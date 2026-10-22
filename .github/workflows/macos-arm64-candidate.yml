@@ -1,0 +1,157 @@
+# Draft: publish only after fork/branch authorization and review.
+# Expected branch: ai-fixes-1.7.5, descended from the pinned 1.7.5 commit.
+name: VCMI 1.7.5 macOS ARM64 candidate
+on:
+  push:
+    branches:
+      - ai-fixes-1.7.5
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vcmi-ai-175-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  VCMI_BASE: 6901839ae9760dfcd1d5ff2c4aa4ef6968fee752
+jobs:
+  tests:
+    if: github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref_name == 'ai-fixes-1.7.5'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require GitHub-hosted runner
+        run: test "$RUNNER_ENVIRONMENT" = github-hosted
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify pinned ancestry
+        run: git merge-base --is-ancestor "$VCMI_BASE" HEAD
+      - name: Install upstream test dependencies
+        run: |
+          source CI/before_install/linux_qt6.sh
+          sudo apt-get install --no-install-recommends -y gcc-14 g++-14 p7zip-full
+      - name: Prepare upstream minimal test data
+        run: |
+          curl --fail --location --retry 3 https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z -o "$RUNNER_TEMP/heroes3.7z"
+          echo "64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  $RUNNER_TEMP/heroes3.7z" | sha256sum --check
+          mkdir -p "$HOME/.local/share/vcmi"
+          7za x -o"$HOME/.local/share/vcmi" "$RUNNER_TEMP/heroes3.7z"
+      - name: Configure and build existing unit suite
+        run: |
+          cmake --preset linux-gcc-test -DENABLE_CCACHE=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          cmake --build --preset linux-gcc-test --parallel 2
+      - name: Require new strategy regression fixtures
+        run: |
+          ctest --preset linux-gcc-test --output-on-failure --no-tests=error -R '^Nullkiller2BuyArmyRegression\.' --parallel 2
+          ctest --preset linux-gcc-test --output-on-failure --no-tests=error -R '^Nullkiller2DwellingGrowthRegression\.' --parallel 2
+      - name: Run existing and committed regression tests
+        working-directory: out/build/linux-gcc-test/bin
+        run: |
+          mkdir -p ../Testing/Temporary
+          ./vcmitest --gtest_output=xml:../Testing/Temporary/vcmitest.xml
+      - name: Preserve test logs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: vcmi-175-test-logs-${{ github.sha }}
+          path: out/build/linux-gcc-test/Testing/Temporary/
+          retention-days: 7
+          if-no-files-found: ignore
+  macos:
+    needs: tests
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      MACOS_CODE_SIGN_IDENTITY: ""
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require GitHub-hosted runner
+        run: test "$RUNNER_ENVIRONMENT" = github-hosted
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify architecture, ancestry and toolchain
+        run: |
+          test "$(uname -m)" = arm64
+          test -d "$DEVELOPER_DIR"
+          git merge-base --is-ancestor "$VCMI_BASE" HEAD
+          test "$(git -C dependencies rev-parse HEAD)" = 2e1924490c80547a8f85ed88aca29223057e832b
+          xcodebuild -version
+          cmake --version
+          ninja --version
+      - name: Restore pinned upstream dependencies
+        run: |
+          pipx install 'conan==2.33.0'
+          conan --version
+          curl --fail --location --retry 3 https://github.com/vcmi/vcmi-dependencies/releases/download/2026-07-07/dependencies-mac-arm.txz -o "$RUNNER_TEMP/dependencies-mac-arm.txz"
+          echo "88c0a27d137ae27cc86da5762d9f50c9080be13380afd2b416de3335a4ac8dd0  $RUNNER_TEMP/dependencies-mac-arm.txz" | shasum -a 256 --check
+          conan cache restore "$RUNNER_TEMP/dependencies-mac-arm.txz"
+          conan profile detect
+          conan install . --output-folder=conan-generated --build=never --profile=dependencies/conan_profiles/macos-arm --profile=dependencies/conan_profiles/base/apple-system --conf="tools.cmake.cmaketoolchain:generator=Ninja"
+      - name: Configure candidate
+        run: |
+          cmake --preset macos-arm-conan-ninja-release -DENABLE_CCACHE=OFF -DENABLE_TEST=OFF -DENABLE_NULLKILLER2_AI=ON -DPACKAGE_FILE_NAME="vcmi-1.7.5-ai-candidate-arm64-${GITHUB_SHA:0:12}" -DPACKAGE_NAME_SUFFIX="AI candidate" -DENABLE_GOLDMASTER=OFF
+      - name: Build ARM64
+        run: cmake --build --preset macos-arm-conan-ninja-release --parallel 2
+      - name: Package app without DMG/XProtect workaround
+        working-directory: out/build/macos-arm-conan-ninja-release
+        run: |
+          cpack -G ZIP -C Release
+          shasum -a 256 *.zip > SHA256SUMS.txt
+          printf 'Source commit: %s\nBase commit: %s\nARM64 candidate; ad-hoc signed, not Apple-notarized.\n' "$GITHUB_SHA" "$VCMI_BASE" > BUILD-INFO.txt
+      - name: Verify extracted ARM64 app and signatures
+        working-directory: out/build/macos-arm-conan-ninja-release
+        run: |
+          verify_dir="$RUNNER_TEMP/vcmi-package-check"
+          mkdir -p "$verify_dir"
+          ditto -x -k "vcmi-1.7.5-ai-candidate-arm64-${GITHUB_SHA:0:12}.zip" "$verify_dir"
+          app="$verify_dir/VCMI.app"
+          test -f "$app/Contents/Info.plist"
+          for executable in vcmiclient vcmiserver vcmilauncher vcmieditor; do
+            test -x "$app/Contents/MacOS/$executable"
+            test "$(lipo -archs "$app/Contents/MacOS/$executable")" = arm64
+            codesign --verify --strict --verbose=2 "$app/Contents/MacOS/$executable"
+          done
+          test -f "$app/Contents/Frameworks/AI/libNullkiller2.dylib"
+          while IFS= read -r -d '' library; do
+            lipo -verify_arch arm64 "$library"
+            codesign --verify --strict --verbose=2 "$library"
+          done < <(find "$app/Contents" -type f -name '*.dylib' -print0)
+      - name: Preserve matching source and license
+        run: |
+          mkdir -p source-artifact
+          export SOURCE_ARCHIVE_DIR="$GITHUB_WORKSPACE/source-artifact"
+          git archive --format=tar HEAD -o "$GITHUB_WORKSPACE/source-artifact/vcmi-source.tar"
+          git submodule foreach --recursive 'git archive --format=tar --prefix="$displaypath/" HEAD -o "$SOURCE_ARCHIVE_DIR/submodule-$(echo "$displaypath" | tr / _).tar"'
+          cp license.txt source-artifact/
+          printf 'Source commit: %s\nBase commit: %s\nExtract vcmi-source.tar, then each submodule archive into the same directory.\n' "$GITHUB_SHA" "$VCMI_BASE" > source-artifact/README.txt
+          git submodule status --recursive > source-artifact/SUBMODULES.txt
+          (cd source-artifact && shasum -a 256 *.tar > SHA256SUMS.txt)
+      - name: Upload matching source
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: vcmi-175-ai-candidate-source-${{ github.sha }}
+          path: source-artifact/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload candidate binary
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: vcmi-175-ai-candidate-macos-arm64-${{ github.sha }}
+          path: |
+            out/build/macos-arm-conan-ninja-release/*.zip
+            out/build/macos-arm-conan-ninja-release/SHA256SUMS.txt
+            out/build/macos-arm-conan-ninja-release/BUILD-INFO.txt
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error

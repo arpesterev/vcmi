@@ -153,6 +153,16 @@ if(ENABLE_BATTLE_AI)
 
 endif()
 
+if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS)
+	# These fixtures call non-exported production AI functions. Link the static
+	# AI instead of changing the production shared-library visibility/API.
+	list(APPEND test_SRCS
+		nullkiller2/BuyArmyRegression.cpp
+		nullkiller2/DwellingGrowthRegression.cpp
+	)
+	list(APPEND test_HEADERS nullkiller2/StrategyCallbackStub.h)
+endif()
+
 assign_source_group(${test_SRCS} ${test_HEADERS})
 
 set(mock_HEADERS
