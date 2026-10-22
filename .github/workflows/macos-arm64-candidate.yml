@@ -107,6 +107,14 @@ jobs:
         working-directory: out/build/macos-arm-conan-ninja-release
         run: |
           cpack -G ZIP -C Release
+          package="vcmi-1.7.5-ai-candidate-arm64-${GITHUB_SHA:0:12}"
+          staged_app="_CPack_Packages/Darwin/ZIP/$package/VCMI.app"
+          # vcmibuilder is a script: its signature lives in extended attributes.
+          # CPack's ZIP drops those; ditto preserves them for Archive Utility.
+          codesign --verify --strict --verbose=2 "$staged_app/Contents/MacOS/vcmibuilder"
+          codesign --verify --deep --strict --verbose=2 "$staged_app"
+          ditto -c -k --rsrc --extattr --sequesterRsrc --keepParent "$staged_app" "$RUNNER_TEMP/$package.zip"
+          mv "$RUNNER_TEMP/$package.zip" "$package.zip"
           shasum -a 256 *.zip > SHA256SUMS.txt
           printf 'Source commit: %s\nBase commit: %s\nARM64 candidate; ad-hoc signed, not Apple-notarized.\n' "$GITHUB_SHA" "$VCMI_BASE" > BUILD-INFO.txt
       - name: Verify extracted ARM64 app and signatures
@@ -117,6 +125,8 @@ jobs:
           ditto -x -k "vcmi-1.7.5-ai-candidate-arm64-${GITHUB_SHA:0:12}.zip" "$verify_dir"
           app="$verify_dir/VCMI.app"
           test -f "$app/Contents/Info.plist"
+          codesign --verify --strict --verbose=2 "$app/Contents/MacOS/vcmibuilder"
+          codesign --verify --deep --strict --verbose=2 "$app"
           for executable in vcmiclient vcmiserver vcmilauncher vcmieditor; do
             test -x "$app/Contents/MacOS/$executable"
             test "$(lipo -archs "$app/Contents/MacOS/$executable")" = arm64
