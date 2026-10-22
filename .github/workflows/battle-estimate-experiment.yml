@@ -51,6 +51,19 @@ jobs:
           git merge-base --is-ancestor "$PROBE_PARENT" HEAD
           mkdir -p probe-logs
           git rev-parse HEAD > probe-logs/commit.txt
+      - name: Expose source data for target-only test binaries
+        timeout-minutes: 1
+        run: |
+          # vcmitest alone does not activate Linux developmentMode().
+          # Keep bin as cwd for copied test/testdata, and use the supported XDG lookup.
+          test -f "$GITHUB_WORKSPACE/config/filesystem.json"
+          test -d "$GITHUB_WORKSPACE/Mods"
+          test -d "$GITHUB_WORKSPACE/scripts"
+          data_parent="$(mktemp -d "$RUNNER_TEMP/battle-probe-data.XXXXXX")"
+          ln -s "$GITHUB_WORKSPACE" "$data_parent/vcmi"
+          test -f "$data_parent/vcmi/config/filesystem.json"
+          printf 'XDG_DATA_DIRS=%s\n' "$data_parent" >> "$GITHUB_ENV"
+          printf 'source=%s\nxdg_data_dirs=%s\n' "$GITHUB_WORKSPACE" "$data_parent" > probe-logs/runtime-data-path.txt
       - name: Prefer existing official HTTPS Ubuntu archive
         timeout-minutes: 1
         run: |
@@ -246,6 +259,19 @@ jobs:
           git merge-base --is-ancestor "$PROBE_PARENT" HEAD
           mkdir -p probe-logs
           git rev-parse HEAD > probe-logs/commit.txt
+      - name: Expose source data for target-only test binaries
+        timeout-minutes: 1
+        run: |
+          # vcmitest alone does not activate Linux developmentMode().
+          # Keep bin as cwd for copied test/testdata, and use the supported XDG lookup.
+          test -f "$GITHUB_WORKSPACE/config/filesystem.json"
+          test -d "$GITHUB_WORKSPACE/Mods"
+          test -d "$GITHUB_WORKSPACE/scripts"
+          data_parent="$(mktemp -d "$RUNNER_TEMP/battle-probe-data.XXXXXX")"
+          ln -s "$GITHUB_WORKSPACE" "$data_parent/vcmi"
+          test -f "$data_parent/vcmi/config/filesystem.json"
+          printf 'XDG_DATA_DIRS=%s\n' "$data_parent" >> "$GITHUB_ENV"
+          printf 'source=%s\nxdg_data_dirs=%s\n' "$GITHUB_WORKSPACE" "$data_parent" > probe-logs/runtime-data-path.txt
       - name: Prefer existing official HTTPS Ubuntu archive
         timeout-minutes: 1
         run: |
