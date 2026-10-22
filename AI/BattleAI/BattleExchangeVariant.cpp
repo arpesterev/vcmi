@@ -10,6 +10,9 @@
 #include "StdInc.h"
 #include "BattleExchangeVariant.h"
 #include "BattleEvaluator.h"
+#ifdef VCMI_BATTLE_AI_TEST_TRACE
+#include "BattleAITestTrace.h"
+#endif
 #include "../../lib/CStack.h"
 #include "../../lib/GameLibrary.h"
 
@@ -170,7 +173,12 @@ float BattleExchangeVariant::trackAttack(
 	bool evaluateOnly)
 {
 	if(evaluateOnly)
+	{
+#ifdef VCMI_BATTLE_AI_TEST_TRACE
+		BattleAITestTrace::emit({BattleAITestTrace::Kind::Estimate, hb.get(), attacker.get(), defender.get(), shooting});
+#endif
 		return estimateFirstStrike(attacker, defender, shooting, isOurAttack, damageCache, hb);
+	}
 
 	const std::string cachingStringBlocksRetaliation = "type_BLOCKS_RETALIATION";
 	static const auto selectorBlocksRetaliation = Selector::type()(BonusType::BLOCKS_RETALIATION);
@@ -787,6 +795,9 @@ BattleScore BattleExchangeEvaluator::calculateExchange(
 #if BATTLE_TRACE_LEVEL>=2
 				logAi->trace("Best target selector for %s", attacker->getDescription());
 #endif
+#ifdef VCMI_BATTLE_AI_TEST_TRACE
+				BattleAITestTrace::emit({BattleAITestTrace::Kind::Selection, exchangeBattle.get(), attacker.get(), nullptr, shooting});
+#endif
 				auto estimateAttack = [&](const battle::Unit * u) -> float
 				{
 					auto stackWithBonuses = exchangeBattle->getForUpdate(u->unitId());
@@ -864,6 +875,9 @@ BattleScore BattleExchangeEvaluator::calculateExchange(
 				}
 			}
 
+#ifdef VCMI_BATTLE_AI_TEST_TRACE
+			BattleAITestTrace::emit({BattleAITestTrace::Kind::Choice, exchangeBattle.get(), attacker.get(), targetUnit, shooting});
+#endif
 			auto defender = exchangeBattle->getForUpdate(targetUnit->unitId());
 			const int totalAttacks = attacker->getTotalAttacks(shooting);
 

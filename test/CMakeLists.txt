@@ -202,6 +202,7 @@ endif()
 add_subdirectory_with_folder("3rdparty" googletest EXCLUDE_FROM_ALL)
 
 add_executable(vcmitest ${test_SRCS} ${test_HEADERS} ${mock_HEADERS})
+include(battleAI/BattleCallerProbes.cmake)
 target_link_libraries(vcmitest PRIVATE gtest gmock vcmi ${SYSTEM_LIBS})
 if(ENABLE_LUA)
 	target_link_libraries(vcmitest PRIVATE vcmiLua)
