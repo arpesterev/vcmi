@@ -1,0 +1,107 @@
+# Isolated experiment: not included in the macOS delivery branch.
+name: VCMI 1.7.5 battle estimate experiment
+on:
+  push:
+    branches:
+      - ai-battle-experiment-1.7.5
+permissions:
+  contents: read
+concurrency:
+  group: vcmi-battle-experiment-175
+  cancel-in-progress: false
+env:
+  VCMI_BASE: 6901839ae9760dfcd1d5ff2c4aa4ef6968fee752
+jobs:
+  tests:
+    if: github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref_name == 'ai-battle-experiment-1.7.5'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require GitHub-hosted runner
+        run: test "$RUNNER_ENVIRONMENT" = github-hosted
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify pinned ancestry
+        run: git merge-base --is-ancestor "$VCMI_BASE" HEAD
+      - name: Install upstream test dependencies
+        run: |
+          source CI/before_install/linux_qt6.sh
+          sudo apt-get install --no-install-recommends -y gcc-14 g++-14 p7zip-full
+      - name: Prepare upstream minimal test data
+        run: |
+          curl --fail --location --retry 3 https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z -o "$RUNNER_TEMP/heroes3.7z"
+          echo "64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  $RUNNER_TEMP/heroes3.7z" | sha256sum --check
+          mkdir -p "$HOME/.local/share/vcmi"
+          7za x -o"$HOME/.local/share/vcmi" "$RUNNER_TEMP/heroes3.7z"
+      - name: Configure and build existing unit suite
+        run: |
+          cmake --preset linux-gcc-test -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          cmake --build --preset linux-gcc-test --parallel 2
+      - name: Require new strategy regression fixtures
+        run: |
+          ctest --preset linux-gcc-test --output-on-failure --no-tests=error -R '^Nullkiller2BuyArmyRegression\.' --parallel 2
+          ctest --preset linux-gcc-test --output-on-failure --no-tests=error -R '^Nullkiller2DwellingGrowthRegression\.' --parallel 2
+      - name: Require all eight battle regression cases
+        working-directory: out/build/linux-gcc-test/bin
+        run: |
+          mkdir -p ../Testing/Temporary
+          ./vcmitest --gtest_filter='BattleExchangeEstimateTest.*' --gtest_output=xml:../Testing/Temporary/battle-fixed.xml
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('../Testing/Temporary/battle-fixed.xml').getroot()
+          cases = root.findall('.//testcase')
+          assert len(cases) == 8, f'Expected eight battle cases, found {len(cases)}'
+          assert all(c.get('classname') == 'BattleExchangeEstimateTest' and c.get('status') == 'run' and c.find('failure') is None and c.find('skipped') is None for c in cases)
+          assert root.get('failures') == '0' and root.get('errors', '0') == '0'
+          print('Verified fixed battle regressions: 8/8 passed')
+          PY
+      - name: Run existing and committed regression tests
+        working-directory: out/build/linux-gcc-test/bin
+        run: |
+          mkdir -p ../Testing/Temporary
+          ./vcmitest --gtest_output=xml:../Testing/Temporary/vcmitest.xml
+      - name: Verify only two safe regressions fail with upstream estimator
+        run: |
+          # Never run the null-input or complete suite against upstream code.
+          source_file=AI/BattleAI/BattleExchangeVariant.cpp
+          trap 'git -C "$GITHUB_WORKSPACE" show "$GITHUB_SHA:$source_file" > "$GITHUB_WORKSPACE/$source_file"' EXIT
+          git show "$VCMI_BASE:$source_file" > "$source_file"
+          cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
+          cd out/build/linux-gcc-test/bin
+          set +e
+          ./vcmitest --gtest_filter='BattleExchangeEstimateTest.AccountsForPostHitRetaliationWithoutMutatingParents:BattleExchangeEstimateTest.RanksSafeTargetAboveHigherGrossDamageTarget' --gtest_output=xml:../Testing/Temporary/battle-upstream-red.xml
+          status=$?
+          set -e
+          test "$status" -eq 1
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('../Testing/Temporary/battle-upstream-red.xml').getroot()
+          expected = {
+              'AccountsForPostHitRetaliationWithoutMutatingParents': 'estimate(defender)',
+              'RanksSafeTargetAboveHigherGrossDamageTarget': 'estimate(alternative)',
+          }
+          cases = root.findall('.//testcase')
+          assert len(cases) == 2 and {c.get('name') for c in cases} == set(expected)
+          assert root.get('failures') == '2' and root.get('errors', '0') == '0'
+          for case in cases:
+              failures = case.findall('failure')
+              assert case.get('status') == 'run' and case.find('skipped') is None
+              assert len(failures) == 1, ET.tostring(case, encoding='unicode')
+              assert expected[case.get('name')] in failures[0].get('message', ''), ET.tostring(case, encoding='unicode')
+          print('Verified upstream red control: exactly two intended estimate assertions fail; no fixture/setup failures')
+          PY
+          cd "$GITHUB_WORKSPACE"
+      - name: Preserve test logs
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: vcmi-175-battle-experiment-logs-${{ github.sha }}
+          path: out/build/linux-gcc-test/Testing/Temporary/
+          retention-days: 7
+          if-no-files-found: ignore

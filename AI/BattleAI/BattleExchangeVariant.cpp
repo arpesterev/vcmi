@@ -14,6 +14,7 @@
 #include "../../lib/GameLibrary.h"
 
 #include <tbb/parallel_for.h>
+#include <limits>
 
 AttackerValue::AttackerValue()
 	: value(0),
@@ -126,6 +127,39 @@ float BattleExchangeVariant::trackAttack(
 	return attackValue;
 }
 
+namespace
+{
+float estimateFirstStrike(
+	const std::shared_ptr<StackWithBonuses> & attacker,
+	const std::shared_ptr<StackWithBonuses> & defender,
+	bool shooting,
+	bool isOurAttack,
+	DamageCache & damageCache,
+	const std::shared_ptr<HypotheticBattle> & battle)
+{
+	if(!attacker || !defender || !battle)
+		return std::numeric_limits<float>::lowest();
+
+	const auto * currentAttacker = battle->battleGetUnitByID(attacker->unitId());
+	const auto * currentDefender = battle->battleGetUnitByID(defender->unitId());
+
+	if(!currentAttacker || !currentDefender || !currentAttacker->alive() || !currentDefender->alive())
+		return std::numeric_limits<float>::lowest();
+
+	// Run the same first strike on private state, including post-hit retaliation.
+	// Construct a child with a subject; never shallow-copy mutable stack pointers.
+	auto estimateBattle = std::make_shared<HypotheticBattle>(battle->env, battle);
+	auto estimateAttacker = estimateBattle->getForUpdate(currentAttacker->unitId());
+	auto estimateDefender = estimateBattle->getForUpdate(currentDefender->unitId());
+	DamageCache estimateCache = damageCache;
+	BattleExchangeVariant estimate;
+
+	return estimate.trackAttack(
+		estimateAttacker, estimateDefender, shooting, isOurAttack,
+		estimateCache, estimateBattle, false);
+}
+}
+
 float BattleExchangeVariant::trackAttack(
 	std::shared_ptr<StackWithBonuses> attacker,
 	std::shared_ptr<StackWithBonuses> defender,
@@ -135,6 +169,9 @@ float BattleExchangeVariant::trackAttack(
 	std::shared_ptr<HypotheticBattle> hb,
 	bool evaluateOnly)
 {
+	if(evaluateOnly)
+		return estimateFirstStrike(attacker, defender, shooting, isOurAttack, damageCache, hb);
+
 	const std::string cachingStringBlocksRetaliation = "type_BLOCKS_RETALIATION";
 	static const auto selectorBlocksRetaliation = Selector::type()(BonusType::BLOCKS_RETALIATION);
 	const bool counterAttacksBlocked = attacker->hasBonus(selectorBlocksRetaliation, cachingStringBlocksRetaliation);
@@ -756,10 +793,10 @@ BattleScore BattleExchangeEvaluator::calculateExchange(
 					auto score = v.trackAttack(
 						attacker,
 						stackWithBonuses,
-						exchangeBattle->battleCanShoot(stackWithBonuses.get()),
+						shooting,
 						isOur,
 						damageCache,
-						hb,
+						exchangeBattle,
 						true);
 
 #if BATTLE_TRACE_LEVEL>=2
@@ -1072,3 +1109,4 @@ bool BattleExchangeEvaluator::checkPositionBlocksOurStacks(const HypotheticBattl
 
 	return blockingScore > BLOCKING_THRESHOLD;
 }
+
