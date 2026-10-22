@@ -14,4 +14,8 @@ fi
 
 ONNXRUNTIME_ROOT=/opt/onnxruntime
 sudo mkdir -p "$ONNXRUNTIME_ROOT"
-curl -fsSL "$ONNXRUNTIME_URL" | sudo tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
+ONNXRUNTIME_ARCHIVE=$(mktemp "${RUNNER_TEMP:-/tmp}/onnxruntime.XXXXXX.tgz")
+curl -fsSL --connect-timeout 30 --max-time 300 --retry 3 --retry-max-time 900 "$ONNXRUNTIME_URL" -o "$ONNXRUNTIME_ARCHIVE"
+sudo tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT" -f "$ONNXRUNTIME_ARCHIVE"
+rm -f "$ONNXRUNTIME_ARCHIVE"
+

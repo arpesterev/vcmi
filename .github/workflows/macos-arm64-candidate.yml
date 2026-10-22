@@ -17,7 +17,7 @@ jobs:
   tests:
     if: github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref_name == 'ai-fixes-1.7.5'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 150
     defaults:
       run:
         shell: bash
@@ -32,9 +32,10 @@ jobs:
       - name: Verify pinned ancestry
         run: git merge-base --is-ancestor "$VCMI_BASE" HEAD
       - name: Install upstream test dependencies
+        timeout-minutes: 90
         run: |
           source CI/before_install/linux_qt6.sh
-          sudo apt-get install --no-install-recommends -y gcc-14 g++-14 p7zip-full
+          sudo apt-get "${APT_NETWORK_OPTIONS[@]}" install --no-install-recommends -y gcc-14 g++-14 p7zip-full
       - name: Prepare upstream minimal test data
         run: |
           curl --fail --location --retry 3 https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z -o "$RUNNER_TEMP/heroes3.7z"

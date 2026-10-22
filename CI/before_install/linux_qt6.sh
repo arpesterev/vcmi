@@ -8,13 +8,14 @@ source $(dirname "${BASH_SOURCE[0]}")/linux_onnxruntime.sh
 APT_CACHE="${APT_CACHE:-${RUNNER_TEMP:-/tmp}/apt-cache}"
 sudo mkdir -p "$APT_CACHE"
 
-sudo apt -yq -o Acquire::Retries=3 update
-sudo apt -yq install eatmydata
+APT_NETWORK_OPTIONS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
+sudo apt -yq "${APT_NETWORK_OPTIONS[@]}" update
+sudo apt -yq "${APT_NETWORK_OPTIONS[@]}" install eatmydata
 
 sudo eatmydata apt -yq --no-install-recommends \
   -o Dir::Cache::archives="$APT_CACHE" \
   -o APT::Keep-Downloaded-Packages=true \
-  -o Acquire::Retries=3 -o Dpkg::Use-Pty=0 \
+  "${APT_NETWORK_OPTIONS[@]}" -o Dpkg::Use-Pty=0 \
   install \
   libboost-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev \
   libboost-program-options-dev libboost-locale-dev libboost-iostreams-dev \
@@ -28,3 +29,4 @@ sudo eatmydata apt -yq --no-install-recommends \
 sudo rm -f  "$APT_CACHE/lock" || true
 sudo rm -rf "$APT_CACHE/partial" || true
 sudo chown -R "$USER:$USER" "$APT_CACHE"
+
