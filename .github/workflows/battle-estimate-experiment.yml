@@ -51,6 +51,40 @@ jobs:
           git merge-base --is-ancestor "$PROBE_PARENT" HEAD
           mkdir -p probe-logs
           git rev-parse HEAD > probe-logs/commit.txt
+      - name: Prefer existing official HTTPS Ubuntu archive
+        timeout-minutes: 1
+        run: |
+          sudo python3 - <<'PY'
+          import hashlib, json, pathlib
+          source = pathlib.Path('/etc/apt/sources.list.d/ubuntu.sources')
+          mirrors = pathlib.Path('/etc/apt/apt-mirrors.txt')
+          keyring = pathlib.Path('/usr/share/keyrings/ubuntu-archive-keyring.gpg')
+          assert all(path.is_file() and not path.is_symlink() for path in [source,mirrors,keyring])
+          original_source, original_keyring = source.read_bytes(), keyring.read_bytes()
+          text = original_source.decode()
+          uri_fields = [line for line in text.splitlines() if line.startswith('URIs:')]
+          assert 1 <= len(uri_fields) <= 2
+          assert all(line.split() == ['URIs:', 'mirror+file:/etc/apt/apt-mirrors.txt'] for line in uri_fields)
+          signed_by = [line for line in text.splitlines() if line.startswith('Signed-By:')]
+          assert len(signed_by) == len(uri_fields)
+          assert all(line.split() == ['Signed-By:', str(keyring)] for line in signed_by)
+          expected = ('http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
+                      'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+                      'https://security.ubuntu.com/ubuntu/\tpriority:3\n')
+          original = mirrors.read_text()
+          assert original == expected, 'Unexpected runner mirror layout: refuse broad replacement'
+          old, new = 'http://azure.archive.ubuntu.com/ubuntu/', 'https://archive.ubuntu.com/ubuntu/'
+          assert original.count(old) == 1
+          updated = original.replace(old, new, 1)
+          assert len(updated.splitlines()) == 3
+          assert all(line.split()[0] in [new, 'https://security.ubuntu.com/ubuntu/'] for line in updated.splitlines())
+          mirrors.write_text(updated)
+          assert mirrors.read_text() == updated
+          assert source.read_bytes() == original_source and keyring.read_bytes() == original_keyring
+          report = {'replaced_uri_count':1, 'mirror_entries':3, 'source_uri_fields':len(uri_fields), 'old_uri':old, 'new_uri':new, 'sources_sha256_unchanged':hashlib.sha256(original_source).hexdigest(), 'keyring_sha256_unchanged':hashlib.sha256(original_keyring).hexdigest(), 'mirror_before_sha256':hashlib.sha256(original.encode()).hexdigest(), 'mirror_after_sha256':hashlib.sha256(updated.encode()).hexdigest(), 'signature_checks':'unchanged; no trust or authentication bypass'}
+          pathlib.Path('probe-logs/ubuntu-mirror-change.json').write_text(json.dumps(report, indent=2)+'\n')
+          print(json.dumps(report, indent=2))
+          PY
       - name: Install bounded upstream dependencies
         timeout-minutes: 12
         run: |
@@ -212,6 +246,40 @@ jobs:
           git merge-base --is-ancestor "$PROBE_PARENT" HEAD
           mkdir -p probe-logs
           git rev-parse HEAD > probe-logs/commit.txt
+      - name: Prefer existing official HTTPS Ubuntu archive
+        timeout-minutes: 1
+        run: |
+          sudo python3 - <<'PY'
+          import hashlib, json, pathlib
+          source = pathlib.Path('/etc/apt/sources.list.d/ubuntu.sources')
+          mirrors = pathlib.Path('/etc/apt/apt-mirrors.txt')
+          keyring = pathlib.Path('/usr/share/keyrings/ubuntu-archive-keyring.gpg')
+          assert all(path.is_file() and not path.is_symlink() for path in [source,mirrors,keyring])
+          original_source, original_keyring = source.read_bytes(), keyring.read_bytes()
+          text = original_source.decode()
+          uri_fields = [line for line in text.splitlines() if line.startswith('URIs:')]
+          assert 1 <= len(uri_fields) <= 2
+          assert all(line.split() == ['URIs:', 'mirror+file:/etc/apt/apt-mirrors.txt'] for line in uri_fields)
+          signed_by = [line for line in text.splitlines() if line.startswith('Signed-By:')]
+          assert len(signed_by) == len(uri_fields)
+          assert all(line.split() == ['Signed-By:', str(keyring)] for line in signed_by)
+          expected = ('http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
+                      'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+                      'https://security.ubuntu.com/ubuntu/\tpriority:3\n')
+          original = mirrors.read_text()
+          assert original == expected, 'Unexpected runner mirror layout: refuse broad replacement'
+          old, new = 'http://azure.archive.ubuntu.com/ubuntu/', 'https://archive.ubuntu.com/ubuntu/'
+          assert original.count(old) == 1
+          updated = original.replace(old, new, 1)
+          assert len(updated.splitlines()) == 3
+          assert all(line.split()[0] in [new, 'https://security.ubuntu.com/ubuntu/'] for line in updated.splitlines())
+          mirrors.write_text(updated)
+          assert mirrors.read_text() == updated
+          assert source.read_bytes() == original_source and keyring.read_bytes() == original_keyring
+          report = {'replaced_uri_count':1, 'mirror_entries':3, 'source_uri_fields':len(uri_fields), 'old_uri':old, 'new_uri':new, 'sources_sha256_unchanged':hashlib.sha256(original_source).hexdigest(), 'keyring_sha256_unchanged':hashlib.sha256(original_keyring).hexdigest(), 'mirror_before_sha256':hashlib.sha256(original.encode()).hexdigest(), 'mirror_after_sha256':hashlib.sha256(updated.encode()).hexdigest(), 'signature_checks':'unchanged; no trust or authentication bypass'}
+          pathlib.Path('probe-logs/ubuntu-mirror-change.json').write_text(json.dumps(report, indent=2)+'\n')
+          print(json.dumps(report, indent=2))
+          PY
       - name: Install bounded upstream dependencies
         timeout-minutes: 12
         run: |
