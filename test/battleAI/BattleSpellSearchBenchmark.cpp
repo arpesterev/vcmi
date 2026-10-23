@@ -9,11 +9,14 @@
 #include "lib/battle/CObstacleInstance.h"
 #include "lib/spells/CSpellHandler.h"
 #include "lib/spells/ISpellMechanics.h"
+#include "lib/spells/Problem.h"
 #include "lib/logging/CLogger.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <iomanip>
+#include <set>
 
 namespace test
 {
@@ -27,6 +30,7 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 	struct Logging
 	{
 		std::string mock = ::testing::GMOCK_FLAG(verbose);
+		std::streamsize precision = std::cout.precision();
 		CLogger * ai = dynamic_cast<CLogger *>(logAi);
 		CLogger * global = dynamic_cast<CLogger *>(logGlobal);
 		ELogLevel::ELogLevel aiLevel = ai ? ai->getLevel() : ELogLevel::NOT_SET;
@@ -42,6 +46,7 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 			if(ai) ai->setLevel(aiLevel);
 			if(global) global->setLevel(globalLevel);
 			::testing::GMOCK_FLAG(verbose) = mock;
+			std::cout.precision(precision);
 		}
 	} logging;
 	ASSERT_NE(logging.ai, nullptr);
@@ -55,7 +60,8 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 	constexpr double cellCapMs = 60000;
 	constexpr double totalCapMs = 300000;
 	constexpr size_t targetCap = 8192;
-	std::cout << "SPELL_SEARCH_CONFIG\ttrace=off\tmode=passive\tlevel=expert\trounds=1\tcell_cap_ms=60000\ttotal_cap_ms=300000\ttarget_cap=8192\tpasses=1\n";
+	std::cout << std::setprecision(17);
+	std::cout << "SPELL_SEARCH_CONFIG\ttrace=off\tmode=passive\tlevel=expert\trounds=1\tcell_cap_ms=60000\ttotal_cap_ms=300000\ttarget_cap=8192\tpasses=1\tschema=2\taudit=complete_domain\tteleport_target_cap=8\n";
 	for(const int count : {6, 14, 28})
 		for(const auto spellId : {SpellID::MAGIC_ARROW, SpellID::TELEPORT, SpellID::REMOVE_OBSTACLE})
 		{
@@ -103,9 +109,85 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 			cast.setEffectPower(10);
 			cast.setEffectDuration(3);
 			auto mechanics = spell->battleMechanics(&cast);
+			const bool teleport = spellId == SpellID::TELEPORT;
+			const bool obstacleSpell = spellId == SpellID::REMOVE_OBSTACLE;
+			const std::vector<spells::AimType> expectedTypes = teleport
+				? std::vector<spells::AimType>{spells::AimType::CREATURE, spells::AimType::LOCATION}
+				: std::vector<spells::AimType>{obstacleSpell ? spells::AimType::LOCATION : spells::AimType::CREATURE};
+			ASSERT_EQ(mechanics->getTargetTypes(), expectedTypes);
+			const size_t rawBound = teleport ? count * GameConstants::BFIELD_SIZE
+				: obstacleSpell ? GameConstants::BFIELD_SIZE : count;
 			const auto cellStart = Clock::now();
+			// Independent complete-domain audit, not the candidate's shortlist API.
+			// All fixture units occupy distinct single hexes, so the ordered hex
+			// tuple is a canonical target key, including the Teleport source unit.
+			auto canonical = [](const spells::Target & target)
+			{
+				std::vector<int> result;
+				for(const auto & destination : target)
+					result.push_back(destination.hexValue.toInt());
+				return result;
+			};
+			std::set<std::vector<int>> legalPool;
+			size_t legalChecked = 0;
+			auto audit = [&](const spells::Target & target)
+			{
+				++legalChecked;
+				spells::detail::ProblemImpl ignored;
+				if(mechanics->canBeCastAt(target, ignored))
+					EXPECT_TRUE(legalPool.insert(canonical(target)).second);
+			};
+			if(obstacleSpell)
+			{
+				for(int hex = 0; hex < GameConstants::BFIELD_SIZE; ++hex)
+					audit({spells::Destination(BattleHex(hex))});
+			}
+			else
+			{
+				const auto units = mechanics->battle()->battleGetAllUnits(false);
+				ASSERT_EQ(units.size(), static_cast<size_t>(count));
+				std::set<int> sourceHexes;
+				for(const auto * unit : units)
+				{
+					ASSERT_TRUE(sourceHexes.insert(unit->getPosition().toInt()).second);
+					if(teleport)
+					{
+						// Check complete CREATURE+LOCATION pairs only. No heuristic,
+						// friendly-only or no-op filtering may shrink the audit pool.
+						for(int hex = 0; hex < GameConstants::BFIELD_SIZE; ++hex)
+							audit({spells::Destination(unit->getPosition()), spells::Destination(BattleHex(hex))});
+					}
+					else
+						audit({spells::Destination(unit->getPosition())});
+				}
+			}
+			const auto legalityAuditMs = elapsed(cellStart);
+			ASSERT_EQ(legalChecked, rawBound);
+			ASSERT_FALSE(legalPool.empty());
+			const auto enumerationStart = Clock::now();
 			const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
-			const auto enumerationMs = elapsed(cellStart);
+			const auto enumerationMs = elapsed(enumerationStart);
+			std::set<std::vector<int>> selectedKeys;
+			size_t selectedInPool = 0;
+			for(const auto & target : targets)
+			{
+				ASSERT_EQ(target.size(), expectedTypes.size());
+				spells::detail::ProblemImpl ignored;
+				ASSERT_TRUE(mechanics->canBeCastAt(target, ignored));
+				const auto key = canonical(target);
+				ASSERT_TRUE(selectedKeys.insert(key).second);
+				ASSERT_EQ(legalPool.count(key), 1u);
+				++selectedInPool;
+			}
+			ASSERT_LE(targets.size(), legalPool.size());
+			// Empty baseline enumerators are unsupported, not 100% pruning.
+			const std::string selectionMode = targets.empty() ? "empty_enumerator"
+				: teleport ? "teleport_k8" : "full_enumeration";
+			const auto pruned = targets.empty() ? 0u : legalPool.size() - targets.size();
+			if(teleport)
+				ASSERT_LE(targets.size(), 8u);
+			else if(!targets.empty())
+				ASSERT_EQ(selectedKeys, legalPool);
 			const auto evalStart = Clock::now();
 			size_t evaluated = 0;
 			size_t changed = 0;
@@ -157,9 +239,8 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 					++evaluated;
 				}
 			const auto evaluationMs = elapsed(evalStart);
-			if(status == "COMPLETE" && (elapsed(cellStart) >= cellCapMs || elapsed(wholeStart) >= totalCapMs))
-				status = "TIME_CAP";
-			ASSERT_TRUE(std::isfinite(enumerationMs) && std::isfinite(evaluationMs) && std::isfinite(checksum));
+			ASSERT_TRUE(std::isfinite(legalityAuditMs) && std::isfinite(enumerationMs)
+				&& std::isfinite(evaluationMs) && std::isfinite(checksum));
 			EXPECT_EQ(scene.snapshot(), before);
 			EXPECT_EQ(scene.callback->battleGetAllObstacles(), obstacles);
 			EXPECT_EQ(scene.state->battleGetAllObstacles(), obstacles);
@@ -170,15 +251,23 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 				const_cast<CObstacleInstance *>(obstacles[index].get())->toInfo(snapshot);
 				EXPECT_EQ(snapshot.data, obstacleSnapshots[index]);
 			}
+			const auto cellMs = elapsed(cellStart);
+			if(status == "COMPLETE" && (cellMs >= cellCapMs || elapsed(wholeStart) >= totalCapMs))
+				status = "TIME_CAP";
 			std::cout << "SPELL_SEARCH\t" << count << '\t' << key << '\t' << targets.size()
 				<< '\t' << evaluated << '\t' << status << '\t' << enumerationMs << '\t' << evaluationMs
 				<< '\t' << checksum << '\t' << changed << '\t' << mechanics->getTargetTypes().size()
 				<< "\tobstacle_entries=3\tsource_units=" << count << "\tfriendly_units=" << count / 2
 				<< "\thex_domain=" << GameConstants::BFIELD_SIZE
-				<< "\traw_combination_bound=" << (spellId == SpellID::TELEPORT
-					? count * GameConstants::BFIELD_SIZE : spellId == SpellID::REMOVE_OBSTACLE
-					? GameConstants::BFIELD_SIZE : count) << '\n';
+				<< "\traw_combination_bound=" << rawBound << "\tlegal_pool=" << legalPool.size()
+				<< "\tselected=" << targets.size() << "\tpruned=" << pruned
+				<< "\tselection_mode=" << selectionMode << "\tlegal_checked=" << legalChecked
+				<< "\tselected_in_pool=" << selectedInPool << "\tselected_unique=" << selectedKeys.size()
+				<< "\tlegality_audit_ms=" << legalityAuditMs << "\tcell_ms=" << cellMs << '\n';
 		}
+	const auto totalMs = elapsed(wholeStart);
+	std::cout << "SPELL_SEARCH_END\tcells=9\ttotal_ms=" << totalMs
+		<< "\tstatus=" << (totalMs >= totalCapMs ? "TIME_CAP" : "COMPLETE") << '\n';
 #endif
 }
 }

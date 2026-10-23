@@ -18,6 +18,9 @@
 #include "lib/spells/CSpellHandler.h"
 #include "lib/CStack.h"
 #include "lib/battle/CBattleInfoCallback.h"
+#include <algorithm>
+#include <set>
+#include <utility>
 
 namespace test
 {
@@ -163,6 +166,27 @@ TEST_F(SpellTargetEvaluatorTest, ObstacleTargetsUseMechanicsLegality)
 			return target.size() == 1 && target[0].hexValue == BattleHex(80);
 		}));
 	confirmResults({{BattleHex(80)}});
+}
+
+TEST_F(SpellTargetEvaluatorTest, NonTeleportCreatureLocationSignatureRemainsExhaustive)
+{
+	spellTargetTypes({AimType::CREATURE, AimType::LOCATION});
+	ON_CALL(mechMock, getSpellId()).WillByDefault(Return(SpellID(SpellID::SACRIFICE)));
+	addStack(BattleHex(20), casterSide);
+	addStack(BattleHex(40), casterSide);
+	ON_CALL(battleMock, battleGetAllUnits(false)).WillByDefault(Return(allUnits));
+	EXPECT_CALL(mechMock, canBeCastAt(_, _))
+		.Times(2 * GameConstants::BFIELD_SIZE)
+		.WillRepeatedly(Return(true));
+	const auto targets = SpellTargetEvaluator::getViableTargets(&mechMock);
+	ASSERT_EQ(targets.size(), 2u * GameConstants::BFIELD_SIZE);
+	std::set<std::pair<int, int>> pairs;
+	for(const auto & target : targets)
+	{
+		ASSERT_EQ(target.size(), 2u);
+		pairs.emplace(target.front().hexValue.toInt(), target.back().hexValue.toInt());
+	}
+	EXPECT_EQ(pairs.size(), targets.size());
 }
 
 TEST_F(SpellTargetEvaluatorTest, EmptySignatureAndUnavailableFirstTargetProduceNoCasts)
@@ -395,6 +419,446 @@ TEST(SpellTargetRealMechanicsTest, OrdinaryLocationSpellsKeepNearUnitHeuristic)
 			fullBoardLegalCount += mechanics->canBeCastAt(Target{Destination(BattleHex(hex))});
 		EXPECT_GT(fullBoardLegalCount, 2 * units.size());
 	}
+}
+
+namespace teleportprobe
+{
+using Key = std::pair<uint32_t, int>;
+
+void configure(BattleCast & cast)
+{
+	cast.setSpellLevel(3);
+	cast.setEffectPower(10);
+	cast.setEffectDuration(3);
+}
+
+void primeSnapshots(callerprobe::Scenario & scene)
+{
+	// Serialization includes the lazy retaliation-capacity cache. Prime it on
+	// both borrowed sources and hypothetical wrappers, without spending a turn.
+	for(const auto & source : scene.sources)
+	{
+		source->state.counterAttacks.total();
+		scene.state->getForUpdate(source->state.unitId())->counterAttacks.total();
+	}
+}
+
+std::vector<Key> keys(const CBattleInfoCallback & battle, const std::vector<Target> & targets)
+{
+	std::vector<Key> result;
+	for(const auto & target : targets)
+	{
+		EXPECT_EQ(target.size(), 2u);
+		if(target.size() != 2)
+			return {};
+		const auto * source = battle.battleGetUnitByPos(target.front().hexValue);
+		EXPECT_NE(source, nullptr);
+		if(!source)
+			return {};
+		result.emplace_back(source->unitId(), target.back().hexValue.toInt());
+	}
+	return result;
+}
+
+void expectLegalUniqueMoves(const Mechanics & mechanics, const std::vector<Target> & targets)
+{
+	EXPECT_LE(targets.size(), 8u);
+	std::set<Key> seen;
+	for(const auto & target : targets)
+	{
+		ASSERT_EQ(target.size(), 2u);
+		const auto * source = mechanics.battle()->battleGetUnitByPos(target.front().hexValue);
+		ASSERT_NE(source, nullptr);
+		EXPECT_TRUE(source->alive());
+		EXPECT_NE(target.back().hexValue, source->getPosition());
+		EXPECT_TRUE(mechanics.canBeCastAt(target));
+		EXPECT_TRUE(seen.emplace(source->unitId(), target.back().hexValue.toInt()).second);
+	}
+}
+
+size_t legalMoveCount(const Mechanics & mechanics)
+{
+	size_t count = 0;
+	for(const auto * source : mechanics.battle()->battleGetAllUnits(false))
+		for(int hex = 0; hex < GameConstants::BFIELD_SIZE; ++hex)
+			if(BattleHex(hex) != source->getPosition()
+				&& mechanics.canBeCastAt(Target{Destination(source->getPosition()), Destination(BattleHex(hex))}))
+				++count;
+	return count;
+}
+
+std::shared_ptr<HypotheticBattle> castInChild(callerprobe::Scenario & scene,
+	const Target & target, uint32_t casterId, bool disableSmart = false)
+{
+	auto child = std::make_shared<HypotheticBattle>(scene.environment.get(), scene.state);
+	auto caster = child->getForUpdate(casterId);
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	BattleCast cast(child.get(), caster.get(), Mode::PASSIVE, spell);
+	configure(cast);
+	if(disableSmart)
+		cast.smart = false;
+	auto mechanics = spell->battleMechanics(&cast);
+	EXPECT_TRUE(mechanics->canBeCastAt(target));
+	cast.castEval(child->getServerCallback(), target);
+	return child;
+}
+
+// Vary the public enumeration itself. Reversing Scenario::sources alone is
+// insufficient: HypotheticBattle enumerates its materialized state map instead.
+class EnumerationOrderBattle : public HypotheticBattle
+{
+public:
+	using HypotheticBattle::HypotheticBattle;
+	bool reversed = false;
+
+	::battle::Units getUnitsIf(const ::battle::UnitFilter & predicate) const override
+	{
+		auto result = HypotheticBattle::getUnitsIf(predicate);
+		if(reversed)
+			std::reverse(result.begin(), result.end());
+		return result;
+	}
+};
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportShortlistIsBoundedLegalRepeatableAndSourcePure)
+{
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	ASSERT_NE(spell, nullptr);
+	for(const int count : {6, 14, 28})
+	{
+		SCOPED_TRACE(count);
+		callerprobe::Scenario scene(callerprobe::benchmarkSpecs(count, true));
+		teleportprobe::primeSnapshots(scene);
+		const auto before = scene.snapshot();
+		const auto activeBefore = scene.state->getActiveStackID();
+		// PASSIVE unit casters cannot target themselves. Keep active unit 1
+		// teleportable by casting from a different friendly unit.
+		auto caster = scene.state->getForUpdate(2);
+		BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+		teleportprobe::configure(cast);
+		auto mechanics = spell->battleMechanics(&cast);
+		ASSERT_EQ(mechanics->getTargetTypes(), std::vector<AimType>({AimType::CREATURE, AimType::LOCATION}));
+		ASSERT_GT(teleportprobe::legalMoveCount(*mechanics), 8u);
+		const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+		ASSERT_FALSE(targets.empty());
+		teleportprobe::expectLegalUniqueMoves(*mechanics, targets);
+		const auto repeated = SpellTargetEvaluator::getViableTargets(mechanics.get());
+		EXPECT_EQ(teleportprobe::keys(*scene.state, targets), teleportprobe::keys(*scene.state, repeated));
+		for(const auto & target : targets)
+		{
+			const auto * source = scene.state->battleGetUnitByPos(target.front().hexValue);
+			ASSERT_NE(source, nullptr);
+			const auto child = teleportprobe::castInChild(scene, target, 2);
+			const auto * moved = child->battleGetUnitByID(source->unitId());
+			ASSERT_NE(moved, nullptr);
+			EXPECT_EQ(moved->getPosition(), target.back().hexValue);
+			EXPECT_EQ(scene.snapshot(), before);
+			EXPECT_EQ(scene.state->getActiveStackID(), activeBefore);
+		}
+		EXPECT_EQ(scene.snapshot(), before);
+	}
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportShortlistIgnoresSourceEnumerationOrder)
+{
+	callerprobe::Scenario scene(callerprobe::benchmarkSpecs(14, true));
+	auto ordered = std::make_shared<teleportprobe::EnumerationOrderBattle>(scene.environment.get(), scene.callback);
+	scene.state = ordered;
+	teleportprobe::primeSnapshots(scene);
+	const auto before = scene.snapshot();
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	ASSERT_NE(spell, nullptr);
+	auto caster = ordered->getForUpdate(2);
+	BattleCast cast(ordered.get(), caster.get(), Mode::PASSIVE, spell);
+	teleportprobe::configure(cast);
+	auto mechanics = spell->battleMechanics(&cast);
+	const auto forwardUnits = ordered->battleGetAllUnits(false);
+	const auto forward = SpellTargetEvaluator::getViableTargets(mechanics.get());
+	ordered->reversed = true;
+	auto reverseUnits = ordered->battleGetAllUnits(false);
+	ASSERT_NE(forwardUnits, reverseUnits) << "Fixture must actually change the enumerated order";
+	std::reverse(reverseUnits.begin(), reverseUnits.end());
+	ASSERT_EQ(forwardUnits, reverseUnits);
+	const auto reverse = SpellTargetEvaluator::getViableTargets(mechanics.get());
+	ASSERT_FALSE(forward.empty());
+	teleportprobe::expectLegalUniqueMoves(*mechanics, reverse);
+	EXPECT_EQ(teleportprobe::keys(*ordered, forward), teleportprobe::keys(*ordered, reverse));
+	EXPECT_EQ(scene.snapshot(), before);
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportShortlistRetainsActiveMeleeContactsWithDifferentDefenders)
+{
+	callerprobe::Scenario scene({
+		{1, BattleSide::ATTACKER, BattleHex(3, 5), 20, 100, 20, 4, false},
+		{2, BattleSide::ATTACKER, BattleHex(3, 2), 10, 100, 5, 4, false},
+		{3, BattleSide::ATTACKER, BattleHex(3, 8), 10, 100, 5, 4, false},
+		{4, BattleSide::DEFENDER, BattleHex(11, 2), 10, 100, 10, 4, true},
+		{5, BattleSide::DEFENDER, BattleHex(11, 5), 10, 100, 10, 4, false},
+		{6, BattleSide::DEFENDER, BattleHex(11, 8), 10, 100, 10, 4, false}
+	});
+	teleportprobe::primeSnapshots(scene);
+	const auto before = scene.snapshot();
+	const auto * active = scene.state->battleActiveUnit();
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitId(), 1u);
+	for(const auto * enemy : scene.state->battleAliveUnits(BattleSide::DEFENDER))
+		ASSERT_FALSE(CStack::isMeleeAttackPossible(active, enemy));
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	ASSERT_NE(spell, nullptr);
+	auto caster = scene.state->getForUpdate(2);
+	BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+	teleportprobe::configure(cast);
+	auto mechanics = spell->battleMechanics(&cast);
+	const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+	teleportprobe::expectLegalUniqueMoves(*mechanics, targets);
+	std::set<uint32_t> contactedDefenders;
+	for(const auto & target : targets)
+	{
+		if(target.front().hexValue != active->getPosition())
+			continue;
+		const auto child = teleportprobe::castInChild(scene, target, 2);
+		const auto * moved = child->battleGetUnitByID(1);
+		ASSERT_NE(moved, nullptr);
+		EXPECT_EQ(moved->getPosition(), target.back().hexValue);
+		for(const auto * enemy : child->battleAliveUnits(BattleSide::DEFENDER))
+			if(child->battleCanAttackUnit(moved, enemy) && CStack::isMeleeAttackPossible(moved, enemy))
+				contactedDefenders.insert(enemy->unitId());
+	}
+	// The two attack slots should not both be wasted around the same defender.
+	EXPECT_GE(contactedDefenders.size(), 2u);
+	EXPECT_EQ(scene.snapshot(), before);
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportShortlistUnblocksFriendlyShooterAfterRealCast)
+{
+	callerprobe::Scenario scene({
+		{1, BattleSide::ATTACKER, BattleHex(3, 2), 20, 100, 10, 4, false},
+		{2, BattleSide::ATTACKER, BattleHex(5, 5), 20, 100, 10, 4, true},
+		{3, BattleSide::ATTACKER, BattleHex(3, 8), 10, 100, 5, 4, false},
+		{4, BattleSide::DEFENDER, BattleHex(6, 5), 10, 100, 10, 4, false},
+		{5, BattleSide::DEFENDER, BattleHex(12, 2), 10, 100, 10, 4, true},
+		{6, BattleSide::DEFENDER, BattleHex(12, 8), 10, 100, 10, 4, false}
+	});
+	teleportprobe::primeSnapshots(scene);
+	const auto before = scene.snapshot();
+	const auto * shooter = scene.state->battleGetUnitByID(2);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->canShoot());
+	ASSERT_TRUE(scene.state->battleIsUnitBlocked(shooter));
+	ASSERT_FALSE(scene.state->battleCanShoot(shooter));
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	ASSERT_NE(spell, nullptr);
+	auto caster = scene.state->getForUpdate(3);
+	BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+	teleportprobe::configure(cast);
+	auto mechanics = spell->battleMechanics(&cast);
+	const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+	teleportprobe::expectLegalUniqueMoves(*mechanics, targets);
+	size_t escapes = 0;
+	size_t activeAttacks = 0;
+	size_t otherFriendlyAttacks = 0;
+	for(const auto & target : targets)
+	{
+		const auto * source = scene.state->battleGetUnitByPos(target.front().hexValue);
+		ASSERT_NE(source, nullptr);
+		const auto enemies = scene.state->battleAliveUnits(BattleSide::DEFENDER);
+		const bool contact = std::any_of(enemies.begin(), enemies.end(), [&](const ::battle::Unit * enemy)
+		{
+			return scene.state->battleCanAttackUnit(source, enemy)
+				&& CStack::isMeleeAttackPossible(source, enemy, target.back().hexValue);
+		});
+		activeAttacks += contact && source->unitId() == 1;
+		otherFriendlyAttacks += contact && source->unitId() == 2;
+		if(target.front().hexValue != shooter->getPosition())
+			continue;
+		const auto child = teleportprobe::castInChild(scene, target, 3);
+		const auto * moved = child->battleGetUnitByID(2);
+		ASSERT_NE(moved, nullptr);
+		if(child->battleIsUnitBlocked(moved))
+			continue; // Other categories may also choose attacks with this shooter.
+		++escapes;
+		EXPECT_EQ(moved->getPosition(), target.back().hexValue);
+		EXPECT_TRUE(child->battleCanShoot(moved));
+		for(const auto * enemy : child->battleAliveUnits(BattleSide::DEFENDER))
+		{
+			for(const auto & occupied : enemy->getHexes())
+				EXPECT_FALSE(moved->getSurroundingHexes().contains(occupied));
+			EXPECT_TRUE(child->battleCanShoot(moved, enemy->getPosition()));
+		}
+	}
+	EXPECT_GE(activeAttacks, 2u);
+	EXPECT_GE(otherFriendlyAttacks, 2u);
+	EXPECT_GT(escapes, 0u);
+	EXPECT_EQ(scene.snapshot(), before);
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportShortlistBackfillsEmptyCategoriesAndExcludesLegalNoOp)
+{
+	callerprobe::Scenario scene({
+		{1, BattleSide::ATTACKER, BattleHex(3, 2), 10, 100, 5, 4, false},
+		{2, BattleSide::ATTACKER, BattleHex(6, 5), 10, 100, 10, 4, false},
+		{3, BattleSide::DEFENDER, BattleHex(7, 5), 10, 100, 10, 4, false}
+	});
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	ASSERT_NE(spell, nullptr);
+	auto caster = scene.state->getForUpdate(1);
+	BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+	teleportprobe::configure(cast);
+	auto mechanics = spell->battleMechanics(&cast);
+	const auto * ally = scene.state->battleGetUnitByID(2);
+	ASSERT_NE(ally, nullptr);
+	// Real Teleport permits the current square. Only the shortlist removes it;
+	// not casting remains the unchanged BattleEvaluator baseline, not a target.
+	ASSERT_TRUE(mechanics->canBeCastAt(Target{Destination(ally->getPosition()), Destination(ally->getPosition())}));
+	ASSERT_GT(teleportprobe::legalMoveCount(*mechanics), 8u);
+	const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+	teleportprobe::expectLegalUniqueMoves(*mechanics, targets);
+	// No active-unit spell target and no shooters: empty quotas must be reused.
+	EXPECT_EQ(targets.size(), 8u);
+	for(const auto & target : targets)
+		EXPECT_EQ(target.front().hexValue, ally->getPosition());
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportWithNoLegalSourceProducesNoShortlist)
+{
+	callerprobe::Scenario scene({
+		{1, BattleSide::ATTACKER, BattleHex(3, 5), 10, 100, 10, 4, false},
+		{2, BattleSide::DEFENDER, BattleHex(11, 5), 10, 100, 10, 4, false}
+	});
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	ASSERT_NE(spell, nullptr);
+	auto caster = scene.state->getForUpdate(1);
+	BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+	teleportprobe::configure(cast);
+	auto mechanics = spell->battleMechanics(&cast);
+	ASSERT_EQ(mechanics->getTargetTypes(), std::vector<AimType>({AimType::CREATURE, AimType::LOCATION}));
+	// The only friendly source is the passive caster, which cannot target itself.
+	ASSERT_EQ(teleportprobe::legalMoveCount(*mechanics), 0u);
+	EXPECT_TRUE(SpellTargetEvaluator::getViableTargets(mechanics.get()).empty());
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportShortlistEscapesRearHexBlockingForBothDoubleWideSides)
+{
+	const auto * wideType = CreatureID(10).toCreature(); // Core cavalier: width only; bonuses remain fixture-owned.
+	ASSERT_NE(wideType, nullptr);
+	ASSERT_TRUE(wideType->isDoubleWide());
+	for(const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
+	{
+		SCOPED_TRACE(static_cast<int>(side));
+		const bool attacking = side == BattleSide::ATTACKER;
+		const auto enemySide = attacking ? BattleSide::DEFENDER : BattleSide::ATTACKER;
+		callerprobe::Scenario scene({
+			{1, side, BattleHex(attacking ? 3 : 13, 2), 20, 100, 10, 4, false},
+			{2, side, BattleHex(attacking ? 5 : 11, 5), 20, 100, 10, 4, true},
+			{3, side, BattleHex(attacking ? 3 : 13, 8), 10, 100, 5, 4, false},
+			{4, enemySide, BattleHex(attacking ? 3 : 13, 5), 10, 100, 10, 4, false},
+			{5, enemySide, BattleHex(attacking ? 12 : 4, 2), 10, 100, 10, 4, true},
+			{6, enemySide, BattleHex(attacking ? 12 : 4, 8), 10, 100, 10, 4, false}
+		});
+		ON_CALL(scene.sources[1]->info, unitType()).WillByDefault(Return(wideType));
+		// Type is copied into StackWithBonuses; rebuild wrappers after the local
+		// source override rather than changing the shared Scenario fixture.
+		scene.state = std::make_shared<HypotheticBattle>(scene.environment.get(), scene.callback);
+		teleportprobe::primeSnapshots(scene);
+		const auto before = scene.snapshot();
+		const auto * shooter = scene.state->battleGetUnitByID(2);
+		const auto * blocker = scene.state->battleGetUnitByID(4);
+		ASSERT_NE(shooter, nullptr);
+		ASSERT_NE(blocker, nullptr);
+		ASSERT_TRUE(shooter->doubleWide());
+		ASSERT_FALSE(shooter->getPosition().getNeighbouringTiles().contains(blocker->getPosition()));
+		ASSERT_TRUE(shooter->occupiedHex().getNeighbouringTiles().contains(blocker->getPosition()));
+		ASSERT_TRUE(scene.state->battleIsUnitBlocked(shooter));
+		ASSERT_FALSE(scene.state->battleCanShoot(shooter));
+		const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+		ASSERT_NE(spell, nullptr);
+		auto caster = scene.state->getForUpdate(3);
+		BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+		teleportprobe::configure(cast);
+		auto mechanics = spell->battleMechanics(&cast);
+		const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+		teleportprobe::expectLegalUniqueMoves(*mechanics, targets);
+		size_t escapes = 0;
+		for(const auto & target : targets)
+		{
+			if(target.front().hexValue != shooter->getPosition())
+				continue;
+			const auto child = teleportprobe::castInChild(scene, target, 3);
+			const auto * moved = child->battleGetUnitByID(2);
+			ASSERT_NE(moved, nullptr);
+			ASSERT_TRUE(moved->doubleWide());
+			EXPECT_EQ(moved->getPosition(), target.back().hexValue);
+			EXPECT_EQ(moved->occupiedHex(), BattleHex(target.back().hexValue.toInt() + (attacking ? -1 : 1)));
+			if(child->battleIsUnitBlocked(moved))
+				continue;
+			++escapes;
+			EXPECT_TRUE(child->battleCanShoot(moved, blocker->getPosition()));
+			for(const auto * enemy : child->battleAliveUnits(enemySide))
+				for(const auto & occupied : enemy->getHexes())
+					EXPECT_FALSE(moved->getSurroundingHexes().contains(occupied));
+		}
+		EXPECT_GT(escapes, 0u);
+		EXPECT_EQ(scene.snapshot(), before);
+	}
+}
+
+TEST(SpellTargetRealMechanicsTest, TeleportShortlistClassifiesHypnotizedActiveByEffectiveOwner)
+{
+	callerprobe::Scenario scene({
+		{1, BattleSide::DEFENDER, BattleHex(11, 5), 20, 100, 20, 4, false},
+		{2, BattleSide::ATTACKER, BattleHex(3, 2), 10, 100, 5, 4, false},
+		{3, BattleSide::ATTACKER, BattleHex(3, 8), 10, 100, 5, 4, false},
+		{4, BattleSide::DEFENDER, BattleHex(6, 5), 10, 100, 10, 4, true},
+		{5, BattleSide::DEFENDER, BattleHex(8, 8), 10, 100, 10, 4, false}
+	});
+	const auto * wideType = CreatureID(10).toCreature();
+	ASSERT_NE(wideType, nullptr);
+	ASSERT_TRUE(wideType->isDoubleWide());
+	ON_CALL(scene.sources[0]->info, unitType()).WillByDefault(Return(wideType));
+	scene.sources[0]->add(BonusType::HYPNOTIZED, 1);
+	scene.state = std::make_shared<HypotheticBattle>(scene.environment.get(), scene.callback);
+	teleportprobe::primeSnapshots(scene);
+	const auto before = scene.snapshot();
+	const auto * active = scene.state->battleActiveUnit();
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitId(), 1u);
+	ASSERT_EQ(active->unitSide(), BattleSide::DEFENDER);
+	ASSERT_TRUE(active->doubleWide());
+	ASSERT_TRUE(active->isHypnotized());
+	auto caster = scene.state->getForUpdate(2);
+	ASSERT_EQ(scene.state->battleGetOwner(active), scene.state->battleGetOwner(caster.get()));
+	const auto * spell = SpellID(SpellID::TELEPORT).toSpell();
+	ASSERT_NE(spell, nullptr);
+	BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+	teleportprobe::configure(cast);
+	// Deliberate non-default real-cast configuration: core smart Teleport uses
+	// initial target ownership and cannot target this hypnotized enemy-side ally.
+	// Disable smart filtering only here to isolate effective-owner shortlisting.
+	cast.smart = false;
+	auto mechanics = spell->battleMechanics(&cast);
+	const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+	teleportprobe::expectLegalUniqueMoves(*mechanics, targets);
+	size_t activeContacts = 0;
+	for(const auto & target : targets)
+	{
+		if(target.front().hexValue != active->getPosition())
+			continue;
+		const auto child = teleportprobe::castInChild(scene, target, 2, true);
+		const auto * moved = child->battleGetUnitByID(1);
+		ASSERT_NE(moved, nullptr);
+		EXPECT_EQ(moved->unitSide(), BattleSide::DEFENDER);
+		EXPECT_EQ(moved->occupiedHex(), BattleHex(target.back().hexValue.toInt() + 1));
+		for(const uint32_t enemyId : {4u, 5u})
+		{
+			const auto * enemy = child->battleGetUnitByID(enemyId);
+			ASSERT_NE(enemy, nullptr);
+			if(child->battleCanAttackUnit(moved, enemy) && CStack::isMeleeAttackPossible(moved, enemy))
+				++activeContacts;
+		}
+	}
+	EXPECT_GT(activeContacts, 0u);
+	EXPECT_EQ(scene.snapshot(), before);
 }
 
 }

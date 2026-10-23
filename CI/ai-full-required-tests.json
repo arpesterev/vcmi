@@ -110,6 +110,7 @@
     "Nullkiller2TownRecruitmentRegression.UnaffordableCreatureUpgradeDoesNotSendRequest",
     "SpellTargetEvaluatorTest.EmptySignatureAndUnavailableFirstTargetProduceNoCasts",
     "SpellTargetEvaluatorTest.EnumeratesAndValidatesCompleteCreatureLocationTargets",
+    "SpellTargetEvaluatorTest.NonTeleportCreatureLocationSignatureRemainsExhaustive",
     "SpellTargetEvaluatorTest.ObstacleTargetsUseMechanicsLegality",
     "SpellTargetEvaluatorTest.ReturnSingleEmptyDestinationIfTargetIsNone",
     "SpellTargetEvaluatorTest.ReturnsOneCaseOfEachOptimalCastIfNegativeLocationSpell",
@@ -117,7 +118,15 @@
     "SpellTargetEvaluatorTest.ReturnsSuspectibleCreaturePositionsIfSpellTargetsCreatures",
     "SpellTargetRealMechanicsTest.OrdinaryLocationSpellsKeepNearUnitHeuristic",
     "SpellTargetRealMechanicsTest.RemoveObstacleFindsRemoteTargetsAndKeepsParentsUnchanged",
-    "SpellTargetRealMechanicsTest.RemoveObstacleWithoutLegalObstacleHasNoTargets"
+    "SpellTargetRealMechanicsTest.RemoveObstacleWithoutLegalObstacleHasNoTargets",
+    "SpellTargetRealMechanicsTest.TeleportShortlistBackfillsEmptyCategoriesAndExcludesLegalNoOp",
+    "SpellTargetRealMechanicsTest.TeleportShortlistClassifiesHypnotizedActiveByEffectiveOwner",
+    "SpellTargetRealMechanicsTest.TeleportShortlistEscapesRearHexBlockingForBothDoubleWideSides",
+    "SpellTargetRealMechanicsTest.TeleportShortlistIgnoresSourceEnumerationOrder",
+    "SpellTargetRealMechanicsTest.TeleportShortlistIsBoundedLegalRepeatableAndSourcePure",
+    "SpellTargetRealMechanicsTest.TeleportShortlistRetainsActiveMeleeContactsWithDifferentDefenders",
+    "SpellTargetRealMechanicsTest.TeleportShortlistUnblocksFriendlyShooterAfterRealCast",
+    "SpellTargetRealMechanicsTest.TeleportWithNoLegalSourceProducesNoShortlist"
   ],
   "minimum_executed_tests": 314,
   "scope": "Exact named regression tests plus complete enabled suite. Synthetic fixtures do not establish whole-game strength."
