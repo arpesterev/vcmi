@@ -54,6 +54,7 @@ using dwellingContent = std::pair<ui32, std::vector<CreatureID>>;
 namespace NK2AI
 {
 struct creInfo;
+struct AIPath;
 class AIGateway;
 class Nullkiller;
 
@@ -199,6 +200,7 @@ bool isWeeklyRevisitable(const PlayerColor & playerID, const CGObjectInstance * 
 bool isObjectRemovable(const CGObjectInstance * obj); //FIXME FIXME: move logic to object property!
 bool isSafeToVisit(const CGHeroInstance * h, uint64_t dangerStrength, float safeAttackRatio);
 bool isSafeToVisit(const CGHeroInstance * h, const CCreatureSet *, uint64_t dangerStrength, float safeAttackRatio);
+bool isSafeToVisit(const AIPath & path, float safeAttackRatio);
 
 bool compareHeroStrength(const CGHeroInstance * h1, const CGHeroInstance * h2);
 bool compareArmyStrength(const CArmedInstance * a1, const CArmedInstance * a2);

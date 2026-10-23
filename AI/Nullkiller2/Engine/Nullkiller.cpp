@@ -41,6 +41,7 @@ Nullkiller::Nullkiller()
 	: activeHero(nullptr)
 	, scanDepth(ScanDepth::MAIN_FULL)
 	, useHeroChain(true)
+	, pathfinderInvalidated(true)
 	, memory(std::make_unique<AIMemory>())
 {
 

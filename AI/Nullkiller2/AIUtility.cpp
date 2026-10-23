@@ -11,6 +11,7 @@
 #include "AIUtility.h"
 #include "AIGateway.h"
 #include "Goals/Goals.h"
+#include "Pathfinding/AINodeStorage.h"
 
 #include "../../lib/UnlockGuard.h"
 #include "../../lib/CConfigHandler.h"
@@ -146,6 +147,11 @@ bool isSafeToVisit(const CGHeroInstance * h, const CCreatureSet * heroArmy, uint
 bool isSafeToVisit(const CGHeroInstance * h, uint64_t dangerStrength, float safeAttackRatio)
 {
 	return isSafeToVisit(h, h, dangerStrength, safeAttackRatio);
+}
+
+bool isSafeToVisit(const AIPath & path, float safeAttackRatio)
+{
+	return isSafeToVisit(path.targetHero, path.heroArmy, path.getTotalDanger(), safeAttackRatio);
 }
 
 bool isObjectRemovable(const CGObjectInstance * obj)

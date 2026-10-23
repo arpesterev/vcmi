@@ -100,11 +100,11 @@ void CBattleAI::yourTacticPhase(const BattleID & battleID, int distance)
 	cb->battleMakeTacticAction(battleID, BattleAction::makeEndOFTacticPhase(cb->getBattle(battleID)->battleGetTacticsSide()));
 }
 
-static float getStrengthRatio(std::shared_ptr<CBattleInfoCallback> cb, BattleSide side)
+float CBattleAI::getStrengthRatio(std::shared_ptr<CBattleInfoCallback> cb, BattleSide side)
 {
 	auto stacks = cb->battleGetAllStacks();
-	auto our = 0;
-	auto enemy = 0;
+	double our = 0;
+	double enemy = 0;
 
 	for(auto stack : stacks)
 	{
@@ -113,13 +113,15 @@ static float getStrengthRatio(std::shared_ptr<CBattleInfoCallback> cb, BattleSid
 		if(!creature)
 			continue;
 
+		// Widen before multiplication: legal large stacks can exceed int32_t.
+		const double stackStrength = static_cast<double>(stack->getCount()) * creature->getAIValue();
 		if(stack->unitSide() == side)
-			our += stack->getCount() * creature->getAIValue();
+			our += stackStrength;
 		else
-			enemy += stack->getCount() * creature->getAIValue();
+			enemy += stackStrength;
 	}
 
-	return enemy == 0 ? 1.0f : static_cast<float>(our) / enemy;
+	return enemy == 0 ? 1.0f : static_cast<float>(our / enemy);
 }
 
 int getSimulationTurnsCount(const StartInfo * startInfo)
@@ -276,6 +278,11 @@ std::optional<BattleAction> CBattleAI::considerFleeingOrSurrendering(const Battl
 			}
 		}
 	}
+
+	// The final own stack may already be dead when this callback is observed.
+	// There is no surviving army for which to request retreat or surrender.
+	if(bs.ourStacks.empty())
+		return std::nullopt;
 
 	bs.turnsSkippedByDefense = movesSkippedByDefense / bs.ourStacks.size();
 

@@ -134,6 +134,7 @@ public:
 	int32_t getActiveStackID() const override;
 
 	battle::Units getUnitsIf(const battle::UnitFilter & predicate) const override;
+	ObstacleCList getAllObstacles() const override;
 
 	void nextRound() override;
 	void nextTurn(uint32_t unitId, BattleUnitTurnReason reason) override;
@@ -218,6 +219,8 @@ private:
 		const Environment * env;
 	};
 
+	std::map<uint32_t, std::shared_ptr<CObstacleInstance>> obstacleStates;
+	std::set<uint32_t> removedObstacles;
 	int32_t bonusTreeVersion;
 	int32_t activeUnitId;
 	mutable uint32_t nextId;

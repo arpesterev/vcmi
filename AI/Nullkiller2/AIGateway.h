@@ -191,6 +191,8 @@ public:
 	static void memorizeRevisitableObjs(const std::unique_ptr<AIMemory>& memory, const PlayerColor& playerID, const std::shared_ptr<CCallback>& cc);
 
 	static void pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const CGHeroInstance * h, const CGHeroInstance * other = nullptr);
+private:
+	void invalidatePlanningData();
 };
 
 }

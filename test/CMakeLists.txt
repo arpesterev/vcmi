@@ -1,6 +1,8 @@
 include(GoogleTest)
 include(CheckCXXCompilerFlag)
 
+option(VCMI_BATTLE_AI_BENCHMARK_ONLY "Build only the compatible BattleAI latency harness" OFF)
+
 set(googleTest_Dir ${CMAKE_CURRENT_SOURCE_DIR}/googletest)
 if(EXISTS ${googleTest_Dir})
 	set(GTestSrc ${googleTest_Dir}/googletest)
@@ -149,6 +151,9 @@ if(ENABLE_BATTLE_AI)
 	list(APPEND test_SRCS
 		${BATTLE_AI_TEST_SRCS}
 		battleAI/SpellTargetsEvaluatorTest.cpp
+		battleAI/BattleStateRegressionTest.cpp
+		battleAI/BattleAINumericRegression.cpp
+		battleAI/BattleExchangeVariantTest.cpp
 	)
 
 endif()
@@ -157,10 +162,40 @@ if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS)
 	# These fixtures call non-exported production AI functions. Link the static
 	# AI instead of changing the production shared-library visibility/API.
 	list(APPEND test_SRCS
+		nullkiller2/BuildAnalyzerRegression.cpp
+		nullkiller2/TownRecruitmentRegression.cpp
+		nullkiller2/AdventurePlanningRegression.cpp
+		nullkiller2/PlanningCacheRegression.cpp
+		nullkiller2/MissingTargetRegression.cpp
+		nullkiller2/AIPathMetadataRegression.cpp
+		nullkiller2/ArmyDeliverySafetyRegression.cpp
+		nullkiller2/ArmyPlanningRegression.cpp
+		nullkiller2/CompositeActionRegression.cpp
+		nullkiller2/HeroChainCostRegression.cpp
+		nullkiller2/HeroRoleRegression.cpp
+		nullkiller2/ScoutArmyRegression.cpp
+		nullkiller2/ThreatSettingsRegression.cpp
 		nullkiller2/BuyArmyRegression.cpp
 		nullkiller2/DwellingGrowthRegression.cpp
 	)
 	list(APPEND test_HEADERS nullkiller2/StrategyCallbackStub.h)
+endif()
+
+# Keep the baseline/candidate benchmark harness independent of new correctness APIs.
+# The normal integration/fullsuite source list is untouched unless explicitly opted in.
+if(VCMI_BATTLE_AI_BENCHMARK_ONLY)
+	if(NOT ENABLE_BATTLE_AI OR NOT VCMI_BATTLE_AI_CALLER_PROBES OR VCMI_BATTLE_AI_TEST_TRACE)
+		message(FATAL_ERROR "Benchmark-only requires BattleAI and caller probes with test trace OFF")
+	endif()
+	set(BATTLE_BENCHMARK_MOCK_SRCS ${test_SRCS})
+	list(FILTER BATTLE_BENCHMARK_MOCK_SRCS INCLUDE REGEX "^mock/.*\\.cpp$")
+	set(test_SRCS
+		StdInc.cpp
+		main.cpp
+		CVcmiTestConfig.cpp
+		${BATTLE_BENCHMARK_MOCK_SRCS}
+		${BATTLE_AI_TEST_SRCS}
+	)
 endif()
 
 assign_source_group(${test_SRCS} ${test_HEADERS})
@@ -201,6 +236,7 @@ endif()
 add_subdirectory_with_folder("3rdparty" googletest EXCLUDE_FROM_ALL)
 
 add_executable(vcmitest ${test_SRCS} ${test_HEADERS} ${mock_HEADERS})
+include(battleAI/BattleCallerProbes.cmake)
 target_link_libraries(vcmitest PRIVATE gtest gmock vcmi ${SYSTEM_LIBS})
 if(ENABLE_LUA)
 	target_link_libraries(vcmitest PRIVATE vcmiLua)

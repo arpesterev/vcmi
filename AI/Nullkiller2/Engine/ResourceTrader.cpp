@@ -64,8 +64,17 @@ bool ResourceTrader::trade(BuildAnalyzer & buildAnalyzer, CCallback & cc, const 
 			missingNow.toString()
 		);
 
+		const auto resourcesBeforeTrade = cc.getResourceAmount();
 		if(tradeHelper(EXPENDABLE_BULK_RATIO, *market, missingNow, income, freeAfterMissingTotal, buildAnalyzer, cc))
 		{
+			// The AI waits for requests to be applied. A rejected request must
+			// not loop forever against the same resources and market offer.
+			if(cc.getResourceAmount() == resourcesBeforeTrade)
+			{
+				logAi->warn("ResourceTrader: Trade did not change resources. Stopping.");
+				break;
+			}
+
 			haveTraded = true;
 			shouldTryToTrade = true;
 		}

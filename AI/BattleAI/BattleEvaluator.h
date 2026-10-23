@@ -48,6 +48,10 @@ class DLL_EXPORT BattleEvaluator
 	int simulationTurnsCount;
 
 public:
+	static bool isSpellWorthCasting(float value, float noSpellScore);
+	static bool isRedundantSummonHealthGain(int ownershipSign, int healthChangeSign, bool magical);
+	static bool spellChangesGeometry(const CBattleInfoCallback & before, const CBattleInfoCallback & after);
+
 	BattleAction selectStackAction(const CStack * stack);
 	bool attemptCastingSpell(const CStack * stack);
 	bool canCastSpell();

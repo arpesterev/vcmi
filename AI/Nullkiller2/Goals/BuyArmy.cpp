@@ -58,7 +58,8 @@ void BuyArmy::accept(AIGateway * aiGw)
 
 		if(ci.count)
 		{
-			if (town->getUpperArmy()->stacksCount() == GameConstants::ARMY_SIZE)
+			if (town->getUpperArmy()->stacksCount() == GameConstants::ARMY_SIZE
+				&& !town->getUpperArmy()->getSlotFor(ci.creID).validSlot())
 			{
 				SlotID lowestValueSlot;
 				int lowestValue = std::numeric_limits<int>::max();
@@ -87,8 +88,8 @@ void BuyArmy::accept(AIGateway * aiGw)
 			if (town->getUpperArmy()->stacksCount() < GameConstants::ARMY_SIZE || town->getUpperArmy()->getSlotFor(ci.creID).validSlot()) //It is possible we don't scrap despite we wanted to due to not scrapping stacks that fit our faction
 			{
 				aiGw->cc->recruitCreatures(town, town->getUpperArmy(), ci.creID, ci.count, ci.level);
+				valueBought += ci.count * ci.creID.toCreature()->getAIValue();
 			}
-			valueBought += ci.count * ci.creID.toCreature()->getAIValue();
 		}
 	}
 

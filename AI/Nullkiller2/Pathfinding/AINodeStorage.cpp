@@ -1535,6 +1535,16 @@ AIPath::AIPath()
 {
 }
 
+AIPathNodeInfo AIPath::createNodeInfo(const int3 & coord, EPathfindingLayer layer) const
+{
+	AIPathNodeInfo node;
+	node.coord = coord;
+	node.layer = layer;
+	node.targetHero = targetHero;
+	node.chainMask = chainMask;
+	return node;
+}
+
 std::shared_ptr<const SpecialAction> AIPath::getFirstBlockedAction() const
 {
 	for(auto node = nodes.rbegin(); node != nodes.rend(); node++)

@@ -31,6 +31,7 @@ namespace Goals
 		std::string toString() const override;
 		bool operator==(const ExecuteHeroChain & other) const override;
 		const AIPath & getPath() const { return chainPath; }
+		void setClosestWayRatio(const AIPath & closestWay);
 
 		int getHeroExchangeCount() const override { return chainPath.exchangeCount; }
 

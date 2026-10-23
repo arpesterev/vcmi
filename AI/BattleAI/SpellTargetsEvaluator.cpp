@@ -21,14 +21,16 @@ std::vector<Target> SpellTargetEvaluator::getViableTargets(const Mechanics * spe
 {
 	std::vector<Target> result;
 	std::vector<AimType> targetTypes = spellMechanics->getTargetTypes();
-	if(targetTypes.size() != 1) //TODO: support for multi-destination spells
+	if(targetTypes.empty())
 		return result;
+	if(targetTypes.size() > 1 || targetTypes.front() == AimType::OBSTACLE)
+		return allTargetCombinations(spellMechanics, targetTypes);
 
 	auto targetType = targetTypes.front();
 
 	switch(targetType)
 	{
-		case AimType::CREATURE://TODO: support for multi-destination spells
+		case AimType::CREATURE:
 			return allTargetableCreatures(spellMechanics);
 		case AimType::LOCATION:
 		{
@@ -44,6 +46,53 @@ std::vector<Target> SpellTargetEvaluator::getViableTargets(const Mechanics * spe
 		default:
 			return result;
 	}
+}
+
+std::vector<Target> SpellTargetEvaluator::allTargetCombinations(const Mechanics * mechanics, const std::vector<AimType> & types)
+{
+	std::vector<std::vector<Destination>> destinations;
+	for(const auto type : types)
+	{
+		std::vector<Destination> choices;
+		if(type == AimType::CREATURE)
+		{
+			for(const auto * unit : mechanics->battle()->battleGetAllUnits(false))
+				choices.emplace_back(unit->getPosition());
+		}
+		else if(type == AimType::LOCATION || type == AimType::OBSTACLE)
+		{
+			// Let the spell mechanics decide which tiles/obstacles are legal. In
+			// particular, don't filter a teleport destination without its unit.
+			for(int hex = 0; hex < GameConstants::BFIELD_SIZE; ++hex)
+				choices.emplace_back(BattleHex(hex));
+		}
+		else if(type == AimType::NO_TARGET)
+			choices.emplace_back(BattleHex::INVALID);
+		else
+			return {};
+		destinations.push_back(std::move(choices));
+	}
+
+	std::vector<Target> result;
+	Target candidate;
+	std::function<void(size_t)> visit = [&](size_t index)
+	{
+		if(index == destinations.size())
+		{
+			detail::ProblemImpl ignored;
+			if(mechanics->canBeCastAt(candidate, ignored))
+				result.push_back(candidate);
+			return;
+		}
+		for(const auto & destination : destinations[index])
+		{
+			candidate.push_back(destination);
+			visit(index + 1);
+			candidate.pop_back();
+		}
+	};
+	visit(0);
+	return result;
 }
 
 std::vector<Target> SpellTargetEvaluator::defaultLocationSpellHeuristics(const spells::Mechanics * spellMechanics)

@@ -247,7 +247,11 @@ void GraphPaths::addChainInfo(std::vector<AIPath> & paths, int3 tile, const CGHe
 
 			for(auto graphTile = ++tilesToPass.rbegin(); graphTile != tilesToPass.rend(); graphTile++)
 			{
-				AIPathNodeInfo n;
+				const auto * tileInfo = aiNk->cc->getTile(graphTile->coord, false);
+				auto layer = tileInfo
+					? (tileInfo->isWater() ? EPathfindingLayer::SAIL : EPathfindingLayer::LAND)
+					: EPathfindingLayer::WRONG;
+				auto n = path.createNodeInfo(graphTile->coord, layer);
 				auto & node = getNode(*graphTile);
 
 				n.coord = graphTile->coord;
@@ -351,7 +355,8 @@ void GraphPaths::quickAddChainInfoWithBlocker(std::vector<AIPath> & paths, int3 
 			if(entryPath.targetHero != hero)
 				continue;
 
-			auto & path = paths.emplace_back();
+			auto & path = paths.emplace_back(entryPath);
+			path.nodes.clear();
 
 			path.targetHero = entryPath.targetHero;
 			path.heroArmy = entryPath.heroArmy;
@@ -360,7 +365,11 @@ void GraphPaths::quickAddChainInfoWithBlocker(std::vector<AIPath> & paths, int3 
 			path.targetObjectDanger = aiNk->dangerEvaluator->evaluateDanger(tile, path.targetHero, !allowBattle);
 			path.targetObjectArmyLoss = aiNk->pathfinder->getStorage()->evaluateArmyLoss(path.targetHero, path.heroArmy->getArmyStrength(), path.targetObjectDanger);
 
-			AIPathNodeInfo n;
+			const auto * targetTileInfo = aiNk->cc->getTile(tile, false);
+			auto targetLayer = targetTileInfo
+				? (targetTileInfo->isWater() ? EPathfindingLayer::SAIL : EPathfindingLayer::LAND)
+				: EPathfindingLayer::WRONG;
+			auto n = path.createNodeInfo(tile, targetLayer);
 
 			n.targetHero = hero;
 			n.parentIndex = -1;
@@ -392,6 +401,11 @@ void GraphPaths::quickAddChainInfoWithBlocker(std::vector<AIPath> & paths, int3 
 			for(auto graphTile = tilesToPass.rbegin(); graphTile != tilesToPass.rend(); graphTile++)
 			{
 				auto & node = getNode(*graphTile);
+				const auto * tileInfo = aiNk->cc->getTile(graphTile->coord, false);
+				auto layer = tileInfo
+					? (tileInfo->isWater() ? EPathfindingLayer::SAIL : EPathfindingLayer::LAND)
+					: EPathfindingLayer::WRONG;
+				n = path.createNodeInfo(graphTile->coord, layer);
 
 				n.coord = graphTile->coord;
 				n.cost = node.cost;

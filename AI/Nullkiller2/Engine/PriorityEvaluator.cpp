@@ -234,9 +234,10 @@ uint64_t RewardEvaluator::getArmyReward(
 	bool checkGold) const
 {
 	const float enemyArmyEliminationRewardRatio = 0.5f;
-	auto relations = aiNk->cc->getPlayerRelations(target->tempOwner, aiNk->playerID);
-	if(!target) // TODO: Mircea: Shouldn't it be relations instead of target in the if? See getArmyGrowth below
+	if(!target)
 		return 0;
+
+	auto relations = aiNk->cc->getPlayerRelations(target->tempOwner, aiNk->playerID);
 
 	switch(target->ID)
 	{
@@ -441,11 +442,15 @@ float RewardEvaluator::getCombinedResourceRequirementStrength(const TResources &
 
 	for(TResources::nziterator it(res); it.valid(); it++)
 	{
+		// Rewardable objects may also remove resources. A cost is not a reward.
+		if(it->resVal <= 0)
+			continue;
+
 		auto calculation = 0.5f * getNowResourceRequirementStrength(it->resType)
 			+ 0.5f * getTotalResourceRequirementStrength(it->resType);
 
 		// Even not required resources should be valuable because they shouldn't be left for the enemies to collect
-		sum += std::min(MINIMUM_STRATEGICAL_VALUE_NON_TOWN, calculation);
+		sum += std::max(MINIMUM_STRATEGICAL_VALUE_NON_TOWN, calculation);
 	}
 
 	return sum;

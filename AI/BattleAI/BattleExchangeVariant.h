@@ -129,6 +129,7 @@ class ReachabilityMapCache
 		std::array<battle::Units, GameConstants::BFIELD_SIZE> hexes;
 	};
 
+	std::shared_ptr<CBattleInfoCallback> battleState;
 	std::map<uint32_t, ReachabilityInfo> unitReachabilityMap; // unit ID -> reachability
 	std::map<uint32_t, PerTurnData> hexReachabilityPerTurn;
 

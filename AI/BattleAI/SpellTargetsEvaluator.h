@@ -18,6 +18,8 @@ public:
 	static std::vector<spells::Target> getViableTargets(const spells::Mechanics * spellMechanics);
 
 private:
+	static std::vector<spells::Target> allTargetCombinations(const spells::Mechanics * spellMechanics, const std::vector<spells::AimType> & types);
+
 	enum Compare
 	{
 		EQUAL,

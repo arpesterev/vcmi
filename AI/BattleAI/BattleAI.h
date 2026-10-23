@@ -16,6 +16,7 @@
 VCMI_LIB_NAMESPACE_BEGIN
 
 class CSpell;
+class CBattleInfoCallback;
 
 VCMI_LIB_NAMESPACE_END
 
@@ -73,6 +74,9 @@ public:
 	void yourTacticPhase(const BattleID & battleID, int distance) override;
 
 	std::optional<BattleAction> considerFleeingOrSurrendering(const BattleID & battleID);
+
+	/// Relative current army strength used by the live stack-action evaluator.
+	static float getStrengthRatio(std::shared_ptr<CBattleInfoCallback> cb, BattleSide side);
 
 	void print(const std::string &text) const;
 	BattleAction useCatapult(const BattleID & battleID, const CStack *stack);

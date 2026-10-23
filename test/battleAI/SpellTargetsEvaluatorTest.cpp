@@ -127,11 +127,49 @@ public:
 	}
 };
 
-TEST_F(SpellTargetEvaluatorTest, ReturnsEmptyIfMultiDestinationSpell)
+TEST_F(SpellTargetEvaluatorTest, EnumeratesAndValidatesCompleteCreatureLocationTargets)
 {
 	spellTargetTypes({AimType::CREATURE, AimType::LOCATION});
-	std::vector<Target> result = SpellTargetEvaluator::getViableTargets(&mechMock);
-	EXPECT_TRUE(result.empty());
+	addStack(BattleHex(20), casterSide);
+	addStack(BattleHex(40), casterSide);
+	ON_CALL(battleMock, battleGetAllUnits(false)).WillByDefault(Return(allUnits));
+	EXPECT_CALL(mechMock, canBeCastAt(_, _))
+		.Times(2 * GameConstants::BFIELD_SIZE)
+		.WillRepeatedly(Invoke([](const Target & target, Problem &)
+		{
+			EXPECT_EQ(target.size(), 2u); // Never validate incomplete prefixes.
+			return target.size() == 2 &&
+				((target[0].hexValue == BattleHex(20) && target[1].hexValue == BattleHex(80)) ||
+				 (target[0].hexValue == BattleHex(40) && target[1].hexValue == BattleHex(90)));
+		}));
+	const auto result = SpellTargetEvaluator::getViableTargets(&mechMock);
+	ASSERT_EQ(result.size(), 2u);
+	EXPECT_EQ(result[0][0].hexValue, BattleHex(20));
+	EXPECT_EQ(result[0][1].hexValue, BattleHex(80));
+	EXPECT_EQ(result[1][0].hexValue, BattleHex(40));
+	EXPECT_EQ(result[1][1].hexValue, BattleHex(90));
+}
+
+TEST_F(SpellTargetEvaluatorTest, ObstacleTargetsUseMechanicsLegality)
+{
+	spellTargetTypes({AimType::OBSTACLE});
+	EXPECT_CALL(mechMock, canBeCastAt(_, _))
+		.Times(GameConstants::BFIELD_SIZE)
+		.WillRepeatedly(Invoke([](const Target & target, Problem &)
+		{
+			return target.size() == 1 && target[0].hexValue == BattleHex(80);
+		}));
+	confirmResults({{BattleHex(80)}});
+}
+
+TEST_F(SpellTargetEvaluatorTest, EmptySignatureAndUnavailableFirstTargetProduceNoCasts)
+{
+	spellTargetTypes({});
+	EXPECT_TRUE(SpellTargetEvaluator::getViableTargets(&mechMock).empty());
+	spellTargetTypes({AimType::CREATURE, AimType::LOCATION});
+	ON_CALL(battleMock, battleGetAllUnits(false)).WillByDefault(Return(allUnits));
+	EXPECT_CALL(mechMock, canBeCastAt(_, _)).Times(0);
+	EXPECT_TRUE(SpellTargetEvaluator::getViableTargets(&mechMock).empty());
 }
 
 TEST_F(SpellTargetEvaluatorTest, ReturnSingleEmptyDestinationIfTargetIsNone)

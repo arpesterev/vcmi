@@ -151,7 +151,7 @@ bool isEquivalentGoals(TSubgoal goal1, TSubgoal goal2, CCallback & cc)
 		const auto o1 = cc.getObj(ObjectInstanceID(goal1->objid));
 		const auto o2 = cc.getObj(ObjectInstanceID(goal2->objid));
 
-		return o1->ID == Obj::SHIPYARD && o1->ID == o2->ID;
+		return o1 && o2 && o1->ID == Obj::SHIPYARD && o1->ID == o2->ID;
 	}
 
 	return false;

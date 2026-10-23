@@ -9,6 +9,7 @@
  */
 #include "StdInc.h"
 #include "StackWithBonuses.h"
+#include "../../lib/battle/CObstacleInstance.h"
 
 #include <vcmi/events/EventBus.h>
 
@@ -320,6 +321,18 @@ battle::Units HypotheticBattle::getUnitsIf(const battle::UnitFilter & predicate)
 	return ret;
 }
 
+IBattleInfo::ObstacleCList HypotheticBattle::getAllObstacles() const
+{
+	auto result = BattleProxy::getAllObstacles();
+	vstd::erase_if(result, [&](const auto & obstacle)
+	{
+		return removedObstacles.count(obstacle->uniqueID) || obstacleStates.count(obstacle->uniqueID);
+	});
+	for(const auto & entry : obstacleStates)
+		result.push_back(entry.second);
+	return result;
+}
+
 BattleID HypotheticBattle::getBattleID() const
 {
 	return subject->getBattle()->getBattleID();
@@ -444,17 +457,34 @@ void HypotheticBattle::setWallState(EWallPart partOfWall, EWallState state)
 
 void HypotheticBattle::addObstacle(const ObstacleChanges & changes)
 {
-	//TODO:HypotheticBattle::addObstacle
+	auto obstacle = std::make_shared<SpellCreatedObstacle>();
+	obstacle->fromInfo(changes);
+	removedObstacles.erase(changes.id);
+	obstacleStates[changes.id] = obstacle;
 }
 
 void HypotheticBattle::updateObstacle(const ObstacleChanges& changes)
 {
-	//TODO:HypotheticBattle::updateObstacle
+	SpellCreatedObstacle changed;
+	changed.fromInfo(changes);
+	for(const auto & obstacle : getAllObstacles())
+	{
+		if(obstacle->uniqueID != changes.id)
+			continue;
+		const auto * spellObstacle = dynamic_cast<const SpellCreatedObstacle *>(obstacle.get());
+		if(!spellObstacle)
+			return;
+		auto copy = std::make_shared<SpellCreatedObstacle>(*spellObstacle);
+		copy->revealed = changed.revealed;
+		obstacleStates[changes.id] = copy;
+		return;
+	}
 }
 
 void HypotheticBattle::removeObstacle(uint32_t id)
 {
-	//TODO:HypotheticBattle::removeObstacle
+	obstacleStates.erase(id);
+	removedObstacles.insert(id);
 }
 
 uint32_t HypotheticBattle::nextUnitId() const

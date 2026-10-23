@@ -62,9 +62,6 @@ void BuildAnalyzer::update()
 
 	for(const CGTownInstance * town : towns)
 	{
-		if(town->built >= aiNk->cc->getSettings().getInteger(EGameSettings::TOWNS_BUILDINGS_PER_TURN_CAP))
-			continue; // Not much point in trying anything - can't built in this town anymore today
-
 #if NK2AI_TRACE_LEVEL >= 1
 		logAi->trace("Checking town %s", town->getNameTranslated());
 #endif
@@ -73,6 +70,12 @@ void BuildAnalyzer::update()
 		TownDevelopmentInfo & tdi = developmentInfos.back();
 
 		updateDwellings(tdi, aiNk->armyManager, aiNk->cc);
+		armyCost += tdi.armyCost;
+
+		// Building today does not remove the town's existing army or its cost.
+		if(town->built >= aiNk->cc->getSettings().getInteger(EGameSettings::TOWNS_BUILDINGS_PER_TURN_CAP))
+			continue;
+
 		updateOtherBuildings(tdi, aiNk->armyManager, aiNk->cc);
 		requiredResources += tdi.requiredResources;
 		totalDevelopmentCost += tdi.townDevelopmentCost;
@@ -82,8 +85,6 @@ void BuildAnalyzer::update()
 			if (building.dailyIncome[EGameResID::GOLD] > 0)
 				economyDevelopmentCost += building.buildCostWithPrerequisites[EGameResID::GOLD];
 		}
-
-		armyCost += tdi.armyCost;
 
 #if NK2AI_TRACE_LEVEL >= 1
 		for(const auto & biToBuild : tdi.toBuild)
@@ -134,6 +135,10 @@ void TownDevelopmentInfo::addBuildingBuilt(const BuildingInfo & bi)
 
 void TownDevelopmentInfo::addBuildingToBuild(const BuildingInfo & bi)
 {
+	// Forbidden or otherwise unavailable buildings must not reserve resources.
+	if(!bi.isBuildable && !bi.isMissingResources)
+		return;
+
 	townDevelopmentCost += bi.buildCostWithPrerequisites;
 	townDevelopmentCost += BuildAnalyzer::goldRemove(bi.armyCost);
 
@@ -259,6 +264,9 @@ void BuildAnalyzer::updateDwellings(TownDevelopmentInfo & developmentInfo, std::
 			developmentInfo.addBuildingBuilt(info);
 			break;
 		}
+
+		if(developmentInfo.town->built >= cc->getSettings().getInteger(EGameSettings::TOWNS_BUILDINGS_PER_TURN_CAP))
+			continue;
 
 		// find all non-built dwellings that can be built and add them for consideration
 		for (const auto & buildID : dwellingsInTown)

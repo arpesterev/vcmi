@@ -44,7 +44,7 @@ struct HitMapNode
 	{
 		maximumDanger = HitMapInfo::NoThreat;
 		fastestDanger = HitMapInfo::NoThreat;
-		closestTown = nullptr;
+		// Territory is cached independently by calculateTileOwners().
 	}
 };
 

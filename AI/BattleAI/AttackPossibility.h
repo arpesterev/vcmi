@@ -19,6 +19,7 @@ private:
 	std::unordered_map<uint32_t, std::unordered_map<uint32_t, float>> damageCache;
 	std::map<BattleHex, std::unordered_map<uint32_t, int64_t>> obstacleDamage;
 	DamageCache * parent;
+	bool hasLocalObstacleDamage = false;
 
 	void buildObstacleDamageCache(std::shared_ptr<HypotheticBattle> hb, BattleSide side);
 
@@ -31,6 +32,7 @@ public:
 	int64_t getObstacleDamage(const BattleHex & hex, const battle::Unit * defender);
 	int64_t getOriginalDamage(const battle::Unit * attacker, const battle::Unit * defender, std::shared_ptr<CBattleInfoCallback> hb);
 	void buildDamageCache(std::shared_ptr<HypotheticBattle> hb, BattleSide side);
+	void refreshObstacleDamage(std::shared_ptr<HypotheticBattle> hb, BattleSide side);
 };
 
 /// <summary>

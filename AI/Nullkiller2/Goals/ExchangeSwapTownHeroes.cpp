@@ -86,18 +86,9 @@ void ExchangeSwapTownHeroes::accept(AIGateway * aiGw)
 	aiGw->makePossibleUpgrades(town);
 	aiGw->moveHeroToTile(town->visitablePos(), HeroPtr(getGarrisonHero(), aiGw->cc.get()));
 
-	auto upperArmy = town->getUpperArmy();
-	
-	if(!town->getGarrisonHero())
-	{
-		if (!getGarrisonHero()->canBeMergedWith(*town))
-		{
-			while (upperArmy->stacksCount() != 0)
-			{
-				aiGw->cc->dismissCreature(upperArmy, upperArmy->Slots().begin()->first);
-			}
-		}
-	}
+	// A garrison exchange must not destroy the town army to make room.
+	if(!town->getGarrisonHero() && !getGarrisonHero()->canBeMergedWith(*town))
+		throw cannotFulfillGoalException("Cannot garrison hero without losing town troops.");
 	
 	aiGw->cc->swapGarrisonHero(town);
 

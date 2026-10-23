@@ -130,7 +130,7 @@ std::vector<SlotInfo>::iterator ArmyManager::getBestUnitForScout(std::vector<Slo
 	auto fastest = boost::min_element(army, [&](const SlotInfo & left, const SlotInfo & right) -> bool
 	{
 		uint64_t leftUnitPower = left.power / left.count;
-		uint64_t rightUnitPower = left.power / left.count;
+		uint64_t rightUnitPower = right.power / right.count;
 		bool leftUnitIsWeak = leftUnitPower < maxUnitValue || left.creature->getLevel() < 4;
 		bool rightUnitIsWeak = rightUnitPower < maxUnitValue || right.creature->getLevel() < 4;
 
@@ -365,6 +365,10 @@ std::vector<creInfo> ArmyManager::getArmyAvailableToBuy(
 
 		if(!ci.count) continue;
 
+		vstd::amin(ci.count, availableRes / ci.creID.toCreature()->getFullRecruitCost());
+		if(ci.count <= 0)
+			continue;
+
 		// Calculate the market value of the new stack
 		TResources newStackValue = ci.creID.toCreature()->getFullRecruitCost() * ci.count;
 
@@ -410,26 +414,24 @@ std::vector<creInfo> ArmyManager::getArmyAvailableToBuy(
 					shouldDisband = true;
 				}
 			}
-			else
-			{
-				freeHeroSlots--; //new slot will be occupied
-			}
 		}
-
-		vstd::amin(ci.count, availableRes / ci.creID.toCreature()->getFullRecruitCost()); //max count we can afford
 
 		int disbandMalus = 0;
 		
 		if (shouldDisband)
 		{
 			disbandMalus = leastValuableStackValue / ci.creID.toCreature()->getFullRecruitCost();
-			alreadyDisbanded.insert(leastValuableSlot);
 		}
 
 		ci.count -= disbandMalus;
 
 		if(ci.count <= 0)
 			continue;
+
+		if(shouldDisband)
+			alreadyDisbanded.insert(leastValuableSlot);
+		else if(!hero->hasStackAtSlot(dst))
+			freeHeroSlots--;
 
 		ci.level = i; //this is important for Dungeon Summoning Portal
 		creaturesInDwellings.push_back(ci);

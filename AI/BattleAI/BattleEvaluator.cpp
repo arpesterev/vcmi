@@ -510,6 +510,39 @@ bool BattleEvaluator::canCastSpell()
 	return cb->getBattle(battleID)->battleCanCastSpell(hero, spells::Mode::HERO) == ESpellCastProblem::OK;
 }
 
+bool BattleEvaluator::isSpellWorthCasting(float value, float noSpellScore)
+{
+	// Waiting/defending is always available. An absent or losing attack must
+	// not make a harmful spell attractive just because its score is less bad.
+	const auto baseline = std::max(0.0f, noSpellScore);
+	return value > baseline && !vstd::isAlmostEqual(value, baseline);
+}
+
+bool BattleEvaluator::isRedundantSummonHealthGain(int ownershipSign, int healthChangeSign, bool magical)
+{
+	return ownershipSign > 0 && healthChangeSign > 0 && magical;
+}
+
+bool BattleEvaluator::spellChangesGeometry(const CBattleInfoCallback & before, const CBattleInfoCallback & after)
+{
+	const auto beforeUnits = before.battleAliveUnits();
+	const auto afterUnits = after.battleAliveUnits();
+	if(beforeUnits.size() != afterUnits.size())
+		return true;
+	for(const auto * unit : beforeUnits)
+	{
+		const auto * updated = after.battleGetUnitByID(unit->unitId());
+		if(!updated || !updated->alive()
+			|| updated->getPosition() != unit->getPosition()
+			|| updated->getMovementRange() != unit->getMovementRange()
+			|| updated->hasBonusOfType(BonusType::FLYING) != unit->hasBonusOfType(BonusType::FLYING)
+			|| after.battleGetOwner(updated) != before.battleGetOwner(unit))
+			return true;
+	}
+	// Unchanged obstacles are shared. Added/removed/revealed ones are COW.
+	return before.battleGetAllObstacles() != after.battleGetAllObstacles();
+}
+
 bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 {
 	auto hero = cb->getBattle(battleID)->battleGetMyHero();
@@ -723,16 +756,14 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 
 				auto allUnits = state->battleGetUnitsIf([](const battle::Unit * u) -> bool { return u->isValidTarget(true); });
 
-				auto needFullEval = vstd::contains_if(allUnits, [&](const battle::Unit * u) -> bool
-					{
-						auto original = cb->getBattle(battleID)->battleGetUnitByID(u->unitId());
-						return  !original || u->getMovementRange() != original->getMovementRange();
-					});
+				auto needFullEval = spellChangesGeometry(*cb->getBattle(battleID), *state);
 
 				DamageCache safeCopy = damageCache;
 				DamageCache innerCache(&safeCopy);
 
 				innerCache.buildDamageCache(state, side);
+				if(needFullEval)
+					innerCache.refreshObstacleDamage(state, side);
 
 				if(cachedAttack.ap && cachedAttack.waited)
 				{
@@ -743,22 +774,25 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 				float damageToHostilesScore = 0;
 				float damageToFriendliesScore = 0;
 
-				if(needFullEval || !cachedAttack.ap)
+				const auto * currentActiveStack = state->battleGetUnitByID(activeStack->unitId());
+				if(!currentActiveStack || !currentActiveStack->alive())
+					stackActionScore = EvaluationResult::INEFFECTIVE_SCORE;
+				else if(needFullEval || !cachedAttack.ap)
 				{
 #if BATTLE_TRACE_LEVEL >= 1
 					logAi->trace("Full evaluation is started due to stack speed affected.");
 #endif
 
-					PotentialTargets innerTargets(activeStack, innerCache, state);
+					PotentialTargets innerTargets(currentActiveStack, innerCache, state);
 					BattleExchangeEvaluator innerEvaluator(state, env, strengthRatio, simulationTurnsCount);
 
 					innerEvaluator.updateReachabilityMap(state);
 
-					auto moveTarget = innerEvaluator.findMoveTowardsUnreachable(activeStack, innerTargets, innerCache, state);
+					auto moveTarget = innerEvaluator.findMoveTowardsUnreachable(currentActiveStack, innerTargets, innerCache, state);
 
 					if(!innerTargets.possibleAttacks.empty())
 					{
-						auto newStackAction = innerEvaluator.findBestTarget(activeStack, innerTargets, innerCache, state);
+						auto newStackAction = innerEvaluator.findBestTarget(currentActiveStack, innerTargets, innerCache, state);
 
 						stackActionScore = std::max(moveTarget.score, newStackAction.score);
 					}
@@ -812,7 +846,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 								|| unit->isClone()
 								|| unit->isGhost();
 
-							if(ourUnit && goodEffect && isMagical)
+							if(isRedundantSummonHealthGain(ourUnit, goodEffect, isMagical))
 								continue;
 
 							damageToHostilesScore += dpsReduce * scoreEvaluator.getPositiveEffectMultiplier();
@@ -875,7 +909,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 			return ps.value;
 		});
 
-	if(castToPerform.value > cachedAttack.score && !vstd::isAlmostEqual(castToPerform.value, cachedAttack.score))
+	if(isSpellWorthCasting(castToPerform.value, cachedAttack.score))
 	{
 		LOGFL("Best spell is %s (value %d). Will cast.", castToPerform.spell->getNameTranslated() % castToPerform.value);
 		BattleAction spellcast;

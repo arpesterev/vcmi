@@ -37,6 +37,16 @@ bool CompositeAction::canAct(const Nullkiller * aiNk, const AIPathNode * source)
 	return true;
 }
 
+bool CompositeAction::canAct(const Nullkiller * aiNk, const AIPathNodeInfo & source) const
+{
+	for(auto part : parts)
+	{
+		if(!part->canAct(aiNk, source)) return false;
+	}
+
+	return true;
+}
+
 Goals::TSubgoal CompositeAction::decompose(const Nullkiller * aiNk, const CGHeroInstance * hero) const
 {
 	for(auto part : parts)

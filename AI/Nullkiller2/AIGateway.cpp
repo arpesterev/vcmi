@@ -59,6 +59,7 @@ AIGateway::~AIGateway()
 void AIGateway::availableCreaturesChanged(const CGDwelling * town)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::heroMoved(const TryMoveHero & details, bool verbose)
@@ -107,6 +108,7 @@ void AIGateway::heroMoved(const TryMoveHero & details, bool verbose)
 void AIGateway::heroInGarrisonChange(const CGTownInstance * town)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::centerView(int3 pos, int focusTime)
@@ -117,11 +119,13 @@ void AIGateway::centerView(int3 pos, int focusTime)
 void AIGateway::artifactMoved(const ArtifactLocation & src, const ArtifactLocation & dst)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::artifactAssembled(const ArtifactLocation & al)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::showTavernWindow(const CGObjectInstance * object, const CGHeroInstance * visitor, QueryID queryID)
@@ -183,16 +187,19 @@ void AIGateway::gameOver(PlayerColor player, const EVictoryLossCheckResult & vic
 void AIGateway::artifactPut(const ArtifactLocation & al)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::artifactRemoved(const ArtifactLocation & al)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::artifactDisassembled(const ArtifactLocation & al)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::heroVisit(const CGHeroInstance * visitor, const CGObjectInstance * visitedObj, bool start)
@@ -290,6 +297,7 @@ void AIGateway::heroExperienceChanged(const CGHeroInstance * hero, si64 val)
 void AIGateway::heroPrimarySkillChanged(const CGHeroInstance * hero, PrimarySkill which, si64 val)
 {
 	LOG_TRACE_PARAMS(logAi, "which '%i', val '%i'", which.getNum() % val);
+	invalidatePlanningData();
 }
 
 void AIGateway::showRecruitmentDialog(const CGDwelling * dwelling, const CArmedInstance * dst, int level, QueryID queryID)
@@ -306,11 +314,13 @@ void AIGateway::showRecruitmentDialog(const CGDwelling * dwelling, const CArmedI
 void AIGateway::heroMovePointsChanged(const CGHeroInstance * hero)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::garrisonsChanged(ObjectInstanceID id1, ObjectInstanceID id2)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::newObject(const CGObjectInstance * obj)
@@ -357,6 +367,7 @@ void AIGateway::showHillFortWindow(const CGObjectInstance * object, const CGHero
 void AIGateway::playerBonusChanged(const Bonus & bonus, bool gain)
 {
 	LOG_TRACE_PARAMS(logAi, "gain '%i'", gain);
+	invalidatePlanningData();
 }
 
 void AIGateway::heroCreated(const CGHeroInstance * h)
@@ -396,6 +407,7 @@ void AIGateway::requestRealized(PackageApplied * pa)
 void AIGateway::receivedResource()
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::showUniversityWindow(const IMarket * market, const CGHeroInstance * visitor, QueryID queryID)
@@ -409,11 +421,13 @@ void AIGateway::showUniversityWindow(const IMarket * market, const CGHeroInstanc
 void AIGateway::heroManaPointsChanged(const CGHeroInstance * hero)
 {
 	LOG_TRACE(logAi);
+	invalidatePlanningData();
 }
 
 void AIGateway::heroSecondarySkillChanged(const CGHeroInstance * hero, int which, int val)
 {
 	LOG_TRACE_PARAMS(logAi, "which '%d', val '%d'", which % val);
+	invalidatePlanningData();
 }
 
 void AIGateway::battleResultsApplied()
@@ -446,6 +460,8 @@ void AIGateway::objectPropertyChanged(const SetObjectProperty * sop)
 		if(!nullkiller) // crash protection
 			return;
 
+		invalidatePlanningData();
+
 		if(obj)
 		{
 			if(relations == PlayerRelations::ENEMIES)
@@ -454,11 +470,8 @@ void AIGateway::objectPropertyChanged(const SetObjectProperty * sop)
 				//addVisitableObj(obj); // TODO: Remove once save compatibility broken. In past owned objects were removed from this set
 				nullkiller->memory->markObjectUnvisited(obj);
 			}
-			else if(relations == PlayerRelations::SAME_PLAYER && obj->ID == Obj::TOWN)
-			{
-				// reevaluate defence for a new town
-				nullkiller->dangerHitMap->resetHitmap();
-			}
+			if(obj->ID == Obj::TOWN && nullkiller->dangerHitMap)
+				nullkiller->dangerHitMap->resetTileOwners();
 		}
 	}
 }
@@ -466,11 +479,13 @@ void AIGateway::objectPropertyChanged(const SetObjectProperty * sop)
 void AIGateway::buildChanged(const CGTownInstance * town, BuildingID buildingID, int what)
 {
 	LOG_TRACE_PARAMS(logAi, "what '%i'", what);
+	invalidatePlanningData();
 }
 
 void AIGateway::heroBonusChanged(const CGHeroInstance * hero, const Bonus & bonus, bool gain)
 {
 	LOG_TRACE_PARAMS(logAi, "gain '%i'", gain);
+	invalidatePlanningData();
 }
 
 void AIGateway::showMarketWindow(const IMarket * market, const CGHeroInstance * visitor, QueryID queryID)
@@ -749,6 +764,15 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
 					if(newValue > oldValue && nullkiller->getFreeResources().canAfford(upgradeInfo.getUpgradeCostsFor(upgID) * s->getCount()))
 					{
 						cc->upgradeCreature(obj, SlotID(i), upgID);
+						// Requests can be rejected; the callback return value does not
+						// report success. Check the applied stack before trying again.
+						s = obj->getStackPtr(SlotID(i));
+						if(!s || s->getId() != upgID)
+						{
+							logAi->warn("Creature upgrade was not applied. Stopping upgrades for this slot.");
+							break;
+						}
+
 						upgraded = true;
 						logAi->debug("Upgraded %d %s to %s", s->getCount(), upgradeInfo.oldID.toCreature()->getNamePluralTranslated(),
 							upgradeInfo.getUpgrade().toCreature()->getNamePluralTranslated());
@@ -1591,9 +1615,22 @@ bool AIStatus::channelProbing()
 	return ongoingChannelProbing;
 }
 
+void AIGateway::invalidatePlanningData()
+{
+	if(!nullkiller)
+		return;
+
+	// Actor snapshots cache army strength, hero bonuses and movement. A
+	// notification invalidating only CPathsInfo must not leave those reusable.
+	nullkiller->invalidatePathfinderData();
+	if(nullkiller->dangerHitMap)
+		nullkiller->dangerHitMap->resetHitmap();
+}
+
 void AIGateway::invalidatePaths()
 {
 	nullkiller->invalidatePaths();
+	invalidatePlanningData();
 }
 
 /*

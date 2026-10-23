@@ -53,6 +53,10 @@ bool isThreatUnderControl(const CGTownInstance * town, const HitMapInfo & threat
 
 	for(const AIPath & path : paths)
 	{
+		// A strong hero cannot cover this threat through an unavailable route.
+		if(aiNk->arePathHeroesLocked(path) || path.getFirstBlockedAction())
+			continue;
+
 		bool threatIsWeak = path.getHeroStrength() / (float)threat.danger > THREAT_IGNORE_RATIO;
 		bool needToSaveGrowth = threat.turn == 0 && dayOfWeek == LIBRARY->engineSettings()->getInteger(EGameSettings::GENERAL_DAYS_PER_WEEK);
 
@@ -362,7 +366,7 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 
 			if(closestWay)
 			{
-				heroChain.closestWayRatio = closestWay->movementCost() / heroChain.getPath().movementCost();
+				heroChain.setClosestWayRatio(*closestWay);
 			}
 
 			sequence.push_back(sptr(heroChain));

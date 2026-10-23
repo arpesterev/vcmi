@@ -37,7 +37,11 @@ std::string CaptureObject::toString() const
 
 TGoalVec CaptureObject::decompose(const Nullkiller * aiNk) const
 {
-	return CaptureObjectsBehavior(aiNk->cc->getObj(ObjectInstanceID(objid))).decompose(aiNk);
+	const auto * target = aiNk->cc->getObj(ObjectInstanceID(objid));
+	if(!target)
+		return {};
+
+	return CaptureObjectsBehavior(target).decompose(aiNk);
 }
 
 }

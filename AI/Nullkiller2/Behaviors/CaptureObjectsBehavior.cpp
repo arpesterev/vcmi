@@ -24,9 +24,13 @@ using namespace Goals;
 template <typename T>
 bool vectorEquals(const std::vector<T> & v1, const std::vector<T> & v2)
 {
-	return vstd::contains_if(v1, [&](T o) -> bool
+	// Filters are sets: order and duplicate entries do not change their meaning.
+	return std::all_of(v1.begin(), v1.end(), [&](const T & value)
 	{
-		return vstd::contains(v2, o);
+		return vstd::contains(v2, value);
+	}) && std::all_of(v2.begin(), v2.end(), [&](const T & value)
+	{
+		return vstd::contains(v1, value);
 	});
 }
 
@@ -132,14 +136,13 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			sharedPtr.reset(newWay);
 			auto heroRole = nullkiller->heroManager->getHeroRoleOrDefaultInefficient(path.targetHero);
 
-			auto & closestWay = closestWaysByRole[heroRole];
-			if(!closestWay || closestWay->movementCost() > path.movementCost())
-			{
-				closestWay = &path;
-			}
-
 			if(!nullkiller->arePathHeroesLocked(path))
 			{
+				// Only executable candidates may discount other heroes' routes.
+				auto & closestWay = closestWaysByRole[heroRole];
+				if(!closestWay || closestWay->movementCost() > path.movementCost())
+					closestWay = &path;
+
 				waysToVisitObj.push_back(newWay);
 				tasks[tasks.size() - 1] = sharedPtr;
 			}
@@ -153,7 +156,7 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 		if(closestWay)
 		{
-			way->closestWayRatio = closestWay->movementCost() / way->getPath().movementCost();
+			way->setClosestWayRatio(*closestWay);
 		}
 	}
 

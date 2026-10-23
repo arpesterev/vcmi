@@ -31,8 +31,15 @@ void DamageCache::cacheDamage(const battle::Unit * attacker, const battle::Unit 
 	damageCache[attacker->unitId()][defender->unitId()] = static_cast<float>(damage) / attacker->getCount();
 }
 
+void DamageCache::refreshObstacleDamage(std::shared_ptr<HypotheticBattle> hb, BattleSide side)
+{
+	buildObstacleDamageCache(hb, side);
+}
+
 void DamageCache::buildObstacleDamageCache(std::shared_ptr<HypotheticBattle> hb, BattleSide side)
 {
+	obstacleDamage.clear();
+	hasLocalObstacleDamage = true;
 	for(const auto & obst : hb->battleGetAllObstacles(side))
 	{
 		auto spellObstacle = dynamic_cast<const SpellCreatedObstacle *>(obst.get());
@@ -133,7 +140,7 @@ int64_t DamageCache::getDamage(const battle::Unit * attacker, const battle::Unit
 
 int64_t DamageCache::getObstacleDamage(const BattleHex & hex, const battle::Unit * defender)
 {
-	if(parent)
+	if(parent && !hasLocalObstacleDamage)
 		return parent->getObstacleDamage(hex, defender);
 
 	auto damages = obstacleDamage.find(hex);

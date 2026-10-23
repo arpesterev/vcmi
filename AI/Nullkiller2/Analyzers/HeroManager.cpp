@@ -127,7 +127,7 @@ void HeroManager::update()
 	// One per town + static bonus on bigger maps after some weeks
 	int globalMainCount = std::max(static_cast<int>(cc->getTownsInfo().size()) + biggerMapFactor, 1);
 	// If 1 town but big map, limit a bit to don't spread the army too much
-	globalMainCount = std::min(globalMainCount, static_cast<int>(cc->getTownsInfo().size() * 2));
+	globalMainCount = std::max(1, std::min(globalMainCount, static_cast<int>(cc->getTownsInfo().size() * 2)));
 
 	// TODO: Mircea: Should spread them on map min 1 per town, avoiding all within the same town and the other towns just with dummy scouts
 	logAi->trace("HeroManager::update Max number of main heroes (globalMainCount) is %d", globalMainCount);

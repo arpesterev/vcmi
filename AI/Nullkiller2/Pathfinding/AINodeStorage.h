@@ -67,16 +67,16 @@ struct AIPathNode : public CGPathNode
 
 struct AIPathNodeInfo
 {
-	float cost;
-	uint8_t turns;
-	int3 coord;
-	EPathfindingLayer layer;
-	uint64_t danger;
-	const CGHeroInstance * targetHero;
-	int parentIndex;
-	uint64_t chainMask;
+	float cost = 0;
+	uint8_t turns = 0;
+	int3 coord = int3(-1);
+	EPathfindingLayer layer = EPathfindingLayer::WRONG;
+	uint64_t danger = 0;
+	const CGHeroInstance * targetHero = nullptr;
+	int parentIndex = -1;
+	uint64_t chainMask = 0;
 	std::shared_ptr<const SpecialAction> specialAction;
-	bool actionIsBlocked;
+	bool actionIsBlocked = false;
 };
 
 struct AIPath
@@ -84,15 +84,17 @@ struct AIPath
 	using NodesVector = boost::container::small_vector<AIPathNodeInfo, 16>;
 
 	NodesVector nodes;
-	uint64_t targetObjectDanger;
-	uint64_t armyLoss;
-	uint64_t targetObjectArmyLoss;
-	const CGHeroInstance * targetHero;
-	const CCreatureSet * heroArmy;
-	uint64_t chainMask;
-	uint8_t exchangeCount;
+	uint64_t targetObjectDanger = 0;
+	uint64_t armyLoss = 0;
+	uint64_t targetObjectArmyLoss = 0;
+	const CGHeroInstance * targetHero = nullptr;
+	const CCreatureSet * heroArmy = nullptr;
+	uint64_t chainMask = 0;
+	uint8_t exchangeCount = 0;
 
 	AIPath();
+
+	AIPathNodeInfo createNodeInfo(const int3 & coord, EPathfindingLayer layer) const;
 
 	/// Gets danger of path excluding danger of visiting the target object like creature bank
 	uint64_t getPathDanger() const;

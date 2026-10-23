@@ -1,0 +1,18 @@
+{
+  "base_commit": "6901839ae9760dfcd1d5ff2c4aa4ef6968fee752",
+  "production_files": [
+    "AI/BattleAI/AttackPossibility.cpp",
+    "AI/BattleAI/AttackPossibility.h",
+    "AI/BattleAI/BattleAI.cpp",
+    "AI/BattleAI/BattleAI.h",
+    "AI/BattleAI/BattleEvaluator.cpp",
+    "AI/BattleAI/BattleEvaluator.h",
+    "AI/BattleAI/BattleExchangeVariant.cpp",
+    "AI/BattleAI/BattleExchangeVariant.h",
+    "AI/BattleAI/SpellTargetsEvaluator.cpp",
+    "AI/BattleAI/SpellTargetsEvaluator.h",
+    "AI/BattleAI/StackWithBonuses.cpp",
+    "AI/BattleAI/StackWithBonuses.h"
+  ],
+  "scope": "Complete changed BattleAI runtime production bundle; same unchanged compatible exchange/finder benchmark harness. Non-battle candidate source shared between binaries. Not full-game latency or win-rate."
+}

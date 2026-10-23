@@ -40,6 +40,13 @@ ExecuteHeroChain::ExecuteHeroChain(const AIPath & path, const CGObjectInstance *
 	}
 }
 
+void ExecuteHeroChain::setClosestWayRatio(const AIPath & closestWay)
+{
+	const auto cost = chainPath.movementCost();
+	// A hero already at the target is a closest candidate, not a 0/0 score.
+	closestWayRatio = cost > 0 ? closestWay.movementCost() / cost : 1.0f;
+}
+
 bool ExecuteHeroChain::operator==(const ExecuteHeroChain & other) const
 {
 	return tile == other.tile 

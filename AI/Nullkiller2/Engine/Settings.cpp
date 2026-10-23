@@ -52,6 +52,7 @@ namespace NK2AI
 		maxRoamingHeroesPerTown = node["maxRoamingHeroesPerTown"].Integer();
 		mainHeroTurnDistanceLimit = node["mainHeroTurnDistanceLimit"].Integer();
 		scoutHeroTurnDistanceLimit = node["scoutHeroTurnDistanceLimit"].Integer();
+		threatTurnDistanceLimit = node["threatTurnDistanceLimit"].Integer();
 		maxPass = node["maxPass"].Integer();
 		maxPriorityPass = node["maxPriorityPass"].Integer();
 		pathfinderBucketsCount = node["pathfinderBucketsCount"].Integer();
