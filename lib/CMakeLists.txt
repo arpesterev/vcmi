@@ -990,3 +990,18 @@ endif()
 if(VCMI_PORTMASTER)
 	target_compile_definitions(vcmi PRIVATE VCMI_PORTMASTER)
 endif()
+
+
+# Internal sublibraries retain vcmi's installed name, exports and static/shared
+# behavior. Root glue, Version.cpp and platform resources stay on vcmi itself.
+include(VCMISourceModules)
+vcmi_add_source_module(vcmi filesystem "^filesystem/")
+vcmi_add_source_module(vcmi json "^json/")
+vcmi_add_source_module(vcmi platform "^(logging|network|vstd)/")
+vcmi_add_source_module(vcmi battle "^(battle|bonuses)/")
+vcmi_add_source_module(vcmi callbacks "^callback/")
+vcmi_add_source_module(vcmi world "^(campaign|constants|entities|events|gameState|mapObjects|mapObjectConstructors|rewardable)/")
+vcmi_add_source_module(vcmi maps "^(mapping|pathfinder|rmg)/")
+vcmi_add_source_module(vcmi content "^(modding|texts)/")
+vcmi_add_source_module(vcmi serialization "^(serializer|networkPacks)/")
+vcmi_add_source_module(vcmi spells "^spells/")

@@ -84,3 +84,10 @@ endif()
 
 vcmi_set_output_dir(vcmiservercommon "")
 enable_pch(vcmiservercommon)
+
+
+# Preserve the server archive and its root networking/game orchestration layer.
+include(VCMISourceModules)
+vcmi_add_source_module(vcmiservercommon battles "^battles/")
+vcmi_add_source_module(vcmiservercommon queries "^queries/")
+vcmi_add_source_module(vcmiservercommon processors "^processors/")

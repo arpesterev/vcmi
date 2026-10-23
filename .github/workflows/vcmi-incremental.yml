@@ -1,0 +1,402 @@
+# Warm mode never silently falls back to a cold rebuild.
+name: VCMI modular incremental builds
+'on':
+  push:
+    branches:
+    - build-incremental-1.7.5
+permissions:
+  contents: read
+concurrency:
+  group: vcmi-incremental-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  VCMI_BASE: 6901839ae9760dfcd1d5ff2c4aa4ef6968fee752
+  OMP_NUM_THREADS: 1
+  OPENBLAS_NUM_THREADS: 1
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    if: github.repository == 'arpesterev/vcmi' && (startsWith(github.event.head_commit.message, '[vcmi-warm] ') || startsWith(github.event.head_commit.message, '[vcmi-bootstrap] '))
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      with:
+        submodules: recursive
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Validate cache safety contracts before using runner time
+      run: |
+        python3 -m unittest discover -s CI -p "test_incremental*.py" -v
+        bash -n CI/incremental-build.sh
+        python3 -m py_compile CI/incremental*.py
+        python3 cmake_modules/tests/test_source_modules.py --cmake cmake --ninja ninja
+  linux:
+    needs:
+    - preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 90 || 40 }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      with:
+        submodules: recursive
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Validate hosted runner and ancestry
+      run: |
+        test "$RUNNER_ENVIRONMENT" = github-hosted
+        git merge-base --is-ancestor "$VCMI_BASE" HEAD
+        mkdir -p .ci incremental-evidence
+    - name: Compute exact build-cache compatibility
+      id: identity
+      run: |
+        key=$(python3 CI/incremental_identity.py linux-gcc-test --output incremental-evidence/runner-identity.json)
+        echo "prefix=vcmi-modular-v1-linux-$key-" >> "$GITHUB_OUTPUT"
+        depkey=$(python3 CI/incremental_identity.py linux-gcc-test --scope dependencies --output incremental-evidence/dependency-identity.json)
+        echo "deps=vcmi-deps-v1-linux-$depkey" >> "$GITHUB_OUTPUT"
+    - name: Restore previous compatible build, compiler and dependency caches
+      id: cache
+      timeout-minutes: 5
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: |-
+          out/build/linux-gcc-test
+          .ci/incremental-state.json
+          ~/.cache/vcmi-incremental/linux-gcc-test
+        key: ${{ steps.identity.outputs.prefix }}${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: ${{ steps.identity.outputs.prefix }}
+    - name: Restore immutable dependency cache
+      id: deps
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      timeout-minutes: 5
+      with:
+        path: |-
+          .ci/test-data
+          .ci/apt-cache
+        key: ${{ steps.identity.outputs.deps }}
+    - name: Fail fast rather than silently rebuilding cold
+      run: |
+        if [[ ( -z '${{ steps.cache.outputs.cache-matched-key }}' || -z '${{ steps.deps.outputs.cache-matched-key }}' ) && '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' != true ]]; then
+          echo '::error::No compatible build cache. Nothing will be compiled. Use an explicit [vcmi-bootstrap] commit after reviewing the cold-build budget.'
+          exit 1
+        fi
+        printf '%s\n' '${{ steps.cache.outputs.cache-matched-key }}' > incremental-evidence/restored-cache-key.txt
+    - name: Install exact distribution dependencies, reusing downloads
+      timeout-minutes: 12
+      env:
+        APT_CACHE: ${{ github.workspace }}/.ci/apt-cache
+        ONNXRUNTIME_ARCHIVE_CACHE: ${{ github.workspace }}/.ci/apt-cache/onnxruntime
+      run: |
+        start=$(date +%s)
+        source CI/before_install/linux_qt6.sh
+        sudo apt-get -o Dir::Cache::archives="$APT_CACHE" -o APT::Keep-Downloaded-Packages=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full ccache
+        test "$APT_CACHE" = "$GITHUB_WORKSPACE/.ci/apt-cache"
+        test ! -L "$APT_CACHE"
+        sudo rm -f "$APT_CACHE/lock"
+        sudo rm -rf "$APT_CACHE/partial"
+        sudo chown -R "$USER:$USER" "$APT_CACHE"
+        printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/dependency-install-seconds.txt
+    - name: Restore checksum-verified test data
+      timeout-minutes: 5
+      run: |
+        mkdir -p .ci/test-data "$HOME/.local/share/vcmi"
+        if [[ ! -f .ci/test-data/heroes3.7z ]]; then
+          test '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' = true
+          curl --fail --location --connect-timeout 20 --max-time 120 --retry 2 https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z -o .ci/test-data/heroes3.7z
+        fi
+        echo '64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  .ci/test-data/heroes3.7z' | sha256sum --check
+        7za x -y -o"$HOME/.local/share/vcmi" .ci/test-data/heroes3.7z > incremental-evidence/test-data-extract.log
+        data_parent="$(mktemp -d "$RUNNER_TEMP/vcmi-data.XXXXXX")"
+        ln -s "$GITHUB_WORKSPACE" "$data_parent/vcmi"
+        echo "XDG_DATA_DIRS=$data_parent" >> "$GITHUB_ENV"
+    - name: Explicit bootstrap starts a fresh build tree, retaining safe compiler cache
+      if: startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ')
+      run: |
+        python3 - <<'PY_RESET'
+        import pathlib, shutil
+        build = pathlib.Path('out/build/linux-gcc-test')
+        assert not build.is_symlink()
+        if build.exists(): shutil.rmtree(build)
+        pathlib.Path('.ci/incremental-state.json').unlink(missing_ok=True)
+        PY_RESET
+    - name: Bound and persist immutable dependencies before compilation
+      run: |
+        python3 - <<'PY_DEPS'
+        import pathlib
+        paths=['.ci/test-data', '.ci/apt-cache']
+        total=sum(p.stat().st_size for name in paths for p in pathlib.Path(name).expanduser().rglob('*') if p.is_file() and not p.is_symlink())
+        print('Dependency cache logical bytes:',total)
+        assert total <= 3 * 1024**3, 'Dependency cache exceeds 3 GiB; review before compiling'
+        PY_DEPS
+        df -Pk . > incremental-evidence/disk-before-build.txt
+    - name: Save first verified dependency cache
+      if: steps.deps.outputs.cache-matched-key == ''
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      timeout-minutes: 5
+      with:
+        path: |-
+          .ci/test-data
+          .ci/apt-cache
+        key: ${{ steps.deps.outputs.cache-primary-key }}
+    - name: Verify cached state and restore timestamps by content, never by pathname alone
+      run: |
+        start=$(date +%s)
+        python3 CI/incremental_identity.py linux-gcc-test --installed --output incremental-evidence/toolchain-identity.json
+        if [[ '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' != true ]]; then
+          python3 CI/incremental_cache.py restore --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json | tee incremental-evidence/cache-validation.json
+        fi
+        printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/cache-verification-seconds.txt
+    - name: Build affected Ninja targets and prove immediate no-op
+      id: build
+      timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 65 || 20 }}
+      run: bash CI/incremental-build.sh linux-gcc-test
+    - name: Run every enabled regression, including required AI tests
+      timeout-minutes: 4
+      working-directory: out/build/linux-gcc-test/bin
+      run: |
+        ./vcmitest --gmock_verbose=error --gtest_output=xml:"$GITHUB_WORKSPACE/incremental-evidence/tests.xml" > "$GITHUB_WORKSPACE/incremental-evidence/tests.log" 2>&1
+        python3 "$GITHUB_WORKSPACE/CI/check_required_regressions.py" --manifest "$GITHUB_WORKSPACE/CI/ai-full-required-tests.json" --xml "$GITHUB_WORKSPACE/incremental-evidence/tests.xml"
+    - name: Snapshot only successful build outputs, with bounded upload size
+      run: |
+        python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json
+        python3 - <<'PY_SIZE'
+        import pathlib
+        paths=['out/build/linux-gcc-test', '.ci/incremental-state.json', '~/.cache/vcmi-incremental/linux-gcc-test']
+        total=sum(p.stat().st_size for name in paths for p in ([pathlib.Path(name).expanduser()] if pathlib.Path(name).expanduser().is_file() else pathlib.Path(name).expanduser().rglob('*')) if p.is_file() and not p.is_symlink())
+        print('Cache logical bytes:', total)
+        assert total <= 3 * 1024**3, 'Cache exceeds 3 GiB per platform; reduce scope before uploading'
+        PY_SIZE
+    - name: Persist new cache generation (not a frozen first-build key)
+      if: startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') || steps.build.outputs.save-cache == 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      timeout-minutes: 5
+      with:
+        path: |-
+          out/build/linux-gcc-test
+          .ci/incremental-state.json
+          ~/.cache/vcmi-incremental/linux-gcc-test
+        key: ${{ steps.cache.outputs.cache-primary-key }}
+    - name: Always retain timing, cache and Ninja evidence
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      with:
+        name: incremental-linux-${{ github.sha }}-${{ github.run_attempt }}
+        path: incremental-evidence/
+        retention-days: 7
+        if-no-files-found: error
+  macos:
+    needs:
+    - preflight
+    - linux
+    runs-on: macos-15
+    timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 90 || 40 }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      with:
+        submodules: recursive
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Validate hosted runner and ancestry
+      run: |
+        test "$RUNNER_ENVIRONMENT" = github-hosted
+        git merge-base --is-ancestor "$VCMI_BASE" HEAD
+        mkdir -p .ci incremental-evidence
+        test "$(uname -m)" = arm64
+        test -d "$DEVELOPER_DIR"
+    - name: Compute exact build-cache compatibility
+      id: identity
+      run: |
+        key=$(python3 CI/incremental_identity.py macos-arm-conan-ninja-release --output incremental-evidence/runner-identity.json)
+        echo "prefix=vcmi-modular-v1-macos-$key-" >> "$GITHUB_OUTPUT"
+        depkey=$(python3 CI/incremental_identity.py macos-arm-conan-ninja-release --scope dependencies --output incremental-evidence/dependency-identity.json)
+        echo "deps=vcmi-deps-v1-macos-$depkey" >> "$GITHUB_OUTPUT"
+    - name: Restore previous compatible build, compiler and dependency caches
+      id: cache
+      timeout-minutes: 5
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: |-
+          out/build/macos-arm-conan-ninja-release
+          .ci/incremental-state.json
+          ~/.cache/vcmi-incremental/macos-arm-conan-ninja-release
+        key: ${{ steps.identity.outputs.prefix }}${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: ${{ steps.identity.outputs.prefix }}
+    - name: Restore immutable dependency cache
+      id: deps
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      timeout-minutes: 5
+      with:
+        path: |-
+          ~/.conan2/p
+          conan-generated
+          .ci/conan-tool
+        key: ${{ steps.identity.outputs.deps }}
+    - name: Fail fast rather than silently rebuilding cold
+      run: |
+        if [[ ( -z '${{ steps.cache.outputs.cache-matched-key }}' || -z '${{ steps.deps.outputs.cache-matched-key }}' ) && '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' != true ]]; then
+          echo '::error::No compatible build cache. Nothing will be compiled. Use an explicit [vcmi-bootstrap] commit after reviewing the cold-build budget.'
+          exit 1
+        fi
+        printf '%s\n' '${{ steps.cache.outputs.cache-matched-key }}' > incremental-evidence/restored-cache-key.txt
+    - name: Prepare ccache and pinned dependency tooling
+      timeout-minutes: 5
+      run: |
+        start=$(date +%s)
+        command -v ccache >/dev/null || brew install ccache
+        if [[ ! -x .ci/conan-tool/bin/conan ]]; then
+          test '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' = true
+          python3 -m venv .ci/conan-tool
+          .ci/conan-tool/bin/pip install 'conan==2.33.0'
+        fi
+        echo "$GITHUB_WORKSPACE/.ci/conan-tool/bin" >> "$GITHUB_PATH"
+        printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/dependency-tooling-seconds.txt
+    - name: Bootstrap pinned Conan packages only on explicit cold run
+      if: steps.deps.outputs.cache-matched-key == ''
+      timeout-minutes: 12
+      run: |
+        curl --fail --location --connect-timeout 20 --max-time 300 --retry 2 --retry-max-time 600 https://github.com/vcmi/vcmi-dependencies/releases/download/2026-07-07/dependencies-mac-arm.txz -o "$RUNNER_TEMP/dependencies-mac-arm.txz"
+        echo "88c0a27d137ae27cc86da5762d9f50c9080be13380afd2b416de3335a4ac8dd0  $RUNNER_TEMP/dependencies-mac-arm.txz" | shasum -a 256 --check
+        conan cache restore "$RUNNER_TEMP/dependencies-mac-arm.txz"
+        conan profile detect
+        conan install . --output-folder=conan-generated --build=never --profile=dependencies/conan_profiles/macos-arm --profile=dependencies/conan_profiles/base/apple-system --conf="tools.cmake.cmaketoolchain:generator=Ninja"
+    - name: Explicit bootstrap starts a fresh build tree, retaining safe compiler cache
+      if: startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ')
+      run: |
+        python3 - <<'PY_RESET'
+        import pathlib, shutil
+        build = pathlib.Path('out/build/macos-arm-conan-ninja-release')
+        assert not build.is_symlink()
+        if build.exists(): shutil.rmtree(build)
+        pathlib.Path('.ci/incremental-state.json').unlink(missing_ok=True)
+        PY_RESET
+    - name: Bound and persist immutable dependencies before compilation
+      run: |
+        python3 - <<'PY_DEPS'
+        import pathlib
+        paths=['~/.conan2/p', 'conan-generated', '.ci/conan-tool']
+        total=sum(p.stat().st_size for name in paths for p in pathlib.Path(name).expanduser().rglob('*') if p.is_file() and not p.is_symlink())
+        print('Dependency cache logical bytes:',total)
+        assert total <= 3 * 1024**3, 'Dependency cache exceeds 3 GiB; review before compiling'
+        PY_DEPS
+        df -Pk . > incremental-evidence/disk-before-build.txt
+    - name: Save first verified dependency cache
+      if: steps.deps.outputs.cache-matched-key == ''
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      timeout-minutes: 5
+      with:
+        path: |-
+          ~/.conan2/p
+          conan-generated
+          .ci/conan-tool
+        key: ${{ steps.deps.outputs.cache-primary-key }}
+    - name: Verify cached state and restore timestamps by content, never by pathname alone
+      run: |
+        start=$(date +%s)
+        python3 CI/incremental_identity.py macos-arm-conan-ninja-release --installed --output incremental-evidence/toolchain-identity.json
+        if [[ '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' != true ]]; then
+          python3 CI/incremental_cache.py restore --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json --external-root "$HOME/.conan2/p" --external-root "$GITHUB_WORKSPACE/conan-generated" | tee incremental-evidence/cache-validation.json
+        fi
+        printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/cache-verification-seconds.txt
+    - name: Build affected Ninja targets and prove immediate no-op
+      id: build
+      timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 65 || 20 }}
+      run: bash CI/incremental-build.sh macos-arm-conan-ninja-release
+    - name: Snapshot only successful build outputs, with bounded upload size
+      run: |
+        python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json --external-root "$HOME/.conan2/p" --external-root "$GITHUB_WORKSPACE/conan-generated"
+        python3 - <<'PY_SIZE'
+        import pathlib
+        paths=['out/build/macos-arm-conan-ninja-release', '.ci/incremental-state.json', '~/.cache/vcmi-incremental/macos-arm-conan-ninja-release']
+        total=sum(p.stat().st_size for name in paths for p in ([pathlib.Path(name).expanduser()] if pathlib.Path(name).expanduser().is_file() else pathlib.Path(name).expanduser().rglob('*')) if p.is_file() and not p.is_symlink())
+        print('Cache logical bytes:', total)
+        assert total <= 3 * 1024**3, 'Cache exceeds 3 GiB per platform; reduce scope before uploading'
+        PY_SIZE
+    - name: Persist new cache generation (not a frozen first-build key)
+      if: startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') || steps.build.outputs.save-cache == 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      timeout-minutes: 5
+      with:
+        path: |-
+          out/build/macos-arm-conan-ninja-release
+          .ci/incremental-state.json
+          ~/.cache/vcmi-incremental/macos-arm-conan-ninja-release
+        key: ${{ steps.cache.outputs.cache-primary-key }}
+    - name: Package app without DMG/XProtect workaround
+      working-directory: out/build/macos-arm-conan-ninja-release
+      run: |
+        cpack -G ZIP -C Release
+        package="vcmi-1.7.5-ai-modular-arm64"
+        staged_app="_CPack_Packages/Darwin/ZIP/$package/VCMI.app"
+        # vcmibuilder is a script: its signature lives in extended attributes.
+        # CPack's ZIP drops those; ditto preserves them for Archive Utility.
+        codesign --verify --strict --verbose=2 "$staged_app/Contents/MacOS/vcmibuilder"
+        codesign --verify --deep --strict --verbose=2 "$staged_app"
+        ditto -c -k --rsrc --extattr --sequesterRsrc --keepParent "$staged_app" "$RUNNER_TEMP/$package.zip"
+        mv "$RUNNER_TEMP/$package.zip" "$package.zip"
+        shasum -a 256 *.zip > SHA256SUMS.txt
+        printf 'Source commit: %s\nBase commit: %s\nARM64 candidate; ad-hoc signed, not Apple-notarized.\n' "$GITHUB_SHA" "$VCMI_BASE" > BUILD-INFO.txt
+    - name: Verify extracted ARM64 app and signatures
+      working-directory: out/build/macos-arm-conan-ninja-release
+      run: |
+        verify_dir="$RUNNER_TEMP/vcmi-package-check"
+        mkdir -p "$verify_dir"
+        ditto -x -k "vcmi-1.7.5-ai-modular-arm64.zip" "$verify_dir"
+        app="$verify_dir/VCMI.app"
+        test -f "$app/Contents/Info.plist"
+        codesign --verify --strict --verbose=2 "$app/Contents/MacOS/vcmibuilder"
+        codesign --verify --deep --strict --verbose=2 "$app"
+        for executable in vcmiclient vcmiserver vcmilauncher vcmieditor; do
+          test -x "$app/Contents/MacOS/$executable"
+          test "$(lipo -archs "$app/Contents/MacOS/$executable")" = arm64
+          codesign --verify --strict --verbose=2 "$app/Contents/MacOS/$executable"
+        done
+        test -f "$app/Contents/Frameworks/AI/libNullkiller2.dylib"
+        test -f "$app/Contents/Frameworks/AI/libBattleAI.dylib"
+        while IFS= read -r -d '' library; do
+          lipo "$library" -verify_arch arm64
+          codesign --verify --strict --verbose=2 "$library"
+        done < <(find "$app/Contents" -type f -name '*.dylib' -print0)
+    - name: Preserve matching source and license
+      run: |
+        mkdir -p source-artifact
+        export SOURCE_ARCHIVE_DIR="$GITHUB_WORKSPACE/source-artifact"
+        git archive --format=tar HEAD -o "$GITHUB_WORKSPACE/source-artifact/vcmi-source.tar"
+        git submodule foreach --recursive 'git archive --format=tar --prefix="$displaypath/" HEAD -o "$SOURCE_ARCHIVE_DIR/submodule-$(echo "$displaypath" | tr / _).tar"'
+        cp license.txt source-artifact/
+        printf 'Source commit: %s\nBase commit: %s\nExtract vcmi-source.tar, then each submodule archive into the same directory.\n' "$GITHUB_SHA" "$VCMI_BASE" > source-artifact/README.txt
+        git submodule status --recursive > source-artifact/SUBMODULES.txt
+        (cd source-artifact && shasum -a 256 *.tar > SHA256SUMS.txt)
+    - name: Upload matching source
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      with:
+        name: vcmi-175-ai-full-candidate-source-${{ github.sha }}
+        path: source-artifact/
+        retention-days: 7
+        if-no-files-found: error
+    - name: Upload candidate binary
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      with:
+        name: vcmi-175-ai-full-candidate-macos-arm64-${{ github.sha }}
+        path: |
+          out/build/macos-arm-conan-ninja-release/*.zip
+          out/build/macos-arm-conan-ninja-release/SHA256SUMS.txt
+          out/build/macos-arm-conan-ninja-release/BUILD-INFO.txt
+        retention-days: 7
+        compression-level: 0
+        if-no-files-found: error
+    - name: Always retain timing, cache and Ninja evidence
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      with:
+        name: incremental-macos-${{ github.sha }}-${{ github.run_attempt }}
+        path: incremental-evidence/
+        retention-days: 7
+        if-no-files-found: error
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      MACOS_CODE_SIGN_IDENTITY: ''

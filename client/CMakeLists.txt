@@ -585,3 +585,17 @@ endif()
 
 vcmi_set_output_dir(vcmiclientcommon "")
 enable_pch(vcmiclientcommon)
+
+
+# Keep the public client archive and platform glue while compiling independent
+# source groups as concrete sublibrary targets. No source is compiled twice.
+include(VCMISourceModules)
+vcmi_add_source_module(vcmiclientcommon render "^(render|renderSDL|xBRZ)/")
+vcmi_add_source_module(vcmiclientcommon media "^media/")
+vcmi_add_source_module(vcmiclientcommon input "^(eventsSDL|gui)/")
+vcmi_add_source_module(vcmiclientcommon widgets "^widgets/")
+vcmi_add_source_module(vcmiclientcommon windows "^windows/")
+vcmi_add_source_module(vcmiclientcommon adventure "^(adventureMap|mapView)/")
+vcmi_add_source_module(vcmiclientcommon battle "^battle/")
+vcmi_add_source_module(vcmiclientcommon lobby "^(lobby|globalLobby|mainmenu)/")
+vcmi_add_source_module(vcmiclientcommon netlag "^netlag/")
