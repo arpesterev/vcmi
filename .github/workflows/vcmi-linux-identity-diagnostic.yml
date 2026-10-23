@@ -1,0 +1,120 @@
+# Isolated evidence collection; not a warm-cache fallback or migration.
+name: VCMI Linux installed identity diagnostic
+'on':
+  push:
+    branches:
+    - build-incremental-1.7.5
+permissions:
+  contents: read
+concurrency:
+  group: vcmi-linux-identity-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  VCMI_BASE: 6901839ae9760dfcd1d5ff2c4aa4ef6968fee752
+  VCMI_SHIPPING_BASE: 72e7990f3d9456c7f00e2d98e8dea867cf04ae25
+  DIAGNOSTIC_IMAGE: 20261023.334.3
+  DEPENDENCY_KEY: vcmi-deps-v1-linux-aeb32a29af25fe67dfefd742c9cee60e32a493abb60c71d9d74705db61d9b132
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  inspect-installed-linux:
+    if: github.repository == 'arpesterev/vcmi' && startsWith(github.event.head_commit.message, '[vcmi-diagnose-linux] ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      timeout-minutes: 3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Validate bounded diagnostic and immutable baseline
+      timeout-minutes: 2
+      run: |
+        test "$RUNNER_ENVIRONMENT" = github-hosted
+        test "$(uname -m)" = x86_64
+        test "${ImageVersion:-unknown}" = "$DIAGNOSTIC_IMAGE"
+        git merge-base --is-ancestor "$VCMI_BASE" HEAD
+        git merge-base --is-ancestor "$VCMI_SHIPPING_BASE" HEAD
+        mkdir -p linux-identity-diagnostic-evidence
+        echo 'e5f3db8a3395709a5a60c47b55d56a59910fca4ad7b24500a0ca18f13bf6dcb1  CI/linux-diagnostic-baseline/runner-identity.json' | sha256sum --check
+        echo 'e923c33704e900860b291feb4ad31b5d3049137100f6511e561f74809d233b8d  CI/linux-diagnostic-baseline/toolchain-identity.json' | sha256sum --check
+        echo 'aeb32a29af25fe67dfefd742c9cee60e32a493abb60c71d9d74705db61d9b132  CI/linux-diagnostic-baseline/dependency-identity.json' | sha256sum --check
+        python3 -m unittest discover -s CI -p 'test_linux_identity_diagnostic.py' -v
+        python3 CI/incremental_identity.py linux-gcc-test --output linux-identity-diagnostic-evidence/runner-identity.json
+        python3 CI/linux_identity_diagnostic.py compare --baseline CI/linux-diagnostic-baseline/runner-identity.json --current linux-identity-diagnostic-evidence/runner-identity.json --expected-image "$DIAGNOSTIC_IMAGE" --output linux-identity-diagnostic-evidence/preinstall-comparison.json
+        printf '%s\n' "$DEPENDENCY_KEY" > linux-identity-diagnostic-evidence/requested-dependency-cache-key.txt
+    - name: Restore only the verified exact prior downloads and test archive
+      id: deps
+      timeout-minutes: 5
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: |-
+          .ci/test-data
+          .ci/apt-cache
+        key: ${{ env.DEPENDENCY_KEY }}
+        fail-on-cache-miss: true
+    - name: Refuse fallback, unsafe paths, missing archives, or oversized downloads
+      timeout-minutes: 2
+      env:
+        CACHE_HIT: ${{ steps.deps.outputs.cache-hit }}
+        MATCHED_KEY: ${{ steps.deps.outputs.cache-matched-key }}
+      run: |
+        test "$CACHE_HIT" = true
+        test "$MATCHED_KEY" = "$DEPENDENCY_KEY"
+        printf '%s\n' "$MATCHED_KEY" > linux-identity-diagnostic-evidence/restored-dependency-cache-key.txt
+        python3 - <<'PY'
+        import pathlib
+        assert not pathlib.Path('.ci').is_symlink()
+        total = 0
+        for root in map(pathlib.Path, ['.ci/test-data', '.ci/apt-cache']):
+            assert root.is_dir() and not root.is_symlink(), root
+            for path in root.rglob('*'):
+                assert not path.is_symlink(), path
+                if path.is_file(): total += path.stat().st_size
+        assert total <= 3 * 1024**3, 'Dependency cache exceeds 3 GiB'
+        print('Restored dependency logical bytes:', total)
+        PY
+        test -f .ci/apt-cache/onnxruntime/onnxruntime-1.18.1-x86_64.tgz
+        test -f .ci/apt-cache/onnxruntime/onnxruntime-1.18.1-x86_64.tgz.sha256
+        echo '64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  .ci/test-data/heroes3.7z' | sha256sum --check
+    - name: Install the normal distribution dependencies, without compiling anything
+      timeout-minutes: 12
+      env:
+        APT_CACHE: ${{ github.workspace }}/.ci/apt-cache
+        ONNXRUNTIME_ARCHIVE_CACHE: ${{ github.workspace }}/.ci/apt-cache/onnxruntime
+      run: |
+        start=$(date +%s)
+        trap 'status=$?; printf "%s\n" "$(( $(date +%s)-start ))" > linux-identity-diagnostic-evidence/dependency-install-seconds.txt; printf "%s\n" "$status" > linux-identity-diagnostic-evidence/dependency-install-exit-status.txt' EXIT
+        source CI/before_install/linux_qt6.sh
+        sudo apt-get -o Dir::Cache::archives="$APT_CACHE" -o APT::Keep-Downloaded-Packages=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full ccache
+        test "$APT_CACHE" = "$GITHUB_WORKSPACE/.ci/apt-cache"
+        test ! -L "$APT_CACHE"
+        sudo rm -f "$APT_CACHE/lock"
+        sudo rm -rf "$APT_CACHE/partial"
+        sudo chown -R "$USER:$USER" "$APT_CACHE"
+    - name: Capture installed identity
+      id: installed
+      timeout-minutes: 2
+      run: |
+        python3 CI/incremental_identity.py linux-gcc-test --installed --output linux-identity-diagnostic-evidence/toolchain-identity.json
+    - name: Report every non-image mismatch without approving or migrating any cache
+      timeout-minutes: 1
+      run: |
+        python3 CI/linux_identity_diagnostic.py compare --baseline CI/linux-diagnostic-baseline/toolchain-identity.json --current linux-identity-diagnostic-evidence/toolchain-identity.json --expected-image "$DIAGNOSTIC_IMAGE" --output linux-identity-diagnostic-evidence/installed-comparison.json
+    - name: Capture additional binary and package hashes even on identity mismatch
+      if: always() && !cancelled() && steps.installed.outcome == 'success'
+      timeout-minutes: 3
+      run: |
+        python3 CI/linux_identity_diagnostic.py inventory --output linux-identity-diagnostic-evidence/binary-and-package-hashes.json
+    - name: Retain diagnostic evidence even on mismatch
+      if: always()
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      timeout-minutes: 2
+      with:
+        name: linux-identity-diagnostic-${{ github.sha }}-${{ github.run_attempt }}
+        path: linux-identity-diagnostic-evidence/
+        retention-days: 7
+        if-no-files-found: warn

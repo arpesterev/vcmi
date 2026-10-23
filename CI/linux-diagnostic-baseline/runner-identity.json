@@ -1,0 +1,18 @@
+{
+  "arch": "x86_64",
+  "bootstrap_compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+  "build_contract_sha256": "0176e47377624539d2ceed3edb01d4025231b9229ac6f3ff8959b0e21e1cc656",
+  "cache_protocol_sha256": "17a4da5ced00401387fbc02e681340b12ed62b5ab4a08bad87cd4bf432e63b06",
+  "cmake": "cmake version 3.31.6\n\nCMake suite maintained and supported by Kitware (kitware.com/cmake).",
+  "dependency_commit": "2e1924490c80547a8f85ed88aca29223057e832b",
+  "dependency_setup_sha256": "5bd2a0f57711c66634c4e590bd49002d12e03bb1997826aa7558576e6d701d61",
+  "home": "/home/runner",
+  "ninja": "1.13.2",
+  "onnx_setup_sha256": "a2a549232bace65c92b286a02ddc834dfe303ed2e1477eaf0c6d6bba8aded973",
+  "os": "Linux",
+  "presets_sha256": "36a767b1818e854f5634055067fe63a9c602939a3bcd6b8d545da05efa8c0cd1",
+  "profile": "linux-gcc-test",
+  "runner_image": "20261012.334.1",
+  "schema": 1,
+  "workspace": "/home/runner/work/vcmi/vcmi"
+}
