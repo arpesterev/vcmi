@@ -18,7 +18,7 @@ jobs:
   preflight:
     runs-on: ubuntu-24.04
     timeout-minutes: 3
-    if: github.repository == 'arpesterev/vcmi' && (startsWith(github.event.head_commit.message, '[vcmi-warm] ') || startsWith(github.event.head_commit.message, '[vcmi-bootstrap] '))
+    if: github.repository == 'arpesterev/vcmi' && (startsWith(github.event.head_commit.message, '[vcmi-probes] ') || startsWith(github.event.head_commit.message, '[vcmi-warm] ') || startsWith(github.event.head_commit.message, '[vcmi-bootstrap] '))
     steps:
     - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       with:
@@ -316,6 +316,16 @@ jobs:
       id: build
       timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 65 || 20 }}
       run: bash CI/incremental-build.sh macos-arm-conan-ninja-release
+    - name: Verify bounded real dependency changes and restore original sources
+      if: startsWith(github.event.head_commit.message, '[vcmi-probes] ')
+      timeout-minutes: 15
+      run: |
+        export CCACHE_DIR="$HOME/.cache/vcmi-incremental/macos-arm-conan-ninja-release"
+        export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+        python3 CI/incremental_probes.py --source "$GITHUB_WORKSPACE" --build "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release" --evidence "$GITHUB_WORKSPACE/incremental-evidence/probes" --seconds 600 --cleanup-seconds 120 --max-objects 32 --parallel 2
+        git diff --exit-code
+        git diff --cached --exit-code
+        git submodule foreach --recursive 'git diff --exit-code && git diff --cached --exit-code'
     - name: Snapshot only successful build outputs, with bounded upload size
       run: |
         python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json --external-root "$HOME/.conan2/p" --external-root "$GITHUB_WORKSPACE/conan-generated"

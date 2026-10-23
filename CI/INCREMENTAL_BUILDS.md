@@ -32,6 +32,9 @@ The new workflow runs only in `arpesterev/vcmi`, on
 - `[vcmi-warm] description`: requires both compatible dependency and build-state
   caches. Missing, incompatible, corrupt, or unsafe state fails the job. It
   never silently falls back to an expensive cold compile.
+- `[vcmi-probes] description`: warm mode plus reversible, bounded Mac dependency
+  probes for client/AI source and private/shared headers. Sources are restored
+  and a final no-op is required before snapshotting or packaging.
 
 Ordinary commits are source-only and do not launch expensive builds. These
 prefixes authorize a specific bounded run; they are not estimates of duration.
@@ -56,6 +59,9 @@ identical build generation. Dependency keys do not change with an edit to the
 build implementation scripts. Caches remain subject to GitHub quota and eviction;
 this is why warm mode has an explicit failure, not a claim of permanent storage.
 No workflow deletes unrelated repository caches or changes billing limits.
+Mac cache extraction preserves the archived file modes with GNU tar
+`--same-permissions`; umask must not turn 0664 into 0644 and invalidate the
+manifest. Validation still checks every file mode, hash, and symlink target.
 
 Compatibility includes runner image, OS/architecture, absolute workspace,
 compiler, SDK, build options, presets, dependency revision and setup inputs.
@@ -85,6 +91,10 @@ same build contract, then test a client-only source edit, an AI-only edit, and
 a shared-header edit. Compare actual affected object sets, compile misses,
 transfer/dependency-install/configure/build/test/package time separately.
 A shared-header change must rebuild all consumers, not just the edited module.
+The opt-in probes select a shared header with at most 32 compiled consumers;
+this does not validate every header or claim that a global-header edit is cheap.
+Generated Qt and external translation units are included in consumer counts.
+Each probe reports its exact source path and expected/actual object outputs.
 Fixture tests cover this dependency contract, including simulated fresh checkout
 and archive timestamp truncation; they do not replace actual VCMI platform runs.
 

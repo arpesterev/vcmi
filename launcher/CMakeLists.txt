@@ -1,3 +1,5 @@
+include("${CMAKE_SOURCE_DIR}/cmake_modules/VCMIWriteIfDifferent.cmake")
+
 if(ENABLE_INNOEXTRACT)
 	# libiconv not required for our use case
 	set(WITH_CONV "builtin" CACHE STRING "" FORCE)
@@ -129,7 +131,7 @@ if(ENABLE_TRANSLATIONS)
 		foreach(qmFile ${launcher_QM})
 			string(APPEND rccQmFiles "<file>${qmFile}</file>\n")
 		endforeach()
-		file(WRITE "${translationsResource}"
+		vcmi_write_if_different("${translationsResource}"
 "<!DOCTYPE RCC>
 <RCC version=\"1.0\">
 <qresource prefix=\"/\">

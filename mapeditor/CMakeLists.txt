@@ -1,3 +1,5 @@
+include("${CMAKE_SOURCE_DIR}/cmake_modules/VCMIWriteIfDifferent.cmake")
+
 set(editor_SRCS
 		StdInc.cpp
 		main.cpp
@@ -231,7 +233,7 @@ if(ENABLE_TRANSLATIONS)
 		foreach(qmFile ${editor_QM})
 			string(APPEND rccQmFiles "<file>${qmFile}</file>\n")
 		endforeach()
-		file(WRITE "${translationsResource}"
+		vcmi_write_if_different("${translationsResource}"
 "<!DOCTYPE RCC>
 <RCC version=\"1.0\">
 <qresource prefix=\"/\">
