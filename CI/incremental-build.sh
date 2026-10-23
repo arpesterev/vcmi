@@ -22,7 +22,7 @@ fi
 printf '%s\n' "$(( $(date +%s) - start ))" > incremental-evidence/configure-seconds.txt
 # Do not accept an enabled option with a missing or bypassed compiler launcher.
 grep -q '^ENABLE_CCACHE:BOOL=ON$' "$build/CMakeCache.txt"
-grep -q 'ccache' "$build/CMakeFiles/rules.ninja"
+python3 CI/incremental_launcher.py --build "$build" --evidence incremental-evidence "${targets[@]}"
 cp "$build/.ninja_log" incremental-evidence/ninja-before.log 2>/dev/null || :
 start=$(date +%s)
 cmake --build --preset "$profile" --target "${targets[@]}" --parallel 2 -- -d explain 2>&1 | tee incremental-evidence/build.log
