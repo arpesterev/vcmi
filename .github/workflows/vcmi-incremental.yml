@@ -10,6 +10,7 @@ concurrency:
   group: vcmi-incremental-${{ github.ref }}
   cancel-in-progress: true
 env:
+  VCMI_SHIPPING_BASE: 72e7990f3d9456c7f00e2d98e8dea867cf04ae25
   VCMI_BASE: 6901839ae9760dfcd1d5ff2c4aa4ef6968fee752
   OMP_NUM_THREADS: 1
   OPENBLAS_NUM_THREADS: 1
@@ -48,6 +49,7 @@ jobs:
       run: |
         test "$RUNNER_ENVIRONMENT" = github-hosted
         git merge-base --is-ancestor "$VCMI_BASE" HEAD
+        git merge-base --is-ancestor "$VCMI_SHIPPING_BASE" HEAD
         mkdir -p .ci incremental-evidence
     - name: Compute exact build-cache compatibility
       id: identity
@@ -205,6 +207,7 @@ jobs:
       run: |
         test "$RUNNER_ENVIRONMENT" = github-hosted
         git merge-base --is-ancestor "$VCMI_BASE" HEAD
+        git merge-base --is-ancestor "$VCMI_SHIPPING_BASE" HEAD
         mkdir -p .ci incremental-evidence
         test "$(uname -m)" = arm64
         test -d "$DEVELOPER_DIR"
@@ -299,6 +302,7 @@ jobs:
         start=$(date +%s)
         python3 CI/incremental_identity.py macos-arm-conan-ninja-release --installed --output incremental-evidence/toolchain-identity.json
         if [[ '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' != true ]]; then
+          python3 CI/incremental_diagnostics.py --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --build "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release" --external-root "$HOME/.conan2/p" --external-root "$GITHUB_WORKSPACE/conan-generated" --output incremental-evidence/external-cache-differences.json
           python3 CI/incremental_cache.py restore --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json --external-root "$HOME/.conan2/p" --external-root "$GITHUB_WORKSPACE/conan-generated" | tee incremental-evidence/cache-validation.json
         fi
         printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/cache-verification-seconds.txt
