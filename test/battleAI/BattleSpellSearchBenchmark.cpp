@@ -135,7 +135,9 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 				++legalChecked;
 				spells::detail::ProblemImpl ignored;
 				if(mechanics->canBeCastAt(target, ignored))
+				{
 					EXPECT_TRUE(legalPool.insert(canonical(target)).second);
+				}
 			};
 			if(obstacleSpell)
 			{
@@ -185,9 +187,13 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 				: teleport ? "teleport_k8" : "full_enumeration";
 			const auto pruned = targets.empty() ? 0u : legalPool.size() - targets.size();
 			if(teleport)
+			{
 				ASSERT_LE(targets.size(), 8u);
+			}
 			else if(!targets.empty())
+			{
 				ASSERT_EQ(selectedKeys, legalPool);
+			}
 			const auto evalStart = Clock::now();
 			size_t evaluated = 0;
 			size_t changed = 0;
