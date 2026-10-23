@@ -390,7 +390,7 @@ std::vector<UnitSpec> queueSpecs(size_t count, bool tie = false)
 {
 	std::vector<UnitSpec> result = {
 		{1, BattleSide::ATTACKER, BattleHex(5, 5), 30, 100, tie ? 10 : 8, 20, false},
-		{3, BattleSide::DEFENDER, BattleHex(6, 5), 30, 100, tie ? 0 : 5, 12, false},
+		{3, BattleSide::DEFENDER, BattleHex(6, 5), 30, 100, 5, 12, false},
 		{4, BattleSide::DEFENDER, BattleHex(12, 3), 30, 100, 7, 15, true}
 	};
 	const std::vector<BattleHex> positions = {BattleHex(6, 6), BattleHex(4, 5), BattleHex(5, 4)};
@@ -428,7 +428,8 @@ protected:
 			[&](const AttackPossibility & attack)
 			{
 				return attack.attack.defender->unitId() == 3
-					&& (fallback ? attack.attack.shooting : attack.from == active->getPosition());
+					&& (scenario.state->battleCanShoot(active.get())
+						? attack.attack.shooting : attack.from == active->getPosition());
 			});
 		ASSERT_NE(selected, targets.possibleAttacks.end()) << "PROBE_SETUP: initiating attack";
 		auto evaluator = scenario.evaluator(rounds);
@@ -463,6 +464,7 @@ protected:
 			for(const auto & round : exchange.units)
 				for(const auto * unit : round.second)
 					if(unit->unitSide() == BattleSide::ATTACKER
+						&& std::find(exchange.shooters.begin(), exchange.shooters.end(), unit) == exchange.shooters.end()
 						&& std::find(candidates.begin(), candidates.end(), unit->unitId()) == candidates.end())
 						candidates.push_back(unit->unitId());
 		}
@@ -506,17 +508,61 @@ TEST_F(BattleSingleEvalSelectionTest, QueueScoresThreeAndFourCandidatesOnceInste
 
 TEST_F(BattleSingleEvalSelectionTest, QueueKeepsFirstCandidateOnAnExactScoreTie)
 {
-	std::vector<SelectionObservation> observations;
-	ASSERT_NO_FATAL_FAILURE(run(queueSpecs(3, true), 1, false, false, {4}, observations));
-	ASSERT_EQ(observations.size(), 1u);
-	const auto & selection = observations.front();
-	ASSERT_EQ(selection.scores.size(), 3u);
-	for(float score : selection.scores)
-		EXPECT_FLOAT_EQ(score, selection.scores.front()) << "PROBE_SETUP: genuine production-score tie";
-	checkCountAndParity(selection);
-	ASSERT_TRUE(selection.choice);
-	EXPECT_EQ(*selection.choice, selection.candidates.front());
-	EXPECT_TRUE(selection.executionChecked);
+	std::vector<uint32_t> forwardOrder;
+	std::optional<uint32_t> forwardChoice;
+	for(bool reverse : {false, true})
+	{
+		SCOPED_TRACE(reverse);
+		auto specs = queueSpecs(4, true);
+		// A zero-damage melee defender still retaliates: engine damage has a
+		// per-creature minimum of one. Use a remote shooting initiator instead,
+		// so the three melee candidates enter selection with identical health.
+		// The initiator is filtered out of the ordinary melee-accessible queue.
+		specs.front().position = BattleHex(3, 3);
+		specs.front().shooter = true;
+		if(reverse)
+		{
+			auto first = std::find_if(specs.begin(), specs.end(), [](const UnitSpec & unit) { return unit.id == 2; });
+			auto last = std::find_if(specs.begin(), specs.end(), [](const UnitSpec & unit) { return unit.id == 6; });
+			ASSERT_NE(first, specs.end());
+			ASSERT_NE(last, specs.end());
+			std::swap(first->speed, last->speed);
+		}
+		std::vector<SelectionObservation> observations;
+		ASSERT_NO_FATAL_FAILURE(run(specs, 1, false, false, {4}, observations));
+		ASSERT_EQ(observations.size(), 1u);
+		const auto & selection = observations.front();
+		ASSERT_EQ(selection.candidates.size(), 3u);
+		const std::vector<uint32_t> expectedCandidates = reverse
+			? std::vector<uint32_t>{6, 5, 2} : std::vector<uint32_t>{2, 5, 6};
+		EXPECT_EQ(selection.candidates, expectedCandidates) << "PROBE_SETUP: exact real queue order";
+		ASSERT_EQ(selection.scores.size(), 3u);
+		EXPECT_EQ(std::find(selection.candidates.begin(), selection.candidates.end(), 1u), selection.candidates.end());
+		for(uint32_t id : selection.candidates)
+		{
+			const auto state = std::find_if(selection.before.begin(), selection.before.end(),
+				[id](const UnitState & state) { return std::get<0>(state) == id; });
+			ASSERT_NE(state, selection.before.end());
+			EXPECT_EQ(std::get<1>(*state), 3000) << "PROBE_SETUP: equal full health at selector entry";
+		}
+		for(float score : selection.scores)
+			EXPECT_FLOAT_EQ(score, selection.scores.front()) << "PROBE_SETUP: genuine production-score tie";
+		checkCountAndParity(selection);
+		ASSERT_TRUE(selection.choice);
+		EXPECT_EQ(*selection.choice, selection.candidates.front());
+		EXPECT_TRUE(selection.executionChecked);
+		if(!reverse)
+		{
+			forwardOrder = selection.candidates;
+			forwardChoice = selection.choice;
+		}
+		else
+		{
+			std::reverse(forwardOrder.begin(), forwardOrder.end());
+			EXPECT_EQ(selection.candidates, forwardOrder) << "PROBE_SETUP: reverse the real target queue";
+			EXPECT_NE(selection.choice, forwardChoice) << "FIRST_TIE_FOLLOWS_ORDER_NOT_ID";
+		}
+	}
 }
 
 TEST_F(BattleSingleEvalSelectionTest, ReachableFallbackScoresEachCandidateOnceAndKeepsFirstTie)
