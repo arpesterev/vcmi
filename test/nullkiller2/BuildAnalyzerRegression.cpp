@@ -8,6 +8,7 @@
 
 #include "../../AI/Nullkiller2/Engine/Nullkiller.h"
 #include "../../AI/Nullkiller2/Engine/ResourceTrader.h"
+#include "../../lib/CCreatureHandler.h"
 #include "../../lib/CPlayerState.h"
 #include "../../lib/GameSettings.h"
 #include "../../lib/StartInfo.h"
@@ -22,6 +23,35 @@ namespace test
 {
 namespace
 {
+
+// Legacy game data does not guarantee a rare-resource price for archangels.
+// Change only the gem price through the supported configuration API, and restore
+// the loaded value even when a fatal assertion exits a test early.
+class ScopedGemRecruitCost final : private boost::noncopyable
+{
+	CCreature & creature;
+	const TResource originalGemCost;
+
+	void setGemCost(TResource gems)
+	{
+		JsonNode patch;
+		patch["config"]["cost"]["gems"].Integer() = gems;
+		creature.updateFrom(patch);
+	}
+
+public:
+	ScopedGemRecruitCost(CreatureID id, TResource gems)
+		: creature(*LIBRARY->creh->objects.at(id.getNum()))
+		, originalGemCost(creature.getFullRecruitCost()[EGameResID::GEMS])
+	{
+		setGemCost(gems);
+	}
+
+	~ScopedGemRecruitCost()
+	{
+		setGemCost(originalGemCost);
+	}
+};
 
 // Keep the real canBuildStructure, creatureGrowth, dailyIncome and ArmyManager.
 // Only the state boundary is substituted; there is no copied AI algorithm.
@@ -106,7 +136,7 @@ protected:
 	void initializeTown(CGTownInstance & town, int id)
 	{
 		town.ID = Obj::TOWN;
-		town.subID = MapObjectSubID(0); // Base-game Castle, including gem-priced archangels.
+		town.subID = MapObjectSubID(0); // Base-game Castle.
 		town.id = ObjectInstanceID(id);
 		town.tempOwner = PlayerColor(0);
 		town.setCustomName("Build analyzer regression");
@@ -152,6 +182,7 @@ protected:
 
 TEST_F(Nullkiller2BuildAnalyzerRegression, DailyBuildLimitKeepsArmyBudgetAndKnownBuildings)
 {
+	ScopedGemRecruitCost rareResourceCost(first.creatures[6].second.back(), 3);
 	first.built = 1;
 	const auto expected = expectedArmyCost(first);
 	ASSERT_GT(expected[EGameResID::GOLD], 0);
@@ -175,6 +206,37 @@ TEST_F(Nullkiller2BuildAnalyzerRegression, DailyBuildLimitKeepsArmyBudgetAndKnow
 	EXPECT_EQ(ai.buildAnalyzer->getDailyIncome(), income);
 	const float days = LIBRARY->engineSettings()->getInteger(EGameSettings::GENERAL_DAYS_PER_WEEK);
 	EXPECT_FLOAT_EQ(ai.buildAnalyzer->getGoldPressure(), expected[EGameResID::GOLD] / (1.0f + days * income[EGameResID::GOLD]));
+}
+
+TEST_F(Nullkiller2BuildAnalyzerRegression, RareResourceCostIsExplicitAndRestoredAfterAnalysis)
+{
+	first.built = 1;
+	const auto creature = first.creatures[6].second.back();
+	const auto loadedCost = creature.toCreature()->getFullRecruitCost();
+	const auto loadedArmyCost = expectedArmyCost(first);
+	const int growth = first.creatureGrowth(6);
+	ASSERT_GT(growth, 0);
+
+	for(TResource gems : {0, 3})
+	{
+		ASSERT_EQ(creature.toCreature()->getFullRecruitCost(), loadedCost);
+		ScopedGemRecruitCost rareResourceCost(creature, gems);
+		auto configuredCost = loadedCost;
+		configuredCost[EGameResID::GEMS] = gems;
+		ASSERT_EQ(creature.toCreature()->getFullRecruitCost(), configuredCost);
+
+		auto expected = loadedArmyCost;
+		expected[EGameResID::GEMS] += (gems - loadedCost[EGameResID::GEMS]) * growth;
+		ai.buildAnalyzer->update();
+		ASSERT_EQ(ai.buildAnalyzer->getDevelopmentInfo().size(), 1u);
+		EXPECT_EQ(ai.buildAnalyzer->getDevelopmentInfo().front().armyCost, expected);
+		EXPECT_EQ(ai.buildAnalyzer->getMissingResourcesNow(1), expected);
+		EXPECT_EQ(ai.buildAnalyzer->getMissingResourcesInTotal(1), expected);
+	}
+
+	EXPECT_EQ(creature.toCreature()->getFullRecruitCost(), loadedCost);
+	ai.buildAnalyzer->update();
+	EXPECT_EQ(ai.buildAnalyzer->getMissingResourcesNow(1), loadedArmyCost);
 }
 
 TEST_F(Nullkiller2BuildAnalyzerRegression, CompletingDailyBuildDoesNotEraseExistingArmyDemand)

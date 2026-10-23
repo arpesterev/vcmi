@@ -57,6 +57,7 @@
     "Nullkiller2BuildAnalyzerRegression.ForbiddenBuildingsDoNotReserveDevelopmentResources",
     "Nullkiller2BuildAnalyzerRegression.MixedCappedAndUncappedTownsAreAdditiveAndOrderIndependent",
     "Nullkiller2BuildAnalyzerRegression.NoMarketplaceDoesNotSendTradeRequest",
+    "Nullkiller2BuildAnalyzerRegression.RareResourceCostIsExplicitAndRestoredAfterAnalysis",
     "Nullkiller2BuildAnalyzerRegression.RejectedMarketTradeStopsWithoutRepeatedRequests",
     "Nullkiller2BuildAnalyzerRegression.RepeatedUpdateReplacesRatherThanAccumulatesTownState",
     "Nullkiller2BuildAnalyzerRegression.SuccessfulMarketTradesContinueWhileResourcesChange",

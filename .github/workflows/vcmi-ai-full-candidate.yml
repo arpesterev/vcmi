@@ -139,6 +139,7 @@ jobs:
           ccache --show-config > probe-logs/cache-config.txt
           ccache --show-stats > probe-logs/cache-before.txt
       - name: Configure opt-in trace integration and build vcmitest only
+        id: correctness-build
         timeout-minutes: 68
         run: |
           "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DCMAKE_BUILD_TYPE=Release -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=ON -DENABLE_PCH=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=ON -DVCMI_BATTLE_AI_BENCHMARK_ONLY=OFF -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
@@ -348,6 +349,7 @@ jobs:
         if: always()
         run: ccache --show-stats > probe-logs/cache-after.txt
       - name: Preserve all validation evidence
+        id: validation-evidence
         if: always()
         timeout-minutes: 3
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -358,7 +360,9 @@ jobs:
           if-no-files-found: error
 
       - name: Save initial compiler cache without accumulating per-commit copies
-        if: success() && steps.compiler-cache.outputs.cache-hit != 'true'
+        # Compiler output remains content-addressed even if a later test fails.
+        # This cannot turn a failed validation green or enable the Mac job.
+        if: ${{ !cancelled() && steps.correctness-build.outcome == 'success' && steps.validation-evidence.outcome == 'success' && steps.compiler-cache.outputs.cache-hit != 'true' }}
         timeout-minutes: 3
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
