@@ -1,9 +1,10 @@
-# DRAFT: final worker regression manifest and exact source review required before publication.
 name: VCMI 1.7.5 unified AI fixes and ARM64 candidate
+# Only explicit commit-message prefixes start expensive work on this branch.
+# [vcmi-validate] <description>: full correctness; [vcmi-deliver] <description>: correctness, perf, ARM64.
+# No workflow_dispatch: this workflow intentionally does not modify the default branch.
 on:
   push:
-    branches:
-      - ai-full-fixes-1.7.5
+    branches: [ai-full-fixes-1.7.5]
 permissions:
   contents: read
 concurrency:
@@ -15,10 +16,10 @@ env:
   OMP_NUM_THREADS: 1
   OPENBLAS_NUM_THREADS: 1
 jobs:
-  integration:
-    if: github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref_name == 'ai-full-fixes-1.7.5'
+  validation:
+    if: github.event_name == 'push' && github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref == 'refs/heads/ai-full-fixes-1.7.5' && (startsWith(github.event.head_commit.message, '[vcmi-validate] ') || startsWith(github.event.head_commit.message, '[vcmi-deliver] '))
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-deliver] ') && 150 || 75 }}
     defaults:
       run:
         shell: bash
@@ -26,7 +27,9 @@ jobs:
       - name: Require hosted runner and reserve evidence-upload time
         run: |
           test "$RUNNER_ENVIRONMENT" = github-hosted
-          echo "PROBE_WORK_DEADLINE=$(($(date +%s) + 8400))" >> "$GITHUB_ENV"
+          budget=4080
+          if [ "${{ startsWith(github.event.head_commit.message, '[vcmi-deliver] ') }}" = true ]; then budget=8400; fi
+          echo "PROBE_WORK_DEADLINE=$(($(date +%s) + budget))" >> "$GITHUB_ENV"
           cat > "$RUNNER_TEMP/probe-timeout" <<'SH'
           #!/usr/bin/env bash
           set -euo pipefail
@@ -106,7 +109,7 @@ jobs:
             curl() { command curl --connect-timeout 20 --max-time 180 --retry 2 --retry-max-time 240 "$@"; }
             export -f curl
             source CI/before_install/linux_qt6.sh
-            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full time
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full time ccache
           '
       - name: Prepare bounded checksum-verified test data
         timeout-minutes: 5
@@ -115,10 +118,31 @@ jobs:
           echo "64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  $RUNNER_TEMP/heroes3.7z" | sha256sum --check
           mkdir -p "$HOME/.local/share/vcmi"
           "$RUNNER_TEMP/probe-timeout" 60 7za x -o"$HOME/.local/share/vcmi" "$RUNNER_TEMP/heroes3.7z"
+      - name: Restore bounded compiler cache for this toolchain
+        id: compiler-cache
+        timeout-minutes: 3
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 resolved read-only during audit
+        with:
+          path: ~/.cache/vcmi-ai-ccache
+          # One immutable, at-most-2G cache for this branch/toolchain generation.
+          # ccache validates source, flags and compiler content; stale entries are only misses.
+          key: vcmi-ai-u24-gcc14-release-v1
+      - name: Configure cache and record cold or warm state
+        run: |
+          echo "CCACHE_DIR=$HOME/.cache/vcmi-ai-ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          export CCACHE_DIR="$HOME/.cache/vcmi-ai-ccache"
+          ccache --set-config=compiler_check=content
+          ccache --set-config=sloppiness=
+          ccache --max-size=2G
+          ccache --version > probe-logs/cache-version.txt
+          ccache --show-config > probe-logs/cache-config.txt
+          ccache --show-stats > probe-logs/cache-before.txt
       - name: Configure opt-in trace integration and build vcmitest only
         timeout-minutes: 68
         run: |
-          "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=ON -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DCMAKE_BUILD_TYPE=Release -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=ON -DENABLE_PCH=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=ON -DVCMI_BATTLE_AI_BENCHMARK_ONLY=OFF -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          grep -E "^(CMAKE_BUILD_TYPE|ENABLE_CCACHE|ENABLE_PCH|VCMI_BATTLE_AI_(TEST_TRACE|BENCHMARK_ONLY))(:[^=]*)?=" out/build/linux-gcc-test/CMakeCache.txt > probe-logs/correctness-build-flags.txt
           "$RUNNER_TEMP/probe-timeout" 3720 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
       - name: Require public-caller and estimator regressions
         timeout-minutes: 3
@@ -204,125 +228,18 @@ jobs:
           assert all(len(row) == 10 and int(row[5]) > 0 and int(row[6]) > 0 and int(row[7]) > 0 and int(row[8]) > 0 and row[-1] == 'obstacle_entries=0' for row in rows)
           print('COMPLETE census: 24 actual caller cells, not latency measurements')
           PY
-      - name: Preserve integration evidence
-        if: always()
-        timeout-minutes: 3
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: battle-integration-${{ github.sha }}
-          path: probe-logs/
-          retention-days: 7
-          if-no-files-found: error
-  performance:
-    if: github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref_name == 'ai-full-fixes-1.7.5'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 150
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Require hosted runner and reserve evidence-upload time
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          echo "PROBE_WORK_DEADLINE=$(($(date +%s) + 8400))" >> "$GITHUB_ENV"
-          cat > "$RUNNER_TEMP/probe-timeout" <<'SH'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          limit="$1"; shift
-          remaining=$((PROBE_WORK_DEADLINE - $(date +%s)))
-          if (( remaining <= 0 )); then
-            echo "INCOMPLETE: bounded work deadline reached; reserving time for evidence upload" >&2
-            exit 124
-          fi
-          if (( limit > remaining )); then limit="$remaining"; fi
-          exec timeout --kill-after=15s "${limit}s" "$@"
-          SH
-          chmod +x "$RUNNER_TEMP/probe-timeout"
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        timeout-minutes: 5
-        with:
-          submodules: recursive
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Verify ancestry and prepare logs
-        run: |
-          git merge-base --is-ancestor "$VCMI_BASE" HEAD
-          git merge-base --is-ancestor "$CANDIDATE_PARENT" HEAD
-          mkdir -p probe-logs
-          git rev-parse HEAD > probe-logs/commit.txt
-      - name: Expose source data for target-only test binaries
-        timeout-minutes: 1
-        run: |
-          # vcmitest alone does not activate Linux developmentMode().
-          # Keep bin as cwd for copied test/testdata, and use the supported XDG lookup.
-          test -f "$GITHUB_WORKSPACE/config/filesystem.json"
-          test -d "$GITHUB_WORKSPACE/Mods"
-          test -d "$GITHUB_WORKSPACE/scripts"
-          data_parent="$(mktemp -d "$RUNNER_TEMP/battle-probe-data.XXXXXX")"
-          ln -s "$GITHUB_WORKSPACE" "$data_parent/vcmi"
-          test -f "$data_parent/vcmi/config/filesystem.json"
-          printf 'XDG_DATA_DIRS=%s\n' "$data_parent" >> "$GITHUB_ENV"
-          printf 'source=%s\nxdg_data_dirs=%s\n' "$GITHUB_WORKSPACE" "$data_parent" > probe-logs/runtime-data-path.txt
-      - name: Prefer existing official HTTPS Ubuntu archive
-        timeout-minutes: 1
-        run: |
-          sudo python3 - <<'PY'
-          import hashlib, json, pathlib
-          source = pathlib.Path('/etc/apt/sources.list.d/ubuntu.sources')
-          mirrors = pathlib.Path('/etc/apt/apt-mirrors.txt')
-          keyring = pathlib.Path('/usr/share/keyrings/ubuntu-archive-keyring.gpg')
-          assert all(path.is_file() and not path.is_symlink() for path in [source,mirrors,keyring])
-          original_source, original_keyring = source.read_bytes(), keyring.read_bytes()
-          text = original_source.decode()
-          uri_fields = [line for line in text.splitlines() if line.startswith('URIs:')]
-          assert 1 <= len(uri_fields) <= 2
-          assert all(line.split() == ['URIs:', 'mirror+file:/etc/apt/apt-mirrors.txt'] for line in uri_fields)
-          signed_by = [line for line in text.splitlines() if line.startswith('Signed-By:')]
-          assert len(signed_by) == len(uri_fields)
-          assert all(line.split() == ['Signed-By:', str(keyring)] for line in signed_by)
-          expected = ('http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
-                      'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
-                      'https://security.ubuntu.com/ubuntu/\tpriority:3\n')
-          original = mirrors.read_text()
-          assert original == expected, 'Unexpected runner mirror layout: refuse broad replacement'
-          old, new = 'http://azure.archive.ubuntu.com/ubuntu/', 'https://archive.ubuntu.com/ubuntu/'
-          assert original.count(old) == 1
-          updated = original.replace(old, new, 1)
-          assert len(updated.splitlines()) == 3
-          assert all(line.split()[0] in [new, 'https://security.ubuntu.com/ubuntu/'] for line in updated.splitlines())
-          mirrors.write_text(updated)
-          assert mirrors.read_text() == updated
-          assert source.read_bytes() == original_source and keyring.read_bytes() == original_keyring
-          report = {'replaced_uri_count':1, 'mirror_entries':3, 'source_uri_fields':len(uri_fields), 'old_uri':old, 'new_uri':new, 'sources_sha256_unchanged':hashlib.sha256(original_source).hexdigest(), 'keyring_sha256_unchanged':hashlib.sha256(original_keyring).hexdigest(), 'mirror_before_sha256':hashlib.sha256(original.encode()).hexdigest(), 'mirror_after_sha256':hashlib.sha256(updated.encode()).hexdigest(), 'signature_checks':'unchanged; no trust or authentication bypass'}
-          pathlib.Path('probe-logs/ubuntu-mirror-change.json').write_text(json.dumps(report, indent=2)+'\n')
-          print(json.dumps(report, indent=2))
-          PY
-      - name: Install bounded upstream dependencies
-        timeout-minutes: 12
-        run: |
-          "$RUNNER_TEMP/probe-timeout" 600 bash -euo pipefail -c '
-            curl() { command curl --connect-timeout 20 --max-time 180 --retry 2 --retry-max-time 240 "$@"; }
-            export -f curl
-            source CI/before_install/linux_qt6.sh
-            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full time
-          '
-      - name: Prepare bounded checksum-verified test data
-        timeout-minutes: 5
-        run: |
-          curl --fail --location --connect-timeout 20 --max-time 120 --retry 2 --retry-max-time 180 https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z -o "$RUNNER_TEMP/heroes3.7z"
-          echo "64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  $RUNNER_TEMP/heroes3.7z" | sha256sum --check
-          mkdir -p "$HOME/.local/share/vcmi"
-          "$RUNNER_TEMP/probe-timeout" 60 7za x -o"$HOME/.local/share/vcmi" "$RUNNER_TEMP/heroes3.7z"
-      - name: Build separate no-trace Release candidate
+      - name: Reconfigure existing Release tree for no-trace benchmark only
+        if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
         timeout-minutes: 68
         run: |
-          "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DCMAKE_BUILD_TYPE=Release -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=OFF -DVCMI_BATTLE_AI_BENCHMARK_ONLY=ON -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DCMAKE_BUILD_TYPE=Release -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=ON -DENABLE_PCH=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=OFF -DVCMI_BATTLE_AI_BENCHMARK_ONLY=ON -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
           "$RUNNER_TEMP/probe-timeout" 3720 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
           cp out/build/linux-gcc-test/bin/vcmitest out/build/linux-gcc-test/bin/vcmitest-candidate
           cp out/build/linux-gcc-test/CMakeCache.txt probe-logs/performance-CMakeCache.txt
           grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' probe-logs/performance-CMakeCache.txt
           grep -q '^VCMI_BATTLE_AI_TEST_TRACE:BOOL=OFF$' probe-logs/performance-CMakeCache.txt
       - name: Build pinned 1.7.5 full BattleAI production baseline
+        if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
         timeout-minutes: 20
         run: |
           python3 - <<'PY'
@@ -348,6 +265,7 @@ jobs:
           cp out/build/linux-gcc-test/bin/vcmitest out/build/linux-gcc-test/bin/vcmitest-baseline
           git restore --source="$GITHUB_SHA" --worktree -- AI/BattleAI
       - name: Record same-runner environment and executable hashes
+        if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
         run: |
           python3 - <<'PY' >> "$GITHUB_ENV"
           import os
@@ -356,6 +274,7 @@ jobs:
           { uname -a; lscpu; gcc-14 --version; cmake --version; } > probe-logs/environment.txt
           sha256sum out/build/linux-gcc-test/bin/vcmitest-{candidate,baseline} > probe-logs/executables.sha256
       - name: Require bounded real spell search for both revisions
+        if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
         timeout-minutes: 14
         working-directory: out/build/linux-gcc-test/bin
         run: |
@@ -365,6 +284,7 @@ jobs:
             python3 "$GITHUB_WORKSPACE/CI/validate_spell_search.py" --revision "$revision" --log "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.log" --xml "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.xml" --output "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.json"
           done
       - name: Run bounded ABBA comparisons without trace
+        if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
         timeout-minutes: 30
         working-directory: out/build/linux-gcc-test/bin
         run: |
@@ -373,6 +293,7 @@ jobs:
             "$RUNNER_TEMP/probe-timeout" 420 taskset --cpu-list "$PROBE_CPU" /usr/bin/time -v -o "$GITHUB_WORKSPACE/probe-logs/$invocation.rss.txt" "./vcmitest-$revision" --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_BoundedLatency' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/$invocation.xml" > "$GITHUB_WORKSPACE/probe-logs/$invocation.log" 2>&1
           done
       - name: Reject incomplete measurements and summarize exact samples
+        if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
         timeout-minutes: 2
         run: |
           python3 - <<'PY'
@@ -423,21 +344,33 @@ jobs:
           (folder/'performance-summary.json').write_text(json.dumps(output, indent=2, allow_nan=False)+'\n')
           print(json.dumps(output, indent=2, allow_nan=False))
           PY
-      - name: Preserve performance evidence
+      - name: Record final cache size and hit rates
+        if: always()
+        run: ccache --show-stats > probe-logs/cache-after.txt
+      - name: Preserve all validation evidence
         if: always()
         timeout-minutes: 3
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: battle-performance-${{ github.sha }}
+          name: vcmi-ai-validation-${{ github.sha }}
           path: probe-logs/
           retention-days: 7
           if-no-files-found: error
 
+      - name: Save initial compiler cache without accumulating per-commit copies
+        if: success() && steps.compiler-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 3
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.cache/vcmi-ai-ccache
+          key: vcmi-ai-u24-gcc14-release-v1
+
 
   macos:
-    needs: [integration, performance]
+    needs: validation
+    if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ') && needs.validation.result == 'success'
     runs-on: macos-15
-    timeout-minutes: 120
+    timeout-minutes: 75
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
       MACOS_CODE_SIGN_IDENTITY: ""
@@ -463,10 +396,11 @@ jobs:
           cmake --version
           ninja --version
       - name: Restore pinned upstream dependencies
+        timeout-minutes: 12
         run: |
           pipx install 'conan==2.33.0'
           conan --version
-          curl --fail --location --retry 3 https://github.com/vcmi/vcmi-dependencies/releases/download/2026-07-07/dependencies-mac-arm.txz -o "$RUNNER_TEMP/dependencies-mac-arm.txz"
+          curl --fail --location --connect-timeout 20 --max-time 300 --retry 2 --retry-max-time 600 https://github.com/vcmi/vcmi-dependencies/releases/download/2026-07-07/dependencies-mac-arm.txz -o "$RUNNER_TEMP/dependencies-mac-arm.txz"
           echo "88c0a27d137ae27cc86da5762d9f50c9080be13380afd2b416de3335a4ac8dd0  $RUNNER_TEMP/dependencies-mac-arm.txz" | shasum -a 256 --check
           conan cache restore "$RUNNER_TEMP/dependencies-mac-arm.txz"
           conan profile detect
