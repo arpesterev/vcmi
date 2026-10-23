@@ -222,6 +222,9 @@ jobs:
       id: cache
       timeout-minutes: 5
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      env:
+        # GNU tar must preserve cached dependency modes instead of masking 0664 to 0644.
+        TAR_OPTIONS: --same-permissions
       with:
         path: |-
           out/build/macos-arm-conan-ninja-release
@@ -232,6 +235,9 @@ jobs:
     - name: Restore immutable dependency cache
       id: deps
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      env:
+        # GNU tar must preserve cached dependency modes instead of masking 0664 to 0644.
+        TAR_OPTIONS: --same-permissions
       timeout-minutes: 5
       with:
         path: |-
