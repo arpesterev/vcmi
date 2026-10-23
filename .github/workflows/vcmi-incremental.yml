@@ -10,6 +10,7 @@ concurrency:
   group: vcmi-incremental-${{ github.ref }}
   cancel-in-progress: true
 env:
+  VCMI_LINUX_VERIFIED_BASE: 1d7cf2df90fe78d3ceb9cd532728bee44a3c90bd
   VCMI_SHIPPING_BASE: 72e7990f3d9456c7f00e2d98e8dea867cf04ae25
   VCMI_BASE: 6901839ae9760dfcd1d5ff2c4aa4ef6968fee752
   OMP_NUM_THREADS: 1
@@ -27,11 +28,23 @@ jobs:
         persist-credentials: false
     - name: Validate cache safety contracts before using runner time
       run: |
+        if [[ '${{ startsWith(github.event.head_commit.message, '[vcmi-probes] ') }}' == true ]]; then
+          python3 - <<'PY_SCOPE'
+        import os, subprocess
+        allowed={'.github/workflows/vcmi-incremental.yml','CI/INCREMENTAL_BUILDS.md','CI/incremental_probes.py','CI/test_incremental_probes.py','CI/test_incremental_resources.py','cmake_modules/VCMIWriteIfDifferent.cmake','launcher/CMakeLists.txt','mapeditor/CMakeLists.txt'}
+        changed=set(subprocess.check_output(['git','diff','--no-renames','--name-only','-z',os.environ['VCMI_LINUX_VERIFIED_BASE'],'HEAD']).decode().strip('\0').split('\0'))-{''}
+        unexpected=changed-allowed
+        assert not unexpected, 'Probe-only qualification cannot replace Linux regression validation for: '+repr(sorted(unexpected))
+        print('Probe-only build/Qt changes relative to verified Linux source:',sorted(changed))
+        PY_SCOPE
+        fi
         python3 -m unittest discover -s CI -p "test_incremental*.py" -v
         bash -n CI/incremental-build.sh
         python3 -m py_compile CI/incremental*.py
         python3 cmake_modules/tests/test_source_modules.py --cmake cmake --ninja ninja
   linux:
+    # Probe qualification is Mac-only; normal warm/bootstrap still run every Linux regression.
+    if: ${{ !startsWith(github.event.head_commit.message, '[vcmi-probes] ') }}
     needs:
     - preflight
     runs-on: ubuntu-24.04
@@ -189,6 +202,7 @@ jobs:
         retention-days: 7
         if-no-files-found: error
   macos:
+    if: always() && !cancelled() && needs.preflight.result == 'success' && (needs.linux.result == 'success' || (needs.linux.result == 'skipped' && startsWith(github.event.head_commit.message, '[vcmi-probes] ')))
     needs:
     - preflight
     - linux

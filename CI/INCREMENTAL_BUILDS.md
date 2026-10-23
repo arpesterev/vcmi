@@ -34,12 +34,18 @@ The new workflow runs only in `arpesterev/vcmi`, on
   never silently falls back to an expensive cold compile.
 - `[vcmi-probes] description`: warm mode plus reversible, bounded Mac dependency
   probes for client/AI source and private/shared headers. Sources are restored
-  and a final no-op is required before snapshotting or packaging.
+  and a final no-op is required before snapshotting or packaging. This opt-in
+  qualification runs helper/module preflight on Linux but does not run the
+  Linux production regression job; normal warm/bootstrap modes still do.
+  A green probe run does not certify a newly changed Linux runner image.
+  A preflight allowlist limits this qualification to the reviewed CI/Qt build
+  changes relative to the explicitly recorded Linux-tested commit; runtime
+  source changes require normal production regression validation first.
 
 Ordinary commits are source-only and do not launch expensive builds. These
 prefixes authorize a specific bounded run; they are not estimates of duration.
 The legacy full AI research qualification remains on its existing shipping
-branch. The incremental workflow runs every enabled Linux regression and the
+branch. Normal warm/bootstrap modes run every enabled Linux regression and the
 required regression manifest, but does not rerun performance A/B experiments or
 mutation experiments for each UI edit.
 
