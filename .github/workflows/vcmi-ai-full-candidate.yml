@@ -473,7 +473,7 @@ jobs:
           test -f "$app/Contents/Frameworks/AI/libNullkiller2.dylib"
           test -f "$app/Contents/Frameworks/AI/libBattleAI.dylib"
           while IFS= read -r -d '' library; do
-            lipo -verify_arch arm64 "$library"
+            lipo "$library" -verify_arch arm64
             codesign --verify --strict --verbose=2 "$library"
           done < <(find "$app/Contents" -type f -name '*.dylib' -print0)
       - name: Preserve matching source and license
