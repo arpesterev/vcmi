@@ -13,6 +13,9 @@
 #include "../mock/mock_battle_Unit.h"
 #include "../mock/mock_spells_Mechanics.h"
 #include "AI/BattleAI/SpellTargetsEvaluator.h"
+#include "BattleCallerFixture.h"
+#include "lib/battle/CObstacleInstance.h"
+#include "lib/spells/CSpellHandler.h"
 #include "lib/CStack.h"
 #include "lib/battle/CBattleInfoCallback.h"
 
@@ -249,6 +252,149 @@ TEST_F(SpellTargetEvaluatorTest, ReturnsOneCaseOfEachOptimalCastIfNegativeLocati
         {BattleHex(2), BattleHex(18)},
         {BattleHex(39)}
 	});
+}
+
+TEST(SpellTargetRealMechanicsTest, RemoveObstacleFindsRemoteTargetsAndKeepsParentsUnchanged)
+{
+	callerprobe::Scenario scene(callerprobe::benchmarkSpecs(6, true));
+	IBattleInfo::ObstacleCList obstacles;
+	std::vector<JsonNode> obstacleSnapshots;
+	for(int index = 0; index < 3; ++index)
+	{
+		auto obstacle = std::make_shared<SpellCreatedObstacle>();
+		obstacle->uniqueID = 100 + index;
+		obstacle->ID = SpellID::FORCE_FIELD;
+		obstacle->pos = BattleHex(8, 3 + index);
+		obstacle->customSize.insert(obstacle->pos);
+		obstacle->casterSide = BattleSide::DEFENDER;
+		obstacle->trigger = SpellID::NONE;
+		ObstacleChanges snapshot;
+		obstacle->toInfo(snapshot);
+		obstacleSnapshots.push_back(snapshot.data);
+		obstacles.push_back(obstacle);
+	}
+	// Override setupEmptyBattlefield's explicit empty-obstacle expectation.
+	EXPECT_CALL(*scene.callback, getAllObstacles()).WillRepeatedly(Return(obstacles));
+	ASSERT_EQ(scene.callback->battleGetAllObstacles(), obstacles);
+	ASSERT_EQ(scene.state->battleGetAllObstacles(), obstacles);
+	scene.populateCache();
+	const auto unitsBefore = scene.snapshot();
+	const auto * spell = SpellID(SpellID::REMOVE_OBSTACLE).toSpell();
+	ASSERT_NE(spell, nullptr);
+	ASSERT_EQ(spell->getTargetType(), AimType::OBSTACLE);
+	auto caster = scene.state->getForUpdate(1);
+	BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+	cast.setSpellLevel(3);
+	cast.setEffectPower(10);
+	cast.setEffectDuration(3);
+	auto mechanics = spell->battleMechanics(&cast);
+	// Exercise the real OBSTACLE -> LOCATION conversion, not a mocked signature.
+	ASSERT_EQ(mechanics->getTargetTypes(), std::vector<AimType>({AimType::LOCATION}));
+	const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+	ASSERT_EQ(targets.size(), obstacles.size());
+	std::set<BattleHex> actual;
+	for(const auto & target : targets)
+	{
+		ASSERT_EQ(target.size(), 1u);
+		EXPECT_TRUE(mechanics->canBeCastAt(target));
+		actual.insert(target.front().hexValue);
+		auto child = std::make_shared<HypotheticBattle>(scene.environment.get(), scene.state);
+		ASSERT_EQ(child->battleGetAllObstacles(), obstacles);
+		auto childCaster = child->getForUpdate(1);
+		BattleCast childCast(child.get(), childCaster.get(), Mode::PASSIVE, spell);
+		childCast.setSpellLevel(3);
+		childCast.setEffectPower(10);
+		childCast.setEffectDuration(3);
+		childCast.castEval(child->getServerCallback(), target);
+		const auto remaining = child->battleGetAllObstacles();
+		ASSERT_EQ(remaining.size(), obstacles.size() - 1);
+		for(const auto & obstacle : remaining)
+			EXPECT_NE(obstacle->pos, target.front().hexValue);
+		EXPECT_EQ(scene.state->battleGetAllObstacles(), obstacles);
+		EXPECT_EQ(scene.callback->battleGetAllObstacles(), obstacles);
+	}
+	const std::set<BattleHex> expected{BattleHex(8, 3), BattleHex(8, 4), BattleHex(8, 5)};
+	EXPECT_EQ(actual, expected);
+	EXPECT_EQ(scene.snapshot(), unitsBefore);
+	for(size_t index = 0; index < obstacles.size(); ++index)
+	{
+		ObstacleChanges snapshot;
+		const_cast<CObstacleInstance *>(obstacles[index].get())->toInfo(snapshot);
+		EXPECT_EQ(snapshot.data, obstacleSnapshots[index]);
+	}
+}
+
+TEST(SpellTargetRealMechanicsTest, RemoveObstacleWithoutLegalObstacleHasNoTargets)
+{
+	callerprobe::Scenario scene(callerprobe::benchmarkSpecs(6, true));
+	ASSERT_TRUE(scene.state->battleGetAllObstacles().empty());
+	const auto * spell = SpellID(SpellID::REMOVE_OBSTACLE).toSpell();
+	ASSERT_NE(spell, nullptr);
+	auto caster = scene.state->getForUpdate(1);
+	BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+	cast.setSpellLevel(3);
+	auto mechanics = spell->battleMechanics(&cast);
+	EXPECT_TRUE(mechanics->getTargetTypes().empty());
+	EXPECT_TRUE(SpellTargetEvaluator::getViableTargets(mechanics.get()).empty());
+
+	// Force Field cannot be removed at base/basic/advanced skill. Exhaustive
+	// obstacle locations must not bypass real mechanics' availability check.
+	auto obstacle = std::make_shared<SpellCreatedObstacle>();
+	obstacle->uniqueID = 100;
+	obstacle->ID = SpellID::FORCE_FIELD;
+	obstacle->pos = BattleHex(8, 5);
+	obstacle->customSize.insert(obstacle->pos);
+	obstacle->casterSide = BattleSide::DEFENDER;
+	obstacle->trigger = SpellID::NONE;
+	IBattleInfo::ObstacleCList obstacles{obstacle};
+	EXPECT_CALL(*scene.callback, getAllObstacles()).WillRepeatedly(Return(obstacles));
+	ASSERT_EQ(scene.state->battleGetAllObstacles(), obstacles);
+	for(int level : {0, 1, 2})
+	{
+		cast.setSpellLevel(level);
+		auto unavailable = spell->battleMechanics(&cast);
+		EXPECT_TRUE(unavailable->getTargetTypes().empty());
+		EXPECT_TRUE(SpellTargetEvaluator::getViableTargets(unavailable.get()).empty());
+	}
+}
+
+TEST(SpellTargetRealMechanicsTest, OrdinaryLocationSpellsKeepNearUnitHeuristic)
+{
+	callerprobe::Scenario scene(callerprobe::benchmarkSpecs(6, true));
+	const auto units = scene.state->battleAliveUnits();
+	std::set<BattleHex> nearUnits;
+	for(const auto * unit : units)
+	{
+		nearUnits.insert(unit->getPosition());
+		for(const auto & hex : unit->getSurroundingHexes())
+			nearUnits.insert(hex);
+	}
+	for(const auto spellId : {SpellID::FORCE_FIELD, SpellID::FIRE_WALL})
+	{
+		const auto * spell = SpellID(spellId).toSpell();
+		ASSERT_NE(spell, nullptr);
+		ASSERT_EQ(spell->getTargetType(), AimType::LOCATION);
+		auto caster = scene.state->getForUpdate(1);
+		BattleCast cast(scene.state.get(), caster.get(), Mode::PASSIVE, spell);
+		cast.setSpellLevel(3);
+		cast.setEffectPower(10);
+		cast.setEffectDuration(3);
+		auto mechanics = spell->battleMechanics(&cast);
+		ASSERT_EQ(mechanics->getTargetTypes(), std::vector<AimType>({AimType::LOCATION}));
+		ASSERT_TRUE(mechanics->isNeutralSpell());
+		const auto targets = SpellTargetEvaluator::getViableTargets(mechanics.get());
+		EXPECT_LE(targets.size(), 2 * units.size());
+		for(const auto & target : targets)
+		{
+			ASSERT_EQ(target.size(), 1u);
+			EXPECT_EQ(nearUnits.count(target.front().hexValue), 1u);
+			EXPECT_TRUE(mechanics->canBeCastAt(target));
+		}
+		size_t fullBoardLegalCount = 0;
+		for(int hex = 0; hex < GameConstants::BFIELD_SIZE; ++hex)
+			fullBoardLegalCount += mechanics->canBeCastAt(Target{Destination(BattleHex(hex))});
+		EXPECT_GT(fullBoardLegalCount, 2 * units.size());
+	}
 }
 
 }

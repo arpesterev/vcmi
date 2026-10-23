@@ -11,6 +11,7 @@
 #include "../../lib/CStack.h"
 #include "../../lib/battle/CBattleInfoCallback.h"
 #include "../../lib/spells/Problem.h"
+#include "../../lib/spells/CSpellHandler.h"
 #include "../../lib/CRandomGenerator.h"
 #include "SpellTargetsEvaluator.h"
 #include <vcmi/spells/Spell.h>
@@ -34,6 +35,12 @@ std::vector<Target> SpellTargetEvaluator::getViableTargets(const Mechanics * spe
 			return allTargetableCreatures(spellMechanics);
 		case AimType::LOCATION:
 		{
+			// Real mechanics expose obstacle spells as LOCATION targets. Preserve
+			// the declared type so isolated obstacles are not missed by the
+			// near-unit heuristic, without expanding ordinary location spells.
+			const auto * spell = dynamic_cast<const CSpell *>(spellMechanics->getSpell());
+			if(spell && spell->getTargetType() == AimType::OBSTACLE)
+				return allTargetCombinations(spellMechanics, targetTypes);
 			if(spellMechanics->isNeutralSpell())
 				return defaultLocationSpellHeuristics(
 					spellMechanics

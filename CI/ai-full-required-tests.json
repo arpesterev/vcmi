@@ -114,7 +114,10 @@
     "SpellTargetEvaluatorTest.ReturnSingleEmptyDestinationIfTargetIsNone",
     "SpellTargetEvaluatorTest.ReturnsOneCaseOfEachOptimalCastIfNegativeLocationSpell",
     "SpellTargetEvaluatorTest.ReturnsSuspectibleCreaturePositionsAndSingleRandomSurroundingHexForEachStackIfNeutralLocationSpell",
-    "SpellTargetEvaluatorTest.ReturnsSuspectibleCreaturePositionsIfSpellTargetsCreatures"
+    "SpellTargetEvaluatorTest.ReturnsSuspectibleCreaturePositionsIfSpellTargetsCreatures",
+    "SpellTargetRealMechanicsTest.OrdinaryLocationSpellsKeepNearUnitHeuristic",
+    "SpellTargetRealMechanicsTest.RemoveObstacleFindsRemoteTargetsAndKeepsParentsUnchanged",
+    "SpellTargetRealMechanicsTest.RemoveObstacleWithoutLegalObstacleHasNoTargets"
   ],
   "minimum_executed_tests": 314,
   "scope": "Exact named regression tests plus complete enabled suite. Synthetic fixtures do not establish whole-game strength."

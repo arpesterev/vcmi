@@ -81,7 +81,15 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 				obstacleSnapshots.push_back(snapshot.data);
 				obstacles.push_back(obstacle);
 			}
-			ON_CALL(*scene.callback, getAllObstacles()).WillByDefault(Return(obstacles));
+			// setupEmptyBattlefield() installs an explicit EXPECT_CALL returning no
+			// obstacles. A later ON_CALL cannot override that expectation's action.
+			EXPECT_CALL(*scene.callback, getAllObstacles()).WillRepeatedly(Return(obstacles));
+			ASSERT_EQ(scene.callback->battleGetAllObstacles(), obstacles);
+			ASSERT_EQ(scene.state->battleGetAllObstacles(), obstacles);
+			{
+				auto child = std::make_shared<HypotheticBattle>(scene.environment.get(), scene.state);
+				ASSERT_EQ(child->battleGetAllObstacles(), obstacles);
+			}
 			ASSERT_EQ(scene.state->battleAliveUnits().size(), static_cast<size_t>(count));
 			scene.populateCache();
 			const auto before = scene.snapshot();
@@ -154,6 +162,7 @@ TEST(BattleSpellSearchBenchmark, DISABLED_BoundedRealSpellSearch)
 			ASSERT_TRUE(std::isfinite(enumerationMs) && std::isfinite(evaluationMs) && std::isfinite(checksum));
 			EXPECT_EQ(scene.snapshot(), before);
 			EXPECT_EQ(scene.callback->battleGetAllObstacles(), obstacles);
+			EXPECT_EQ(scene.state->battleGetAllObstacles(), obstacles);
 			for(size_t index = 0; index < obstacles.size(); ++index)
 			{
 				ObstacleChanges snapshot;
