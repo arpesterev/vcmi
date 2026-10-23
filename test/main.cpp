@@ -9,12 +9,13 @@
  */
 
 #include "StdInc.h"
+#include <gmock/gmock.h>
 #include "CVcmiTestConfig.h"
 #include "../lib/filesystem/CMemoryBuffer.h"
 
 int main(int argc, char * argv[])
 {
-	::testing::InitGoogleTest(&argc, argv);
+	::testing::InitGoogleMock(&argc, argv);
 	::testing::AddGlobalTestEnvironment(new CVcmiTestConfig());
 	return RUN_ALL_TESTS();
 }

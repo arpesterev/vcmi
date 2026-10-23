@@ -15,7 +15,7 @@ namespace test
 {
 namespace callerprobe
 {
-// vcmitest initializes GoogleTest, not GoogleMock: do not rely on CLI verbosity.
+// Keep benchmark logging explicit and restore it after each test.
 // VCMI 1.7.5 has no OFF level. Suppress routine AI output, retain error diagnostics.
 struct ScopedBenchmarkLogging
 {
@@ -42,15 +42,31 @@ struct ScopedBenchmarkLogging
 	ScopedBenchmarkLogging & operator=(const ScopedBenchmarkLogging &) = delete;
 };
 
+// Intentionally failing, opt-in only: the CI wrapper requires the exact failure.
+class LoggingContractMock
+{
+public:
+	MOCK_METHOD(void, accept, (int value));
+};
+
+TEST(BattleCallerBenchmark, DISABLED_GMockUnexpectedCallContract)
+{
+	ASSERT_EQ(::testing::GMOCK_FLAG(verbose), "error");
+	LoggingContractMock mock;
+	EXPECT_CALL(mock, accept(1)).Times(::testing::AnyNumber());
+	mock.accept(2); // Must remain a test failure even at error-only verbosity.
+}
+
 using Clock = std::chrono::steady_clock;
 inline double milliseconds(Clock::duration elapsed)
 {
 	return std::chrono::duration<double, std::milli>(elapsed).count();
 }
-inline double quantile(std::vector<double> values, double fraction)
+inline double median(std::vector<double> values)
 {
 	std::sort(values.begin(), values.end());
-	return values.at(static_cast<size_t>(std::ceil(fraction * values.size())) - 1);
+	const auto middle = values.size() / 2;
+	return values.size() % 2 ? values.at(middle) : (values.at(middle - 1) + values.at(middle)) / 2;
 }
 
 #ifdef VCMI_BATTLE_AI_TEST_TRACE
@@ -116,9 +132,10 @@ TEST(BattleCallerBenchmark, DISABLED_BoundedLatency)
 	ASSERT_FALSE(logAi->isDebugEnabled());
 	ASSERT_EQ(::testing::GMOCK_FLAG(verbose), "error");
 	std::cout << "BENCH_CONFIG\tai_level=error\tgmock_verbose=error\ttrace=off\n";
+	std::cout << "SMOKE_CONFIG\twarmups=3\tsamples=10\tcell_cap_ms=15000\tsummary=median_max\n";
 	const auto wholeStart = Clock::now();
-	constexpr int warmups = 5;
-	constexpr int samples = 30;
+	constexpr int warmups = 3;
+	constexpr int samples = 10;
 	constexpr double cellCapMs = 15000;
 	constexpr double totalCapMs = 600000;
 	for(const int stacks : {6, 14, 28})
@@ -218,9 +235,9 @@ TEST(BattleCallerBenchmark, DISABLED_BoundedLatency)
 						<< '\t' << (capped ? "CAPPED" : "COMPLETE")
 						<< '\t' << candidateCount << '\t' << populatedPairs;
 					if(!elapsed.empty())
-						std::cout << '\t' << quantile(elapsed, 0.5) << '\t' << quantile(elapsed, 0.95)
-							<< '\t' << quantile(cacheElapsed, 0.5) << '\t' << quantile(targetElapsed, 0.5)
-							<< '\t' << quantile(reachElapsed, 0.5);
+						std::cout << '\t' << median(elapsed) << '\t' << *std::max_element(elapsed.begin(), elapsed.end())
+							<< '\t' << median(cacheElapsed) << '\t' << median(targetElapsed)
+							<< '\t' << median(reachElapsed);
 					std::cout << "\tsignature=" << signatureTarget << ',' << signatureWait << ',' << signatureScore
 						<< "\tallocations=unmeasured\tobstacle_entries=0\n";
 				}

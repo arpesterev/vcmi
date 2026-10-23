@@ -145,20 +145,43 @@ jobs:
           "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DCMAKE_BUILD_TYPE=Release -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=ON -DENABLE_PCH=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=ON -DVCMI_BATTLE_AI_BENCHMARK_ONLY=OFF -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
           grep -E "^(CMAKE_BUILD_TYPE|ENABLE_CCACHE|ENABLE_PCH|VCMI_BATTLE_AI_(TEST_TRACE|BENCHMARK_ONLY))(:[^=]*)?=" out/build/linux-gcc-test/CMakeCache.txt > probe-logs/correctness-build-flags.txt
           "$RUNNER_TEMP/probe-timeout" 3720 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
+      - name: Verify error-only gMock logging still fails unexpected calls
+        timeout-minutes: 2
+        working-directory: out/build/linux-gcc-test/bin
+        run: |
+          set +e
+          "$RUNNER_TEMP/probe-timeout" 30 ./vcmitest --gmock_verbose=error --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_GMockUnexpectedCallContract' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/gmock-contract.xml" > "$GITHUB_WORKSPACE/probe-logs/gmock-contract.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 1
+          python3 - <<'PYTEST'
+          import os, pathlib, xml.etree.ElementTree as ET
+          folder = pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'probe-logs'
+          root = ET.parse(folder/'gmock-contract.xml').getroot()
+          cases = root.findall('.//testcase')
+          assert len(cases) == 1 and cases[0].get('name') == 'DISABLED_GMockUnexpectedCallContract'
+          assert cases[0].get('status') == 'run' and cases[0].find('skipped') is None
+          failures = cases[0].findall('failure')
+          assert root.get('failures') == '1' and root.get('errors', '0') == '0' and len(failures) == 1
+          assert 'Unexpected mock function call' in failures[0].get('message', '')
+          assert 'Unexpected mock function call' in (folder/'gmock-contract.log').read_text()
+          print('COMPLETE gMock logging contract: unexpected calls still fail')
+          PYTEST
       - name: Require public-caller and estimator regressions
         timeout-minutes: 3
         working-directory: out/build/linux-gcc-test/bin
         run: |
-          "$RUNNER_TEMP/probe-timeout" 120 ./vcmitest --gtest_filter='BattleCallerIntegrationTest.*:BattleExchangeEstimateTest.*' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/fixed-integration.xml" > "$GITHUB_WORKSPACE/probe-logs/fixed-integration.log" 2>&1
+          "$RUNNER_TEMP/probe-timeout" 120 ./vcmitest --gmock_verbose=error --gtest_filter='BattleCallerIntegrationTest.*:BattleExchangeEstimateTest.*:BattleSingleEvalSelectionTest.*' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/fixed-integration.xml" > "$GITHUB_WORKSPACE/probe-logs/fixed-integration.log" 2>&1
           python3 - <<'PY'
           import os, xml.etree.ElementTree as ET
           root = ET.parse(os.environ['GITHUB_WORKSPACE']+'/probe-logs/fixed-integration.xml').getroot()
           cases = root.findall('.//testcase')
-          assert len(cases) == 13
+          assert len(cases) == 19
           assert sum(c.get('classname') == 'BattleCallerIntegrationTest' for c in cases) == 4
           assert sum(c.get('classname') == 'BattleExchangeEstimateTest' for c in cases) == 9
+          assert sum(c.get('classname') == 'BattleSingleEvalSelectionTest' for c in cases) == 6
           assert all(c.get('status') == 'run' and c.find('failure') is None and c.find('skipped') is None for c in cases)
-          print('COMPLETE integration: 4 caller + 9 estimator tests passed')
+          print('COMPLETE integration: 4 caller + 9 estimator + 6 single-evaluation tests passed')
           PY
       - name: Kill each call-site mutant with intended assertion only
         timeout-minutes: 10
@@ -184,7 +207,7 @@ jobs:
             fi
             cd out/build/linux-gcc-test/bin
             set +e
-            "$RUNNER_TEMP/probe-timeout" 60 ./vcmitest --gtest_filter="BattleCallerIntegrationTest.$case_name" --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/mutant-$mutant.xml" > "$GITHUB_WORKSPACE/probe-logs/mutant-$mutant.log" 2>&1
+            "$RUNNER_TEMP/probe-timeout" 60 ./vcmitest --gmock_verbose=error --gtest_filter="BattleCallerIntegrationTest.$case_name" --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/mutant-$mutant.xml" > "$GITHUB_WORKSPACE/probe-logs/mutant-$mutant.log" 2>&1
             status=$?
             set -e
             cd "$GITHUB_WORKSPACE"
@@ -211,13 +234,13 @@ jobs:
           git show "$GITHUB_SHA:AI/BattleAI/BattleExchangeVariant.cpp" > AI/BattleAI/BattleExchangeVariant.cpp
           "$RUNNER_TEMP/probe-timeout" 180 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
           cd out/build/linux-gcc-test/bin
-          "$RUNNER_TEMP/probe-timeout" 120 ./vcmitest --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/fixed-full.xml" > "$GITHUB_WORKSPACE/probe-logs/fixed-full.log" 2>&1
+          "$RUNNER_TEMP/probe-timeout" 120 ./vcmitest --gmock_verbose=error --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/fixed-full.xml" > "$GITHUB_WORKSPACE/probe-logs/fixed-full.log" 2>&1
           python3 "$GITHUB_WORKSPACE/CI/check_required_regressions.py" --manifest "$GITHUB_WORKSPACE/CI/ai-full-required-tests.json" --xml "$GITHUB_WORKSPACE/probe-logs/fixed-full.xml"
       - name: Collect separately bounded trace census
         timeout-minutes: 4
         working-directory: out/build/linux-gcc-test/bin
         run: |
-          "$RUNNER_TEMP/probe-timeout" 180 ./vcmitest --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_TraceCensus' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/census.xml" > "$GITHUB_WORKSPACE/probe-logs/census.log" 2>&1
+          "$RUNNER_TEMP/probe-timeout" 180 ./vcmitest --gmock_verbose=error --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_TraceCensus' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/census.xml" > "$GITHUB_WORKSPACE/probe-logs/census.log" 2>&1
           python3 - <<'PY'
           import itertools, os, pathlib, xml.etree.ElementTree as ET
           folder = pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'probe-logs'
@@ -281,17 +304,17 @@ jobs:
         run: |
           set -euo pipefail
           for revision in baseline candidate; do
-            "$RUNNER_TEMP/probe-timeout" 360 /usr/bin/time -f 'MAX_RSS_KB=%M\nELAPSED_SECONDS=%e' -o "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.resources.txt" taskset -c "$PROBE_CPU" "./vcmitest-$revision" --gtest_also_run_disabled_tests --gtest_filter='BattleSpellSearchBenchmark.DISABLED_BoundedRealSpellSearch' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.xml" > "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.log" 2>&1
+            "$RUNNER_TEMP/probe-timeout" 360 /usr/bin/time -f 'MAX_RSS_KB=%M\nELAPSED_SECONDS=%e' -o "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.resources.txt" taskset -c "$PROBE_CPU" "./vcmitest-$revision" --gmock_verbose=error --gtest_also_run_disabled_tests --gtest_filter='BattleSpellSearchBenchmark.DISABLED_BoundedRealSpellSearch' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.xml" > "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.log" 2>&1
             python3 "$GITHUB_WORKSPACE/CI/validate_spell_search.py" --revision "$revision" --log "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.log" --xml "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.xml" --output "$GITHUB_WORKSPACE/probe-logs/spell-search-$revision.json"
           done
-      - name: Run bounded ABBA comparisons without trace
+      - name: Run fixed-count ABBA latency smoke without trace
         if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
         timeout-minutes: 30
         working-directory: out/build/linux-gcc-test/bin
         run: |
           for invocation in baseline-1 candidate-1 candidate-2 baseline-2; do
             revision="${invocation%-*}"
-            "$RUNNER_TEMP/probe-timeout" 420 taskset --cpu-list "$PROBE_CPU" /usr/bin/time -v -o "$GITHUB_WORKSPACE/probe-logs/$invocation.rss.txt" "./vcmitest-$revision" --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_BoundedLatency' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/$invocation.xml" > "$GITHUB_WORKSPACE/probe-logs/$invocation.log" 2>&1
+            "$RUNNER_TEMP/probe-timeout" 420 taskset --cpu-list "$PROBE_CPU" /usr/bin/time -v -o "$GITHUB_WORKSPACE/probe-logs/$invocation.rss.txt" "./vcmitest-$revision" --gmock_verbose=error --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_BoundedLatency' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/$invocation.xml" > "$GITHUB_WORKSPACE/probe-logs/$invocation.log" 2>&1
           done
       - name: Reject incomplete measurements and summarize exact samples
         if: startsWith(github.event.head_commit.message, '[vcmi-deliver] ')
@@ -311,25 +334,27 @@ jobs:
               assert not any('TOTAL_CAP' in line or '\tCAPPED' in line for line in lines)
               config = 'BENCH_CONFIG\tai_level=error\tgmock_verbose=error\ttrace=off'
               assert lines.count(config) == 1
+              smoke = 'SMOKE_CONFIG\twarmups=3\tsamples=10\tcell_cap_ms=15000\tsummary=median_max'
+              assert lines.count(smoke) == 1
               assert not any(re.search(r'\b(error|fatal)\b|GMOCK WARNING|Unexpected mock', line, re.IGNORECASE) for line in lines if line != config), 'Unexpected diagnostics contaminate benchmark'
               latency = [line.split('\t') for line in lines if line.startswith('LATENCY\t')]
               samples = [line.split('\t') for line in lines if line.startswith('SAMPLE\t')]
               assert len(latency) == 24 and {tuple(row[1:5]) for row in latency} == expected
-              assert len(samples) == 24*30
+              assert len(samples) == 24*10
               summary = {}
               for row in latency:
                   key = tuple(row[1:5])
-                  assert len(row) == 17 and row[5:7] == ['30','COMPLETE']
+                  assert len(row) == 17 and row[5:7] == ['10','COMPLETE']
                   assert int(row[7]) > 0 and int(row[8]) > 0
                   assert row[15:17] == ['allocations=unmeasured','obstacle_entries=0']
                   signature = row[14].removeprefix('signature=').split(',')
                   assert row[14].startswith('signature=') and len(signature) == 3 and math.isfinite(float(signature[2]))
                   assert all(math.isfinite(float(x)) and float(x) >= 0 for x in row[9:14])
                   matching = [sample for sample in samples if tuple(sample[1:5]) == key]
-                  assert len(matching) == 30 and {int(sample[5]) for sample in matching} == set(range(30))
+                  assert len(matching) == 10 and {int(sample[5]) for sample in matching} == set(range(10))
                   assert all(len(sample) == 10 and all(math.isfinite(float(x)) and float(x) >= 0 for x in sample[6:10]) for sample in matching)
                   durations = sorted(float(sample[6]) for sample in matching)
-                  summary['/'.join(key)] = dict(samples=30, median_ms=statistics.median(durations), p95_ms=durations[28], stdev_ms=statistics.stdev(durations), candidates=int(row[7]), populated_pairs=int(row[8]), signature=row[14], allocations='unmeasured', obstacle_entries=0)
+                  summary['/'.join(key)] = dict(samples=10, median_ms=statistics.median(durations), maximum_observed_ms=max(durations), stdev_ms=statistics.stdev(durations), candidates=int(row[7]), populated_pairs=int(row[8]), signature=row[14], allocations='unmeasured', obstacle_entries=0)
               results[invocation] = summary
           comparisons = {}
           for key in results['baseline-1']:
@@ -338,10 +363,10 @@ jobs:
                   assert first['signature'] == second['signature'] and first['candidates'] == second['candidates'] and first['populated_pairs'] == second['populated_pairs']
               baseline = statistics.mean(results[v][key]['median_ms'] for v in ['baseline-1','baseline-2'])
               candidate = statistics.mean(results[v][key]['median_ms'] for v in ['candidate-1','candidate-2'])
-              baseline_p95 = statistics.mean(results[v][key]['p95_ms'] for v in ['baseline-1','baseline-2'])
-              candidate_p95 = statistics.mean(results[v][key]['p95_ms'] for v in ['candidate-1','candidate-2'])
-              comparisons[key] = {'baseline_median_ms':baseline, 'candidate_median_ms':candidate, 'median_ratio':candidate/baseline if baseline > 0 else None, 'baseline_p95_ms':baseline_p95, 'candidate_p95_ms':candidate_p95, 'p95_ratio':candidate_p95/baseline_p95 if baseline_p95 > 0 else None}
-          output = {'status':'COMPLETE', 'cells_per_invocation':24, 'samples_per_cell':30, 'execution_order':['baseline-1','candidate-1','candidate-2','baseline-2'], 'runs':results, 'comparisons':comparisons, 'interpretation':'Complete changed BattleAI production bundle versus pinned 1.7.5, identical compatible exchange/finder harness; not full-game latency or win rate. No automatic performance acceptance or merge.'}
+              baseline_maximum_observed = statistics.mean(results[v][key]['maximum_observed_ms'] for v in ['baseline-1','baseline-2'])
+              candidate_maximum_observed = statistics.mean(results[v][key]['maximum_observed_ms'] for v in ['candidate-1','candidate-2'])
+              comparisons[key] = {'baseline_median_ms':baseline, 'candidate_median_ms':candidate, 'median_ratio':candidate/baseline if baseline > 0 else None, 'baseline_maximum_observed_ms':baseline_maximum_observed, 'candidate_maximum_observed_ms':candidate_maximum_observed, 'maximum_observed_ratio':candidate_maximum_observed/baseline_maximum_observed if baseline_maximum_observed > 0 else None}
+          output = {'status':'COMPLETE', 'cells_per_invocation':24, 'samples_per_cell':10, 'warmups_per_cell':3, 'contract':'bounded_latency_smoke_v2', 'execution_order':['baseline-1','candidate-1','candidate-2','baseline-2'], 'runs':results, 'comparisons':comparisons, 'interpretation':'Fixed-count bounded latency smoke: complete changed BattleAI bundle versus pinned 1.7.5 with identical harness, 10 samples after 3 warmups per cell in each ABBA invocation. Maximum is an observed sample maximum, not p95 or a tail estimate. Timing is descriptive, not a statistical speed, full-game latency or win-rate claim. No automatic performance acceptance or merge.'}
           (folder/'performance-summary.json').write_text(json.dumps(output, indent=2, allow_nan=False)+'\n')
           print(json.dumps(output, indent=2, allow_nan=False))
           PY

@@ -815,6 +815,30 @@ BattleScore BattleExchangeEvaluator::calculateExchange(
 					return score;
 				};
 
+				// The estimator is isolated, so a score is stable during this one
+				// selection. Do not rerun it for the incumbent on each comparison.
+				// Keep the original order and first-on-tie policy; never reuse scores
+				// after an action changes health, ammunition or retaliation state.
+				auto selectBestTarget = [&](const battle::Units & candidates) -> const battle::Unit *
+				{
+					if(candidates.empty())
+						return nullptr;
+					auto best = candidates.front();
+					if(candidates.size() == 1)
+						return best; // max_element did not evaluate singleton ranges.
+					auto bestScore = estimateAttack(best);
+					for(size_t index = 1; index < candidates.size(); ++index)
+					{
+						const auto score = estimateAttack(candidates[index]);
+						if(bestScore < score)
+						{
+							best = candidates[index];
+							bestScore = score;
+						}
+					}
+					return best;
+				};
+
 				auto unitsInOppositeQueueExceptInaccessible = oppositeQueue;
 
 				vstd::erase_if(unitsInOppositeQueueExceptInaccessible, [&](const battle::Unit * u)->bool
@@ -835,7 +859,7 @@ BattleScore BattleExchangeEvaluator::calculateExchange(
 
 				if(!unitsInOppositeQueueExceptInaccessible.empty())
 				{
-					targetUnit = *vstd::maxElementByFun(unitsInOppositeQueueExceptInaccessible, estimateAttack);
+					targetUnit = selectBestTarget(unitsInOppositeQueueExceptInaccessible);
 				}
 				else
 				{
@@ -862,7 +886,7 @@ BattleScore BattleExchangeEvaluator::calculateExchange(
 
 					if(!reachable.empty())
 					{
-						targetUnit = *vstd::maxElementByFun(reachable, estimateAttack);
+						targetUnit = selectBestTarget(reachable);
 					}
 					else
 					{

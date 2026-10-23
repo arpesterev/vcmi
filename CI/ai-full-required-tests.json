@@ -126,8 +126,14 @@
     "SpellTargetRealMechanicsTest.TeleportShortlistIsBoundedLegalRepeatableAndSourcePure",
     "SpellTargetRealMechanicsTest.TeleportShortlistRetainsActiveMeleeContactsWithDifferentDefenders",
     "SpellTargetRealMechanicsTest.TeleportShortlistUnblocksFriendlyShooterAfterRealCast",
-    "SpellTargetRealMechanicsTest.TeleportWithNoLegalSourceProducesNoShortlist"
+    "SpellTargetRealMechanicsTest.TeleportWithNoLegalSourceProducesNoShortlist",
+    "BattleSingleEvalSelectionTest.QueueScoresThreeAndFourCandidatesOnceInsteadOfTwicePerComparison",
+    "BattleSingleEvalSelectionTest.QueueKeepsFirstCandidateOnAnExactScoreTie",
+    "BattleSingleEvalSelectionTest.ReachableFallbackScoresEachCandidateOnceAndKeepsFirstTie",
+    "BattleSingleEvalSelectionTest.SingletonQueueAndFallbackChooseWithoutAnyEstimate",
+    "BattleSingleEvalSelectionTest.EmptyFallbackNeitherEstimatesNorChooses",
+    "BattleSingleEvalSelectionTest.EveryActionAndRoundReestimatesTheChangedExchangeState"
   ],
-  "minimum_executed_tests": 314,
+  "minimum_executed_tests": 421,
   "scope": "Exact named regression tests plus complete enabled suite. Synthetic fixtures do not establish whole-game strength."
 }
