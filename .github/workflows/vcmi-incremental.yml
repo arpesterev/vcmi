@@ -51,6 +51,7 @@ jobs:
         python3 -m unittest discover -s CI -p "test_incremental*.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_compiler_recovery.py" -v
+        python3 -m unittest discover -s CI -p "test_linux_cache_compatibility.py" -v
         bash -n CI/incremental-build.sh
         python3 -m py_compile CI/incremental*.py
         python3 cmake_modules/tests/test_source_modules.py --cmake cmake --ninja ninja
@@ -80,9 +81,7 @@ jobs:
       id: identity
       run: |
         key=$(python3 CI/incremental_identity.py linux-gcc-test --output incremental-evidence/runner-identity.json)
-        echo "prefix=vcmi-modular-v1-linux-$key-" >> "$GITHUB_OUTPUT"
         depkey=$(python3 CI/incremental_identity.py linux-gcc-test --scope dependencies --output incremental-evidence/dependency-identity.json)
-        echo "deps=vcmi-deps-v1-linux-$depkey" >> "$GITHUB_OUTPUT"
         python3 - <<'PY_PROVENANCE'
         import json, os, pathlib
         keys = ('ImageVersion', 'ImageOS', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA')
@@ -93,6 +92,14 @@ jobs:
         print(encoded)
         print(pathlib.Path('incremental-evidence/runner-identity.json').read_text())
         PY_PROVENANCE
+        if [[ '${{ contains(github.event.head_commit.message, '[adventure-qualify]') }}' == true ]]; then
+          python3 CI/linux_cache_compatibility.py runner --observed incremental-evidence/runner-identity.json --output incremental-evidence/cache-runner-identity.json --report incremental-evidence/runner-compatibility.json
+          python3 CI/linux_cache_compatibility.py dependency --observed incremental-evidence/dependency-identity.json --output incremental-evidence/cache-dependency-identity.json --report incremental-evidence/dependency-compatibility.json
+          key=$(sha256sum incremental-evidence/cache-runner-identity.json | cut -d' ' -f1)
+          depkey=$(sha256sum incremental-evidence/cache-dependency-identity.json | cut -d' ' -f1)
+        fi
+        echo "prefix=vcmi-modular-v1-linux-$key-" >> "$GITHUB_OUTPUT"
+        echo "deps=vcmi-deps-v1-linux-$depkey" >> "$GITHUB_OUTPUT"
     - name: Restore previous compatible build, compiler and dependency caches
       id: cache
       timeout-minutes: 5
@@ -271,8 +278,13 @@ jobs:
       run: |
         start=$(date +%s)
         python3 CI/incremental_identity.py linux-gcc-test --installed --output incremental-evidence/toolchain-identity.json
+        if [[ '${{ contains(github.event.head_commit.message, '[adventure-qualify]') }}' == true ]]; then
+          python3 CI/linux_cache_compatibility.py toolchain --observed incremental-evidence/toolchain-identity.json --output incremental-evidence/cache-toolchain-identity.json --report incremental-evidence/toolchain-compatibility.json
+        else
+          cp incremental-evidence/toolchain-identity.json incremental-evidence/cache-toolchain-identity.json
+        fi
         if [[ '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' != true ]]; then
-          python3 CI/incremental_cache.py restore --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json | tee incremental-evidence/cache-validation.json
+          python3 CI/incremental_cache.py restore --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/cache-toolchain-identity.json | tee incremental-evidence/cache-validation.json
         fi
         printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/cache-verification-seconds.txt
     - name: Prepare exact installed-identity compiler recovery scope
@@ -318,7 +330,7 @@ jobs:
         ccache --print-stats > incremental-evidence/forced-battle/ccache-after.tsv
     - name: Snapshot only successful build outputs, with bounded upload size
       run: |
-        python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json
+        python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/cache-toolchain-identity.json
         python3 - <<'PY_SIZE'
         import pathlib
         paths=['out/build/linux-gcc-test', '.ci/incremental-state.json', '~/.cache/vcmi-incremental/linux-gcc-test']
