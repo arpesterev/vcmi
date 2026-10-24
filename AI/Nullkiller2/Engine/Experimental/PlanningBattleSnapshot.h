@@ -4,6 +4,7 @@
  */
 #pragma once
 #include "../../../../lib/battle/BattleLayout.h"
+#include "../../../../lib/constants/EntityIdentifiers.h"
 #include "../../../../lib/int3.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
