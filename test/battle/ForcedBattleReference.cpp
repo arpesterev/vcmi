@@ -94,8 +94,8 @@ struct Duel
 	int attackerCount;
 	int defenderCreature;
 	int defenderCount;
-	std::vector<std::pair<int, int>> attackerExtras;
-	std::vector<std::pair<int, int>> defenderExtras;
+	std::vector<std::pair<int, int>> attackerExtras = {};
+	std::vector<std::pair<int, int>> defenderExtras = {};
 };
 
 class ForcedBattleReference : public ::testing::Test, public MapListener

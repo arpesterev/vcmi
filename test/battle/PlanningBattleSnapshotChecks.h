@@ -3,6 +3,7 @@
 #include "../../AI/Nullkiller2/Engine/Experimental/PlanningBattleSnapshot.h"
 #include "../../AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.h"
 #include "../../lib/battle/BattleInfo.h"
+#include "../../lib/battle/Unit.h"
 #include "../../lib/battle/CObstacleInstance.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/mapObjects/army/CStackInstance.h"
