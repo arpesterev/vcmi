@@ -167,8 +167,10 @@ if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS)
 		nullkiller2/AdventurePlanningRegression.cpp
 		nullkiller2/PlannerContinuityRegression.cpp
 		nullkiller2/PlanningRiskTableTest.cpp
+		nullkiller2/PlanningRiskSchedulerRegression.cpp
 		nullkiller2/AdventureBattleRiskRegression.cpp
 		nullkiller2/TownDefenceRegression.cpp
+		nullkiller2/JointTownDefenceRegression.cpp
 		nullkiller2/PlanningCacheRegression.cpp
 		nullkiller2/MissingTargetRegression.cpp
 		nullkiller2/AIPathMetadataRegression.cpp

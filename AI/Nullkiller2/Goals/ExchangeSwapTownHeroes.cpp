@@ -21,9 +21,14 @@ using namespace Goals;
 ExchangeSwapTownHeroes::ExchangeSwapTownHeroes(
 	const CGTownInstance * town,
 	const CGHeroInstance * garrisonHero,
-	HeroLockedReason lockingReason)
-	:ElementarGoal(Goals::EXCHANGE_SWAP_TOWN_HEROES), town(town), garrisonHero(garrisonHero), lockingReason(lockingReason)
+	HeroLockedReason lockingReason, bool directDefencePreparation)
+	:ElementarGoal(Goals::EXCHANGE_SWAP_TOWN_HEROES), town(town), garrisonHero(garrisonHero), lockingReason(lockingReason), directDefencePreparation(directDefencePreparation)
 {
+	if(directDefencePreparation)
+	{
+		AbstractGoal::town = town;
+		AbstractGoal::hero = garrisonHero;
+	}
 }
 
 std::vector<ObjectInstanceID> ExchangeSwapTownHeroes::getAffectedObjects() const
@@ -58,6 +63,30 @@ bool ExchangeSwapTownHeroes::operator==(const ExchangeSwapTownHeroes & other) co
 
 void ExchangeSwapTownHeroes::accept(AIGateway * aiGw)
 {
+	if(directDefencePreparation)
+	{
+		if(!garrisonHero || town->getGarrisonHero() || town->getVisitingHero() != garrisonHero
+			|| !garrisonHero->canBeMergedWith(*town))
+			throw cannotFulfillGoalException("Town defence merge is no longer available.");
+		std::map<CreatureID, int64_t> expected;
+		for(const auto * army : std::vector<const CArmedInstance *>{town, garrisonHero})
+			for(const auto & slot : army->Slots())
+				expected[slot.second->getCreatureID()] += slot.second->getCount();
+		// The server's garrisonSwap merges the town army into the visitor.
+		// No upgrades, optional purchases or adventure movement belong here.
+		aiGw->cc->swapGarrisonHero(town);
+		if(town->getGarrisonHero() != garrisonHero || town->getVisitingHero() == garrisonHero)
+			throw cannotFulfillGoalException("Town defence garrison swap was not applied.");
+		for(const auto & slot : garrisonHero->Slots())
+			expected[slot.second->getCreatureID()] -= slot.second->getCount();
+		for(const auto & entry : expected)
+			if(entry.second > 0)
+				throw cannotFulfillGoalException("Town defence army merge was incomplete.");
+		if(lockingReason != HeroLockedReason::NOT_LOCKED)
+			aiGw->nullkiller->lockHero(garrisonHero, lockingReason);
+		return;
+	}
+
 	if(!getGarrisonHero())
 	{
 		auto currentGarrisonHero = town->getGarrisonHero();

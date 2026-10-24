@@ -9,6 +9,8 @@
 */
 #include "../StdInc.h"
 #include "BuyArmy.h"
+#include "ExchangeSwapTownHeroes.h"
+#include "../Behaviors/DefenceBehavior.h"
 #include "../../../lib/mapObjects/CGTownInstance.h"
 #include "../AIGateway.h"
 #include "../Engine/Nullkiller.h"
@@ -29,8 +31,40 @@ std::string BuyArmy::toString() const
 	return "Buy army at " + town->getNameTranslated();
 }
 
+bool BuyArmy::isDefencePlanAvailable(const CGTownInstance * town, const CGHeroInstance * defender,
+	const TResources & available, const TResources & budget, const std::vector<creInfo> & creatures)
+{
+	if(!available.canAfford(budget))
+		return false;
+	std::set<CreatureID> types;
+	for(const auto & slot : town->getUpperArmy()->Slots())
+		types.insert(slot.second->getCreatureID());
+	if(defender && defender != town->getUpperArmy())
+		for(const auto & slot : defender->Slots())
+			types.insert(slot.second->getCreatureID());
+	std::map<int, int64_t> stockRequired;
+	TResources exactCost;
+	for(const auto & creature : creatures)
+	{
+		if(creature.count <= 0 || creature.creID == CreatureID::NONE
+			|| creature.level < 0 || creature.level >= town->creatures.size()
+			|| !vstd::contains(town->creatures[creature.level].second, creature.creID))
+			return false;
+		stockRequired[creature.level] += creature.count;
+		if(stockRequired[creature.level] > town->creatures[creature.level].first)
+			return false;
+		types.insert(creature.creID);
+		exactCost += creature.creID.toCreature()->getFullRecruitCost() * creature.count;
+	}
+	return types.size() <= GameConstants::ARMY_SIZE && budget.canAfford(exactCost);
+}
+
 void BuyArmy::accept(AIGateway * aiGw)
 {
+	if(defenceCommander && (town->getVisitingHero() != defenceCommander || town->getGarrisonHero()
+		|| !isDefencePlanAvailable(town, defenceCommander, aiGw->nullkiller->getFreeResources(), *spendingLimit, plannedCreatures)))
+		throw cannotFulfillGoalException("Town defender or planned recruitment is no longer available.");
+
 	ui64 valueBought = 0;
 	//buy the stacks with largest AI value
 
@@ -144,7 +178,14 @@ void BuyArmy::accept(AIGateway * aiGw)
 		throw cannotFulfillGoalException("No creatures to buy.");
 	}
 
-	if(town->getVisitingHero() && !town->getGarrisonHero())
+	if(defenceCommander)
+	{
+		if(DefenceBehavior::combinedDefenceStrength(town, defenceCommander) < requiredDefenceStrength)
+			throw cannotFulfillGoalException("Town defence purchase was incomplete; any recruited troops remain in town.");
+		ExchangeSwapTownHeroes(town, defenceCommander, HeroLockedReason::DEFENCE, true).accept(aiGw);
+	}
+
+	if(!spendingLimit && town->getVisitingHero() && !town->getGarrisonHero())
 	{
 		aiGw->moveHeroToTile(town->visitablePos(), HeroPtr(town->getVisitingHero(), aiGw->cc.get()));
 	}

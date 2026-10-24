@@ -30,6 +30,8 @@
 #include "../Goals/ExecuteHeroChain.h"
 #include "../Goals/AdventureSpellCast.h"
 #include <sstream>
+#include <stdexcept>
+#include "../../../lib/gameState/CGameState.h"
 #include "ResourceTrader.h"
 #include <boost/range/algorithm/sort.hpp>
 
@@ -40,6 +42,7 @@ using namespace Goals;
 
 // while we play vcmieagles graph can be shared
 std::unique_ptr<ObjectGraph> Nullkiller::baseGraph;
+thread_local Nullkiller::PlanningTurnLocks * Nullkiller::planningTurnLocks = nullptr;
 
 Nullkiller::Nullkiller()
 	: activeHero(nullptr)
@@ -273,10 +276,10 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(TGoalVec & tasks, int priorityTie
 		}
 	);
 
-	return selectEvaluatedTasks(tasks);
+	return selectEvaluatedTasks(tasks, settings->isUseFuzzy() ? MIN_PRIORITY : 0);
 }
 
-Goals::TTaskVec Nullkiller::selectEvaluatedTasks(const TGoalVec & tasks) const
+Goals::TTaskVec Nullkiller::selectEvaluatedTasks(const TGoalVec & tasks, float executionFloor) const
 {
 	std::set<ObjectInstanceID> defenders;
 	for(const auto & task : tasks)
@@ -297,13 +300,17 @@ Goals::TTaskVec Nullkiller::selectEvaluatedTasks(const TGoalVec & tasks) const
 			continue;
 		float score = executable->priority;
 		const auto intent = taskIntent(executable);
+		const auto affected = executable->getAffectedObjects();
 		if(intent.chain)
 		{
-			const auto affected = executable->getAffectedObjects();
 			if(std::any_of(affected.begin(), affected.end(), [this](auto id) { return !cc->getObj(id, false); }))
 				continue;
 		}
-		if(intent.chain && !intent.defence && !defenders.count(intent.chain->hero->id))
+		const bool conflictsWithDefence = std::any_of(affected.begin(), affected.end(),
+			[&defenders](auto id) { return defenders.count(id) != 0; });
+		// Retention must not promote an ineligible action or consume a courier
+		// needed by defence, even when the final carrier is a different hero.
+		if(intent.chain && !intent.defence && score >= executionFloor && !conflictsWithDefence)
 		{
 			const auto found = intentions.find(intent.chain->hero->id);
 			const auto * target = intent.chain->objid >= 0 ? cc->getObj(ObjectInstanceID(intent.chain->objid), false) : nullptr;
@@ -324,8 +331,23 @@ Goals::TTaskVec Nullkiller::selectEvaluatedTasks(const TGoalVec & tasks) const
 	return taskPlan.getTasks();
 }
 
+Goals::TTaskVec Nullkiller::prepareExecutionPlan(Goals::TTaskVec selectedTasks) const
+{
+	// Intention ranking resolves competing assignments during selection. The
+	// remaining independent actions execute by intrinsic urgency; stable ties
+	// retain decomposition order. This also keeps below-floor fuzzy goals last.
+	std::stable_sort(selectedTasks.begin(), selectedTasks.end(), [](const auto & a, const auto & b)
+	{
+		return a->priority > b->priority;
+	});
+	if(selectedTasks.empty())
+		selectedTasks.push_back(taskptr(Goals::Invalid()));
+	return selectedTasks;
+}
+
 void Nullkiller::beginPlanningTurn()
 {
+	invalidatePlanningRisk();
 	++planningTurn;
 	failedTasks.clear();
 	recoveryCount = 0;
@@ -381,8 +403,33 @@ void Nullkiller::resetState()
 	}
 }
 
+void Nullkiller::invalidatePlanningRisk()
+{
+	planningRiskEpoch.fetch_add(1, std::memory_order_acq_rel);
+	std::atomic_store_explicit(&preparedPlanningRisk,
+		std::shared_ptr<const PreparedPlanningRisk>{}, std::memory_order_release);
+}
+
+void Nullkiller::preparePlanningRiskForStateUpdate()
+{
+	// This thread sees only its own scoped capability. An unbound standalone
+	// call neither touches another thread's callback nor guesses lock ownership.
+	const auto * capability = planningTurnLocks;
+	if(!capability || capability->planner != this)
+		return;
+	std::atomic_store_explicit(&preparedPlanningRisk,
+		std::shared_ptr<const PreparedPlanningRisk>{}, std::memory_order_release);
+	if(capability->ensureReady)
+		capability->ensureReady();
+	if(capability->prepareRisk)
+		capability->prepareRisk();
+	if(capability->ensureReady)
+		capability->ensureReady();
+}
+
 void Nullkiller::invalidatePathfinderData()
 {
+	invalidatePlanningRisk();
 	pathfinderInvalidated = true;
 }
 
@@ -406,6 +453,7 @@ void Nullkiller::updateState()
 	logAi->trace("PERFORMANCE: NK2 AI updateState started");
 
 	makingTurnInterruption.interruptionPoint();
+	preparePlanningRiskForStateUpdate();
 	std::unique_lock lockGuard(aiStateMutex);
 
 	activeHero = nullptr;
@@ -523,7 +571,15 @@ HeroLockedReason Nullkiller::getHeroLockedReason(const CGHeroInstance * hero) co
 
 void Nullkiller::makeTurn()
 {
-	std::lock_guard<std::mutex> sharedStorageLock(AISharedStorage::locker);
+	// The gateway acquires shared path storage BEFORE the game-state lock.
+	// Acquiring it here while a caller holds the game lock would invert that
+	// order when another AI releases game state for a detached rollout.
+	if(!planningTurnLocks || planningTurnLocks->planner != this
+		|| !planningTurnLocks->sharedStorage.owns_lock()
+		|| planningTurnLocks->sharedStorage.mutex() != &AISharedStorage::locker
+		|| !planningTurnLocks->gameState.owns_lock()
+		|| planningTurnLocks->gameState.mutex() != &CGameState::mutex)
+		throw std::logic_error("Nullkiller makeTurn requires gateway-owned planning locks");
 	pathfinderTurnStorageMisses.store(0);
 	const int MAX_DEPTH = 10;
 	resetState();
@@ -574,15 +630,7 @@ void Nullkiller::makeTurn()
 			}
 		}
 
-		boost::range::sort(selectedTasks, [](const TTask& a, const TTask& b)
-		{
-			return a->priority > b->priority;
-		});
-
-		if(selectedTasks.empty())
-		{
-			selectedTasks.push_back(taskptr(Goals::Invalid()));
-		}
+		selectedTasks = prepareExecutionPlan(std::move(selectedTasks));
 
 		bool hasAnySuccess = false;
 		bool needsReplan = false;

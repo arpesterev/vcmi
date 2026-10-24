@@ -66,6 +66,7 @@ protected:
 	{
 		ai.cc = callback;
 		ai.playerID = PlayerColor(0);
+		ai.buildAnalyzer = std::make_unique<NK2AI::BuildAnalyzer>(&ai);
 		ai.armyManager = std::make_unique<NK2AI::ArmyManager>(callback.get(), &ai);
 		ai.dangerHitMap = std::make_unique<NK2AI::DangerHitMapAnalyzer>(&ai);
 		callback->towns = {&first, &second};

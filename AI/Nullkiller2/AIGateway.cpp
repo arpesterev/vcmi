@@ -11,6 +11,10 @@
 
 #include "../../lib/AsyncRunner.h"
 #include "../../lib/UnlockGuard.h"
+#include "../../lib/ScopeGuard.h"
+#include "../../lib/mapObjects/CGCreature.h"
+#include <stdexcept>
+#include <thread>
 #include "../../lib/StartInfo.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/entities/artifact/ArtifactUtils.h"
@@ -35,6 +39,7 @@
 
 #include "AIGateway.h"
 #include "Goals/Goals.h"
+#include "Pathfinding/AINodeStorage.h"
 
 namespace NK2AI
 {
@@ -180,6 +185,8 @@ void AIGateway::gameOver(PlayerColor player, const EVictoryLossCheckResult & vic
 			logAi->debug("AIGateway: Player %d (%s) lost. It's me. What a disappointment! :(", player, player.toString());
 		}
 
+		planningTurnGeneration.fetch_add(1, std::memory_order_acq_rel);
+		nullkiller->invalidatePlanningRisk();
 		nullkiller->makingTurnInterruption.interruptThread();
 	}
 }
@@ -389,14 +396,8 @@ void AIGateway::showInfoDialog(EInfoWindowMode type, const std::string & text, c
 void AIGateway::requestRealized(PackageApplied * pa)
 {
 	LOG_TRACE(logAi);
-	if(status.haveTurn())
-	{
-		if(pa->packType == CTypeList::getInstance().getTypeID<EndTurn>(nullptr))
-		{
-			if(pa->result)
-				status.madeTurn();
-		}
-	}
+	// PlayerEndsTurn is authoritative for turn ownership. An old EndTurn ack
+	// can arrive after the next YourTurn; it must not clear that newer turn.
 
 	if(pa->packType == CTypeList::getInstance().getTypeID<QueryReply>(nullptr))
 	{
@@ -539,19 +540,29 @@ void AIGateway::initGameInterface(std::shared_ptr<Environment> env, std::shared_
 void AIGateway::yourTurn(QueryID queryID)
 {
 	LOG_TRACE_PARAMS(logAi, "queryID '%i'", queryID);
+	const auto generation = planningTurnGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 	nullkiller->invalidatePathfinderData();
 	status.addQuery(queryID, "YourTurn");
 	executeActionAsync("yourTurn", [this, queryID](){ answerQuery(queryID, 0); });
 	status.startedTurn();
 
-	nullkiller->makingTurnInterruption.reset();
-
-	asyncTasks->run([this]()
+	// Do not reset a still-running older worker's interruption flag. The current
+	// generation resets it only after acquiring storage and replacing that worker.
+	asyncTasks->run([this, generation]()
 	{
 		ScopedThreadName guard("NK2AI::AIGateway::makingTurn");
-		status.waitTillFree();
-		makeTurn();
+		makeTurn(generation);
 	});
+}
+
+void AIGateway::playerEndsTurn(PlayerColor player)
+{
+	if(player != playerID)
+		return;
+	planningTurnGeneration.fetch_add(1, std::memory_order_acq_rel);
+	status.madeTurn();
+	nullkiller->invalidatePlanningRisk();
+	nullkiller->makingTurnInterruption.interruptThread();
 }
 
 void AIGateway::heroGotLevel(const CGHeroInstance * hero, PrimarySkill pskill, std::vector<SecondarySkill> & skills, QueryID queryID)
@@ -788,40 +799,324 @@ bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
 	return upgraded;
 }
 
-void AIGateway::makeTurn()
+void AIGateway::checkPlanningGeneration(uint64_t generation) const
+{
+	if(generation != planningTurnGeneration.load(std::memory_order_acquire))
+		throw InterruptionRequestedException();
+}
+
+void AIGateway::ensurePlanningTurnReady(std::shared_lock<std::shared_mutex> & gameStateLock,
+	uint64_t generation)
+{
+	const auto * capability = Nullkiller::planningTurnLocks;
+	if(!capability || capability->planner != nullkiller.get() || capability->generation != generation
+		|| &capability->gameState != &gameStateLock || !gameStateLock.owns_lock()
+		|| gameStateLock.mutex() != &CGameState::mutex)
+		throw std::logic_error("Planning continuation requires its actual turn lock capability");
+
+	auto checkOwnership = [this, generation]
+	{
+		checkPlanningGeneration(generation);
+		nullkiller->makingTurnInterruption.interruptionPoint();
+		if(!cc || !status.haveTurn() || !cc->isPlayerMakingTurn(playerID)
+			|| cc->getPlayerStatus(playerID) != EPlayerStatus::INGAME)
+			throw InterruptionRequestedException();
+	};
+	checkOwnership();
+	while(!status.isIdle())
+	{
+		gameStateLock.unlock();
+		try
+		{
+			status.waitTillIdle([this, generation] { checkPlanningGeneration(generation); });
+		}
+		catch(...)
+		{
+			gameStateLock.lock();
+			throw;
+		}
+		gameStateLock.lock();
+		checkOwnership();
+	}
+}
+
+void AIGateway::withPlanningTurnLocks(
+	const std::function<void(std::shared_lock<std::shared_mutex> &)> & runTurn, uint64_t generation,
+	const std::function<void(bool)> & onStorageContention)
+{
+	if(Nullkiller::planningTurnLocks)
+		throw std::logic_error("Nested planning lock scope on one thread");
+
+	// All NK2 turn contenders take the storage lock first. A waiting second AI
+	// must not retain a game-state reader while the first runs an unlocked
+	// rollout: that reader could prevent the server writer from making progress.
+	std::unique_lock storageLock(AISharedStorage::locker, std::defer_lock);
+	std::shared_lock gameStateLock(CGameState::mutex, std::defer_lock);
+	if(!storageLock.try_lock())
+	{
+		// Private regression seam: signal proven contention, not merely that a
+		// second thread started. Normal turn entry installs no observer.
+		if(onStorageContention)
+			onStorageContention(gameStateLock.owns_lock());
+		storageLock.lock();
+	}
+	gameStateLock.lock();
+	checkPlanningGeneration(generation);
+	Nullkiller::PlanningTurnLocks capability{nullkiller.get(), storageLock, gameStateLock, generation, {}, {}};
+	Nullkiller::planningTurnLocks = &capability;
+	auto clearCapability = vstd::makeScopeGuard([this]
+	{
+		Nullkiller::planningTurnLocks = nullptr;
+	});
+	runTurn(gameStateLock);
+}
+
+void AIGateway::withPlanningRiskPreparation(std::shared_lock<std::shared_mutex> & gameStateLock,
+	const std::function<void()> & runTurn)
+{
+	auto * capability = Nullkiller::planningTurnLocks;
+	if(!capability || capability->planner != nullkiller.get()
+		|| &capability->gameState != &gameStateLock || !gameStateLock.owns_lock()
+		|| gameStateLock.mutex() != &CGameState::mutex || !capability->sharedStorage.owns_lock()
+		|| capability->sharedStorage.mutex() != &AISharedStorage::locker
+		|| capability->prepareRisk)
+		throw std::logic_error("Risk preparation requires the gateway's owned planning locks");
+
+	capability->prepareRisk = [this, &gameStateLock]
+	{
+		runPlanningRiskBestEffort([this, &gameStateLock] { preparePlanningRisk(gameStateLock); });
+	};
+	auto clearPreparation = vstd::makeScopeGuard([this, capability]
+	{
+		capability->prepareRisk = {};
+		std::atomic_store_explicit(&nullkiller->preparedPlanningRisk,
+			std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+	});
+	runTurn();
+}
+
+void AIGateway::runPlanningRiskBestEffort(const std::function<void()> & prepare)
 {
 	try
 	{
-		auto day = cc->getDate(Date::DAY);
-		logAi->info("Player %d (%s) starting turn, day %d", playerID, playerID.toString(), day);
+		prepare();
+		return;
+	}
+	catch(const InterruptionRequestedException &) { throw; }
+	catch(const TerminationRequestedException &) { throw; }
+	catch(const std::exception & error)
+	{
+		logAi->warn("Planning risk unavailable; using existing policy: %s", error.what());
+	}
+	catch(...)
+	{
+		logAi->warn("Planning risk unavailable; using existing policy after an unknown forecast error");
+	}
+	std::atomic_store_explicit(&nullkiller->preparedPlanningRisk,
+		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+}
 
-		std::shared_lock gsLock(CGameState::mutex);
-		cheatMapReveal(nullkiller);
-		memorizeVisitableObjs(nullkiller->memory, nullkiller->dangerHitMap, playerID, cc);
-		memorizeRevisitableObjs(nullkiller->memory, playerID, cc);
+void AIGateway::preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameStateLock)
+{
+	if(!gameStateLock.owns_lock() || gameStateLock.mutex() != &CGameState::mutex)
+		throw std::logic_error("Risk capture requires the actual held game-state lock");
 
-		const auto start = std::chrono::high_resolution_clock::now();
-		nullkiller->makeTurn();
-		const auto timeElapsedMs = timeElapsed(start);
-		if(timeElapsedMs > 5000)
-			logAi->warn("PERFORMANCE: NK2 makeTurn took %ld ms", timeElapsedMs);
-		else
-			logAi->info("PERFORMANCE: NK2 makeTurn took %ld ms", timeElapsedMs);
-
-		for (const auto *h : cc->getHeroesInfo())
+	// Never use omniscient/open-map callbacks, hidden object lookup, or path
+	// actors already adjusted by hypothetical exchanges/losses. This capture
+	// producer considers only visible ordinary neutral fights by current heroes.
+	if(!cc || cc->getPlayerID() != std::optional<PlayerColor>(playerID)
+		|| nullkiller->isOpenMap() || !status.haveTurn() || !status.isIdle())
+		return;
+	const auto turn = static_cast<uint64_t>(cc->getDate(Date::DAY));
+	// The client dispatches before/after notifications OUTSIDE the game writer.
+	// Their AIMemory updates are not protected by this shared lock. Enumerate
+	// canonical visible map objects instead: game-state application writes that
+	// collection under CGameState::mutex, and this player-bound callback filters
+	// visibility/events. Reduce the temporary object pointers to values here.
+	std::vector<std::pair<ObjectInstanceID, int3>> visibleNeutrals;
+	for(const auto * object : cc->getAllVisitableObjs())
+	{
+		const auto * target = dynamic_cast<const CGCreature *>(object);
+		if(target && target->ID == Obj::MONSTER && target->getOwner() == PlayerColor::NEUTRAL)
+			visibleNeutrals.emplace_back(target->id, target->visitablePos());
+	}
+	std::vector<experimental::PlanningRiskCandidate> candidates;
+	for(const auto * hero : cc->getHeroesInfo())
+	{
+		if(!hero || hero->getOwner() != playerID || !hero->movementPointsRemaining()
+			|| cc->getObj(hero->id, false) != hero)
+			continue;
+		for(const auto & [targetID, targetPosition] : visibleNeutrals)
 		{
-			if (h->movementPointsRemaining())
-				logAi->warn("Hero %s has %d MP left", h->getNameTranslated(), h->movementPointsRemaining());
+			if(targetPosition.z != hero->visitablePos().z)
+				continue;
+			candidates.push_back({hero->id, targetID,
+				hero->visitablePos().dist(targetPosition, int3::DIST_MANHATTAN)});
 		}
+	}
 
-		// A recoverable goal may have stopped with an unresolved server action.
-		// Release the game-state lock so its events can finish before endTurn.
+	// No pointer obtained above survives into the unlocked build. The closures
+	// resolve IDs afresh and are invoked only while the explicit lock is held.
+	preparePlanningRiskBatch(gameStateLock, turn, std::move(candidates),
+		[this](const experimental::PlanningRiskCandidate & candidate, uint64_t epoch)
+			-> std::optional<experimental::CapturedRiskRequest>
 		{
-			auto unlock = vstd::makeUnlockSharedGuard(CGameState::mutex);
-			status.waitTillIdle();
-		}
-		if(status.haveTurn())
+			const auto * hero = dynamic_cast<const CGHeroInstance *>(cc->getObj(candidate.hero, false));
+			const auto * target = dynamic_cast<const CGCreature *>(cc->getObj(candidate.target, false));
+			if(!hero || !target || !hero->movementPointsRemaining()
+				|| hero->visitablePos().z != target->visitablePos().z)
+				return std::nullopt;
+			return experimental::captureNeutralRisk(*cc, *hero, *target, epoch);
+		},
+		[this, turn]
+		{
+			return cc->getPlayerID() == std::optional<PlayerColor>(playerID)
+				&& !nullkiller->isOpenMap() && status.haveTurn() && status.isIdle()
+				&& static_cast<uint64_t>(cc->getDate(Date::DAY)) == turn;
+		});
+}
+
+void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & gameStateLock,
+	uint64_t turn, std::vector<experimental::PlanningRiskCandidate> candidates,
+	const RiskCapture & capture, const std::function<bool()> & stillEligible, const RiskBuild & build)
+{
+	auto * capability = Nullkiller::planningTurnLocks;
+	if(!capability || capability->planner != nullkiller.get()
+		|| &capability->gameState != &gameStateLock || !gameStateLock.owns_lock()
+		|| gameStateLock.mutex() != &CGameState::mutex || !capability->sharedStorage.owns_lock()
+		|| capability->sharedStorage.mutex() != &AISharedStorage::locker)
+		throw std::logic_error("Risk batch requires scoped gateway planning locks");
+
+	std::atomic_store_explicit(&nullkiller->preparedPlanningRisk,
+		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+	if(!stillEligible())
+		return;
+
+	const auto epoch = nullkiller->planningRiskEpoch.load(std::memory_order_acquire);
+	const auto selected = experimental::selectRiskCandidates(std::move(candidates), turn);
+	std::vector<experimental::CapturedRiskRequest> requests;
+	std::vector<experimental::PlanningRiskCandidate> capturedCandidates;
+	std::vector<experimental::PlanningRiskKey> keys;
+	for(const auto & candidate : selected)
+	{
+		auto request = capture(candidate, epoch);
+		if(!request || request->key.epoch != epoch || request->key.hero != candidate.hero
+			|| request->key.target != candidate.target || request->key.capturedState.empty())
+			continue;
+		keys.push_back(request->key);
+		capturedCandidates.push_back(candidate);
+		requests.push_back(std::move(*request));
+	}
+	if(requests.empty())
+		return;
+
+	// Reserve the remaining turn budget before running any detached work. If a
+	// builder throws without returning accounting, conservatively consume it;
+	// retries must not silently create another 42-scenario allowance.
+	const auto previousMemo = planningRiskMemo;
+	auto exceptionMemo = std::make_shared<experimental::PlanningRiskMemo>();
+	if(previousMemo && previousMemo->turn == turn)
+		*exceptionMemo = *previousMemo;
+	exceptionMemo->turn = turn;
+	exceptionMemo->consumedScenarios = experimental::PlanningRiskTable::MAX_SCENARIOS_PER_TURN;
+	planningRiskMemo = std::move(exceptionMemo);
+
+	std::shared_ptr<const experimental::PlanningRiskTable> table;
+	gameStateLock.unlock();
+	try
+	{
+		// Only detached snapshots and immutable memo data reach this call.
+		// aiStateMutex is not held. Shared path-storage serialization IS retained
+		// for existing paths' lifetime; rollout must never access or wait on it.
+		table = build(std::move(requests), turn,
+			experimental::PlanningRiskTable::MAX_SCENARIOS_PER_TURN, previousMemo);
+	}
+	catch(...)
+	{
+		gameStateLock.lock();
+		throw;
+	}
+	gameStateLock.lock();
+	if(!table)
+		return;
+
+	// Spent scenarios count even when subsequent visibility/epoch/key checks
+	// reject the table. This is turn-thread-only; never launch concurrent builds.
+	planningRiskMemo = table->memo();
+	if(capability->ensureReady)
+		capability->ensureReady();
+	nullkiller->makingTurnInterruption.interruptionPoint();
+	if(nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch || !stillEligible())
+		return;
+	for(size_t index = 0; index < keys.size(); ++index)
+	{
+		auto current = capture(capturedCandidates[index], epoch);
+		if(!current || !(current->key == keys[index]))
+			return; // All-or-nothing publication; unknown is not a penalty.
+	}
+	if(nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch || !stillEligible())
+		return;
+
+	auto publication = std::make_shared<Nullkiller::PreparedPlanningRisk>();
+	publication->epoch = epoch;
+	publication->keys = std::move(keys);
+	publication->table = std::move(table);
+	std::atomic_store_explicit(&nullkiller->preparedPlanningRisk,
+		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>(std::move(publication)), std::memory_order_release);
+	// Client notifications run outside the game-state writer. Close their
+	// invalidate-before-store race using the independently atomic risk epoch.
+	if(nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch)
+		std::atomic_store_explicit(&nullkiller->preparedPlanningRisk,
+			std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+}
+
+void AIGateway::makeTurn()
+{
+	makeTurn(planningTurnGeneration.load(std::memory_order_acquire));
+}
+
+void AIGateway::makeTurn(uint64_t generation)
+{
+	try
+	{
+		withPlanningTurnLocks([this, generation](std::shared_lock<std::shared_mutex> & gsLock)
+		{
+			checkPlanningGeneration(generation);
+			nullkiller->makingTurnInterruption.reset();
+			Nullkiller::planningTurnLocks->ensureReady = [this, &gsLock, generation]
+			{
+				ensurePlanningTurnReady(gsLock, generation);
+			};
+			ensurePlanningTurnReady(gsLock, generation);
+			auto day = cc->getDate(Date::DAY);
+			logAi->info("Player %d (%s) starting turn, day %d", playerID, playerID.toString(), day);
+
+			cheatMapReveal(nullkiller);
+			memorizeVisitableObjs(nullkiller->memory, nullkiller->dangerHitMap, playerID, cc);
+			memorizeRevisitableObjs(nullkiller->memory, playerID, cc);
+
+			const auto start = std::chrono::high_resolution_clock::now();
+			if constexpr(ENABLE_STAGED_RISK_PREPARATION)
+				withPlanningRiskPreparation(gsLock, [this] { nullkiller->makeTurn(); });
+			else
+				nullkiller->makeTurn();
+			const auto timeElapsedMs = timeElapsed(start);
+			if(timeElapsedMs > 5000)
+				logAi->warn("PERFORMANCE: NK2 makeTurn took %ld ms", timeElapsedMs);
+			else
+				logAi->info("PERFORMANCE: NK2 makeTurn took %ld ms", timeElapsedMs);
+
+			for (const auto *h : cc->getHeroesInfo())
+			{
+				if (h->movementPointsRemaining())
+					logAi->warn("Hero %s has %d MP left", h->getNameTranslated(), h->movementPointsRemaining());
+			}
+
+			// Pending actions must complete before EndTurn; turn generation and
+			// actual server ownership are checked again after every unlocked wait.
+			ensurePlanningTurnReady(gsLock, generation);
 			endTurn();
+		}, generation);
 	}
 	catch (const InterruptionRequestedException &)
 	{
@@ -1351,26 +1646,25 @@ void AIGateway::tryRealize(Goals::Trade & g) //trade
 
 void AIGateway::endTurn()
 {
+	const auto * capability = Nullkiller::planningTurnLocks;
+	if(!capability || capability->planner != nullkiller.get())
+		throw std::logic_error("EndTurn requires the owning gateway turn scope");
+	const auto generation = capability->generation;
+	ensurePlanningTurnReady(capability->gameState, generation);
 	logAi->info("Player %d (%s) ends turn", playerID, playerID.toString());
-	if(!status.haveTurn())
-	{
-		logAi->error("Not having turn at the end of turn???");
-	}
-
 	logAi->debug("Resources at the end of turn: %s", cc->getResourceAmount().toString());
 
-	if(cc->getPlayerStatus(playerID) != EPlayerStatus::INGAME)
+	while(true)
 	{
-		logAi->info("Ending turn is not needed because we already lost");
-		return;
-	}
-
-	do
-	{
+		ensurePlanningTurnReady(capability->gameState, generation);
 		cc->endTurn();
+		// The callback may release the game lock while awaiting realization.
+		// Never let an older worker retry into a subsequently started turn.
+		if(generation != planningTurnGeneration.load(std::memory_order_acquire)
+			|| !status.haveTurn() || !cc->isPlayerMakingTurn(playerID)
+			|| cc->getPlayerStatus(playerID) != EPlayerStatus::INGAME)
+			break;
 	}
-	while(status.haveTurn()); //for some reasons, our request may fail -> stop requesting end of turn only after we've received a confirmation that it's over
-
 	logGlobal->info("Player %d (%s) ended turn", playerID, playerID.toString());
 }
 
@@ -1384,6 +1678,7 @@ void AIGateway::buildArmyIn(const CGTownInstance * t)
 
 void AIGateway::finish()
 {
+	planningTurnGeneration.fetch_add(1, std::memory_order_acq_rel);
 	nullkiller->makingTurnInterruption.interruptThread();
 
 	if (asyncTasks)
@@ -1548,15 +1843,19 @@ bool AIStatus::isIdle()
 		&& objectsBeingVisited.empty() && !ongoingHeroMovement && !ongoingChannelProbing;
 }
 
-void AIStatus::waitTillIdle()
+void AIStatus::waitTillIdle(const std::function<void()> & checkContinuation)
 {
 	std::unique_lock<std::mutex> lock(mx);
 	while(battle != NO_BATTLE || !remainingQueries.empty() || !requestToQueryID.empty()
 		|| !objectsBeingVisited.empty() || ongoingHeroMovement || ongoingChannelProbing)
 	{
+		if(checkContinuation)
+			checkContinuation(); // Atomic generation only; must not reenter AIStatus.
 		cv.wait_for(lock, std::chrono::milliseconds(10));
 		aiGw->nullkiller->makingTurnInterruption.interruptionPoint();
 	}
+	if(checkContinuation)
+		checkContinuation();
 }
 
 void AIStatus::waitTillFree()

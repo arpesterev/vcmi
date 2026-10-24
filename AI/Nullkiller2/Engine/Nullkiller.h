@@ -14,6 +14,7 @@
 #include "Settings.h"
 #include "AIMemory.h"
 #include "DeepDecomposer.h"
+#include "Experimental/PlanningRiskTable.h"
 #include "../Analyzers/DangerHitMapAnalyzer.h"
 #include "../Analyzers/BuildAnalyzer.h"
 #include "../Analyzers/ArmyManager.h"
@@ -22,6 +23,8 @@
 #include "../Helpers/ArmyFormation.h"
 
 #include "../../../lib/ConditionalWait.h"
+#include <shared_mutex>
+#include <thread>
 
 VCMI_LIB_NAMESPACE_BEGIN
 
@@ -79,6 +82,8 @@ enum class TaskExecutionResult { SUCCESS, REPLAN, STOP };
 class Nullkiller
 {
 	friend class PlannerRegressionAccess;
+	friend class PlanningRiskSchedulerRegressionAccess;
+	friend class AIGateway;
 private:
 	const CGHeroInstance * activeHero;
 	int3 targetTile;
@@ -106,10 +111,37 @@ private:
 	static constexpr unsigned MAX_LOCAL_RECOVERIES = 3;
 	// Policy margin, not a claim of optimal play: switch for >20% better goals.
 	static constexpr float INTENTION_PRIORITY_BONUS = 1.20f;
+	// Preparation is installed only for the gateway's actual held lock scope.
+	// Standalone updateState/test calls have no authority to unlock game state.
+	struct PlanningTurnLocks
+	{
+		Nullkiller * planner;
+		std::unique_lock<std::mutex> & sharedStorage;
+		std::shared_lock<std::shared_mutex> & gameState;
+		uint64_t generation;
+		std::function<void()> ensureReady;
+		std::function<void()> prepareRisk;
+	};
+	// The capability and callbacks never cross thread boundaries. Other threads
+	// see their own null capability, including while the owning scope tears down.
+	static thread_local PlanningTurnLocks * planningTurnLocks;
+	std::atomic<uint64_t> planningRiskEpoch{0};
+	struct PreparedPlanningRisk
+	{
+		uint64_t epoch;
+		std::vector<experimental::PlanningRiskKey> keys;
+		std::shared_ptr<const experimental::PlanningRiskTable> table;
+	};
+	// Access this shared_ptr only through atomic_load/atomic_store. No decision
+	// consumer is enabled: calibration and producer-path tests are still gates.
+	std::shared_ptr<const PreparedPlanningRisk> preparedPlanningRisk;
+	void invalidatePlanningRisk();
+	void preparePlanningRiskForStateUpdate();
 	PathfinderSettings getPathfinderSettings() const;
 	void beginPlanningTurn();
 	bool expandSearch();
-	Goals::TTaskVec selectEvaluatedTasks(const Goals::TGoalVec & tasks) const;
+	Goals::TTaskVec selectEvaluatedTasks(const Goals::TGoalVec & tasks, float executionFloor) const;
+	Goals::TTaskVec prepareExecutionPlan(Goals::TTaskVec selectedTasks) const;
 
 public:
 	static std::unique_ptr<ObjectGraph> baseGraph;

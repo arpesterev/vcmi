@@ -24,6 +24,10 @@ namespace Goals
 	{
 	private:
 		const CGHeroInstance * heroToBuy;
+		bool prepareDefence = false;
+		TResources defenceBudget;
+		std::vector<creInfo> defenceCreatures;
+		uint64_t requiredDefenceStrength = 0;
 
 	public:
 		RecruitHero(const CGTownInstance * townWithTavern, const CGHeroInstance * heroToBuy)
@@ -36,6 +40,16 @@ namespace Goals
 		RecruitHero(const CGTownInstance * townWithTavern)
 			: RecruitHero(townWithTavern, nullptr)
 		{
+		}
+
+		RecruitHero(const CGTownInstance * town, const CGHeroInstance * hero,
+			const TResources & budget, const std::vector<creInfo> & creatures, uint64_t requiredStrength)
+			: RecruitHero(town, hero)
+		{
+			prepareDefence = true;
+			defenceBudget = budget;
+			defenceCreatures = creatures;
+			requiredDefenceStrength = requiredStrength;
 		}
 
 		bool operator==(const RecruitHero & other) const override

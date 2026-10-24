@@ -42,7 +42,8 @@ public:
 	}
 	static void update(Nullkiller & ai) { ai.updateState(); }
 	static void nextTurn(Nullkiller & ai) { ai.beginPlanningTurn(); }
-	static Goals::TTaskVec select(Nullkiller & ai, const Goals::TGoalVec & tasks) { return ai.selectEvaluatedTasks(tasks); }
+	static Goals::TTaskVec select(Nullkiller & ai, const Goals::TGoalVec & tasks, float executionFloor = 0) { return ai.selectEvaluatedTasks(tasks, executionFloor); }
+	static Goals::TTaskVec executionPlan(Nullkiller & ai, const Goals::TGoalVec & tasks) { return ai.prepareExecutionPlan(ai.selectEvaluatedTasks(tasks, 0)); }
 	static TaskExecutionResult execute(Nullkiller & ai, const Goals::TTask & task) { return ai.executeTask(task); }
 	static bool expand(Nullkiller & ai) { return ai.expandSearch(); }
 	static bool dirty(const Nullkiller & ai) { return ai.pathfinderInvalidated; }
@@ -277,6 +278,37 @@ TEST_F(Nullkiller2PlannerContinuityRegression, EqualPriorityIndependentTasksKeep
 	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*selected[2]).objid, 102);
 }
 
+TEST_F(Nullkiller2PlannerContinuityRegression, FinalExecutionPlanUsesRawUrgencyForIndependentIntentions)
+{
+	progressEast();
+	const auto tasks = PlannerRegressionAccess::executionPlan(ai, {
+		journey(second, west, 1.1f), journey(first, east, 1)});
+	ASSERT_EQ(tasks.size(), 2u);
+	EXPECT_EQ(tasks[0]->getHero(), &second);
+	EXPECT_EQ(tasks[1]->getHero(), &first);
+	const auto belowFloor = PlannerRegressionAccess::executionPlan(ai, {
+		journey(first, east, 0.009f), journey(second, west, 0.0105f)});
+	ASSERT_EQ(belowFloor.size(), 2u);
+	EXPECT_EQ(belowFloor[0]->getHero(), &second);
+	EXPECT_EQ(belowFloor[1]->getHero(), &first);
+}
+
+TEST_F(Nullkiller2PlannerContinuityRegression, FinalExecutionPlanPreservesPriorityAndStableTies)
+{
+	int executions = 0;
+	const auto tasks = PlannerRegressionAccess::executionPlan(ai, {
+		sptr(ScriptedGoal(103, executions, false)),
+		sptr(ScriptedGoal(104, executions, false).setpriority(2)),
+		sptr(ScriptedGoal(101, executions, false))});
+	ASSERT_EQ(tasks.size(), 3u);
+	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*tasks[0]).objid, 104);
+	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*tasks[1]).objid, 103);
+	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*tasks[2]).objid, 101);
+	const auto empty = PlannerRegressionAccess::executionPlan(ai, {});
+	ASSERT_EQ(empty.size(), 1u);
+	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*empty[0]).goalType, INVALID);
+}
+
 TEST_F(Nullkiller2PlannerContinuityRegression, RecoveryHasStrictPerTurnBudget)
 {
 	int executions = 0;
@@ -370,6 +402,34 @@ TEST_F(Nullkiller2PlannerContinuityRegression, DefenceCandidatesDisableHysteresi
 	ASSERT_EQ(selected.size(), 1u);
 	EXPECT_NE(dynamic_cast<Composition *>(selected.front().get()), nullptr);
 }
+TEST_F(Nullkiller2PlannerContinuityRegression, CourierDefencePreventsCarrierIntentionBonus)
+{
+	progressEast(&second);
+	int unusedExecutions = 0;
+	auto marker = sptr(ScriptedGoal(-1, unusedExecutions, false));
+	marker->goalType = DEFEND_TOWN;
+	Composition defence;
+	defence.addNext(marker).addNext(journey(second, west, 1.1f));
+	defence.priority = 1.1f;
+	const auto selected = PlannerRegressionAccess::select(ai, {
+		journey(first, east, 1, &second), sptr(defence)});
+	ASSERT_EQ(selected.size(), 1u);
+	EXPECT_NE(dynamic_cast<Composition *>(selected.front().get()), nullptr);
+	EXPECT_TRUE(selected.front()->isObjectAffected(second.id));
+}
+
+TEST_F(Nullkiller2PlannerContinuityRegression, FuzzyExecutionFloorPreventsIneligibleSameHeroRetention)
+{
+	progressEast();
+	const auto selected = PlannerRegressionAccess::select(ai, {
+		journey(first, east, 0.009f), journey(first, west, 0.0105f)}, 0.01f);
+	EXPECT_EQ(selectedDestination(selected), west);
+	// Above the execution floor, near-tie retention still works normally.
+	const auto eligible = PlannerRegressionAccess::select(ai, {
+		journey(first, east, 0.01f), journey(first, west, 0.0105f)}, 0.01f);
+	EXPECT_EQ(selectedDestination(eligible), east);
+}
+
 TEST_F(Nullkiller2PlannerContinuityRegression, TargetDisappearanceAndOwnershipChangeRemoveCommitmentBonus)
 {
 	CGHeroInstance target{callback.get()};

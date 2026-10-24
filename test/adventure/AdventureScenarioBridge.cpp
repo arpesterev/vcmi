@@ -41,6 +41,37 @@
 #include <thread>
 #include <shared_mutex>
 
+namespace NK2AI
+{
+// This executable does not link PlanningRiskSchedulerRegression.cpp. Reuse its
+// private regression friend without exposing a new production test API.
+class PlanningRiskSchedulerRegressionAccess
+{
+public:
+	static void plannerTurn(AIGateway & gateway)
+	{
+		static_assert(!AIGateway::ENABLE_STAGED_RISK_PREPARATION,
+			"Map bridge must not silently activate experimental risk preparation");
+		const auto generation = gateway.planningTurnGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+		gateway.status.startedTurn();
+		gateway.withPlanningTurnLocks([&gateway, generation](std::shared_lock<std::shared_mutex> & gameStateLock)
+		{
+			gateway.nullkiller->makingTurnInterruption.reset();
+			Nullkiller::planningTurnLocks->ensureReady = [&gateway, &gameStateLock, generation]
+			{
+				gateway.ensurePlanningTurnReady(gameStateLock, generation);
+			};
+			gateway.ensurePlanningTurnReady(gameStateLock, generation);
+			AIGateway::memorizeVisitableObjs(gateway.nullkiller->memory, gateway.nullkiller->dangerHitMap,
+				gateway.playerID, gateway.cc);
+			AIGateway::memorizeRevisitableObjs(gateway.nullkiller->memory, gateway.playerID, gateway.cc);
+			gateway.nullkiller->makeTurn();
+			gateway.ensurePlanningTurnReady(gameStateLock, generation);
+		}, generation);
+	}
+};
+}
+
 namespace
 {
 // Single-threaded fixture driver calls the production planner directly. It does
@@ -215,6 +246,8 @@ public:
 				else gateway->tileHidden(fow->tiles);
 			}
 		}
+		else if(auto * endTurn = dynamic_cast<PlayerEndsTurn *>(&pack))
+			gateway->playerEndsTurn(endTurn->player);
 		else if(auto * end = dynamic_cast<PlayerEndsGame *>(&pack))
 			gateway->gameOver(end->player, end->victoryLossCheckResult);
 
@@ -364,12 +397,7 @@ protected:
 			{
 				try
 				{
-					std::shared_lock plannerLock(CGameState::mutex); // Gateway waitTillFree temporarily releases this lock.
-					gateway->status.startedTurn();
-					gateway->nullkiller->makingTurnInterruption.reset();
-					NK2AI::AIGateway::memorizeVisitableObjs(gateway->nullkiller->memory, gateway->nullkiller->dangerHitMap, PlayerColor(0), bridge.callback);
-					NK2AI::AIGateway::memorizeRevisitableObjs(gateway->nullkiller->memory, PlayerColor(0), bridge.callback);
-					gateway->nullkiller->makeTurn();
+					NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway);
 				}
 				catch(const InterruptionRequestedException &)
 				{
@@ -442,9 +470,9 @@ TEST_F(AdventureScenarioBridge, GuardedObjectiveDoesNotPreventSafeAlternative)
 	ASSERT_TRUE(bridge.callback->isVisible(safe)); ASSERT_TRUE(bridge.callback->isVisible(guarded));
 	const auto * monster = dynamic_cast<const CGCreature *>(guarded);
 	ASSERT_NE(monster, nullptr) << "Known-danger fixture requires exposed monster, not hidden resource guards";
-	ASSERT_EQ(monster->stacksCount(), 1);
+	ASSERT_EQ(monster->CArmedInstance::stacksCount(), 1);
 	ASSERT_EQ(monster->getStackCount(SlotID(0)), 999);
-	ASSERT_EQ(monster->getCreature(SlotID(0))->getId(), CreatureID(0)); // core pikeman
+	ASSERT_EQ(monster->CArmedInstance::getCreature(SlotID(0))->getId(), CreatureID(0)); // core pikeman
 	const auto danger = gateway->nullkiller->dangerEvaluator->evaluateDanger(guarded);
 	ASSERT_GT(danger, 0u);
 	for(const auto * hero : bridge.callback->getHeroesInfo())

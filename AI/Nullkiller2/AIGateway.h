@@ -20,6 +20,7 @@
 #include "../../lib/spells/CSpellHandler.h"
 #include "Pathfinding/AIPathfinder.h"
 #include "Engine/Nullkiller.h"
+#include <shared_mutex>
 
 VCMI_LIB_NAMESPACE_BEGIN
 class AsyncRunner;
@@ -55,7 +56,7 @@ public:
 	void removeQuery(QueryID ID);
 	int getQueriesCount();
 	bool isIdle();
-	void waitTillIdle();
+	void waitTillIdle(const std::function<void()> & checkContinuation = {});
 	void startedTurn();
 	void madeTurn();
 	void waitTillFree();
@@ -95,6 +96,7 @@ public:
 
 	void initGameInterface(std::shared_ptr<Environment> env, std::shared_ptr<CCallback> callback) override;
 	void yourTurn(QueryID queryID) override;
+	void playerEndsTurn(PlayerColor player) override;
 
 	void heroGotLevel(const CGHeroInstance * hero, PrimarySkill pskill, std::vector<SecondarySkill> & skills, QueryID queryID) override; //pskill is gained primary skill, interface has to choose one of given skills and call callback with selection id
 	void commanderGotLevel(const CCommanderInstance * commander, std::vector<ui32> skills, QueryID queryID) override; //TODO
@@ -194,6 +196,32 @@ public:
 
 	static void pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const CGHeroInstance * h, const CGHeroInstance * other = nullptr);
 private:
+	friend class PlanningRiskSchedulerRegressionAccess;
+	// Deliberately not a setting: staged code cannot enable decision behavior.
+	static constexpr bool ENABLE_STAGED_RISK_PREPARATION = false;
+	using RiskCapture = std::function<std::optional<experimental::CapturedRiskRequest>(
+		const experimental::PlanningRiskCandidate &, uint64_t)>;
+	using RiskBuild = std::function<std::shared_ptr<const experimental::PlanningRiskTable>(
+		std::vector<experimental::CapturedRiskRequest>, uint64_t, unsigned,
+		std::shared_ptr<const experimental::PlanningRiskMemo>)>;
+	// Only the scoped turn-thread preparation hook reads/writes this memo.
+	// Source invalidation removes publications, not exact-physics memo entries.
+	std::shared_ptr<const experimental::PlanningRiskMemo> planningRiskMemo;
+	std::atomic<uint64_t> planningTurnGeneration{0};
+	void makeTurn(uint64_t generation);
+	void checkPlanningGeneration(uint64_t generation) const;
+	void ensurePlanningTurnReady(std::shared_lock<std::shared_mutex> & gameStateLock, uint64_t generation);
+	void withPlanningTurnLocks(
+		const std::function<void(std::shared_lock<std::shared_mutex> &)> & runTurn, uint64_t generation,
+		const std::function<void(bool)> & onStorageContention = {});
+	void withPlanningRiskPreparation(std::shared_lock<std::shared_mutex> & gameStateLock,
+		const std::function<void()> & runTurn);
+	void preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameStateLock);
+	void runPlanningRiskBestEffort(const std::function<void()> & prepare);
+	void preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & gameStateLock,
+		uint64_t turn, std::vector<experimental::PlanningRiskCandidate> candidates,
+		const RiskCapture & capture, const std::function<bool()> & stillEligible,
+		const RiskBuild & build = experimental::PlanningRiskTable::build);
 	void invalidatePlanningData();
 };
 

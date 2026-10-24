@@ -26,6 +26,8 @@ namespace Goals
 	private:
 		std::optional<TResources> spendingLimit;
 		std::vector<creInfo> plannedCreatures;
+		const CGHeroInstance * defenceCommander = nullptr;
+		uint64_t requiredDefenceStrength = 0;
 		BuyArmy()
 			: ElementarGoal(Goals::BUY_ARMY)
 		{
@@ -39,12 +41,19 @@ namespace Goals
 			priority = 3;//TODO: evaluate?
 		}
 
-		BuyArmy(const CGTownInstance * town, int value, const TResources & budget, const std::vector<creInfo> & creatures = {})
+		BuyArmy(const CGTownInstance * town, int value, const TResources & budget, const std::vector<creInfo> & creatures = {},
+			const CGHeroInstance * commander = nullptr, uint64_t requiredStrength = 0)
 			: BuyArmy(town, value)
 		{
 			spendingLimit = budget;
 			plannedCreatures = creatures;
+			defenceCommander = commander;
+			requiredDefenceStrength = requiredStrength;
+			hero = commander;
 		}
+
+		static bool isDefencePlanAvailable(const CGTownInstance * town, const CGHeroInstance * defender,
+			const TResources & available, const TResources & budget, const std::vector<creInfo> & creatures);
 
 		bool operator==(const BuyArmy & other) const override;
 

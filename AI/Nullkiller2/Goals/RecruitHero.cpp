@@ -11,6 +11,9 @@
 #include "Goals.h"
 #include "../AIGateway.h"
 #include "../AIUtility.h"
+#include "BuyArmy.h"
+#include "ExchangeSwapTownHeroes.h"
+#include "../Behaviors/DefenceBehavior.h"
 #include "../../../lib/constants/StringConstants.h"
 
 
@@ -57,6 +60,26 @@ void RecruitHero::accept(AIGateway * aiGw)
 	if(!heroToHire)
 		throw cannotFulfillGoalException("No hero to hire!");
 
+	if(prepareDefence)
+	{
+		auto totalCost = defenceBudget;
+		totalCost[EGameResID::GOLD] += GameConstants::HERO_GOLD_COST;
+		auto resourcesAfterHire = aiGw->nullkiller->getFreeResources();
+		if(t->getVisitingHero() || t->getGarrisonHero() || !t->hasBuilt(BuildingID::TAVERN)
+			|| !vstd::contains(heroes, heroToHire) || aiGw->nullkiller->heroManager->heroCapReached()
+			|| !resourcesAfterHire.canAfford(totalCost))
+			throw cannotFulfillGoalException("Town rescue hire or total budget is no longer available.");
+		resourcesAfterHire[EGameResID::GOLD] -= GameConstants::HERO_GOLD_COST;
+		if(!BuyArmy::isDefencePlanAvailable(t, heroToHire, resourcesAfterHire, defenceBudget, defenceCreatures))
+			throw cannotFulfillGoalException("Town rescue stock or army slots are no longer available.");
+		double projectedStrength = DefenceBehavior::combinedDefenceStrength(t, heroToHire);
+		for(const auto & creature : defenceCreatures)
+			if(creature.creID != CreatureID::NONE)
+				projectedStrength += creature.count * static_cast<double>(creature.creID.toCreature()->getAIValue()) * heroToHire->getFightingStrength();
+		if(projectedStrength < requiredDefenceStrength)
+			throw cannotFulfillGoalException("Town rescue would no longer provide the required defence strength.");
+	}
+
 	if(t->getVisitingHero())
 	{
 		aiGw->cc->swapGarrisonHero(t);
@@ -75,6 +98,28 @@ void RecruitHero::accept(AIGateway * aiGw)
 		std::unique_lock lockGuard(aiGw->nullkiller->aiStateMutex);
 		aiGw->nullkiller->heroManager->update();
 		aiGw->nullkiller->objectClusterizer->reset();
+	}
+
+	if(prepareDefence)
+	{
+		const auto * defender = t->getVisitingHero();
+		if(!BuyArmy::isDefencePlanAvailable(t, defender, aiGw->nullkiller->getFreeResources(), defenceBudget, defenceCreatures))
+			throw cannotFulfillGoalException("Hero hired, but the remaining town rescue plan is no longer available.");
+		if(!defenceCreatures.empty())
+		{
+			BuyArmy purchase(t, std::numeric_limits<int>::max(), defenceBudget, defenceCreatures);
+			try
+			{
+				purchase.accept(aiGw);
+			}
+			catch(const cannotFulfillGoalException & error)
+			{
+				throw cannotFulfillGoalException(std::string("Hero hired; town troop purchase failed without rollback: ") + error.what());
+			}
+		}
+		if(DefenceBehavior::combinedDefenceStrength(t, defender) < requiredDefenceStrength)
+			throw cannotFulfillGoalException("Town rescue recruitment was incomplete; hero and any bought troops remain in town.");
+		ExchangeSwapTownHeroes(t, defender, HeroLockedReason::DEFENCE, true).accept(aiGw);
 	}
 }
 

@@ -22,12 +22,14 @@ namespace Goals
 		const CGTownInstance * town;
 		const CGHeroInstance * garrisonHero;
 		HeroLockedReason lockingReason;
+		bool directDefencePreparation;
 
 	public:
 		ExchangeSwapTownHeroes(
 			const CGTownInstance * town,
 			const CGHeroInstance * garrisonHero = nullptr,
-			HeroLockedReason lockingReason = HeroLockedReason::NOT_LOCKED);
+			HeroLockedReason lockingReason = HeroLockedReason::NOT_LOCKED,
+			bool directDefencePreparation = false);
 
 		void accept(AIGateway * aiGw) override;
 		std::string toString() const override;

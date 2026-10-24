@@ -93,6 +93,61 @@ HitMapInfo urgentTownThreat(const CGTownInstance * town, const Nullkiller * aiNk
 		consider(threat);
 	return result;
 }
+struct DefencePurchase
+{
+	TResources cost;
+	std::vector<creInfo> creatures;
+	uint64_t value = 0;
+	bool feasible = false;
+};
+
+DefencePurchase planDefencePurchase(const Nullkiller * aiNk, const CGTownInstance * town,
+	const CGHeroInstance * defender, uint64_t danger, const TResources & available)
+{
+	DefencePurchase result;
+	std::set<CreatureID> types;
+	for(const auto & slot : town->getUpperArmy()->Slots())
+		types.insert(slot.second->getCreatureID());
+	if(defender && defender != town->getUpperArmy())
+		for(const auto & slot : defender->Slots())
+			types.insert(slot.second->getCreatureID());
+	if(types.size() > GameConstants::ARMY_SIZE)
+		return result;
+	const auto strength = DefenceBehavior::combinedDefenceStrength(town, defender);
+	const double multiplier = defender ? defender->getFightingStrength() : 1.0;
+	if(multiplier <= 0 || !std::isfinite(multiplier))
+		return result;
+	if(strength >= danger)
+	{
+		result.feasible = true;
+		return result;
+	}
+	for(const auto & creature : aiNk->armyManager->getArmyAvailableToBuy(town->getUpperArmy(), town, available))
+	{
+		if(!types.count(creature.creID) && types.size() == GameConstants::ARMY_SIZE)
+			continue;
+		const auto power = creature.creID.toCreature()->getAIValue();
+		if(!power)
+			continue;
+		const auto missing = static_cast<double>(danger) - strength - result.value * multiplier;
+		const int count = static_cast<int>(std::min<double>(creature.count, std::ceil(missing / (power * multiplier))));
+		if(count <= 0)
+			break;
+		types.insert(creature.creID);
+		auto planned = creature;
+		planned.count = count;
+		result.creatures.push_back(planned);
+		result.value += static_cast<uint64_t>(count) * power;
+		result.cost += creature.creID.toCreature()->getFullRecruitCost() * count;
+		if(strength + result.value * multiplier >= danger)
+		{
+			result.feasible = available.canAfford(result.cost);
+			break;
+		}
+	}
+	return result;
+}
+
 }
 
 Goals::TGoalVec DefenceBehavior::decomposeUrgentPurchases(const Nullkiller * aiNk)
@@ -100,81 +155,72 @@ Goals::TGoalVec DefenceBehavior::decomposeUrgentPurchases(const Nullkiller * aiN
 	Goals::TGoalVec tasks;
 	auto available = aiNk->getFreeResources();
 	auto towns = aiNk->cc->getTownsInfo();
-	std::stable_sort(towns.begin(), towns.end(), [aiNk](const auto * left, const auto * right)
+	RewardEvaluator rewards(aiNk);
+	std::stable_sort(towns.begin(), towns.end(), [&](const auto * left, const auto * right)
 	{
 		const auto a = urgentTownThreat(left, aiNk);
 		const auto b = urgentTownThreat(right, aiNk);
-		return a.turn != b.turn ? a.turn < b.turn : left->id < right->id;
+		if(a.turn != b.turn)
+			return a.turn < b.turn;
+		const auto leftValue = rewards.getStrategicalValue(left);
+		const auto rightValue = rewards.getStrategicalValue(right);
+		return leftValue != rightValue ? leftValue > rightValue : left->id < right->id;
 	});
 	std::set<const CGHeroInstance *> reservedHeroes;
 	for(const auto * town : towns)
 	{
 		const auto threat = urgentTownThreat(town, aiNk);
-		// One intervening AI turn is the preparation horizon. Distant danger
-		// must not permanently consume the economy or immobilize a garrison.
 		if(threat.turn > 1 || !threat.heroPtr.isVerified() || !threat.danger)
 			continue;
 		const auto * defender = town->getGarrisonHero() ? town->getGarrisonHero() : town->getVisitingHero();
-		const auto strength = combinedDefenceStrength(town, defender);
-		if(strength >= threat.danger)
+		auto purchase = planDefencePurchase(aiNk, town, defender, threat.danger, available);
+		if(purchase.feasible && !purchase.value)
+		{
+			// A visitor's numerical strength is not proof that he commands the
+			// town army. Use the server's merge-and-garrison operation explicitly.
+			if(defender && !town->getGarrisonHero())
+				tasks.push_back(sptr(ExchangeSwapTownHeroes(town, defender, HeroLockedReason::DEFENCE, true)
+					.setpriority(1.0f / (1 + threat.turn))));
 			continue;
+		}
 
+		const CGHeroInstance * recruit = nullptr;
+		TResources totalCost = purchase.cost;
 		if(!defender && town->hasBuilt(BuildingID::TAVERN)
 			&& available[EGameResID::GOLD] >= GameConstants::HERO_GOLD_COST
 			&& !aiNk->heroManager->heroCapReached())
 		{
-			auto candidates = aiNk->cc->getAvailableHeroes(town);
-			vstd::erase_if(candidates, [&](const auto * hero) { return reservedHeroes.count(hero) != 0; });
-			const auto * best = selectDefender(town, threat, candidates, available);
-			if(best)
+			auto afterHire = available;
+			afterHire[EGameResID::GOLD] -= GameConstants::HERO_GOLD_COST;
+			for(const auto * hero : aiNk->cc->getAvailableHeroes(town))
 			{
-				available[EGameResID::GOLD] -= GameConstants::HERO_GOLD_COST;
-				reservedHeroes.insert(best);
-				tasks.push_back(sptr(RecruitHero(town, best).setpriority(1.0f / (1 + threat.turn))));
-				continue;
+				if(reservedHeroes.count(hero))
+					continue;
+				auto candidate = planDefencePurchase(aiNk, town, hero, threat.danger, afterHire);
+				auto candidateCost = candidate.cost;
+				candidateCost[EGameResID::GOLD] += GameConstants::HERO_GOLD_COST;
+				if(candidate.feasible && (!purchase.feasible || candidateCost.marketValue() < totalCost.marketValue()))
+				{
+					recruit = hero;
+					purchase = std::move(candidate);
+					totalCost = candidateCost;
+				}
 			}
 		}
-
-		// Buy only enough currently available troops to make holding plausible.
-		// Infeasible towns reserve nothing, leaving funds for other towns.
-		auto army = aiNk->armyManager->getArmyAvailableToBuy(town->getUpperArmy(), town, available);
-		std::set<CreatureID> types;
-		for(const auto & slot : town->getUpperArmy()->Slots())
-			types.insert(slot.second->getCreatureID());
-		if(defender && defender != town->getUpperArmy())
-			for(const auto & slot : defender->Slots())
-				types.insert(slot.second->getCreatureID());
-		if(types.size() > GameConstants::ARMY_SIZE)
+		// Infeasible towns reserve nothing, even when they are more valuable.
+		if(!purchase.feasible)
 			continue;
-		TResources cost;
-		std::vector<creInfo> plannedCreatures;
-		uint64_t value = 0;
-		const double multiplier = defender ? defender->getFightingStrength() : 1.0;
-		for(const auto & creature : army)
+		available -= totalCost;
+		if(recruit)
 		{
-			if(!types.count(creature.creID) && types.size() == GameConstants::ARMY_SIZE)
-				continue;
-			const auto power = creature.creID.toCreature()->getAIValue();
-			if(!power || multiplier <= 0)
-				continue;
-			const auto missing = static_cast<double>(threat.danger) - strength - value * multiplier;
-			const int count = static_cast<int>(std::min<double>(creature.count, std::ceil(missing / (power * multiplier))));
-			if(count <= 0)
-				break;
-			types.insert(creature.creID);
-			auto planned = creature;
-			planned.count = count;
-			plannedCreatures.push_back(planned);
-			value += static_cast<uint64_t>(count) * power;
-			cost += creature.creID.toCreature()->getFullRecruitCost() * count;
-			if(strength + value * multiplier >= threat.danger)
-				break;
+			reservedHeroes.insert(recruit);
+			tasks.push_back(sptr(RecruitHero(town, recruit, purchase.cost, purchase.creatures, threat.danger)
+				.setpriority(1.0f / (1 + threat.turn))));
 		}
-		if(value && strength + value * multiplier >= threat.danger && available.canAfford(cost))
-		{
-			available -= cost;
-			tasks.push_back(sptr(BuyArmy(town, value, cost, plannedCreatures).setpriority(1.0f / (1 + threat.turn))));
-		}
+		else
+			tasks.push_back(sptr(BuyArmy(town, purchase.value, purchase.cost, purchase.creatures,
+				town->getGarrisonHero() ? nullptr : defender, threat.danger)
+				.setpriority(1.0f / (1 + threat.turn))));
 	}
 	return tasks;
 }

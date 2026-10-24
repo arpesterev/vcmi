@@ -125,3 +125,17 @@ fixture correction, NOT a production AI bug fix or permission to reveal guards.
 The old composition remains generator-accessible as `surprise_guarded_resource`,
 marked unsupported and excluded from the acceptance target. The original failed
 evidence remains in the qualification artifacts for commit a44df12f73773033176f42304ab035abb25e79dd; it is not overwritten or reclassified as passed.
+
+## Qualification 3 lock-contract adaptation
+
+The bridge-only existing private regression friend calls the real gateway
+`withPlanningTurnLocks`, acquiring shared path storage before game state. Each
+synchronous red turn advances the actual generation, installs the actual scoped
+readiness closure and checks real server turn ownership before and after planning.
+It never constructs a synthetic capability or calls the risk-preparation hook; a
+static assertion requires the experimental hook to remain disabled. PlayerEndsTurn
+packets forward the production gateway callback after state application.
+The separate executable must NOT link PlanningRiskSchedulerRegression.cpp, which
+defines its own richer version of this test-only friend. This remains synchronous
+planner-turn integration, not qualification of asynchronous client/network threads.
+Qualification 2 is unchanged. This adaptation has not been compiled or executed.
