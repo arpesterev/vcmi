@@ -58,14 +58,27 @@ def run(command, logfile, seconds, cwd=None):
 
 
 
-def capture_first_case_backtrace(executable, evidence, cwd):
+def last_started_reference_case(log):
+    from forced_battle_evidence import EXPECTED_TEST_NAMES
+    names = re.findall(r'^\[ RUN      \] ([^\r\n]+)$', log, re.MULTILINE)
+    if not names or names[-1] not in EXPECTED_TEST_NAMES:
+        return None
+    return names[-1]
+
+
+def capture_first_case_backtrace(executable, evidence, cwd, selected_case='ForcedBattleReference.OrdinaryMelee'):
     """Diagnostic only: no debugger outcome can validate the failed suite."""
     debugger = shutil.which('lldb-18') or shutil.which('lldb') or shutil.which('gdb')
     result = {'attempted': False, 'scenario_passed': False, 'seconds_limit': 30}
     if not debugger:
         result['reason'] = 'No existing debugger; no packages were installed'
         return result
-    case = '--gtest_filter=ForcedBattleReference.OrdinaryMelee'
+    from forced_battle_evidence import EXPECTED_TEST_NAMES
+    if selected_case not in EXPECTED_TEST_NAMES:
+        result['reason'] = 'No declared interrupted reference test found; no diagnostic launched'
+        return result
+    result['selected_case'] = selected_case
+    case = '--gtest_filter=' + selected_case
     if Path(debugger).name.startswith('lldb'):
         command = [debugger, '--no-lldbinit', '--batch', '-o', 'settings set target.load-script-from-symbol-file false',
                    '-o', 'settings set target.disable-aslr false',
@@ -165,7 +178,8 @@ def main():
     except Exception as error:
         result['reason'] = str(error)
         if reference_started and re.search(r'returncode=-(?:11|6),', str(error)):
-            result['crash_diagnostic'] = capture_first_case_backtrace(build / 'bin' / target, evidence, build / 'bin')
+            result['crash_diagnostic'] = capture_first_case_backtrace(build / 'bin' / target, evidence, build / 'bin',
+                last_started_reference_case((evidence / 'tests.log').read_text()))
         raise
     finally:
         (evidence / 'qualification.json').write_text(json.dumps(result, indent=2) + '\n')

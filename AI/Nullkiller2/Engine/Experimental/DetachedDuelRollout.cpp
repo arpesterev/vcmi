@@ -26,7 +26,8 @@ bool supportedBonuses(const battle::Unit & unit, DuelOutcome & result)
 		|| unit.moraleVal() != 0 || unit.luckVal() != 0
 		|| unit.getTotalAttacks(false) != 1 || unit.getTotalAttacks(true) != 1)
 		return false;
-	for(const auto & bonus : *unit.getAllBonuses(Selector::all))
+	const auto effectiveBonuses = unit.getAllBonuses(Selector::all);
+	for(const auto & bonus : *effectiveBonuses)
 	{
 		// Moving conditional bonuses require a re-evaluated bonus graph. This
 		// initial subset has none except native-terrain bonuses, whose terrain

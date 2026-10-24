@@ -66,6 +66,36 @@ class BridgeQualificationTest(unittest.TestCase):
                 run([sys.executable, '-c', 'import time; print("PASS", flush=True); time.sleep(5)'],
                     Path(directory) / 'timeout.log', 0.05)
 
+    def test_case_failure_does_not_hide_later_independent_results(self):
+        from adventure_bridge_qualification import execute_cases
+        calls = []
+        def fake_run(command, logfile, seconds, cwd):
+            calls.append(command)
+            if len(calls) == 1:
+                raise RuntimeError('first case failed')
+            case = next(arg.split('=', 1)[1] for arg in command if arg.startswith('--gtest_filter='))
+            xml = Path(next(arg.split('xml:', 1)[1] for arg in command if arg.startswith('--gtest_output=')))
+            xml.write_text('<testsuites><testsuite><testcase classname="AdventureScenarioBridge" name="' + case.split('.')[1] + '" status="run" result="completed"/></testsuite></testsuites>')
+            self.assertLessEqual(seconds, 180)
+            return 0.1
+        with tempfile.TemporaryDirectory() as directory:
+            results, _ = execute_cases(Path('/unused'), Path(directory), Path(directory), run_case=fake_run)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual([result['status'] for result in results], ['incomplete', 'completed', 'completed', 'completed'])
+        self.assertEqual(results[0]['reason'], 'first case failed')
+
+    def test_exhausted_total_budget_does_not_launch_remaining_cases(self):
+        from adventure_bridge_qualification import execute_cases
+        from unittest.mock import Mock
+        clock = Mock(side_effect=[0, 0, 601, 601, 601, 601])
+        run_case = Mock(side_effect=RuntimeError('timeout=True'))
+        with tempfile.TemporaryDirectory() as directory:
+            results, elapsed = execute_cases(Path('/unused'), Path(directory), Path(directory), run_case=run_case, clock=clock)
+        self.assertEqual(run_case.call_count, 1)
+        self.assertTrue(all(result['status'] == 'incomplete' for result in results))
+        self.assertTrue(all(not result['attempted'] for result in results[1:]))
+        self.assertEqual(elapsed, 601)
+
     def test_missing_xml_cannot_pass(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(FileNotFoundError):

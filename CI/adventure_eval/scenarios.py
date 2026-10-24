@@ -5,6 +5,27 @@ import json
 NAMES = ('productive_move', 'stable_goal_progress', 'blocked_goal_alternative', 'urgent_two_town_defence')
 
 
+def control_object(objects, key, kind):
+    """Bind the named fixture object via the engine-supported visitable position.
+
+    This baseline parses `object` names but CMap::checkForObjectives resolves
+    CONTROL only from `position`. Name-only controls silently mean all of a type.
+    """
+    obj = objects[key]
+    if obj['type'] != kind:
+        raise ValueError('Objective kind does not match named object')
+    mask = obj['template']['mask']
+    width = len(mask[0])
+    if any(len(row) != width for row in mask):
+        raise ValueError('Objective mask must be rectangular')
+    visits = [(x, y) for y, row in enumerate(mask) for x, cell in enumerate(row) if cell in 'AT']
+    if len(visits) != 1:
+        raise ValueError('Objective requires exactly one explicit visitable mask tile')
+    x, y = visits[0]
+    position = [obj['x'] - (width - 1 - x), obj['y'] - (len(mask) - 1 - y), obj['l']]
+    return ['control', {'object': key, 'type': kind, 'position': position}]
+
+
 def configure(repo, parts, name):
     templates = json.loads((repo / 'test/testdata/ObjectPropertyTest/objects.json').read_text())
     terrain_source = json.loads((repo / 'test/testdata/ObjectPropertyTest/surface_terrain.json').read_text())
@@ -31,7 +52,7 @@ def configure(repo, parts, name):
         return obj
 
     def control(key, kind):
-        return ['control', {'object': key, 'type': kind}]
+        return control_object(objects, key, kind)
 
     # Red and blue have fixed distinct heroes; blue is isolated by water in the
     # non-combat scenarios, not by hidden bonuses or altered AI visibility.

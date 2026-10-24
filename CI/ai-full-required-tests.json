@@ -41,6 +41,7 @@
     "CGameStateTest.PlanningBattlefieldEnumerationPreservesRandomVariantOrder",
     "CGameStateTest.PlanningBattlefieldFixedOverrideDoesNotConsumeRandomness",
     "CGameStateTest.PureObjectCandidatesDoNotSampleThreadGlobalRandomness",
+    "CGameStateTest.UncachedBonusListRequiresRetainedOwnerDuringIteration",
     "Nullkiller2AIPathMetadataRegression.DefaultNodeCannotPretendToBeAValidChain",
     "Nullkiller2AIPathMetadataRegression.EmptyPathHasDeterministicMetadata",
     "Nullkiller2AIPathMetadataRegression.ProducerDoesNotUseCompressedPredecessorLoss",

@@ -100,7 +100,8 @@ struct PlanningBattleSnapshot::Impl
 			// Copy the complete effective snapshot exactly once. Otherwise the
 			// normal creature parent would duplicate the copied base statistics.
 			stack->detachFromSource(*stack->getCreature());
-			for(const auto & bonus : *original->getAllBonuses(Selector::all))
+			const auto effectiveBonuses = original->getAllBonuses(Selector::all);
+			for(const auto & bonus : *effectiveBonuses)
 			{
 				// Engine setup reapplies these for the destination context.
 				if(bonus->source == BonusSource::TERRAIN_NATIVE || bonus->source == BonusSource::TERRAIN_OVERLAY)
@@ -213,7 +214,8 @@ try
 			sourceState << ':' << slot.getNum() << ':' << stack->getCreatureID().getNum()
 				<< ':' << stack->getCount() << ':' << stack->getTreeVersion()
 				<< ':' << stack->getCreature()->getTreeVersion();
-			for(const auto & bonus : *stack->getAllBonuses(Selector::all)) append(bonus->toJsonNode().toString());
+			const auto effectiveBonuses = stack->getAllBonuses(Selector::all);
+			for(const auto & bonus : *effectiveBonuses) append(bonus->toJsonNode().toString());
 			append("stack-end");
 		}
 		append("army-end");
@@ -381,7 +383,8 @@ std::string PlanningBattleSnapshot::physicsState() const
 		result << ':' << unit->unitId() << ':' << static_cast<int>(unit->unitSide()) << ':' << unit->unitOwner().getNum()
 			<< ':' << unit->creatureId().getNum() << ':' << unit->unitSlot().getNum() << ':' << unit->getPosition().toInt()
 			<< ':' << unit->getCount() << ':' << unit->getAvailableHealth();
-		for(const auto & bonus : *unit->getAllBonuses(Selector::all)) append(bonus->toJsonNode().toString());
+		const auto effectiveBonuses = unit->getAllBonuses(Selector::all);
+		for(const auto & bonus : *effectiveBonuses) append(bonus->toJsonNode().toString());
 		append("unit-end");
 	}
 	for(const auto & obstacle : battle.battleGetAllObstacles())

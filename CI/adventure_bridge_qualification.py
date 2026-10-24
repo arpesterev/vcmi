@@ -84,6 +84,29 @@ def map_hashes(build):
     return hashes, provenance
 
 
+def execute_cases(executable, evidence, cwd, run_case=run, clock=time.monotonic):
+    """Collect independent failures without extending the shared 600-second cap."""
+    started = clock()
+    results = []
+    for index, case in enumerate(CASES):
+        remaining = 600 - (clock() - started)
+        record = {'test': case, 'status': 'incomplete', 'attempted': False}
+        results.append(record)
+        if remaining <= 0:
+            record['reason'] = 'Total execution budget exhausted'
+            continue
+        record['attempted'] = True
+        xml = evidence / f'test-{index}.xml'
+        try:
+            record['seconds'] = run_case([str(executable), '--gmock_verbose=error', '--gtest_filter=' + case,
+                '--gtest_output=xml:' + str(xml)], evidence / f'test-{index}.log', min(180, remaining), cwd)
+            validate_xml(xml, case)
+            record['status'] = 'completed'
+        except Exception as error:
+            record['reason'] = str(error)
+    return results, clock() - started
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for arg in ('build', 'evidence', 'cache-validation', 'data-archive'):
@@ -129,16 +152,11 @@ def main():
         if digest(executable) != result['binary_sha256'] or map_hashes(build)[0] != result['map_sha256']:
             raise ValueError('No-op changed binary or generated maps')
         result['noop_verified'] = True
-        started = time.monotonic()
-        for index, case in enumerate(CASES):
-            remaining = 600 - (time.monotonic() - started)
-            if remaining <= 0:
-                raise RuntimeError('Total execution budget exhausted')
-            xml = evidence / f'test-{index}.xml'
-            run([str(executable), '--gmock_verbose=error', '--gtest_filter=' + case,
-                 '--gtest_output=xml:' + str(xml)], evidence / f'test-{index}.log', min(180, remaining), build / 'bin')
-            result['executed_tests'].append(validate_xml(xml, case))
-        result.update(status='completed', execution_seconds=time.monotonic() - started)
+        result['case_results'], result['execution_seconds'] = execute_cases(executable, evidence, build / 'bin')
+        result['executed_tests'] = [case['test'] for case in result['case_results'] if case['status'] == 'completed']
+        if len(result['executed_tests']) != len(CASES):
+            raise RuntimeError('One or more required bridge cases failed or were incomplete; see case_results')
+        result['status'] = 'completed'
     except Exception as error:
         result['reason'] = str(error)
         raise

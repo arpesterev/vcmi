@@ -74,3 +74,25 @@ class ReferenceCrashDiagnosticTest(unittest.TestCase):
             result = capture_first_case_backtrace(Path('/bin/reference'), Path('/evidence'), Path('/bin'))
         self.assertFalse(result['scenario_passed'])
         self.assertEqual(result['reason'], 'diagnostic timeout')
+
+
+class InterruptedReferenceDiagnosticTest(unittest.TestCase):
+    def test_selects_last_started_declared_case_not_previous_pass(self):
+        from adventure_qualification import last_started_reference_case
+        log = '[ RUN      ] ForcedBattleReference.OrdinaryMelee\n[       OK ] ForcedBattleReference.OrdinaryMelee\n[ RUN      ] ForcedBattleReference.RangedAgainstSlowMelee\n'
+        self.assertEqual(last_started_reference_case(log), 'ForcedBattleReference.RangedAgainstSlowMelee')
+        for malformed in ('', '[ RUN      ] malicious:*\n', log + '[ RUN      ] unknown\n'):
+            self.assertIsNone(last_started_reference_case(malformed))
+
+    def test_retargets_bounded_debugger_and_rejects_unknown_case(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from adventure_qualification import capture_first_case_backtrace
+        with patch('adventure_qualification.shutil.which', return_value='/usr/bin/lldb-18'), patch('adventure_qualification.run', return_value=0.1) as run:
+            result = capture_first_case_backtrace(Path('/bin/reference'), Path('/evidence'), Path('/bin'), 'ForcedBattleReference.RangedAgainstSlowMelee')
+            self.assertIn('--gtest_filter=ForcedBattleReference.RangedAgainstSlowMelee', run.call_args.args[0])
+            self.assertFalse(result['scenario_passed'])
+            run.reset_mock()
+            result = capture_first_case_backtrace(Path('/bin/reference'), Path('/evidence'), Path('/bin'), None)
+            run.assert_not_called()
+            self.assertFalse(result['attempted'])

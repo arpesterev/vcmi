@@ -84,3 +84,18 @@ Real server forced-battle outcomes belong to the separate
 `vcmi_forced_battle_reference` target. Paired equal-scalar mismatches must count
 false-safe attacks and false-dangerous refusals using completed battles, not the
 planner's own formula. Neither target currently calibrates skipped attacks.
+
+## First engine evidence and fixture correction
+
+The first callback move case passed on the qualification runner. The production
+planner reached the deadline, where the bridge rejected legitimate RemoveObject
+loss cleanup. This is not a completed planner smoke or opponent-quality result.
+Inspection found that this baseline resolves CONTROL via visitable position, not
+the parsed object name. Name-only hero control accidentally required every hero
+of that type, including blue. Corrected fixtures retain names and add exact
+visitable positions; initialization verifies resolved IDs against named objects.
+Deadlines and explicit mine ownership/survival assertions are unchanged.
+RemoveObject now sends visible-object removal notifications before actual state
+delete, then after-removal notification and path invalidation. Boat removal remains
+unsupported. The bridge does not reproduce the graphical client's hidden enemy
+hero deletion notification exception, so it grants no extra map knowledge.

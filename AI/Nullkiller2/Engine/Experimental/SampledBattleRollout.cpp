@@ -19,7 +19,8 @@ bool supportedBonuses(const battle::Unit & unit, SampledBattleOutcome & result)
 		|| unit.getTotalAttacks(false) < 1 || unit.getTotalAttacks(false) > 2
 		|| unit.getTotalAttacks(true) < 1 || unit.getTotalAttacks(true) > 2)
 		return false;
-	for(const auto & bonus : *unit.getAllBonuses(Selector::all))
+	const auto effectiveBonuses = unit.getAllBonuses(Selector::all);
+	for(const auto & bonus : *effectiveBonuses)
 	{
 		constexpr auto fixedDuringBattle = BonusDuration::PERMANENT | BonusDuration::ONE_BATTLE
 			| BonusDuration::ONE_DAY | BonusDuration::ONE_WEEK | BonusDuration::N_DAYS;

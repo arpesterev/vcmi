@@ -107,14 +107,14 @@ public:
 			|| dynamic_cast<SetAvailableHero *>(&pack) || dynamic_cast<SetAvailableCreatures *>(&pack)
 			|| dynamic_cast<SetAvailableArtifacts *>(&pack) || dynamic_cast<DaysWithoutTown *>(&pack)
 			|| dynamic_cast<TurnTimeUpdate *>(&pack) || dynamic_cast<InfoWindow *>(&pack)
-			|| dynamic_cast<ChangeFormation *>(&pack);
+			|| dynamic_cast<ChangeFormation *>(&pack) || dynamic_cast<RemoveObject *>(&pack);
 	}
 
 	void applyPack(CPackForClient & pack) override
 	{
 		checkBudget();
 		packets.push_back(typeid(pack).name());
-		// Queries, battles, object removal and unsupported state mutations are
+		// Queries, battles and unsupported state mutations are
 		// rejected BEFORE application, rather than silently losing AI callbacks.
 		if(!supportedStatePacket(pack))
 			reject(std::string("server packet ") + typeid(pack).name());
@@ -139,6 +139,19 @@ public:
 				const auto * object = callback->getObj(property->id, false);
 				if(object && callback->isVisible(object)) gateway->beforeObjectPropertyChanged(property);
 			}
+		if(auto * removal = dynamic_cast<RemoveObject *>(&pack))
+		{
+			const auto * object = handler->gameState().getObjInstance(removal->objectID);
+			if(!object) reject("RemoveObject references missing object");
+			const auto * hero = dynamic_cast<const CGHeroInstance *>(object);
+			if(hero && hero->inBoat()) reject("Boat removal callbacks not qualified");
+			// Match the client's pre-delete notification ordering, without its
+			// hidden enemy-hero deletion exception: never grant unseen knowledge.
+			if(gateway && callback->isVisible(object))
+				gateway->objectRemoved(object, removal->initiator);
+			std::cout << "ADVENTURE_BRIDGE remove=" << removal->objectID.getNum()
+				<< " owner=" << object->getOwner().getNum() << std::endl;
+		}
 		// The state is shared with the player callback: apply exactly once.
 		handler->gs->apply(pack);
 		if(auto * move = dynamic_cast<TryMoveHero *>(&pack))
@@ -146,6 +159,13 @@ public:
 			const auto * hero = handler->gameState().getHero(move->id);
 			if(move->result == TryMoveHero::SUCCESS && hero && hero->anchorPos() == move->end && move->end != move->start)
 				++productiveMoves;
+		}
+		if(auto * property = dynamic_cast<SetObjectProperty *>(&pack))
+		{
+			const auto * object = handler->gameState().getObjInstance(property->id);
+			if(object && callback && callback->isVisible(object))
+				std::cout << "ADVENTURE_BRIDGE object=" << object->instanceName
+					<< " owner=" << object->getOwner().getNum() << std::endl;
 		}
 		if(auto * end = dynamic_cast<PlayerEndsGame *>(&pack))
 			if(end->player == PlayerColor(0))
@@ -197,6 +217,7 @@ public:
 		// Conservative invalidation for every applied state delta. This changes
 		// caching only, never grants information or fabricates success.
 		gateway->invalidatePaths();
+		if(dynamic_cast<RemoveObject *>(&pack)) gateway->objectRemovedAfter();
 	}
 
 	void sendPack(CPackForClient & pack, GameConnectionID) override
@@ -294,6 +315,20 @@ protected:
 		Load::ProgressAccumulator progress;
 		bridge.handler->init(&start, progress); // Initializes real event bus, scripting and turn order.
 		bridge.callback = std::make_shared<CCallback>(bridge.handler->gs, PlayerColor(0), &bridge);
+		// Refuse ambiguous/all-of-type victory controls before running a turn.
+		for(const auto & event : bridge.handler->gameState().getMap().triggeredEvents)
+		{
+			event.trigger.morph([this](const EventCondition & condition) -> EventExpression::Variant
+			{
+				if(condition.condition == EventCondition::CONTROL)
+				{
+					const auto * expected = object(condition.objectInstanceName);
+					if(!expected || condition.objectID != expected->id || condition.position != expected->visitablePos())
+						throw std::runtime_error("Fixture CONTROL did not resolve exact named object/visitable position");
+				}
+				return condition;
+			});
+		}
 		bridge.handler->start(false);
 		ASSERT_EQ(bridge.active, PlayerColor(0));
 		ASSERT_EQ(bridge.handler->gameState().getDate(Date::DAY), 1);

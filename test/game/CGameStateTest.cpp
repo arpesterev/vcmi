@@ -684,3 +684,24 @@ TEST_F(CGameStateTest, ConcreteTerrainLimiterKeepsExistingEncoding)
 	ASSERT_NE(restored, nullptr);
 	EXPECT_EQ(restored->terrainType, ETerrainId::GRASS);
 }
+
+TEST_F(CGameStateTest, UncachedBonusListRequiresRetainedOwnerDuringIteration)
+{
+	startTestGame();
+	const auto * hero = getHeroByOwner(PlayerColor(0));
+	ASSERT_NE(hero, nullptr);
+	std::weak_ptr<const BonusList> observation;
+	{
+		const auto effectiveBonuses = hero->getAllBonuses(Selector::all, "");
+		observation = effectiveBonuses;
+		ASSERT_FALSE(effectiveBonuses->empty());
+		for(const auto & bonus : *effectiveBonuses)
+		{
+			EXPECT_FALSE(observation.expired());
+			ASSERT_NE(bonus, nullptr);
+		}
+	}
+	// The engine does not retain the result list for an empty cache key.
+	// Dereferencing a temporary owner in a C++20 range expression is unsafe.
+	EXPECT_TRUE(observation.expired());
+}
