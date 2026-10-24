@@ -24,6 +24,7 @@
 #include "../../lib/callback/CCallback.h"
 #include "../../AI/Nullkiller2/Engine/Nullkiller.h"
 #include "../../AI/Nullkiller2/Engine/Settings.h"
+#include "../../AI/Nullkiller2/AIUtility.h"
 #include "../../AI/Nullkiller2/Engine/Experimental/PlanningRiskDecision.h"
 #include "../../AI/Nullkiller2/Engine/Experimental/DetachedDefendBonuses.h"
 #include "../../lib/callback/GameRandomizer.h"
@@ -524,6 +525,23 @@ protected:
 		const int split = monster->getNumberOfStacks(hero);
 		const double scalarRatio = static_cast<double>(hero->getArmyStrength()) / monster->getArmyStrength();
 		const auto oracleBefore = RandomizerCapture::capture(*handler->randomizer);
+        // Exact current hero-specific baseline, not the raw creature-value ratio.
+        // Log the production predicate; getMagicStrength alone may count magic
+        // the adventure predicate correctly excludes as unavailable.
+        std::cout << "FORCED_DECISION_SCALAR family=" << family << " oracle_seed=" << seed
+            << " hero_type=" << hero->getHeroTypeID().getNum()
+            << " attack=" << hero->getPrimSkillLevel(PrimarySkill::ATTACK)
+            << " defense=" << hero->getPrimSkillLevel(PrimarySkill::DEFENSE)
+            << " spell_power=" << hero->getPrimSkillLevel(PrimarySkill::SPELL_POWER)
+            << " knowledge=" << hero->getPrimSkillLevel(PrimarySkill::KNOWLEDGE)
+            << " fighting_strength=" << hero->getFightingStrength()
+            << " magic_strength=" << hero->getMagicStrength()
+            << " spellbook=" << hero->hasSpellbook() << " mana=" << hero->mana
+            << " own_army=" << hero->getArmyStrength() << " neutral_army=" << monster->getArmyStrength()
+            << " safe_ratio=" << ai.settings->getSafeAttackRatio()
+            << " scalar_safe=" << NK2AI::isSafeToVisit(hero, hero, monster->getArmyStrength(), ai.settings->getSafeAttackRatio())
+            << " difficulty=" << static_cast<int>(ai.cc->getStartInfo()->difficulty) << std::endl;
+        EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), oracleBefore);
 		DecisionRiskBudget::Settings settings;
 		settings.wallTime = std::chrono::milliseconds(2000);
 		settings.maximumDraws = 3 * 128;

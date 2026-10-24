@@ -123,10 +123,10 @@ def summarize_evidence(log, *, require_smokes=True):
                 if _int(row,'oracle_seed') != specs[identity]['seed']: raise ValueError(f'wrong sample oracle seed {identity}')
                 index = _int(row,'sample_index',{0,1,2})
             if index in samples[identity]: raise ValueError(f'duplicate sample {identity}/{index}')
-            status = _int(row,'status',{0,1,2}); winner = _int(row,'winner',{-1,0,1})
+            status = _int(row,'status',{0,1,2,3}); winner = _int(row,'winner',{-1,0,1})
             if (status == 2 and winner == -1) or (status != 2 and winner != -1):
                 raise ValueError(f'nonterminal/terminal winner inconsistency {identity}')
-            if 'reason' not in row or (status == 0 and row['reason'].strip().lower() in ('','none')):
+            if 'reason' not in row or (status != 2 and row['reason'].strip().lower() in ('','none')):
                 raise ValueError(f'missing unsupported-sample reason {identity}')
             if status != 2 and 'agrees' in row: raise ValueError(f'nonterminal accuracy {identity}')
             for key in ('a_survivors','d_survivors'):
@@ -154,7 +154,7 @@ def summarize_evidence(log, *, require_smokes=True):
         rows = []
         for index, row in sorted(samples[identity].items()):
             status = int(row['status']); counts['sample_executions'] += 1
-            counts[{0:'samples_unsupported',1:'samples_budget_exhausted',2:'samples_finished'}[status]] += 1
+            counts[{0:'samples_unsupported',1:'samples_budget_exhausted',2:'samples_finished',3:'samples_rollout_limit'}[status]] += 1
             result = dict(row, sample_index=index, sample_seed=SEEDS[index])
             if status == 2:
                 agrees = int(row['winner']) == reference['actual_winner']
@@ -167,11 +167,11 @@ def summarize_evidence(log, *, require_smokes=True):
             smoke_failures.append(f'predeclared supported smoke did not execute three terminal samples: {identity}')
         results.append(dict(id=identity,test=spec['test'],actual=reference,selected_capture=selected,samples=rows))
     for key in ('actual_terminal','capture_opportunities','captures_admitted','captures_rejected','selected_capture_admitted',
-                'selected_capture_rejected','sample_executions','samples_unsupported','samples_budget_exhausted','samples_finished',
+                'selected_capture_rejected','sample_executions','samples_unsupported','samples_budget_exhausted','samples_finished','samples_rollout_limit',
                 'finished_winner_agrees','finished_winner_disagrees'):
         counts.setdefault(key,0)
     if require_smokes and smoke_failures:
         raise ValueError("; ".join(smoke_failures))
     return dict(supported_smoke_failures=smoke_failures, expected_cases=58, counts=dict(counts),required_supported_smokes=list(REQUIRED_SMOKES),
                 rejected_capture_reasons=dict(capture_reasons),nonterminal_sample_reasons=dict(sample_reasons),cases=results,
-                interpretation='Fixed-policy outcome comparisons only. Unsupported and budget outcomes are not losses; endpoint straddles are not accuracy; no calibrated probability or safety claim.')
+                interpretation='Fixed-policy outcome comparisons only. Unsupported, budget and intrinsic rollout-limit outcomes are not losses; endpoint straddles are not accuracy; no calibrated probability or safety claim.')

@@ -60,6 +60,27 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(data['counts']['samples_unsupported'],1)
         self.assertEqual(data['nonterminal_sample_reasons'],{'unknown bonus on a unit':1})
 
+    def test_rollout_limit_is_nonterminal_and_not_agreement(self):
+        text=make_log(True)
+        old=next(x for x in text.splitlines() if x.startswith('FORCED_BATTLE_SAMPLE case=mixed_high ') and 'sample_index=0 ' in x)
+        new='FORCED_BATTLE_SAMPLE case=mixed_high oracle_seed=17041 sample_index=0 status=3 winner=-1 reason=intrinsic action limit reached bonus=-1'
+        text=text.replace(old,new)
+        data=summarize_evidence(text)
+        self.assertEqual(data['counts']['samples_rollout_limit'],1)
+        self.assertEqual(data['counts']['samples_finished'],173)
+        self.assertEqual(data['counts']['finished_winner_agrees'],173)
+        self.assertIn('intrinsic action limit reached',data['nonterminal_sample_reasons'])
+        for bad in (new.replace('winner=-1','winner=0'),new+' agrees=1',new.replace('intrinsic action limit reached','none')):
+            self.assert_bad(text.replace(new,bad))
+
+    def test_rollout_limit_cannot_pass_required_smoke(self):
+        text=make_log().replace('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
+            'FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=3 winner=-1 reason=intrinsic round limit reached')
+        self.assert_bad(text)
+        data=summarize_evidence(text,require_smokes=False)
+        self.assertEqual(data['counts']['samples_rollout_limit'],1)
+        self.assertTrue(data['supported_smoke_failures'])
+
     def test_valid_disagreement_is_not_rejected(self):
         text=make_log().replace('sample_index=0 status=2 winner=0','sample_index=0 status=2 winner=1').replace('d_lost_value=100 agrees=1','d_lost_value=100')
         data=summarize_evidence(text)

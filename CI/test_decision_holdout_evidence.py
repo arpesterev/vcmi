@@ -38,6 +38,22 @@ class HoldoutEvidenceTest(unittest.TestCase):
         with self.assertRaises(ValueError): summarize_holdouts(log().replace('oracle_seed=29009','oracle_seed=104729'))
     def test_nonfinite_loss_fails(self):
         with self.assertRaises(ValueError): summarize_holdouts(log().replace('loss_fraction=1','loss_fraction=nan'))
+    def test_rollout_limit_retained_unknown_not_terminal_or_favorable(self):
+        text=log(); family,seed=CASES[0]; prefix=f'family={family} oracle_seed={seed}'
+        first=text.splitlines()[0]
+        forecast=f'FORCED_DECISION_FORECAST {prefix} captured=1 policy=1 revalidated=1 record=1 variants=1 draws=1 samples=0 recommendation=0 adverse_upper=1 defeat_lower=0 tolerance=0.2 worst_loss=1 all_finished=0 own_magic=0 elapsed_us=10000 stopped=0 reason=none'
+        text=text.replace(first,forecast)
+        text+=f'\nFORCED_DECISION_VARIANT {prefix} variant=0 battlefield=3 terrain=0'
+        sample=f'FORCED_DECISION_SAMPLE {prefix} variant=0 index=0 sampler_seed=104729 status=3 winner=-1 initial_value=100 remaining_value=50 actions=256 bonus=-1 reason=intrinsic action limit reached'
+        text+='\n'+sample
+        data=summarize_holdouts(text)
+        self.assertEqual(data['counts']['rollout_limit_samples'],1)
+        self.assertEqual(data['counts']['finished_samples'],0)
+        self.assertEqual(data['counts']['unknown'],13)
+        for bad in (sample.replace('winner=-1','winner=0'),sample.replace('intrinsic action limit reached','none'),sample.replace('status=3','status=4'),sample+' agrees=1'):
+            with self.assertRaises(ValueError): summarize_holdouts(text.replace(sample,bad))
+        with self.assertRaises(ValueError): summarize_holdouts(text.replace('recommendation=0','recommendation=1'))
+
     def test_valid_admitted_prefix_and_disagreement_kept(self):
         text=log(); family,seed=CASES[0]; prefix=f'family={family} oracle_seed={seed}'
         original=text.splitlines()[0]
@@ -46,6 +62,7 @@ class HoldoutEvidenceTest(unittest.TestCase):
         for i in range(128):
             text+=f'\nFORCED_DECISION_SAMPLE {prefix} variant=0 index={i} sampler_seed={104729+i*7919} status=2 winner=0 initial_value=100 remaining_value=100 actions=9 bonus=-1 reason=none'
         self.assertEqual(summarize_holdouts(text)['counts']['false_favorable_observations'],1)
+        with self.assertRaises(ValueError): summarize_holdouts(text.replace('status=2 winner=0','status=3 winner=-1').replace('reason=none','reason=intrinsic action limit reached'))
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('tolerance=0.2','tolerance=-1'))
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('initial_value=100 remaining_value=100','initial_value=0 remaining_value=0'))
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('initial_value=100 remaining_value=100','initial_value=100 remaining_value=101'))

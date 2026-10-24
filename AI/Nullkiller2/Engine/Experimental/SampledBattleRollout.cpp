@@ -295,7 +295,9 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 			}
 		}
 	}
-	result.status = battle.finished() ? SampledBattleStatus::FINISHED : SampledBattleStatus::BUDGET_EXHAUSTED;
+	result.status = battle.finished() ? SampledBattleStatus::FINISHED : SampledBattleStatus::ROLLOUT_LIMIT;
+	if(result.status == SampledBattleStatus::ROLLOUT_LIMIT)
+		result.unsupportedReason = result.actions >= MAX_ACTIONS ? "rollout activation limit" : "rollout round limit";
 	for(const auto & unit : battle.units)
 	{
 		result.remainingHealth[sideIndex(unit->unitSide())] += unit->getAvailableHealth();

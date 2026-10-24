@@ -19,6 +19,40 @@ protected:
 		NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway, false);
 	}
 
+	void diagnoseThreat(const char * phase, const CGHeroInstance * enemy, const CGTownInstance * town)
+	{
+		// Diagnostic only. Same real callback/fog, no revealing or executing actions.
+		NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway, false, [&](NK2AI::Nullkiller & ai)
+		{
+			NK2AI::PathfinderSettings config;
+			config.useHeroChain = false;
+			config.mainTurnDistanceLimit = config.scoutTurnDistanceLimit = ai.settings->getThreatTurnDistanceLimit();
+			ai.pathfinder->updatePaths({{enemy, NK2AI::HeroRole::MAIN}}, config);
+			const auto actualArmy = NK2AI::getHeroArmyStrengthWithCommander(enemy, enemy);
+			const auto townDanger = ai.dangerEvaluator->evaluateDanger(town->visitablePos(), enemy, true);
+			const auto scalarLoss = ai.pathfinder->getStorage()->evaluateArmyLoss(enemy, actualArmy, townDanger);
+			std::cout << "INTERACTION_DIAGNOSTIC phase=" << phase
+				<< " enemy_x=" << enemy->visitablePos().x << " enemy_y=" << enemy->visitablePos().y
+				<< " enemy_army=" << enemy->getArmyStrength() << " local_army=" << uniqueLocalStrength(town)
+				<< " actual_enemy_army=" << actualArmy << " town_danger_for_enemy=" << townDanger << " scalar_loss=" << scalarLoss
+				<< " enemy_visible=" << bridge.callback->isVisible(enemy) << " unseen_corridor_y=";
+			for(int y = 7; y <= 40; ++y)
+				if(!bridge.callback->isVisible(int3(44, y, 0))) std::cout << y << ',';
+			std::cout << std::endl;
+			for(const auto & target : {town->visitablePos(), town->visitablePos() + int3(0, 1, 0)})
+			{
+				const auto paths = ai.pathfinder->getPathInfo(target);
+				std::cout << "INTERACTION_DIAGNOSTIC phase=" << phase << " target=" << target.toString()
+					<< " paths=" << paths.size();
+				for(const auto & path : paths)
+					std::cout << " turn=" << static_cast<int>(path.turn()) << " danger=" << path.getTotalDanger()
+						<< " loss=" << path.getTotalArmyLoss();
+				std::cout << std::endl;
+			}
+			gateway->invalidatePaths(); // never leave enemy-only cached paths for planner
+		});
+	}
+
 	static uint64_t uniqueLocalStrength(const CGTownInstance * town)
 	{
 		const auto * upper = town->getUpperArmy();
@@ -55,6 +89,7 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 		<< "Reject changed fixture income/event timing instead of tuning acceptance";
 	const auto initialResources = bridge.callback->getResourceAmount();
 	const auto initialStrength = uniqueLocalStrength(threatened);
+	diagnoseThreat("before_recruitment", enemy, threatened);
 	observeThreats();
 	const auto initialThreat = gateway->nullkiller->dangerHitMap->getObjectThreat(threatened).fastestDanger;
 	ASSERT_LE(initialThreat.turn, 1);
@@ -79,6 +114,7 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	EXPECT_EQ(safeTown->getOwner(), PlayerColor(0));
 	ASSERT_EQ(objective->getOwner(), PlayerColor::NEUTRAL)
 		<< "Recovery objective must not already be captured before urgency removal";
+	diagnoseThreat("after_recruitment_before_withdrawal", enemy, threatened);
 	finishActiveTurn();
 	ASSERT_EQ(bridge.active, PlayerColor(1));
 
@@ -97,6 +133,7 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	finishActiveTurn();
 	ASSERT_EQ(bridge.active, PlayerColor(0));
 	ASSERT_EQ(bridge.handler->gameState().getDate(Date::DAY), 2);
+	diagnoseThreat("after_first_withdrawal", enemy, threatened);
 	observeThreats();
 	ASSERT_LE(gateway->nullkiller->dangerHitMap->getObjectThreat(threatened).fastestDanger.turn, 1)
 		<< "Day2 is deliberately still inside the two-turn threat horizon";

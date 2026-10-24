@@ -9,7 +9,7 @@ class IGameInfoCallback;
 VCMI_LIB_NAMESPACE_END
 namespace NK2AI::experimental
 {
-enum class SampledBattleStatus { UNSUPPORTED, BUDGET_EXHAUSTED, FINISHED };
+enum class SampledBattleStatus { UNSUPPORTED, BUDGET_EXHAUSTED, FINISHED, ROLLOUT_LIMIT };
 struct SampledStackOutcome
 {
 	uint32_t unit;

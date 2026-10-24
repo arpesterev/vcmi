@@ -27,9 +27,10 @@ def summarize_holdouts(log):
             variant=integer(row,'variant',{0,1,2}); index=integer(row,'index',range(128))
             if (variant,index) in samples[key]: raise ValueError('duplicate sample')
             if integer(row,'sampler_seed') != 104729+index*7919: raise ValueError('wrong public seed')
-            status=integer(row,'status',{0,1,2}); winner=integer(row,'winner',{-1,0,1})
+            status=integer(row,'status',{0,1,2,3}); winner=integer(row,'winner',{-1,0,1})
             if (status==2)!=(winner!=-1): raise ValueError('invalid terminal winner')
-            if status!=2 and not row.get('reason'): raise ValueError('missing unknown reason')
+            if status!=2 and 'agrees' in row: raise ValueError('nonterminal agreement')
+            if status!=2 and row.get('reason','').strip().lower() in ('','none'): raise ValueError('missing unknown reason')
             initial=number(row,'initial_value'); remaining=number(row,'remaining_value'); number(row,'actions')
             if remaining>initial or (status==2 and initial<=0): raise ValueError('invalid sample army values')
             samples[key][variant,index]=row
@@ -77,6 +78,9 @@ def summarize_holdouts(log):
         counts['stopped_decisions']+=int(forecast['stopped'])
         counts[{0:'unknown',1:'favorable',2:'likely_defeat'}[recommendation]]+=1
         counts['unsupported_samples']+=sum(int(r['status'])==0 for r in samples[key].values())
+        counts['budget_exhausted_samples']+=sum(int(r['status'])==1 for r in samples[key].values())
+        counts['finished_samples']+=sum(int(r['status'])==2 for r in samples[key].values())
+        counts['rollout_limit_samples']+=sum(int(r['status'])==3 for r in samples[key].values())
         cases.append(dict(family=key[0],oracle_seed=key[1],forecast=forecast,actual=actual,
             variants=list(variants[key].values()),samples=list(samples[key].values()),
             false_favorable_observation=false_favorable,false_defeat_observation=false_defeat))

@@ -43,6 +43,7 @@
 #include <chrono>
 #include <thread>
 #include <shared_mutex>
+#include <functional>
 
 namespace NK2AI
 {
@@ -51,13 +52,14 @@ namespace NK2AI
 class PlanningRiskSchedulerRegressionAccess
 {
 public:
-	static void plannerTurn(AIGateway & gateway, bool makeDecisions = true)
+	static void plannerTurn(AIGateway & gateway, bool makeDecisions = true,
+		const std::function<void(Nullkiller &)> & operation = {})
 	{
 		static_assert(!AIGateway::ENABLE_STAGED_RISK_PREPARATION,
 			"Map bridge must not silently activate experimental risk preparation");
 		const auto generation = gateway.planningTurnGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 		gateway.status.startedTurn();
-		gateway.withPlanningTurnLocks([&gateway, generation, makeDecisions](std::shared_lock<std::shared_mutex> & gameStateLock)
+		gateway.withPlanningTurnLocks([&gateway, generation, makeDecisions, &operation](std::shared_lock<std::shared_mutex> & gameStateLock)
 		{
 			gateway.nullkiller->makingTurnInterruption.reset();
 			Nullkiller::planningTurnLocks->ensureReady = [&gateway, &gameStateLock, generation]
@@ -68,7 +70,8 @@ public:
 			AIGateway::memorizeVisitableObjs(gateway.nullkiller->memory, gateway.nullkiller->dangerHitMap,
 				gateway.playerID, gateway.cc);
 			AIGateway::memorizeRevisitableObjs(gateway.nullkiller->memory, gateway.playerID, gateway.cc);
-			if(makeDecisions) gateway.nullkiller->makeTurn();
+			if(operation) operation(*gateway.nullkiller);
+			else if(makeDecisions) gateway.nullkiller->makeTurn();
 			else gateway.nullkiller->dangerHitMap->updateHitMap();
 			gateway.ensurePlanningTurnReady(gameStateLock, generation);
 		}, generation);

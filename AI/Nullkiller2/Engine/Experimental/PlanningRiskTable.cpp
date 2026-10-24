@@ -292,6 +292,10 @@ std::shared_ptr<const PlanningRiskTable> PlanningRiskTable::buildDecision(std::v
 			auto & prefix = record.variantScenarios[job.variant];
 			// Never publish a result after a missing/interrupted earlier seed.
 			if(prefix.size() != job.seedIndex || !results[i].outcome) continue;
+			// A shared cancellation/deadline leaves an incomplete prefix. An
+			// intrinsic rollout cap is instead a recorded nonterminal outcome:
+			// it must stop this request, not retry the identical seed at every
+			// later checkpoint and discard all following charged draws.
 			if(results[i].outcome->status == SampledBattleStatus::BUDGET_EXHAUSTED) continue;
 			prefix.push_back(std::move(*results[i].outcome));
 		}

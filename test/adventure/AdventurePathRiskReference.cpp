@@ -1,6 +1,7 @@
 /* GPL-2.0-or-later. Injected-evidence protocol test, NOT battle calibration. */
 #include "AdventurePathRiskBridge.h"
 #include "../nullkiller2/PlanningRiskConsumerAccess.h"
+#include "../../AI/Nullkiller2/Engine/Experimental/PlanningRiskDecision.h"
 
 namespace
 {
@@ -61,6 +62,30 @@ TEST_F(AdventurePathRiskReference, ActualPathfinderRequiresEligibleFavorablePubl
 		PlanningRiskConsumerRegressionAccess::publish(ai, key, evidence(false));
 		ASSERT_TRUE(rebuild().empty()) << "Unsafe evidence cannot rescue a scalar-pruned encounter";
 		PlanningRiskConsumerRegressionAccess::publish(ai, key, evidence(true));
+		PlanningRiskRoute cleanRoute;
+		cleanRoute.knownEarlierDanger = true;
+		const auto targetDecision = decideNeutralRisk(ai, *hero, hero, monster->visitablePos(), cleanRoute, false);
+		std::cout << "PATH_RISK_DIAGNOSTIC probe=monster epoch=" << key.epoch
+			<< " hero=" << hero->id.getNum() << " target=" << monster->id.getNum()
+			<< " hero_start=" << hero->visitablePos().toString() << " target_pos=" << monster->visitablePos().toString()
+			<< " current_army=1 earlier_danger=0 earlier_loss=0 spent_mana=0 recommendation="
+			<< static_cast<int>(targetDecision.recommendation) << " sampled_loss=" << targetDecision.sampledLoss << std::endl;
+		ASSERT_EQ(targetDecision.recommendation, RiskRecommendation::FAVORABLE)
+			<< "Publication must be valid at exact monster tile before interpreting a path rejection";
+		const auto halo = monster->visitablePos() + int3(-1, 0, 0);
+		ASSERT_TRUE(bridge.callback->isVisible(halo));
+		const auto haloObjects = bridge.callback->getVisitableObjs(halo, false);
+		const auto haloGuards = bridge.callback->getGuardingCreatures(halo);
+		std::cout << "PATH_RISK_DIAGNOSTIC probe=halo pos=" << halo.toString() << " objects=" << haloObjects.size()
+			<< " guards=" << haloGuards.size();
+		for(const auto * guard : haloGuards) std::cout << " guard_id=" << guard->id.getNum();
+		const auto haloDecision = decideNeutralRisk(ai, *hero, hero, halo, cleanRoute, false);
+		std::cout << " recommendation=" << static_cast<int>(haloDecision.recommendation) << std::endl;
+		ASSERT_TRUE(haloObjects.empty());
+		ASSERT_EQ(haloGuards.size(), 1u);
+		ASSERT_EQ(haloGuards.front(), monster);
+		ASSERT_EQ(haloDecision.recommendation, RiskRecommendation::UNKNOWN)
+			<< "Diagnostic baseline: current consumer cannot resolve an empty guarded approach";
 		const auto favorable = rebuild();
 		ASSERT_FALSE(favorable.empty()) << "Eligible publication must reach actual pathfinder before scalar pruning";
 		for(const auto & path : favorable)
