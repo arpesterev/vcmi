@@ -19,7 +19,7 @@ ALLOWED = re.compile(r'^(?:server/CMakeFiles/vcmiservercommon(?:_battles|_querie
 
 def validate_plan(text, limit):
     objects = {match.group(1) for line in text.splitlines() if (match := OBJECT.search(line))}
-    unexpected = sorted(obj for obj in objects if not ALLOWED.match(obj) and obj != 'lib/CMakeFiles/vcmi.dir/Version.cpp.o')
+    unexpected = sorted(obj for obj in objects if not ALLOWED.match(obj) and obj != 'lib/CMakeFiles/vcmi.dir/__/Version.cpp.o')
     if unexpected:
         raise ValueError('Reference target unexpectedly rebuilds existing core/AI/client objects: ' + repr(unexpected))
     if len(objects) > limit:
