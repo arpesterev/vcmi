@@ -31,7 +31,10 @@ class PublicInteractionMapTest(unittest.TestCase):
             self.assertEqual(objects['hero_1']['options']['army'], [{'type': 'core:pikeman', 'amount': 30}])
             self.assertEqual(objects['retreat_observer']['options'], {'owner': 'red'})
             self.assertEqual(objects['retreat_observer_far']['options'], {'owner': 'red'})
-            self.assertEqual(header['events'][0]['resources'], {'gold': -8800})
+            self.assertEqual(header['events'][0]['resources'], {'gold': -7800})
+            self.assertEqual(10000 + header['events'][0]['resources']['gold'], 2200)
+            self.assertEqual(header['events'][0]['firstOccurrence'], 0)
+            self.assertEqual(header['events'][0]['nextOccurrence'], 0)
 
     def test_controls_have_explicit_positions_and_deadline_not_tuned_to_result(self):
         with tempfile.TemporaryDirectory() as root:

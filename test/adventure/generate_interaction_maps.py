@@ -18,6 +18,10 @@ def generate(repo, output):
     # Use only public templates, preserving normal player visibility/resources.
     scenarios.configure(repo, parts, 'urgent_two_town_defence')
     header, objects = parts['header.json'], parts['objects.json']
+    # NewTurnProcessor::generateNewTurn skips player income on firstTurn.
+    # Expert AI starts at 10000; preserve declared 2200 budget, not an assumed
+    # day 1 payment from the two Village Halls. Shared scenario stays unchanged.
+    header['events'][0]['resources']['gold'] = -7800
     for key, color, hero_type in (('hero_0', 'red', 'christian'), ('hero_1', 'blue', 'lordHaart')):
         header['players'][color]['mainHero'] = hero_type
         header['players'][color]['heroes'][key]['type'] = hero_type

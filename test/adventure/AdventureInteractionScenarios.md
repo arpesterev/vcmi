@@ -1,8 +1,9 @@
 # Bounded interaction drafts, separate from frozen qualification
 
-Status: native map generator exercised; C++ uncompiled and unexecuted. These files
-are an unregistered overlay in `vcmi_adventure_interactions`, not modifications to
-qualification2/qualification3. No production source changes or CI launches.
+Status: first native qualification compiled and ran but failed the initial budget
+precondition (actual 1200 versus declared 2200), before any planner behavior. The
+generator correction below is source-supported; repaired native execution is
+pending. No production source changes are required.
 
 ## Defence, shared spending and recovery: first priority
 
@@ -12,8 +13,12 @@ real owned lock capabilities and real `CGameHandler` requests. It does not add a
 client renderer, fake successful request acknowledgments or battle resolver.
 
 The public 64x48 map has two red towns, one existing visiting hero and a visible
-blue threat. Initial gold must be exactly 2200 after the normal map event/income;
-if it is not, fixture qualification fails. A pair of remote ordinary red ore mines keep
+blue threat. Initial gold must be exactly 2200 after the normal map event;
+if it is not, fixture qualification fails. Expert AI starts with 10000 gold
+(config/difficulty.json; CGameState::initDifficulty). NewTurnProcessor.cpp692-696
+explicitly skips income on the first turn, so the one-shot map event must subtract
+7800, not 8800. The original draft incorrectly included 1000 day1 town income. The
+C++ 2200 assertion and all later behavior/deadline assertions remain unchanged. A pair of remote ordinary red ore mines keep
 the retreat destinations visible, without a reveal cheat or raw hidden lookup.
 
 Before the first planner turn, actual production threat analysis must establish
