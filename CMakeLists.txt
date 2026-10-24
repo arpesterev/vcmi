@@ -711,6 +711,9 @@ add_subdirectory(lib)
 
 if (ENABLE_CLIENT OR ENABLE_SERVER)
 	add_subdirectory(server)
+elseif(ENABLE_TEST)
+	# Qualification target only; ordinary unit tests do not build the server.
+	add_subdirectory(server EXCLUDE_FROM_ALL)
 endif()
 
 if(ENABLE_ERM)

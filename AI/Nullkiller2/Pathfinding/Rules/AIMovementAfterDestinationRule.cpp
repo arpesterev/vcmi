@@ -326,7 +326,7 @@ namespace AIPathfinding
 
 		auto hero = nodeStorage->getHero(source.node);
 		uint64_t danger = aiNk->dangerEvaluator->evaluateDanger(destination.coord, hero, true);
-		uint64_t actualArmyValue = srcNode->actor->armyValue - srcNode->armyLoss;
+		uint64_t actualArmyValue = AIPath::remainingArmy(srcNode->actor->armyValue, srcNode->armyLoss);
 		uint64_t loss = nodeStorage->evaluateArmyLoss(hero, actualArmyValue, danger);
 
 		if(loss < actualArmyValue)

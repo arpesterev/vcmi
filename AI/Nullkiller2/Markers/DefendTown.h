@@ -28,7 +28,7 @@ namespace Goals
 
 	public:
 		DefendTown(const CGTownInstance * town, const HitMapInfo & threat, const AIPath & defencePath, bool isCounterAttack = false);
-		DefendTown(const CGTownInstance * town, const HitMapInfo & threat, const CGHeroInstance * defender);
+		DefendTown(const CGTownInstance * town, const HitMapInfo & threat, const CGHeroInstance * defender, uint64_t combinedStrength = 0);
 
 		bool operator==(const DefendTown & other) const override;
 		std::string toString() const override;

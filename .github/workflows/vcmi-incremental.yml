@@ -38,7 +38,18 @@ jobs:
         print('Probe-only build/Qt changes relative to verified Linux source:',sorted(changed))
         PY_SCOPE
         fi
+        if [[ '${{ contains(github.event.head_commit.message, '[adventure-qualify]') }}' == true ]]; then
+          python3 - <<'PY_FROZEN'
+        import hashlib, json, pathlib
+        manifest=json.loads(pathlib.Path('CI/adventure-candidate-files.json').read_text())
+        assert manifest['baseline_commit']=='8fda7bdc69887e8c86d27a149681fc598c3cd8d1'
+        for name, expected in manifest['files'].items():
+            assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==expected, 'Frozen source changed: '+name
+        print('Verified frozen first-qualification files:',len(manifest['files']))
+        PY_FROZEN
+        fi
         python3 -m unittest discover -s CI -p "test_incremental*.py" -v
+        python3 -m unittest discover -s CI -p "test_adventure_qualification.py" -v
         bash -n CI/incremental-build.sh
         python3 -m py_compile CI/incremental*.py
         python3 cmake_modules/tests/test_source_modules.py --cmake cmake --ninja ninja
@@ -173,6 +184,14 @@ jobs:
       run: |
         ./vcmitest --gmock_verbose=error --gtest_output=xml:"$GITHUB_WORKSPACE/incremental-evidence/tests.xml" > "$GITHUB_WORKSPACE/incremental-evidence/tests.log" 2>&1
         python3 "$GITHUB_WORKSPACE/CI/check_required_regressions.py" --manifest "$GITHUB_WORKSPACE/CI/ai-full-required-tests.json" --xml "$GITHUB_WORKSPACE/incremental-evidence/tests.xml"
+    - name: Qualify bounded real-server battle references on verified warm objects
+      if: startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]')
+      timeout-minutes: 10
+      run: |
+        export CCACHE_DIR="$HOME/.cache/vcmi-incremental/linux-gcc-test"
+        export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+        python3 CI/adventure_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z --resource-root "$HOME/.local/share/vcmi"
+        ccache --print-stats > incremental-evidence/forced-battle/ccache-after.tsv
     - name: Snapshot only successful build outputs, with bounded upload size
       run: |
         python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json

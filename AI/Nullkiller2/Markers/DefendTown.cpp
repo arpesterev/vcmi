@@ -25,8 +25,8 @@ DefendTown::DefendTown(const CGTownInstance * town, const HitMapInfo & threat, c
 	hero = defencePath.targetHero;
 }
 
-DefendTown::DefendTown(const CGTownInstance * town, const HitMapInfo & threat, const CGHeroInstance * defender)
-	: CGoal(Goals::DEFEND_TOWN), threat(threat), defenceArmyStrength(defender->getTotalStrength()), turn(0)
+DefendTown::DefendTown(const CGTownInstance * town, const HitMapInfo & threat, const CGHeroInstance * defender, uint64_t combinedStrength)
+	: CGoal(Goals::DEFEND_TOWN), threat(threat), defenceArmyStrength(combinedStrength ? combinedStrength : defender->getTotalStrength()), turn(0), counterattack(false)
 {
 	settown(town);
 	sethero(defender);

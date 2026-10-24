@@ -28,6 +28,8 @@ namespace Goals
 			sethero(hero);
 		}
 
+		SpellID getSpellID() const { return spellID; }
+
 		const CSpell * getSpell() const
 		{ 
 			return spellID.toSpell();

@@ -122,7 +122,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 		{
 			logAi->error("Hero %s was lost. Exit hero chain.", heroPtr.nameOrDefault());
 
-			return;
+			throw cannotFulfillGoalException("Chain hero is no longer present.");
 		}
 
 		if(node->parentIndex >= i)
@@ -159,7 +159,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 					{
 						logAi->error("Hero %s was lost trying to execute special action. Exit hero chain.", heroPtr.nameOrDefault());
 
-						return;
+						throw cannotFulfillGoalException("Chain hero was lost during a special action.");
 					}
 				}
 				else if(i > 0 && aiGw->nullkiller->isObjectGraphAllowed())
@@ -201,7 +201,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 							hero->getNameTranslated(),
 							node->coord.toString());
 
-						return;
+						throw cannotFulfillGoalException("Zero-turn chain route is no longer executable.");
 					}
 				}
 
@@ -240,7 +240,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 						{
 							logAi->error("Hero %s was lost. Exit hero chain.", heroPtr.nameOrDefault());
 
-							return;
+							throw;
 						}
 
 						if(hero->movementPointsRemaining() > 0)
@@ -273,7 +273,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 					node->coord.toString(),
 					hero->visitablePos().toString());
 
-				return;
+				throw cannotFulfillGoalException("Hero did not arrive at the promised chain node.");
 			}
 			
 			// no exception means we were not able to reach the tile
@@ -286,7 +286,7 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 			{
 				logAi->debug("Hero %s was killed while attempting to reach %s", heroPtr.nameOrDefault(), node->coord.toString());
 
-				return;
+				throw cannotFulfillGoalException("Chain hero was lost while completing a goal.");
 			}
 		}
 	}

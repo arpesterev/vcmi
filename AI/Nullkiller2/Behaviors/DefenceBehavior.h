@@ -31,6 +31,13 @@ namespace Goals
 		Goals::TGoalVec decompose(const Nullkiller * aiNk) const override;
 		std::string toString() const override;
 
+		// Recomputed before optional spending; only immediately affordable,
+		// useful purchases are returned, with a shared budget across towns.
+		static Goals::TGoalVec decomposeUrgentPurchases(const Nullkiller * aiNk);
+		static const CGHeroInstance * selectDefender(const CGTownInstance * town, const HitMapInfo & threat,
+			const std::vector<const CGHeroInstance *> & heroes, const TResources & resources);
+		static uint64_t combinedDefenceStrength(const CGTownInstance * town, const CGHeroInstance * hero);
+
 		bool operator==(const DefenceBehavior & other) const override
 		{
 			return true;
@@ -38,7 +45,6 @@ namespace Goals
 
 	private:
 		void evaluateDefence(Goals::TGoalVec & tasks, const CGTownInstance * town, const Nullkiller * aiNk) const;
-		static void evaluateRecruitingHero(Goals::TGoalVec & tasks, const HitMapInfo & threat, const CGTownInstance * town, const Nullkiller * aiNk);
 	};
 }
 

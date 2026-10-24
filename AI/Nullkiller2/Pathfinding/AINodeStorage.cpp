@@ -331,9 +331,7 @@ void AINodeStorage::commit(
 	destination->setCost(cost);
 	destination->moveRemains = movementLeft;
 	destination->turns = turn;
-	destination->armyLoss = source->armyLoss;
-	destination->manaCost = source->manaCost;
-	destination->danger = source->danger;
+	destination->inheritCosts(*source);
 	destination->theNodeBefore = source->theNodeBefore;
 	destination->chainOther = nullptr;
 
@@ -638,10 +636,14 @@ bool AINodeStorage::selectNextActor()
 
 uint64_t AINodeStorage::evaluateArmyLoss(const CGHeroInstance * hero, uint64_t armyValue, uint64_t danger) const
 {
+	if(armyValue == 0 || danger == 0)
+		return 0;
 	float fightingStrength = aiNk->heroManager->getFightingStrengthCached(hero);
+	if(fightingStrength <= 0)
+		return armyValue;
 	double ratio = (double)danger / (armyValue * fightingStrength);
 
-	return (uint64_t)(armyValue * ratio * ratio);
+	return ratio >= 1.0 ? armyValue : static_cast<uint64_t>(armyValue * ratio * ratio);
 }
 
 void HeroChainCalculationTask::cleanupInefectiveChains(std::vector<ExchangeCandidate> & result) const
@@ -866,6 +868,7 @@ void HeroChainCalculationTask::addHeroChain(const std::vector<ExchangeCandidate>
 
 		exchangeNode->chainOther = other;
 		exchangeNode->armyLoss = chainInfo.armyLoss;
+		exchangeNode->arrivalArmyLoss = chainInfo.armyLoss;
 
 #if NK2AI_PATHFINDER_TRACE_LEVEL >= 2
 		logAi->trace(
@@ -1101,7 +1104,8 @@ struct TownPortalFinder
 
 			if(aiNode->actor->baseActor != actor
 				|| node->layer != EPathfindingLayer::LAND
-				|| node->moveRemains < movementNeeded)
+				|| node->moveRemains < movementNeeded
+				|| hero->mana < aiNode->manaCost + hero->getSpellCost(townPortal))
 			{
 				continue;
 			}
@@ -1157,6 +1161,7 @@ struct TownPortalFinder
 				DO_NOT_SAVE_TO_COMMITTED_TILES);
 
 			node->theNodeBefore = bestNode;
+			node->manaCost += hero->getSpellCost(townPortal);
 			node->addSpecialAction(std::make_shared<AIPathfinding::TownPortalAction>(targetTown, spellID));
 		}
 
@@ -1348,8 +1353,8 @@ bool AINodeStorage::isOtherChainBetter(
 		return false;
 
 	auto nodeActor = other.actor;
-	auto nodeArmyValue = nodeActor->armyValue - other.armyLoss;
-	auto candidateArmyValue = candidateNode.actor->armyValue - candidateNode.armyLoss;
+	auto nodeArmyValue = AIPath::remainingArmy(nodeActor->armyValue, other.armyLoss);
+	auto candidateArmyValue = AIPath::remainingArmy(candidateNode.actor->armyValue, candidateNode.armyLoss);
 
 	if(nodeArmyValue > candidateArmyValue
 		&& other.getCost() <= candidateNode.getCost())
@@ -1445,14 +1450,14 @@ void AINodeStorage::calculateChainInfo(std::vector<AIPath> & paths, const int3 &
 		path.armyLoss = node.armyLoss;
 
 		fillChainInfo(&node, path, -1);
-		path.targetObjectDanger = aiNk->dangerEvaluator->evaluateDanger(pos, path.targetHero, !node.actor->allowBattle);
+		path.setRiskProvenance(node, aiNk->dangerEvaluator->evaluateDanger(pos, path.targetHero, !node.actor->allowBattle), 0);
 		for(const auto & pathNode : path.nodes)
 		{
 			auto pathNodeDanger = aiNk->dangerEvaluator->evaluateDanger(pathNode.coord, path.targetHero, !node.actor->allowBattle);
 			path.targetObjectDanger = std::max(pathNodeDanger, path.targetObjectDanger);
 		}
 
-		if(path.targetObjectDanger > 0)
+		if(path.destinationObjectDanger > 0)
 		{
 			if(node.theNodeBefore)
 			{
@@ -1462,14 +1467,6 @@ void AINodeStorage::calculateChainInfo(std::vector<AIPath> & paths, const int3 &
 					paths.pop_back();
 					continue;
 				}
-				else
-				{
-					path.armyLoss = prevNode->armyLoss;
-				}
-			}
-			else
-			{
-				path.armyLoss = 0;
 			}
 		}
 
@@ -1486,8 +1483,8 @@ void AINodeStorage::calculateChainInfo(std::vector<AIPath> & paths, const int3 &
 
 		path.targetObjectArmyLoss = evaluateArmyLoss(
 			path.targetHero,
-			getHeroArmyStrengthWithCommander(path.targetHero, path.heroArmy, fortLevel),
-			path.targetObjectDanger);
+			AIPath::remainingArmy(getHeroArmyStrengthWithCommander(path.targetHero, path.heroArmy, fortLevel), path.armyLoss),
+			path.destinationObjectDanger);
 
 		path.chainMask = node.actor->chainMask;
 		path.exchangeCount = node.actor->actorExchangeCount;
@@ -1533,6 +1530,26 @@ void AINodeStorage::fillChainInfo(const AIPathNode * node, AIPath & path, int pa
 AIPath::AIPath()
 	: nodes({})
 {
+}
+
+uint64_t AIPath::remainingArmy(uint64_t strength, uint64_t loss)
+{
+	return strength - std::min(strength, loss);
+}
+
+void AIPath::setDangerProvenance(uint64_t destinationDanger, uint64_t routeDanger)
+{
+	destinationObjectDanger = destinationDanger;
+	targetObjectDanger = std::max(destinationDanger, routeDanger);
+	hasDestinationRiskProvenance = true;
+}
+
+void AIPath::setRiskProvenance(const AIPathNode & destination, uint64_t destinationDanger, uint64_t routeDanger)
+{
+	setDangerProvenance(destinationDanger, routeDanger);
+	armyLoss = destinationDanger > 0 ? destination.arrivalArmyLoss : destination.armyLoss;
+	destinationHeroManaCost = destination.actor && destination.actor->hero == targetHero
+		? std::max<int32_t>(0, destination.manaCost) : 0;
 }
 
 AIPathNodeInfo AIPath::createNodeInfo(const int3 & coord, EPathfindingLayer layer) const

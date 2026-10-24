@@ -41,13 +41,23 @@ struct AIPathNode : public CGPathNode
 	const ChainActor * actor = nullptr;
 
 	uint64_t danger;
+	// Loss accumulated before entering this tile; unlike the compressed predecessor.
 	uint64_t armyLoss;
+	uint64_t arrivalArmyLoss = 0;
 	uint32_t version;
 
-	int16_t manaCost;
+	int32_t manaCost;
 	DayFlags dayFlags;
 
 	void addSpecialAction(std::shared_ptr<const SpecialAction> action);
+
+	void inheritCosts(const AIPathNode & source)
+	{
+		armyLoss = source.armyLoss;
+		arrivalArmyLoss = source.armyLoss;
+		manaCost = source.manaCost;
+		danger = source.danger;
+	}
 
 	inline void reset(EPathfindingLayer layer, EPathAccessibility accessibility)
 	{
@@ -58,6 +68,7 @@ struct AIPathNode : public CGPathNode
 		manaCost = 0;
 		specialAction.reset();
 		armyLoss = 0;
+		arrivalArmyLoss = 0;
 		chainOther = nullptr;
 		dayFlags = DayFlags::NONE;
 		this->layer = layer;
@@ -84,7 +95,11 @@ struct AIPath
 	using NodesVector = boost::container::small_vector<AIPathNodeInfo, 16>;
 
 	NodesVector nodes;
+	// Legacy maximum including route guards. Do not use as destination-only danger.
 	uint64_t targetObjectDanger = 0;
+	uint64_t destinationObjectDanger = 0;
+	int32_t destinationHeroManaCost = 0;
+	bool hasDestinationRiskProvenance = false;
 	uint64_t armyLoss = 0;
 	uint64_t targetObjectArmyLoss = 0;
 	const CGHeroInstance * targetHero = nullptr;
@@ -93,6 +108,11 @@ struct AIPath
 	uint8_t exchangeCount = 0;
 
 	AIPath();
+
+	// Export the actual destination carrier's cumulative costs, never another chain hero's.
+	void setRiskProvenance(const AIPathNode & destination, uint64_t destinationDanger, uint64_t routeDanger);
+	void setDangerProvenance(uint64_t destinationDanger, uint64_t routeDanger);
+	static uint64_t remainingArmy(uint64_t strength, uint64_t loss);
 
 	AIPathNodeInfo createNodeInfo(const int3 & coord, EPathfindingLayer layer) const;
 

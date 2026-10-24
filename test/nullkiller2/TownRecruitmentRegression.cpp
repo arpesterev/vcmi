@@ -36,6 +36,7 @@ public:
 	int moves = 0;
 	int swaps = 0;
 	bool applyUpgrades = false;
+	bool applyRecruitment = true;
 	int upgrades = 0;
 	int upgradeRequestLimit = 100;
 
@@ -76,6 +77,8 @@ public:
 	void recruitCreatures(const CGDwelling *, const CArmedInstance * army, CreatureID creature, ui32 amount, si32) override
 	{
 		recruited.push_back(creature);
+		if(!applyRecruitment)
+			return;
 		const auto slot = army->getSlotFor(creature);
 		ASSERT_TRUE(slot.validSlot());
 		const_cast<CArmedInstance *>(army)->addToSlot(slot, creature, amount);
@@ -248,6 +251,70 @@ TEST_F(Nullkiller2TownRecruitmentRegression, UnaffordableCreatureUpgradeDoesNotS
 	EXPECT_FALSE(gateway.makePossibleUpgrades(&town));
 	EXPECT_EQ(callback->upgrades, 0);
 	EXPECT_EQ(town.getCreature(SlotID(0))->getId(), CreatureID(0));
+}
+
+TEST_F(Nullkiller2TownRecruitmentRegression, DefensivePurchaseHonorsExactBudgetWithoutOptionalUpgrades)
+{
+	const auto creature = CreatureID(0);
+	const auto cost = creature.toCreature()->getFullRecruitCost();
+	town.setCreature(SlotID(0), creature, 5);
+	town.creatures = {{10, {creature}}};
+	const auto before = callback->resources;
+	NK2AI::Goals::BuyArmy goal(&town, 1000000, cost * 2);
+	EXPECT_NO_THROW(goal.accept(&gateway));
+	EXPECT_EQ(town.getStackCount(SlotID(0)), 7);
+	EXPECT_EQ(callback->resources, before - cost * 2);
+	EXPECT_EQ(callback->upgrades, 0);
+}
+
+TEST_F(Nullkiller2TownRecruitmentRegression, DefensivePurchaseDoesNotScrapTroopsForNewStack)
+{
+	for(int slot = 0; slot < GameConstants::ARMY_SIZE - 1; ++slot)
+		town.setCreature(SlotID(slot), CreatureID(slot * 2), 1);
+	town.setCreature(SlotID(6), CreatureID(14), 1);
+	town.creatures = {{10, {CreatureID(12)}}};
+	NK2AI::Goals::BuyArmy goal(&town, 1000000, callback->resources);
+	EXPECT_THROW(goal.accept(&gateway), NK2AI::cannotFulfillGoalException);
+	EXPECT_TRUE(callback->dismissed.empty());
+	EXPECT_TRUE(callback->recruited.empty());
+	EXPECT_EQ(town.getCreature(SlotID(6))->getId(), CreatureID(14));
+}
+
+TEST_F(Nullkiller2TownRecruitmentRegression, DefensivePurchaseKeepsExactPlannedSpeciesAndCount)
+{
+	const auto creature = CreatureID(0);
+	const auto cost = creature.toCreature()->getFullRecruitCost();
+	town.setCreature(SlotID(0), creature, 5);
+	town.creatures = {{10, {creature}}, {10, {CreatureID(2)}}};
+	const auto before = callback->resources;
+	const std::vector<NK2AI::creInfo> plan = {{2, creature, 0}};
+	NK2AI::Goals::BuyArmy goal(&town, 1000000, cost * 2, plan);
+	EXPECT_NO_THROW(goal.accept(&gateway));
+	EXPECT_THAT(callback->recruited, ::testing::ElementsAre(creature));
+	EXPECT_EQ(town.getStackCount(SlotID(0)), 7);
+	EXPECT_EQ(callback->resources, before - cost * 2);
+}
+
+TEST_F(Nullkiller2TownRecruitmentRegression, DefensivePurchaseRechecksDepletedStock)
+{
+	const auto creature = CreatureID(0);
+	town.creatures = {{0, {creature}}};
+	const std::vector<NK2AI::creInfo> plan = {{2, creature, 0}};
+	NK2AI::Goals::BuyArmy goal(&town, 1000000, callback->resources, plan);
+	EXPECT_THROW(goal.accept(&gateway), NK2AI::cannotFulfillGoalException);
+	EXPECT_TRUE(callback->recruited.empty());
+}
+
+TEST_F(Nullkiller2TownRecruitmentRegression, RejectedRecruitmentReportsFailureWithoutRepeatingRequest)
+{
+	callback->applyRecruitment = false;
+	town.creatures = {{10, {CreatureID(0)}}};
+	const auto before = callback->resources;
+	NK2AI::Goals::BuyArmy goal(&town, 1000000, callback->resources);
+	EXPECT_THROW(goal.accept(&gateway), NK2AI::cannotFulfillGoalException);
+	EXPECT_EQ(callback->recruited.size(), 1u);
+	EXPECT_EQ(town.stacksCount(), 0);
+	EXPECT_EQ(callback->resources, before);
 }
 
 }

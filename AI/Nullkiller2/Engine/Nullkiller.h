@@ -59,8 +59,9 @@ struct TaskPlanItem
 {
 	std::vector<ObjectInstanceID> affectedObjects;
 	Goals::TSubgoal task;
+	float rankingPriority;
 
-	TaskPlanItem(const Goals::TSubgoal& goal);
+	TaskPlanItem(const Goals::TSubgoal& goal, float rankingPriority);
 };
 
 class TaskPlan
@@ -70,11 +71,14 @@ private:
 
 public:
 	Goals::TTaskVec getTasks() const;
-	void mergeAndFilter(const Goals::TSubgoal& task);
+	void mergeAndFilter(const Goals::TSubgoal& task, float rankingPriority = -1);
 };
+
+enum class TaskExecutionResult { SUCCESS, REPLAN, STOP };
 
 class Nullkiller
 {
+	friend class PlannerRegressionAccess;
 private:
 	const CGHeroInstance * activeHero;
 	int3 targetTile;
@@ -87,6 +91,25 @@ private:
 	bool openMap;
 	bool useObjectGraph;
 	bool pathfinderInvalidated;
+	// IDs and coordinates only: no goal/path pointers survive state rebuilds.
+	struct Intention
+	{
+		ObjectInstanceID target;
+		int3 tile;
+		PlayerColor targetOwner;
+		unsigned lastProgressTurn;
+	};
+	std::map<ObjectInstanceID, Intention> intentions;
+	std::set<std::string> failedTasks;
+	unsigned planningTurn = 0;
+	unsigned recoveryCount = 0;
+	static constexpr unsigned MAX_LOCAL_RECOVERIES = 3;
+	// Policy margin, not a claim of optimal play: switch for >20% better goals.
+	static constexpr float INTENTION_PRIORITY_BONUS = 1.20f;
+	PathfinderSettings getPathfinderSettings() const;
+	void beginPlanningTurn();
+	bool expandSearch();
+	Goals::TTaskVec selectEvaluatedTasks(const Goals::TGoalVec & tasks) const;
 
 public:
 	static std::unique_ptr<ObjectGraph> baseGraph;
@@ -147,7 +170,7 @@ private:
 	void decompose(Goals::TGoalVec & results, const Goals::TSubgoal& behavior, int decompositionMaxDepth) const;
 	Goals::TTask choseBestTask(Goals::TGoalVec & tasks) const;
 	Goals::TTaskVec buildPlanAndFilter(Goals::TGoalVec & tasks, int priorityTier) const;
-	bool executeTask(const Goals::TTask & task) const;
+	TaskExecutionResult executeTask(const Goals::TTask & task);
 	bool areAffectedObjectsPresent(const Goals::TTask & task) const;
 	HeroRole getTaskRole(const Goals::TTask & task) const;
 	void tracePlayerStatus(bool beginning) const;

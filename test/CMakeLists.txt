@@ -165,6 +165,9 @@ if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS)
 		nullkiller2/BuildAnalyzerRegression.cpp
 		nullkiller2/TownRecruitmentRegression.cpp
 		nullkiller2/AdventurePlanningRegression.cpp
+		nullkiller2/PlannerContinuityRegression.cpp
+		nullkiller2/AdventureBattleRiskRegression.cpp
+		nullkiller2/TownDefenceRegression.cpp
 		nullkiller2/PlanningCacheRegression.cpp
 		nullkiller2/MissingTargetRegression.cpp
 		nullkiller2/AIPathMetadataRegression.cpp
@@ -238,6 +241,26 @@ add_subdirectory_with_folder("3rdparty" googletest EXCLUDE_FROM_ALL)
 add_executable(vcmitest ${test_SRCS} ${test_HEADERS} ${mock_HEADERS})
 include(battleAI/BattleCallerProbes.cmake)
 target_link_libraries(vcmitest PRIVATE gtest gmock vcmi ${SYSTEM_LIBS})
+# Explicit qualification target. No cached option or default target change:
+# cmake --build <existing-build> --target vcmi_forced_battle_reference
+if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS AND TARGET vcmiservercommon)
+	add_executable(vcmi_forced_battle_reference EXCLUDE_FROM_ALL
+		StdInc.cpp
+		main.cpp
+		CVcmiTestConfig.cpp
+		mock/mock_MapService.cpp
+		battle/ForcedBattleReference.cpp
+		../AI/Nullkiller2/Engine/Experimental/DetachedDuelRollout.cpp
+	)
+	target_link_libraries(vcmi_forced_battle_reference PRIVATE
+		gtest gmock vcmi Nullkiller2 vcmiservercommon ${SYSTEM_LIBS})
+	target_include_directories(vcmi_forced_battle_reference PRIVATE
+		${CMAKE_CURRENT_SOURCE_DIR}
+		${GTestSrc} ${GTestSrc}/include ${GMockSrc} ${GMockSrc}/include)
+	vcmi_set_output_dir(vcmi_forced_battle_reference "")
+	enable_pch(vcmi_forced_battle_reference)
+endif()
+
 if(ENABLE_LUA)
 	target_link_libraries(vcmitest PRIVATE vcmiLua)
 endif()

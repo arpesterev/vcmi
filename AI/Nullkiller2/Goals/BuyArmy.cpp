@@ -34,9 +34,15 @@ void BuyArmy::accept(AIGateway * aiGw)
 	ui64 valueBought = 0;
 	//buy the stacks with largest AI value
 
-	auto upgradeSuccessful = aiGw->makePossibleUpgrades(town);
+	auto upgradeSuccessful = !spendingLimit && aiGw->makePossibleUpgrades(town);
 
-	auto armyToBuy = aiGw->nullkiller->armyManager->getArmyAvailableToBuy(town->getUpperArmy(), town);
+	auto budget = aiGw->nullkiller->getFreeResources();
+	if(spendingLimit)
+		for(size_t resource = 0; resource < budget.size(); ++resource)
+			budget[resource] = std::min(budget[resource], (*spendingLimit)[resource]);
+	auto armyToBuy = plannedCreatures.empty()
+		? aiGw->nullkiller->armyManager->getArmyAvailableToBuy(town->getUpperArmy(), town, budget)
+		: plannedCreatures;
 
 	if(armyToBuy.empty())
 	{
@@ -48,16 +54,40 @@ void BuyArmy::accept(AIGateway * aiGw)
 
 	for(int i = 0; valueBought < value && i < armyToBuy.size(); i++)
 	{
-		auto res = aiGw->cc->getResourceAmount();
+		auto res = aiGw->nullkiller->getFreeResources();
+		for(size_t resource = 0; resource < res.size(); ++resource)
+			res[resource] = std::min(res[resource], budget[resource]);
 		auto & ci = armyToBuy[i];
 
 		if(objid != CreatureID::NONE && ci.creID.getNum() != objid)
 			continue;
 
+		if(!plannedCreatures.empty())
+		{
+			// Revalidate the exact stock, not a different greedy purchase with
+			// the same price. The state may have changed since planning.
+			if(ci.level < 0 || ci.level >= town->creatures.size()
+				|| !vstd::contains(town->creatures[ci.level].second, ci.creID))
+				continue;
+			vstd::amin(ci.count, town->creatures[ci.level].first);
+		}
 		vstd::amin(ci.count, res / ci.creID.toCreature()->getFullRecruitCost());
 
 		if(ci.count)
 		{
+			// A defensive budget was evaluated without destroying existing troops.
+			if(spendingLimit)
+			{
+				std::set<CreatureID> types;
+				for(const auto & slot : town->getUpperArmy()->Slots())
+					types.insert(slot.second->getCreatureID());
+				if(town->getVisitingHero() && !town->getGarrisonHero())
+					for(const auto & slot : town->getVisitingHero()->Slots())
+						types.insert(slot.second->getCreatureID());
+				types.insert(ci.creID);
+				if(types.size() > GameConstants::ARMY_SIZE)
+					continue;
+			}
 			if (town->getUpperArmy()->stacksCount() == GameConstants::ARMY_SIZE
 				&& !town->getUpperArmy()->getSlotFor(ci.creID).validSlot())
 			{
@@ -87,8 +117,24 @@ void BuyArmy::accept(AIGateway * aiGw)
 			}
 			if (town->getUpperArmy()->stacksCount() < GameConstants::ARMY_SIZE || town->getUpperArmy()->getSlotFor(ci.creID).validSlot()) //It is possible we don't scrap despite we wanted to due to not scrapping stacks that fit our faction
 			{
-				aiGw->cc->recruitCreatures(town, town->getUpperArmy(), ci.creID, ci.count, ci.level);
-				valueBought += ci.count * ci.creID.toCreature()->getAIValue();
+				const auto * targetArmy = town->getUpperArmy();
+				auto countCreatures = [&]()
+				{
+					int count = 0;
+					for(const auto & slot : targetArmy->Slots())
+						if(slot.second->getCreatureID() == ci.creID)
+							count += slot.second->getCount();
+					return count;
+				};
+				const auto before = countCreatures();
+				aiGw->cc->recruitCreatures(town, targetArmy, ci.creID, ci.count, ci.level);
+				// AI callbacks wait for realization. A void request is not proof
+				// of success; do not regenerate this same purchase after a no-op.
+				const auto recruited = countCreatures() - before;
+				if(recruited <= 0)
+					throw cannotFulfillGoalException("Creature recruitment was not applied.");
+				valueBought += recruited * ci.creID.toCreature()->getAIValue();
+				budget -= ci.creID.toCreature()->getFullRecruitCost() * recruited;
 			}
 		}
 	}

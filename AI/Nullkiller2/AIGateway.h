@@ -54,6 +54,8 @@ public:
 	void addQuery(QueryID ID, std::string description);
 	void removeQuery(QueryID ID);
 	int getQueriesCount();
+	bool isIdle();
+	void waitTillIdle();
 	void startedTurn();
 	void madeTurn();
 	void waitTillFree();

@@ -65,7 +65,10 @@ void RecruitHero::accept(AIGateway * aiGw)
 	if(t->getVisitingHero())
 		throw cannotFulfillGoalException("Town " + t->nodeName() + " is occupied. Cannot recruit hero!");
 
+	const auto hiredType = heroToHire->getHeroTypeID();
 	aiGw->cc->recruitHero(t, heroToHire);
+	if(!t->getVisitingHero() || t->getVisitingHero()->getHeroTypeID() != hiredType)
+		throw cannotFulfillGoalException("Hero recruitment was not applied.");
 
 	{
 		// TODO: Mircea: Consider same behavior when a hero is lost? Relevant?

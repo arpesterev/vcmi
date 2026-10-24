@@ -10,6 +10,7 @@
 #pragma once
 
 #include "CGoal.h"
+#include <optional>
 
 namespace NK2AI
 {
@@ -23,6 +24,8 @@ namespace Goals
 	class DLL_EXPORT BuyArmy : public ElementarGoal<BuyArmy>
 	{
 	private:
+		std::optional<TResources> spendingLimit;
+		std::vector<creInfo> plannedCreatures;
 		BuyArmy()
 			: ElementarGoal(Goals::BUY_ARMY)
 		{
@@ -34,6 +37,13 @@ namespace Goals
 			town = Town; //where to buy this army
 			value = val; //expressed in AI unit strength
 			priority = 3;//TODO: evaluate?
+		}
+
+		BuyArmy(const CGTownInstance * town, int value, const TResources & budget, const std::vector<creInfo> & creatures = {})
+			: BuyArmy(town, value)
+		{
+			spendingLimit = budget;
+			plannedCreatures = creatures;
 		}
 
 		bool operator==(const BuyArmy & other) const override;

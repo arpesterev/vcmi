@@ -26,6 +26,7 @@
 #include "../../lib/bonuses/Propagators.h"
 
 #include <vcmi/CreatureService.h>
+#include <vcmi/spells/Spell.h>
 
 namespace NK2AI
 {
@@ -132,16 +133,51 @@ bool HeroPtr::operator==(const HeroPtr & rhs) const
 	return hero == rhs.get();
 }
 
+namespace
+{
+// Adventure estimates must not count an unaffordable spell as combat strength.
+// This is only a necessary condition: it deliberately does not predict targets,
+// resistance, terrain, enemy spellbooks or the outcome of a future spell cast.
+double adventureHeroStrength(const CGHeroInstance * hero, uint32_t manaSpent)
+{
+	const double fighting = hero->getFightingStrength();
+	if(!hero->hasSpellbook() || hero->mana < 0 || hero->manaLimit() <= 0)
+		return fighting;
+
+	const int64_t availableMana = std::max<int64_t>(0, int64_t(hero->mana) - manaSpent);
+	for(const auto spellID : hero->getSpellsInSpellbook())
+	{
+		const auto * spell = spellID.toSpell();
+		if(spell->isCombat() && hero->getSpellCost(spell) <= availableMana)
+		{
+			// Same scalar as CGHeroInstance::getMagicStrength, but evaluated
+			// with mana left after the route, without changing the live hero.
+			const double manaRatio = double(availableMana) / hero->manaLimit();
+			const double magic = std::sqrt(
+				(1.0 + 0.05 * hero->getPrimSkillLevel(PrimarySkill::KNOWLEDGE) * manaRatio)
+				* (1.0 + 0.05 * hero->getPrimSkillLevel(PrimarySkill::SPELL_POWER) * manaRatio));
+			return std::isfinite(magic) ? fighting * std::max(1.0, magic) : fighting;
+		}
+	}
+	return fighting;
+}
+
+bool armyCanHandleDanger(const CGHeroInstance * hero, uint64_t armyStrength,
+	uint64_t danger, float safeAttackRatio, uint32_t manaSpent = 0)
+{
+	if(!danger)
+		return true;
+	if(!hero || !std::isfinite(safeAttackRatio) || safeAttackRatio <= 0)
+		return false;
+	const double strength = adventureHeroStrength(hero, manaSpent) * armyStrength;
+	return std::isfinite(strength) && strength > double(danger) * safeAttackRatio;
+}
+}
+
 bool isSafeToVisit(const CGHeroInstance * h, const CCreatureSet * heroArmy, uint64_t dangerStrength, float safeAttackRatio)
 {
-	const ui64 heroStrength = h->getHeroStrength() * heroArmy->getArmyStrength();
-
-	if(dangerStrength)
-	{
-		return heroStrength > dangerStrength * safeAttackRatio;
-	}
-
-	return true; //there's no danger
+	return armyCanHandleDanger(h, heroArmy ? heroArmy->getArmyStrength() : 0,
+		dangerStrength, safeAttackRatio);
 }
 
 bool isSafeToVisit(const CGHeroInstance * h, uint64_t dangerStrength, float safeAttackRatio)
@@ -151,7 +187,19 @@ bool isSafeToVisit(const CGHeroInstance * h, uint64_t dangerStrength, float safe
 
 bool isSafeToVisit(const AIPath & path, float safeAttackRatio)
 {
-	return isSafeToVisit(path.targetHero, path.heroArmy, path.getTotalDanger(), safeAttackRatio);
+	if(!isSafeToVisit(path.targetHero, path.heroArmy, path.getTotalDanger(), safeAttackRatio))
+		return false;
+
+	if(!path.hasDestinationRiskProvenance)
+		return true; // Aggregate graph danger cannot be split into individual battles.
+
+	// armyLoss is the estimated loss BEFORE the destination battle. Do not also
+	// subtract targetObjectArmyLoss: that would charge the same battle twice.
+	// Keep the existing route-danger gate above, but use the survivors for the
+	// destination, rather than reusing troops already lost along the route.
+	const uint64_t startingArmy = path.heroArmy ? path.heroArmy->getArmyStrength() : 0;
+	const uint64_t remainingArmy = startingArmy - std::min(startingArmy, path.armyLoss);
+	return armyCanHandleDanger(path.targetHero, remainingArmy, path.destinationObjectDanger, safeAttackRatio, static_cast<uint32_t>(std::max(0, path.destinationHeroManaCost)));
 }
 
 bool isObjectRemovable(const CGObjectInstance * obj)

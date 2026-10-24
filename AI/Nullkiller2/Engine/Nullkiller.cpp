@@ -26,6 +26,10 @@
 #include "../Behaviors/StayAtTownBehavior.h"
 #include "../Goals/Invalid.h"
 #include "Goals/RecruitHero.h"
+#include "../Goals/Composition.h"
+#include "../Goals/ExecuteHeroChain.h"
+#include "../Goals/AdventureSpellCast.h"
+#include <sstream>
 #include "ResourceTrader.h"
 #include <boost/range/algorithm/sort.hpp>
 
@@ -115,9 +119,74 @@ void Nullkiller::init(const std::shared_ptr<CCallback> & cbInput, AIGateway * ai
 	armyFormation.reset(new ArmyFormation(cc, this));
 }
 
-TaskPlanItem::TaskPlanItem(const TSubgoal & task)
+namespace
+{
+// Composition descriptions contain transient path details. Use structural goal
+// fields instead, so rebuilding a failed goal cannot evade turn-local suppression.
+void appendTaskIdentity(std::ostream & out, const AbstractGoal & goal)
+{
+	out << int(goal.goalType) << ':' << goal.objid << ':' << goal.tile.toString()
+		<< ':' << goal.bid << ':' << goal.resID << ':';
+	const auto * task = dynamic_cast<const ITask *>(&goal);
+	const auto * hero = task ? task->getHero() : goal.hero;
+	if(hero)
+		out << hero->id.getNum();
+	if(task)
+	{
+		auto objects = task->getAffectedObjects();
+		std::sort(objects.begin(), objects.end());
+		for(auto id : objects)
+			out << 'o' << id.getNum();
+	}
+	if(const auto * spell = dynamic_cast<const AdventureSpellCast *>(&goal))
+		out << 's' << spell->getSpellID().getNum();
+	if(goal.town)
+		out << 't' << goal.town->id.getNum();
+	if(const auto * composition = dynamic_cast<const Composition *>(&goal))
+		for(const auto & part : composition->decompose(nullptr))
+			appendTaskIdentity(out, *part);
+	out << ';';
+}
+
+std::string taskIdentity(const ITask * task)
+{
+	std::ostringstream out;
+	if(const auto * goal = dynamic_cast<const AbstractGoal *>(task))
+		appendTaskIdentity(out, *goal);
+	else
+		out << task->toString();
+	return out.str();
+}
+
+struct TaskIntent
+{
+	const ExecuteHeroChain * chain = nullptr;
+	bool defence = false;
+};
+
+void inspectIntent(const AbstractGoal & goal, TaskIntent & result)
+{
+	result.defence |= goal.goalType == DEFEND_TOWN || goal.goalType == DEFENCE;
+	if(const auto * chain = dynamic_cast<const ExecuteHeroChain *>(&goal))
+		result.chain = chain;
+	if(const auto * composition = dynamic_cast<const Composition *>(&goal))
+		for(const auto & part : composition->decompose(nullptr))
+			inspectIntent(*part, result);
+}
+
+TaskIntent taskIntent(const ITask * task)
+{
+	TaskIntent result;
+	if(const auto * goal = dynamic_cast<const AbstractGoal *>(task))
+		inspectIntent(*goal, result);
+	return result;
+}
+}
+
+TaskPlanItem::TaskPlanItem(const TSubgoal & task, float rankingPriority)
 	: affectedObjects(task->asTask()->getAffectedObjects())
 	, task(task)
+	, rankingPriority(rankingPriority)
 {
 }
 
@@ -135,9 +204,11 @@ Goals::TTaskVec TaskPlan::getTasks() const
 	return result;
 }
 
-void TaskPlan::mergeAndFilter(const TSubgoal & task)
+void TaskPlan::mergeAndFilter(const TSubgoal & task, float rankingPriority)
 {
 	TGoalVec blockers;
+	if(rankingPriority < 0)
+		rankingPriority = task->asTask()->priority;
 
 	if (task->asTask()->priority <= 0)
 		return;
@@ -148,7 +219,7 @@ void TaskPlan::mergeAndFilter(const TSubgoal & task)
 		{
 			if(task == item.task || task->asTask()->isObjectAffected(objid) || (task->asTask()->getHero() != nullptr && task->asTask()->getHero() == item.task->asTask()->getHero()))
 			{
-				if(item.task->asTask()->priority >= task->asTask()->priority)
+				if(item.rankingPriority >= rankingPriority)
 					return;
 
 				blockers.push_back(item.task);
@@ -162,15 +233,14 @@ void TaskPlan::mergeAndFilter(const TSubgoal & task)
 			return vstd::contains(blockers, item.task);
 		});
 
-	tasks.emplace_back(task);
+	tasks.emplace_back(task, rankingPriority);
 }
 
 Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
 {
+	vstd::erase_if(tasks, [this](const TSubgoal & task) { return failedTasks.count(taskIdentity(task->asTask())) != 0; });
 	if(tasks.empty())
-	{
 		return taskptr(Invalid());
-	}
 
 	for(const TSubgoal & task : tasks)
 	{
@@ -188,8 +258,6 @@ Goals::TTask Nullkiller::choseBestTask(Goals::TGoalVec & tasks) const
 
 Goals::TTaskVec Nullkiller::buildPlanAndFilter(TGoalVec & tasks, int priorityTier) const
 {
-	TaskPlan taskPlan;
-
 	tbb::parallel_for(
 		tbb::blocked_range<size_t>(0, tasks.size()),
 		[this, &tasks, priorityTier](const tbb::blocked_range<size_t> & r)
@@ -204,20 +272,82 @@ Goals::TTaskVec Nullkiller::buildPlanAndFilter(TGoalVec & tasks, int priorityTie
 		}
 	);
 
-	boost::range::sort(
-		tasks,
-		[](const TSubgoal & g1, const TSubgoal & g2) -> bool
-		{
-			return g2->asTask()->priority < g1->asTask()->priority;
-		}
-	);
+	return selectEvaluatedTasks(tasks);
+}
 
-	for(const TSubgoal & task : tasks)
+Goals::TTaskVec Nullkiller::selectEvaluatedTasks(const TGoalVec & tasks) const
+{
+	std::set<ObjectInstanceID> defenders;
+	for(const auto & task : tasks)
 	{
-		taskPlan.mergeAndFilter(task);
+		if(!std::isfinite(task->asTask()->priority) || task->asTask()->priority <= 0)
+			continue;
+		const auto intent = taskIntent(task->asTask());
+		if(intent.defence)
+			for(auto id : task->asTask()->getAffectedObjects())
+				defenders.insert(id);
 	}
 
+	std::vector<std::pair<float, TSubgoal>> ranked;
+	for(const auto & task : tasks)
+	{
+		const auto * executable = task->asTask();
+		if(!std::isfinite(executable->priority) || executable->priority <= 0 || failedTasks.count(taskIdentity(executable)))
+			continue;
+		float score = executable->priority;
+		const auto intent = taskIntent(executable);
+		if(intent.chain)
+		{
+			const auto affected = executable->getAffectedObjects();
+			if(std::any_of(affected.begin(), affected.end(), [this](auto id) { return !cc->getObj(id, false); }))
+				continue;
+		}
+		if(intent.chain && !intent.defence && !defenders.count(intent.chain->hero->id))
+		{
+			const auto found = intentions.find(intent.chain->hero->id);
+			const auto * target = intent.chain->objid >= 0 ? cc->getObj(ObjectInstanceID(intent.chain->objid), false) : nullptr;
+			if(found != intentions.end() && (found->second.target.getNum() < 0 || found->second.target.getNum() == intent.chain->objid)
+				&& found->second.tile == intent.chain->tile
+				&& cc->getObj(intent.chain->hero->id, false) == intent.chain->hero
+				&& (found->second.target.getNum() < 0 || (target && target->getOwner() == found->second.targetOwner)))
+				score = static_cast<float>(std::min(static_cast<double>(score) * INTENTION_PRIORITY_BONUS,
+					static_cast<double>(std::numeric_limits<float>::max())));
+		}
+		ranked.emplace_back(score, task);
+	}
+	// Stable ties preserve deterministic decomposition order, not hash/pointer order.
+	std::stable_sort(ranked.begin(), ranked.end(), [](const auto & a, const auto & b) { return a.first > b.first; });
+	TaskPlan taskPlan;
+	for(const auto & [score, task] : ranked)
+		taskPlan.mergeAndFilter(task, score);
 	return taskPlan.getTasks();
+}
+
+void Nullkiller::beginPlanningTurn()
+{
+	++planningTurn;
+	failedTasks.clear();
+	recoveryCount = 0;
+	vstd::erase_if(intentions, [this](const auto & item)
+	{
+		if(planningTurn - item.second.lastProgressTurn > 2 || !cc->getObj(item.first, false))
+			return true;
+		if(item.second.target.getNum() < 0)
+			return false;
+		const auto * target = cc->getObj(item.second.target, false);
+		return !target || target->getOwner() != item.second.targetOwner;
+	});
+}
+
+bool Nullkiller::expandSearch()
+{
+	if(scanDepth == ScanDepth::ALL_FULL)
+		return false;
+	scanDepth = ScanDepth::ALL_FULL;
+	useHeroChain = false;
+	// Path settings are part of the cache key even when no map event occurred.
+	invalidatePathfinderData();
+	return true;
 }
 
 void Nullkiller::decompose(Goals::TGoalVec & results, const Goals::TSubgoal& behavior, int decompositionMaxDepth) const
@@ -235,6 +365,7 @@ void Nullkiller::resetState()
 {
 	std::unique_lock lockGuard(aiStateMutex);
 
+	beginPlanningTurn();
 	lockedResources = TResources();
 	scanDepth = ScanDepth::MAIN_FULL;
 	lockedHeroes.clear();
@@ -252,6 +383,18 @@ void Nullkiller::resetState()
 void Nullkiller::invalidatePathfinderData()
 {
 	pathfinderInvalidated = true;
+}
+
+PathfinderSettings Nullkiller::getPathfinderSettings() const
+{
+	PathfinderSettings cfg;
+	cfg.useHeroChain = useHeroChain;
+	cfg.allowBypassObjects = true;
+	if(scanDepth == ScanDepth::SMALL || isObjectGraphAllowed())
+		cfg.mainTurnDistanceLimit = settings->getMainHeroTurnDistanceLimit();
+	if(scanDepth != ScanDepth::ALL_FULL || isObjectGraphAllowed())
+		cfg.scoutTurnDistanceLimit = settings->getScoutHeroTurnDistanceLimit();
+	return cfg;
 }
 
 void Nullkiller::updateState()
@@ -291,14 +434,7 @@ void Nullkiller::updateState()
 		methodToElapsedMs.emplace("heroManager->update()", timeElapsed(startMethod));
 
 		logAi->trace("Updating paths");
-		PathfinderSettings cfg;
-		cfg.useHeroChain = useHeroChain;
-		cfg.allowBypassObjects = true;
-
-		if(scanDepth == ScanDepth::SMALL || isObjectGraphAllowed())
-			cfg.mainTurnDistanceLimit = settings->getMainHeroTurnDistanceLimit();
-		if(scanDepth != ScanDepth::ALL_FULL || isObjectGraphAllowed())
-			cfg.scoutTurnDistanceLimit = settings->getScoutHeroTurnDistanceLimit();
+		const auto cfg = getPathfinderSettings();
 
 		makingTurnInterruption.interruptionPoint();
 		startMethod = std::chrono::high_resolution_clock::now();
@@ -448,6 +584,7 @@ void Nullkiller::makeTurn()
 		}
 
 		bool hasAnySuccess = false;
+		bool needsReplan = false;
 		for(const auto& selectedTask : selectedTasks)
 		{
 			if(cc->getPlayerStatus(playerID) != EPlayerStatus::INGAME)
@@ -495,8 +632,7 @@ void Nullkiller::makeTurn()
 						taskDescription,
 						selectedTask->priority);
 
-					scanDepth = ScanDepth::ALL_FULL;
-					useHeroChain = false;
+					expandSearch();
 					hasAnySuccess = true;
 					break;
 				}
@@ -513,15 +649,20 @@ void Nullkiller::makeTurn()
 			}
 			else
 			{
-				if(!executeTask(selectedTask))
-				{
-					if(hasAnySuccess)
-						break;
+				const auto outcome = executeTask(selectedTask);
+				if(outcome == TaskExecutionResult::STOP)
 					return;
+				if(outcome == TaskExecutionResult::REPLAN)
+				{
+					needsReplan = true;
+					break;
 				}
 				hasAnySuccess = true;
 			}
 		}
+
+		if(needsReplan)
+			continue; // Never execute the rest of a potentially stale plan.
 
 		hasAnySuccess |= ResourceTrader::trade(*buildAnalyzer, *cc, getFreeResources());
 		if(!hasAnySuccess)
@@ -548,13 +689,16 @@ bool Nullkiller::updateStateAndExecutePriorityPass(Goals::TGoalVec & tempResults
 	{
 		tempResults.clear();
 
-		// TODO: Mircea: Should merge recruiting from DefenseBehavior
-		decompose(tempResults, sptr(RecruitHeroBehavior()), 1);
-		// TODO: Mircea: Should merge recruiting from DefenseBehavior
-		decompose(tempResults, sptr(BuyArmyBehavior()), 1);
-		decompose(tempResults, sptr(BuildingBehavior()), 1);
-
+		tempResults = DefenceBehavior::decomposeUrgentPurchases(this);
 		bestPrioPassTask = choseBestTask(tempResults);
+		if(bestPrioPassTask->priority <= 0)
+		{
+			tempResults.clear();
+			decompose(tempResults, sptr(RecruitHeroBehavior()), 1);
+			decompose(tempResults, sptr(BuyArmyBehavior()), 1);
+			decompose(tempResults, sptr(BuildingBehavior()), 1);
+			bestPrioPassTask = choseBestTask(tempResults);
+		}
 
 		if(bestPrioPassTask->priority > 0)
 		{
@@ -566,11 +710,8 @@ bool Nullkiller::updateStateAndExecutePriorityPass(Goals::TGoalVec & tempResults
 			{
 				logAi->error("Nullkiller::updateStateAndExecutePriorityPass Skipping priorityPass due to unverified hero: %s", heroPtr.nameOrDefault());
 			}
-			else if(!executeTask(bestPrioPassTask))
-			{
-				logAi->warn("Task failed to execute");
+			else if(executeTask(bestPrioPassTask) == TaskExecutionResult::STOP)
 				return false;
-			}
 
 			updateState();
 		}
@@ -611,10 +752,31 @@ HeroRole Nullkiller::getTaskRole(const Goals::TTask & task) const
 	return heroRole;
 }
 
-bool Nullkiller::executeTask(const Goals::TTask & task) const
+TaskExecutionResult Nullkiller::executeTask(const Goals::TTask & task)
 {
 	auto start = std::chrono::high_resolution_clock::now();
 	std::string taskDescr = task->toString();
+	const auto key = taskIdentity(task.get());
+	const auto intent = taskIntent(task.get());
+	const auto heroId = intent.chain ? intent.chain->hero->id : ObjectInstanceID(-1);
+	const auto affectedObjects = task->getAffectedObjects();
+	const auto destination = intent.chain ? intent.chain->tile : int3(-1, -1, -1);
+	const auto destinationId = ObjectInstanceID(intent.chain ? intent.chain->objid : -1);
+	std::map<ObjectInstanceID, int3> previousPositions;
+	std::map<ObjectInstanceID, int3> waypoints;
+	if(intent.chain)
+	{
+		// Nodes are destination-first: the first occurrence is this participant's
+		// final rendezvous, not necessarily the recipient's strategic destination.
+		for(const auto & node : intent.chain->getPath().nodes)
+			if(node.targetHero)
+			{
+				previousPositions.emplace(node.targetHero->id, node.targetHero->visitablePos());
+				waypoints.emplace(node.targetHero->id, node.coord);
+			}
+		previousPositions.emplace(heroId, intent.chain->hero->visitablePos());
+		waypoints[heroId] = destination;
+	}
 
 	makingTurnInterruption.interruptionPoint();
 	logAi->debug("Trying to realize %s (value %2.3f)", taskDescr, task->priority);
@@ -630,12 +792,46 @@ bool Nullkiller::executeTask(const Goals::TTask & task) const
 	}
 	catch(cannotFulfillGoalException & e)
 	{
-		logAi->error("Failed to realize subgoal of type %s, I will stop.", taskDescr);
-		logAi->error("The error message was: %s", e.what());
-		return false;
+		logAi->error("Failed to realize subgoal %s: %s", taskDescr, e.what());
+		failedTasks.insert(key);
+		for(auto id : affectedObjects)
+			intentions.erase(id);
+		// A local goal error is not proof that an outstanding server command
+		// failed. Never issue alternatives while a query/move/battle is pending.
+		if(!aiGw->status.isIdle() || recoveryCount >= MAX_LOCAL_RECOVERIES)
+			return TaskExecutionResult::STOP;
+		++recoveryCount;
+		// Chain locks describe the abandoned plan, not an enduring defense duty.
+		// Keep STARTUP/DEFENCE locks; let refreshed routes reuse other couriers.
+		vstd::erase_if(lockedHeroes, [](const auto & entry) { return entry.second == HeroLockedReason::HERO_CHAIN; });
+		invalidatePaths();
+		invalidatePathfinderData();
+		dangerHitMap->resetHitmap();
+		dangerHitMap->resetTileOwners();
+		return TaskExecutionResult::REPLAN;
 	}
 
-	return true;
+	if(intent.chain)
+	{
+		const auto * recipient = dynamic_cast<const CGHeroInstance *>(cc->getObj(heroId, false));
+		bool progressed = false;
+		for(const auto & [id, oldPosition] : previousPositions)
+			if(const auto * hero = dynamic_cast<const CGHeroInstance *>(cc->getObj(id, false)))
+				progressed |= hero->visitablePos() != oldPosition;
+		for(const auto & [id, waypoint] : waypoints)
+		{
+			const auto * hero = dynamic_cast<const CGHeroInstance *>(cc->getObj(id, false));
+			if(!recipient || !hero || intent.defence || recipient->visitablePos() == destination || hero->visitablePos() == waypoint)
+				intentions.erase(id);
+			else if(progressed)
+			{
+				const auto targetId = id == heroId ? destinationId : ObjectInstanceID(-1);
+				const auto * target = targetId.getNum() >= 0 ? cc->getObj(targetId, false) : nullptr;
+				intentions[id] = Intention{targetId, waypoint, target ? target->getOwner() : PlayerColor::NEUTRAL, planningTurn};
+			}
+		}
+	}
+	return TaskExecutionResult::SUCCESS;
 }
 
 TResources Nullkiller::getFreeResources() const

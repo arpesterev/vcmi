@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "activation_commit_suffix": "[adventure-qualify]",
+  "required_commit_prefix": "[vcmi-warm] ",
+  "reference_target": "vcmi_forced_battle_reference",
+  "reference_max_object_edges": 48,
+  "reference_compile_seconds": 420,
+  "reference_execution_seconds": 120,
+  "reference_required_suite": "ForcedBattleReference",
+  "map_smoke_status": "asset inventory only; graphical gameplay not executed",
+  "cold_cache_fallback": false,
+  "reference_required_tests": [
+    "ForcedBattleReference.OrdinaryMelee",
+    "ForcedBattleReference.RangedAgainstSlowMelee",
+    "ForcedBattleReference.SlowMeleeAgainstRanged",
+    "ForcedBattleReference.UndeadMelee",
+    "ForcedBattleReference.FlyingAgainstRanged",
+    "ForcedBattleReference.RangedMirror"
+  ]
+}

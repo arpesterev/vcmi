@@ -47,6 +47,138 @@ Goals::TGoalVec DefenceBehavior::decompose(const Nullkiller * aiNk) const
 	return tasks;
 }
 
+uint64_t DefenceBehavior::combinedDefenceStrength(const CGTownInstance * town, const CGHeroInstance * hero)
+{
+	const auto * army = town->getUpperArmy();
+	if(!hero)
+		return army->getArmyStrength();
+	if(army == hero)
+		return static_cast<uint64_t>(hero->getArmyStrength() * hero->getFightingStrength());
+	// No dismissal or imaginary eighth slot is allowed to make this plan work.
+	if(!hero->canBeMergedWith(*army))
+		return static_cast<uint64_t>(hero->getArmyStrength() * hero->getFightingStrength());
+	return static_cast<uint64_t>((army->getArmyStrength() + hero->getArmyStrength()) * hero->getFightingStrength());
+}
+
+const CGHeroInstance * DefenceBehavior::selectDefender(const CGTownInstance * town, const HitMapInfo & threat,
+	const std::vector<const CGHeroInstance *> & heroes, const TResources & resources)
+{
+	if(threat.turn > 1 || !threat.danger || town->getGarrisonHero() || town->getVisitingHero()
+		|| !town->hasBuilt(BuildingID::TAVERN) || resources[EGameResID::GOLD] < GameConstants::HERO_GOLD_COST)
+		return nullptr;
+	const CGHeroInstance * best = nullptr;
+	for(const auto * hero : heroes)
+	{
+		if(hero->canBeMergedWith(*town->getUpperArmy()) && combinedDefenceStrength(town, hero) >= threat.danger
+			&& (!best || combinedDefenceStrength(town, hero) > combinedDefenceStrength(town, best)))
+			best = hero;
+	}
+	return best;
+}
+
+namespace
+{
+HitMapInfo urgentTownThreat(const CGTownInstance * town, const Nullkiller * aiNk)
+{
+	HitMapInfo result;
+	auto consider = [&](const HitMapInfo & threat)
+	{
+		if(threat.turn <= 1 && threat.heroPtr.isVerified() && threat.danger > result.danger)
+			result = threat;
+	};
+	const auto & node = aiNk->dangerHitMap->getObjectThreat(town);
+	consider(node.fastestDanger);
+	consider(node.maximumDanger);
+	for(const auto & threat : aiNk->dangerHitMap->getTownThreats(town))
+		consider(threat);
+	return result;
+}
+}
+
+Goals::TGoalVec DefenceBehavior::decomposeUrgentPurchases(const Nullkiller * aiNk)
+{
+	Goals::TGoalVec tasks;
+	auto available = aiNk->getFreeResources();
+	auto towns = aiNk->cc->getTownsInfo();
+	std::stable_sort(towns.begin(), towns.end(), [aiNk](const auto * left, const auto * right)
+	{
+		const auto a = urgentTownThreat(left, aiNk);
+		const auto b = urgentTownThreat(right, aiNk);
+		return a.turn != b.turn ? a.turn < b.turn : left->id < right->id;
+	});
+	std::set<const CGHeroInstance *> reservedHeroes;
+	for(const auto * town : towns)
+	{
+		const auto threat = urgentTownThreat(town, aiNk);
+		// One intervening AI turn is the preparation horizon. Distant danger
+		// must not permanently consume the economy or immobilize a garrison.
+		if(threat.turn > 1 || !threat.heroPtr.isVerified() || !threat.danger)
+			continue;
+		const auto * defender = town->getGarrisonHero() ? town->getGarrisonHero() : town->getVisitingHero();
+		const auto strength = combinedDefenceStrength(town, defender);
+		if(strength >= threat.danger)
+			continue;
+
+		if(!defender && town->hasBuilt(BuildingID::TAVERN)
+			&& available[EGameResID::GOLD] >= GameConstants::HERO_GOLD_COST
+			&& !aiNk->heroManager->heroCapReached())
+		{
+			auto candidates = aiNk->cc->getAvailableHeroes(town);
+			vstd::erase_if(candidates, [&](const auto * hero) { return reservedHeroes.count(hero) != 0; });
+			const auto * best = selectDefender(town, threat, candidates, available);
+			if(best)
+			{
+				available[EGameResID::GOLD] -= GameConstants::HERO_GOLD_COST;
+				reservedHeroes.insert(best);
+				tasks.push_back(sptr(RecruitHero(town, best).setpriority(1.0f / (1 + threat.turn))));
+				continue;
+			}
+		}
+
+		// Buy only enough currently available troops to make holding plausible.
+		// Infeasible towns reserve nothing, leaving funds for other towns.
+		auto army = aiNk->armyManager->getArmyAvailableToBuy(town->getUpperArmy(), town, available);
+		std::set<CreatureID> types;
+		for(const auto & slot : town->getUpperArmy()->Slots())
+			types.insert(slot.second->getCreatureID());
+		if(defender && defender != town->getUpperArmy())
+			for(const auto & slot : defender->Slots())
+				types.insert(slot.second->getCreatureID());
+		if(types.size() > GameConstants::ARMY_SIZE)
+			continue;
+		TResources cost;
+		std::vector<creInfo> plannedCreatures;
+		uint64_t value = 0;
+		const double multiplier = defender ? defender->getFightingStrength() : 1.0;
+		for(const auto & creature : army)
+		{
+			if(!types.count(creature.creID) && types.size() == GameConstants::ARMY_SIZE)
+				continue;
+			const auto power = creature.creID.toCreature()->getAIValue();
+			if(!power || multiplier <= 0)
+				continue;
+			const auto missing = static_cast<double>(threat.danger) - strength - value * multiplier;
+			const int count = static_cast<int>(std::min<double>(creature.count, std::ceil(missing / (power * multiplier))));
+			if(count <= 0)
+				break;
+			types.insert(creature.creID);
+			auto planned = creature;
+			planned.count = count;
+			plannedCreatures.push_back(planned);
+			value += static_cast<uint64_t>(count) * power;
+			cost += creature.creID.toCreature()->getFullRecruitCost() * count;
+			if(strength + value * multiplier >= threat.danger)
+				break;
+		}
+		if(value && strength + value * multiplier >= threat.danger && available.canAfford(cost))
+		{
+			available -= cost;
+			tasks.push_back(sptr(BuyArmy(town, value, cost, plannedCreatures).setpriority(1.0f / (1 + threat.turn))));
+		}
+	}
+	return tasks;
+}
+
 bool isThreatUnderControl(const CGTownInstance * town, const HitMapInfo & threat, const Nullkiller * aiNk, const std::vector<AIPath> & paths)
 {
 	int dayOfWeek = aiNk->cc->getDate(Date::DAY_OF_WEEK);
@@ -150,7 +282,9 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 	// or simply no one is around
 	threats.push_back(threatNode.fastestDanger); // no guarantee that fastest danger will be there
 
-	if(town->getGarrisonHero() && handleGarrisonHeroFromPreviousTurn(town, tasks, aiNk))
+	if(town->getGarrisonHero() && (aiNk->isHeroLocked(town->getGarrisonHero())
+		|| ((threatNode.fastestDanger.turn > 1 || !threatNode.fastestDanger.heroPtr.isVerified())
+			&& handleGarrisonHeroFromPreviousTurn(town, tasks, aiNk))))
 		return;
 
 	if(!threatNode.fastestDanger.heroPtr.isVerified())
@@ -159,17 +293,6 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 		logAi->trace("No threat found for town %s", town->getNameTranslated());
 #endif
 		return;
-	}
-
-	const uint64_t reinforcement = aiNk->armyManager->howManyReinforcementsCanBuy(town->getUpperArmy(), town);
-	if(reinforcement)
-	{
-#if NK2AI_TRACE_LEVEL >= 1
-		logAi->trace("Town %s can buy defence army %lld", town->getNameTranslated(), reinforcement);
-#endif
-
-		// TODO: Mircea: This won't have any money left because BuyArmyBehavior runs first and could have used all resources by now
-		tasks.push_back(Goals::sptr(Goals::BuyArmy(town, reinforcement).setpriority(0.5f)));
 	}
 
 	auto paths = aiNk->pathfinder->getPathInfo(town->visitablePos());
@@ -190,7 +313,6 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 		if(isThreatUnderControl(town, threat, aiNk, paths))
 			continue;
 
-		evaluateRecruitingHero(tasks, threat, town, aiNk);
 
 		if(paths.empty())
 		{
@@ -207,6 +329,8 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 		for(int i = 0; i < paths.size(); i++)
 		{
 			auto & path = paths[i];
+			if(path.turn() > threat.turn || aiNk->arePathHeroesLocked(path))
+				continue;
 			if(!closestWay || path.movementCost() < closestWay->movementCost())
 				closestWay = &path;
 
@@ -269,7 +393,7 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 					tasks.push_back(
 						Goals::sptr(
 							Composition()
-								.addNext(DefendTown(town, threat, path.targetHero))
+								.addNext(DefendTown(town, threat, path.targetHero, combinedDefenceStrength(town, path.targetHero)))
 								.addNext(ExchangeSwapTownHeroes(town, town->getVisitingHero(), HeroLockedReason::DEFENCE))
 						)
 					);
@@ -397,96 +521,6 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 	}
 
 	logAi->debug("Found %d tasks", tasks.size());
-}
-
-void DefenceBehavior::evaluateRecruitingHero(Goals::TGoalVec & tasks, const HitMapInfo & threat, const CGTownInstance * town, const Nullkiller * aiNk)
-{
-	// TODO: Mircea: Shouldn't it be threat.turn < 1? How does the current one make sense?
-	if(threat.turn > 0 || town->getGarrisonHero() || town->getVisitingHero())
-		return;
-
-	// TODO: Mircea: Replace with aiNk->heroManager->canRecruitHero(town) but skip limit?
-	if(town->hasBuilt(BuildingID::TAVERN) && aiNk->cc->getResourceAmount(EGameResID::GOLD) > GameConstants::HERO_GOLD_COST)
-	{
-		const auto heroesInTavern = aiNk->cc->getAvailableHeroes(town);
-		for(auto hero : heroesInTavern)
-		{
-			// TODO: Mircea: Investigate if this logic might be off, as the attacker will most probably be more powerful than a tavern hero
-			// A new hero improves the defence strength of town's army if it has defence > 0 in primary skills
-			if(hero->getTotalStrength() < threat.danger)
-				continue;
-
-			bool heroAlreadyHiredInOtherTown = false;
-			for(const auto & task : tasks)
-			{
-				if(auto * const recruitGoal = dynamic_cast<Goals::RecruitHero *>(task.get()))
-				{
-					if(recruitGoal->getHero() == hero)
-					{
-						heroAlreadyHiredInOtherTown = true;
-						break;
-					}
-				}
-			}
-			if(heroAlreadyHiredInOtherTown)
-				continue;
-
-			auto myHeroes = aiNk->cc->getHeroesInfo();
-
-#if NK2AI_TRACE_LEVEL >= 1
-			logAi->trace("Hero %s can be recruited to defend %s", hero->getObjectName(), town->getObjectName());
-#endif
-			bool needSwap = false;
-			const CGHeroInstance * heroToDismiss = nullptr;
-
-			if(town->getVisitingHero())
-			{
-				if(!town->getGarrisonHero())
-					needSwap = true;
-				else
-				{
-					if(town->getVisitingHero()->getArmyStrength() < town->getGarrisonHero()->getArmyStrength())
-					{
-						if(town->getVisitingHero()->getArmyStrength() >= hero->getArmyStrength())
-							continue;
-
-						heroToDismiss = town->getVisitingHero();
-					}
-					else if(town->getGarrisonHero()->getArmyStrength() >= hero->getArmyStrength())
-						continue;
-					else
-					{
-						needSwap = true;
-						heroToDismiss = town->getGarrisonHero();
-					}
-				}
-
-				// avoid dismissing one weak hero in order to recruit another.
-				// TODO: Mircea: Move to constant
-				if(heroToDismiss && heroToDismiss->getArmyStrength() + 500 > hero->getArmyStrength())
-					continue;
-			}
-			// TODO: Mircea: Check if it immediately dismisses after losing a castle, though that implies losing a hero too if present in the castle
-			else if(aiNk->heroManager->heroCapReached())
-			{
-				heroToDismiss = aiNk->heroManager->findWeakHeroToDismiss(hero->getArmyStrength(), town);
-				if(!heroToDismiss)
-					continue;
-			}
-
-			TGoalVec sequence;
-			Goals::Composition recruitHeroComposition;
-
-			if(needSwap)
-				sequence.push_back(sptr(ExchangeSwapTownHeroes(town, town->getVisitingHero())));
-
-			if(heroToDismiss)
-				sequence.push_back(sptr(DismissHero(heroToDismiss)));
-
-			sequence.push_back(sptr(Goals::RecruitHero(town, hero)));
-			tasks.push_back(sptr(Goals::Composition().addNext(DefendTown(town, threat, hero)).addNextSequence(sequence)));
-		}
-	}
 }
 
 }

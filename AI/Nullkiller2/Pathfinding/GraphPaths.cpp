@@ -242,8 +242,15 @@ void GraphPaths::addChainInfo(std::vector<AIPath> & paths, int3 tile, const CGHe
 			if(path.targetHero != hero)
 				continue;
 
-			uint64_t loss = 0;
-			uint64_t strength = getHeroArmyStrengthWithCommander(path.targetHero, path.heroArmy);
+			// The entry object is an intermediate encounter for this extended path.
+			uint64_t strength = AIPath::remainingArmy(
+				getHeroArmyStrengthWithCommander(path.targetHero, path.heroArmy), path.armyLoss);
+			const auto entryLoss = std::min(strength, path.targetObjectArmyLoss);
+			strength -= entryLoss;
+			uint64_t loss = entryLoss;
+			// Graph links store aggregate danger without encounter identities. Keep the
+			// legacy safety gate rather than treating them as exact destination costs.
+			path.hasDestinationRiskProvenance = false;
 
 			for(auto graphTile = ++tilesToPass.rbegin(); graphTile != tilesToPass.rend(); graphTile++)
 			{
@@ -295,9 +302,11 @@ void GraphPaths::addChainInfo(std::vector<AIPath> & paths, int3 tile, const CGHe
 			}
 
 			path.armyLoss += loss;
-			path.targetObjectDanger = aiNk->dangerEvaluator->evaluateDanger(tile, path.targetHero, !allowBattle);
-			// TODO: Mircea: This is similar same as 263, so what's happening here? Why strength is passed differently?
-			path.targetObjectArmyLoss = aiNk->pathfinder->getStorage()->evaluateArmyLoss(path.targetHero, path.heroArmy->getArmyStrength(), path.targetObjectDanger);
+			path.destinationObjectDanger = aiNk->dangerEvaluator->evaluateDanger(tile, path.targetHero, !allowBattle);
+			path.targetObjectDanger = std::max(danger, path.destinationObjectDanger);
+			// Preserve conservative legacy aggregation: links do not identify which
+			// encounters overlap the endpoint. Never infer identity from equal danger.
+			path.targetObjectArmyLoss = aiNk->pathfinder->getStorage()->evaluateArmyLoss(path.targetHero, strength, path.destinationObjectDanger);
 
 			paths.push_back(path);
 		}
@@ -361,9 +370,21 @@ void GraphPaths::quickAddChainInfoWithBlocker(std::vector<AIPath> & paths, int3 
 			path.targetHero = entryPath.targetHero;
 			path.heroArmy = entryPath.heroArmy;
 			path.exchangeCount = entryPath.exchangeCount;
-			path.armyLoss = entryPath.armyLoss + aiNk->pathfinder->getStorage()->evaluateArmyLoss(path.targetHero, path.heroArmy->getArmyStrength(), danger);
-			path.targetObjectDanger = aiNk->dangerEvaluator->evaluateDanger(tile, path.targetHero, !allowBattle);
-			path.targetObjectArmyLoss = aiNk->pathfinder->getStorage()->evaluateArmyLoss(path.targetHero, path.heroArmy->getArmyStrength(), path.targetObjectDanger);
+			path.hasDestinationRiskProvenance = false;
+			auto strength = AIPath::remainingArmy(getHeroArmyStrengthWithCommander(path.targetHero, path.heroArmy), entryPath.armyLoss);
+			const auto entryLoss = std::min(strength, entryPath.targetObjectArmyLoss);
+			strength -= entryLoss;
+			path.armyLoss = entryPath.armyLoss + entryLoss;
+			for(auto graphTile = ++tilesToPass.rbegin(); graphTile != tilesToPass.rend(); ++graphTile)
+			{
+				const auto loss = aiNk->pathfinder->getStorage()->evaluateArmyLoss(path.targetHero, strength, getNode(*graphTile).linkDanger);
+				path.armyLoss += loss;
+				strength = AIPath::remainingArmy(strength, loss);
+			}
+			path.destinationObjectDanger = aiNk->dangerEvaluator->evaluateDanger(tile, path.targetHero, !allowBattle);
+			path.targetObjectDanger = std::max(danger, path.destinationObjectDanger);
+			// Unknown link/endpoint overlap retains the conservative legacy estimate.
+			path.targetObjectArmyLoss = aiNk->pathfinder->getStorage()->evaluateArmyLoss(path.targetHero, strength, path.destinationObjectDanger);
 
 			const auto * targetTileInfo = aiNk->cc->getTile(tile, false);
 			auto targetLayer = targetTileInfo

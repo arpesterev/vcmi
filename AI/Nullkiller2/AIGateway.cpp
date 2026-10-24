@@ -814,7 +814,14 @@ void AIGateway::makeTurn()
 				logAi->warn("Hero %s has %d MP left", h->getNameTranslated(), h->movementPointsRemaining());
 		}
 
-		endTurn();
+		// A recoverable goal may have stopped with an unresolved server action.
+		// Release the game-state lock so its events can finish before endTurn.
+		{
+			auto unlock = vstd::makeUnlockSharedGuard(CGameState::mutex);
+			status.waitTillIdle();
+		}
+		if(status.haveTurn())
+			endTurn();
 	}
 	catch (const InterruptionRequestedException &)
 	{
@@ -1532,6 +1539,24 @@ void AIStatus::madeTurn()
 	std::unique_lock<std::mutex> lock(mx);
 	havingTurn = false;
 	cv.notify_all();
+}
+
+bool AIStatus::isIdle()
+{
+	std::unique_lock<std::mutex> lock(mx);
+	return battle == NO_BATTLE && remainingQueries.empty() && requestToQueryID.empty()
+		&& objectsBeingVisited.empty() && !ongoingHeroMovement && !ongoingChannelProbing;
+}
+
+void AIStatus::waitTillIdle()
+{
+	std::unique_lock<std::mutex> lock(mx);
+	while(battle != NO_BATTLE || !remainingQueries.empty() || !requestToQueryID.empty()
+		|| !objectsBeingVisited.empty() || ongoingHeroMovement || ongoingChannelProbing)
+	{
+		cv.wait_for(lock, std::chrono::milliseconds(10));
+		aiGw->nullkiller->makingTurnInterruption.interruptionPoint();
+	}
 }
 
 void AIStatus::waitTillFree()
