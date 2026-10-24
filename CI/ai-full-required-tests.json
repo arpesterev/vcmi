@@ -42,6 +42,8 @@
     "CGameStateTest.PlanningBattlefieldFixedOverrideDoesNotConsumeRandomness",
     "CGameStateTest.PureObjectCandidatesDoNotSampleThreadGlobalRandomness",
     "CGameStateTest.UncachedBonusListRequiresRetainedOwnerDuringIteration",
+    "DetachedDefendBonuses.NativeLowDefenseFallbackAndRepeatedDefendDoNotStack",
+    "DetachedDefendBonuses.NativePercentageExpiresOnActivationAndInvalidatesCache",
     "Nullkiller2AIPathMetadataRegression.DefaultNodeCannotPretendToBeAValidChain",
     "Nullkiller2AIPathMetadataRegression.EmptyPathHasDeterministicMetadata",
     "Nullkiller2AIPathMetadataRegression.ProducerDoesNotUseCompressedPredecessorLoss",
@@ -188,6 +190,12 @@
     "PlanningCombatTerrain.CoastalLandUsesSandWithoutAuthoritativeState",
     "PlanningCombatTerrain.HiddenNeighbourIsUnknownEvenWhenAnotherShowsWater",
     "PlanningCombatTerrain.InlandAndWaterRetainVisibleTerrain",
+    "PlanningRiskEvidence.BinomialTailMatchesIndependentHighPrecisionControls",
+    "PlanningRiskEvidence.ContextToleranceAndOwnMagicRemainDirectional",
+    "PlanningRiskEvidence.DeadlineAndBudgetNeverProducePartialCheckpointDecision",
+    "PlanningRiskEvidence.ExtremeComplementaryBoundsRemainNumericallyValid",
+    "PlanningRiskEvidence.LuckyThreeCannotApproveAndCheckpointSpendingIsConservative",
+    "PlanningRiskEvidence.MixedOutcomesAndUnsupportedCannotBecomeFavorable",
     "PlanningRiskScheduler.ActualUpdateStatePreparesBeforeTakingAiStateMutex",
     "PlanningRiskScheduler.BuilderExceptionRelocksAndConsumesUnknownSpentBudget",
     "PlanningRiskScheduler.CapabilityCannotBeInventedFromAnotherOrUnownedLock",
@@ -231,6 +239,6 @@
     "SpellTargetRealMechanicsTest.TeleportShortlistUnblocksFriendlyShooterAfterRealCast",
     "SpellTargetRealMechanicsTest.TeleportWithNoLegalSourceProducesNoShortlist"
   ],
-  "minimum_executed_tests": 421,
+  "minimum_executed_tests": 429,
   "scope": "Exact named regression tests plus complete enabled suite. Synthetic fixtures do not establish whole-game strength."
 }

@@ -132,6 +132,7 @@ def main():
     source = Path(__file__).resolve().parent.parent
     fixture_paths = ['test/battle/ForcedBattleReference.cpp', 'AI/Nullkiller2/Engine/Experimental/DetachedDuelRollout.cpp',
                      'AI/Nullkiller2/Engine/Experimental/DetachedDuelRollout.h',
+                     'AI/Nullkiller2/Engine/Experimental/DetachedDefendBonuses.h',
                      'test/battle/PlanningBattleSnapshotChecks.h',
                      'AI/Nullkiller2/Engine/Experimental/PlanningBattleSnapshot.cpp',
                      'AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.cpp',
@@ -141,6 +142,7 @@ def main():
     result = {'status': 'incomplete', 'target': target, 'cold_fallback': False,
               'source_commit': commit, 'baseline_commit': '8fda7bdc69887e8c86d27a149681fc598c3cd8d1',
               'runner_image': os.environ.get('ImageVersion'), 'public_data_sha256': archive_digest,
+              'restore_evidence_sha256': hashlib.sha256(args.cache_validation.read_bytes()).hexdigest(),
               'fixture_sha256': {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in fixture_paths}}
     spec = importlib.util.spec_from_file_location('adventure_asset_inventory', Path(__file__).parent / 'adventure_eval/asset_inventory.py')
     assets = importlib.util.module_from_spec(spec)
@@ -168,6 +170,11 @@ def main():
         noop = (evidence / 'noop.log').read_text()
         if validate_plan(noop, config['reference_max_object_edges']) or re.search(r'\[\d+/\d+\].*(?:Linking |Archiving )', noop):
             raise RuntimeError('Immediate reference rebuild was not a no-op')
+        if hashlib.sha256((build / 'bin' / target).read_bytes()).hexdigest() != result['executable_sha256']:
+            raise RuntimeError('Immediate reference rebuild changed the executable')
+        # A later independent mechanics gate may reuse this binary even when the
+        # model smoke fails, but never after a partial build or failed no-op.
+        result['noop_verified'] = True
         reference_started = True
         result['execution_seconds'] = run([str(build / 'bin' / target), '--gmock_verbose=error',
                                            '--gtest_filter=' + config['reference_filter'], '--gtest_output=xml:' + str(evidence / 'tests.xml')],

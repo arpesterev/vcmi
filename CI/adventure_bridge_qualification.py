@@ -84,11 +84,11 @@ def map_hashes(build):
     return hashes, provenance
 
 
-def execute_cases(executable, evidence, cwd, run_case=run, clock=time.monotonic):
+def execute_cases(executable, evidence, cwd, run_case=run, clock=time.monotonic, cases=CASES):
     """Collect independent failures without extending the shared 600-second cap."""
     started = clock()
     results = []
-    for index, case in enumerate(CASES):
+    for index, case in enumerate(cases):
         remaining = 600 - (clock() - started)
         record = {'test': case, 'status': 'incomplete', 'attempted': False}
         results.append(record)

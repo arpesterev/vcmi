@@ -51,6 +51,9 @@ jobs:
         python3 -m unittest discover -s CI -p "test_incremental*.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_bridge_qualification.py" -v
+        python3 -m unittest discover -s CI -p "test_adventure_defend_qualification.py" -v
+        python3 -m unittest discover -s CI -p "test_adventure_interaction_qualification.py" -v
+        python3 -m unittest discover -s test/adventure -p "test_interaction_maps.py" -v
         python3 -m unittest discover -s CI -p "test_forced_battle_evidence.py" -v
         python3 -m unittest discover -s CI -p "test_compiler_recovery.py" -v
         python3 -m unittest discover -s CI -p "test_linux_cache_compatibility.py" -v
@@ -324,6 +327,7 @@ jobs:
         ./vcmitest --gmock_verbose=error --gtest_output=xml:"$GITHUB_WORKSPACE/incremental-evidence/tests.xml" > "$GITHUB_WORKSPACE/incremental-evidence/tests.log" 2>&1
         python3 "$GITHUB_WORKSPACE/CI/check_required_regressions.py" --manifest "$GITHUB_WORKSPACE/CI/ai-full-required-tests.json" --xml "$GITHUB_WORKSPACE/incremental-evidence/tests.xml"
     - name: Qualify bounded real-server battle references on verified warm objects
+      id: battle_references
       if: startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]')
       timeout-minutes: 10
       run: |
@@ -331,6 +335,11 @@ jobs:
         export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
         python3 CI/adventure_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z --resource-root "$HOME/.local/share/vcmi"
         ccache --print-stats > incremental-evidence/forced-battle/ccache-after.tsv
+    - name: Qualify native DEFEND mechanics with the verified reference binary
+      id: defend_references
+      if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
+      timeout-minutes: 2
+      run: python3 CI/adventure_defend_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/forced-defend --reference-evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
     - name: Qualify bounded real planner turns on public synthetic maps
       if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
       timeout-minutes: 15
@@ -339,6 +348,15 @@ jobs:
         export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
         python3 CI/adventure_bridge_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/adventure-bridge --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
         ccache --print-stats > incremental-evidence/adventure-bridge/ccache-after.tsv
+    - name: Qualify bounded three-turn town defence and economic recovery
+      id: adventure_interaction
+      if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
+      timeout-minutes: 15
+      run: |
+        export CCACHE_DIR="$HOME/.cache/vcmi-incremental/linux-gcc-test"
+        export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+        python3 CI/adventure_interaction_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/adventure-interaction --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
+        ccache --print-stats > incremental-evidence/adventure-interaction/ccache-after.tsv
     - name: Snapshot only successful build outputs, with bounded upload size
       run: |
         python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/cache-toolchain-identity.json

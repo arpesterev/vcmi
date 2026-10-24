@@ -103,3 +103,43 @@ TEST(PlanningRiskTable, CheapAdmissionAlternatesHeroesBeforeCapture)
 		EXPECT_EQ(first[index].target, ObjectInstanceID(100));
 	}
 }
+
+#include "../../AI/Nullkiller2/Engine/Experimental/DetachedDefendBonuses.h"
+#include "../../lib/bonuses/CBonusSystemNode.h"
+#include "../../lib/bonuses/BonusCache.h"
+
+TEST(DetachedDefendBonuses, NativePercentageExpiresOnActivationAndInvalidatesCache)
+{
+	CBonusSystemNode source(BonusNodeType::STACK_INSTANCE, true);
+	source.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::PRIMARY_SKILL,
+		BonusSource::OTHER, 10, BonusSourceID(), BonusSubtypeID(PrimarySkill::DEFENSE), BonusValueType::BASE_NUMBER));
+	const auto sourceVersion = source.getTreeVersion();
+	DetachedDefendBonuses owned(source);
+	BonusValueCache defense(&owned, Selector::typeSubtype(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::DEFENSE)));
+	EXPECT_EQ(defense.getValue(), 10);
+	owned.defend();
+	EXPECT_EQ(defense.getValue(), 12);
+	EXPECT_TRUE(owned.hasBonusOfType(BonusType::UNIT_DEFENDING));
+	// No round boundary expiry: the explicit next-activation call removes it.
+	EXPECT_EQ(defense.getValue(), 12);
+	owned.beforeActivation();
+	EXPECT_EQ(defense.getValue(), 10);
+	EXPECT_FALSE(owned.hasBonusOfType(BonusType::UNIT_DEFENDING));
+	EXPECT_EQ(source.getTreeVersion(), sourceVersion);
+	EXPECT_EQ(source.valOfBonuses(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::DEFENSE)), 10);
+}
+
+TEST(DetachedDefendBonuses, NativeLowDefenseFallbackAndRepeatedDefendDoNotStack)
+{
+	CBonusSystemNode source(BonusNodeType::STACK_INSTANCE, true);
+	source.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::PRIMARY_SKILL,
+		BonusSource::OTHER, 4, BonusSourceID(), BonusSubtypeID(PrimarySkill::DEFENSE), BonusValueType::BASE_NUMBER));
+	DetachedDefendBonuses owned(source);
+	BonusValueCache defense(&owned, Selector::typeSubtype(BonusType::PRIMARY_SKILL, BonusSubtypeID(PrimarySkill::DEFENSE)));
+	owned.defend();
+	EXPECT_EQ(defense.getValue(), 5);
+	owned.defend();
+	EXPECT_EQ(defense.getValue(), 5);
+	owned.beforeActivation();
+	EXPECT_EQ(defense.getValue(), 4);
+}

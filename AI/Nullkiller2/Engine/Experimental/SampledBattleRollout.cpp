@@ -1,6 +1,7 @@
 /* GPL-2.0-or-later; see license.txt. Experimental, not production-wired. */
 #include "../../StdInc.h"
 #include "SampledBattleRollout.h"
+#include "DetachedDefendBonuses.h"
 #include "../../../../lib/battle/BattleInfo.h"
 #include "../../../../lib/battle/BattleLayout.h"
 #include "../../../../lib/battle/CUnitState.h"
@@ -91,10 +92,10 @@ size_t sideIndex(BattleSide side) { return side == BattleSide::ATTACKER ? 0 : 1;
 class SampledBattle final : public BattleInfo, public battle::IUnitEnvironment
 {
 public:
+	std::map<uint32_t, std::unique_ptr<DetachedDefendBonuses>> ownedBonuses;
 	std::vector<std::unique_ptr<battle::CUnitStateDetached>> units;
 	GameRandomizer randomizer;
 	int roundNumber = 0;
-	bool requiresDefend = false;
 	std::vector<std::string> * trace;
 	void record(const std::string & message) { if(trace) trace->push_back(message); }
 	SampledBattle(const CBattleInfoCallback & initial, const IGameInfoCallback & settings,
@@ -107,7 +108,9 @@ public:
 		battlefieldType = initial.battleGetBattlefieldType();
 		for(const auto * original : source)
 		{
-			auto unit = std::make_unique<battle::CUnitStateDetached>(original, original);
+			auto bonus = std::make_unique<DetachedDefendBonuses>(*original);
+			auto unit = std::make_unique<battle::CUnitStateDetached>(original, bonus.get());
+			ownedBonuses.emplace(original->unitId(), std::move(bonus));
 			unit->localInit(this);
 			unit->position = original->getPosition();
 			units.push_back(std::move(unit));
@@ -210,7 +213,10 @@ public:
 			if(distance(hex) < distance(best) || (distance(hex) == distance(best) && hex.toInt() < best.toInt())) best = hex;
 		if(trace) record(std::string(best == actor.position ? "defend actor=" : "move actor=") + std::to_string(actor.unitId()) + " hex=" + std::to_string(best.toInt()));
 		if(best == actor.position)
-			requiresDefend = true; // Dynamic defensive stance is outside this initial subset.
+		{
+			ownedBonuses.at(actor.unitId())->defend();
+			actor.defending = true;
+		}
 		actor.position = best;
 	}
 };
@@ -265,29 +271,20 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 			auto * actor = battle.find(queue.front().front()->unitId());
 			if(!actor || !actor->alive()) break;
 			if(trace) battle.record("activation round=" + std::to_string(round + 1) + " actor=" + std::to_string(actor->unitId()) + " health=" + std::to_string(actor->getAvailableHealth()) + " hex=" + std::to_string(actor->position.toInt()));
+			battle.ownedBonuses.at(actor->unitId())->beforeActivation();
 			const int morale = actor->moraleVal();
 			const bool badMorale = morale < 0 && battle.randomizer.rollBadMorale(battle.armyID(*actor), -morale);
 			if(badMorale && trace) battle.record("bad_morale actor=" + std::to_string(actor->unitId()));
 			if(!badMorale) battle.act(*actor);
-			if(battle.requiresDefend)
-			{
-				result.unsupportedReason = "policy requires dynamic defend bonus";
-				return result;
-			}
 			actor->movedThisRound = true;
 			battle.activeStack = actor->unitId();
 			++result.actions;
-			if(!badMorale && actor->alive() && actor->canMove() && morale > 0 && !battle.finished()
+			if(!badMorale && !actor->defending && actor->alive() && actor->canMove() && morale > 0 && !battle.finished()
 				&& result.actions < MAX_ACTIONS && battle.randomizer.rollGoodMorale(battle.armyID(*actor), morale))
 			{
 				if(trace) battle.record("good_morale actor=" + std::to_string(actor->unitId()));
 				actor->hadMorale = true;
 				battle.act(*actor);
-				if(battle.requiresDefend)
-				{
-					result.unsupportedReason = "policy requires dynamic defend bonus";
-					return result;
-				}
 				++result.actions;
 			}
 		}

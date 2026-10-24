@@ -167,6 +167,7 @@ if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS)
 		nullkiller2/AdventurePlanningRegression.cpp
 		nullkiller2/PlannerContinuityRegression.cpp
 		nullkiller2/PlanningRiskTableTest.cpp
+		nullkiller2/PlanningRiskEvidenceTest.cpp
 		nullkiller2/PlanningRiskSchedulerRegression.cpp
 		nullkiller2/AdventureBattleRiskRegression.cpp
 		nullkiller2/TownDefenceRegression.cpp
@@ -307,3 +308,6 @@ endforeach()
 
 # Asset-free actual planner-turn evidence, explicitly built only.
 include(adventure/AdventureScenarioReference.cmake)
+
+# Independent, explicitly built three-turn defence/transaction evidence.
+include(adventure/AdventureInteractionReference.cmake)

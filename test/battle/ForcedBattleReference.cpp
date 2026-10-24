@@ -20,6 +20,8 @@
 #include "../../lib/battle/BattleLayout.h"
 #include "../../lib/battle/Unit.h"
 #include "../../lib/battle/CUnitState.h"
+#include "../../lib/battle/BattleAttackInfo.h"
+#include "../../AI/Nullkiller2/Engine/Experimental/DetachedDefendBonuses.h"
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/filesystem/ResourcePath.h"
@@ -482,6 +484,110 @@ protected:
 		std::cout << std::endl;
 	}
 
+	// Scripted mechanics control, not a policy-selected battle or outcome sample.
+	void verifyDefend(int creature, bool weak, bool positiveMorale, int extraStance = 0)
+	{
+		ASSERT_NO_FATAL_FAILURE(initialize(17041));
+		ASSERT_NE(handler, nullptr);
+		auto attacker = army(PlayerColor(0), 18, 20); // native single-shot wood elves
+		auto defender = army(PlayerColor::NEUTRAL, creature, 1000);
+		if(extraStance)
+			defender->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+				BonusType::DEFENSIVE_STANCE, BonusSource::OTHER, extraStance, BonusSourceID()));
+		auto layout = BattleLayout::createDefaultLayout(*server.state, attacker.get(), defender.get());
+		layout.obstaclesAllowed = false;
+		layout.tacticsAllowed = false;
+		const auto id = server.state->nextBattleID;
+		handler->battles->startBattle(attacker.get(), defender.get(), battleTile, nullptr, nullptr, layout, nullptr);
+		const auto * real = server.state->getBattle(id);
+		ASSERT_NE(real, nullptr);
+		const battle::Unit * shooter = nullptr;
+		const battle::Unit * target = nullptr;
+		for(const auto * unit : real->battleAliveUnits())
+			(unit->unitSide() == BattleSide::ATTACKER ? shooter : target) = unit;
+		ASSERT_NE(shooter, nullptr);
+		ASSERT_NE(target, nullptr);
+		ASSERT_EQ(real->battleActiveUnit(), shooter);
+		ASSERT_GT(shooter->getMovementRange(), target->getMovementRange());
+		ASSERT_EQ(shooter->getTotalAttacks(true), 1);
+		ASSERT_EQ(shooter->luckVal(), 0);
+		ASSERT_GE(shooter->moraleVal(), 0);
+		ASSERT_GE(target->moraleVal(), 0);
+		if(positiveMorale) { ASSERT_GT(target->moraleVal(), 0); }
+		const int baseDefense = target->getDefense(false);
+		if(weak) { ASSERT_LT(baseDefense, 5); }
+		else { ASSERT_GE(baseDefense, 5); }
+		const auto constructionRng = RandomizerCapture::capture(*handler->randomizer);
+        // This controlled two-stack setup has no ammo cart or control spells.
+        struct Environment final : battle::IUnitEnvironment
+        {
+            bool unitHasAmmoCart(const battle::Unit *) const override { return false; }
+            PlayerColor unitEffectiveOwner(const battle::Unit * unit) const override { return unit->unitOwner(); }
+        } environment;
+		NK2AI::experimental::DetachedDefendBonuses bonuses(*target);
+		battle::CUnitStateDetached copy(target, &bonuses);
+		copy.localInit(&environment);
+		copy = *target->acquireState();
+		EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), constructionRng);
+		auto compare = [&](const char * phase)
+		{
+			const auto rngBefore = RandomizerCapture::capture(*handler->randomizer);
+			const auto live = real->calculateDmgRange(BattleAttackInfo(shooter, target, 0, true)).damage;
+			const auto detached = real->calculateDmgRange(BattleAttackInfo(shooter, &copy, 0, true)).damage;
+			EXPECT_EQ(copy.getDefense(false), target->getDefense(false));
+			EXPECT_EQ(copy.getDefense(true), target->getDefense(true));
+			EXPECT_EQ(detached.min, live.min);
+			EXPECT_EQ(detached.max, live.max);
+			EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), rngBefore);
+			std::cout << "FORCED_DEFEND_CONTROL creature=" << creature << " stance=" << extraStance
+				<< " phase=" << phase << " round=" << real->battleGetRound()
+				<< " defense=" << target->getDefense(false) << " min=" << live.min << " max=" << live.max << std::endl;
+		};
+		compare("before");
+		// DEFEND must not draw good morale, even for positive-morale troops.
+		const auto defendOnly = [&](const battle::Unit * actor)
+		{
+			const auto rngBefore = RandomizerCapture::capture(*handler->randomizer);
+			EXPECT_TRUE(handler->battles->makePlayerBattleAction(id, real->battleGetOwner(actor), BattleAction::makeDefend(actor)));
+			EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), rngBefore);
+		};
+		defendOnly(shooter);
+		ASSERT_EQ(real->battleActiveUnit(), target);
+		for(int cycle = 0; cycle < 3; ++cycle)
+		{
+			const auto roundBefore = real->battleGetRound();
+			const auto rngBefore = RandomizerCapture::capture(*handler->randomizer);
+			bonuses.defend();
+			copy.defending = true;
+			EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), rngBefore);
+			defendOnly(target);
+			ASSERT_EQ(real->battleActiveUnit(), shooter);
+			ASSERT_GT(real->battleGetRound(), roundBefore);
+			ASSERT_TRUE(target->hasBonusOfType(BonusType::UNIT_DEFENDING));
+			const int expected = weak && !extraStance ? baseDefense + 1
+				: (baseDefense + extraStance) * 120 / 100;
+			EXPECT_EQ(target->getDefense(false), expected);
+			compare("next_round_before_own_activation");
+			const auto range = real->calculateDmgRange(BattleAttackInfo(shooter, target, 0, true)).damage;
+			const auto health = target->getAvailableHealth();
+			ASSERT_TRUE(real->battleCanShoot(shooter, target->getPosition()));
+			ASSERT_TRUE(handler->battles->makePlayerBattleAction(id, real->battleGetOwner(shooter), BattleAction::makeShotAttack(shooter, target)));
+			ASSERT_FALSE(server.result.has_value());
+			const auto damage = health - target->getAvailableHealth();
+			EXPECT_GE(damage, range.min);
+			EXPECT_LE(damage, range.max);
+			// A real positive-morale extra shooter turn is legal; consume it by
+			// defending, never by altering the server's morale stream.
+			if(real->battleActiveUnit() == shooter) defendOnly(shooter);
+			ASSERT_EQ(real->battleActiveUnit(), target);
+			bonuses.beforeActivation();
+			copy = *target->acquireState();
+			EXPECT_FALSE(target->hasBonusOfType(BonusType::UNIT_DEFENDING));
+			EXPECT_EQ(target->getDefense(false), baseDefense);
+			compare("own_activation_expired");
+		}
+	}
+
 	void run(const Duel & duel, int seed)
 	{
 		SCOPED_TRACE(std::string(duel.name) + " seed=" + std::to_string(seed));
@@ -747,4 +853,19 @@ TEST_F(ForcedBattleReference, NativeHeroSpecialtyTroops)
 {
 	ASSERT_NO_FATAL_FAILURE(runNeutral(false, true));
 }
+// Separate mechanics tests: no terminal oracle outcome or calibration claim.
+class ForcedDefendReference : public ForcedBattleReference {};
+TEST_F(ForcedDefendReference, DefendNativeMinimumDefense)
+{
+    ASSERT_NO_FATAL_FAILURE(verifyDefend(84, true, true));
+}
+TEST_F(ForcedDefendReference, DefendNativePercentageAndMorale)
+{
+    ASSERT_NO_FATAL_FAILURE(verifyDefend(0, false, true));
+}
+TEST_F(ForcedDefendReference, DefendExplicitStanceMechanicsOnly)
+{
+    ASSERT_NO_FATAL_FAILURE(verifyDefend(0, false, true, 3));
+}
+
 }
