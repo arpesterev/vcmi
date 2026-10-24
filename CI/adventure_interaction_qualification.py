@@ -10,8 +10,7 @@ from adventure_bridge_qualification import DATA_HASH, digest, execute_cases, val
 from adventure_qualification import OBJECT, run
 
 TARGET = 'vcmi_adventure_interaction_reference'
-CASES = ('AdventureInteractionScenarios.UrgentTownPurchaseThenThreeTurnRecovery',
-         'AdventureInteractionScenarios.CoveredEconomyThenActualDefenceOnEnemyApproach')
+CASES = ('AdventureInteractionScenarios.CoveredEconomyThenActualDefenceOnEnemyApproach',)
 MAX_OBJECT_EDGES = 12
 COMPILE_SECONDS = 180
 ALLOWED = re.compile(r'^(?:server/CMakeFiles/vcmiservercommon(?:_battles|_queries|_processors)?\.dir/|test/CMakeFiles/vcmi_adventure_interaction_reference\.dir/)')

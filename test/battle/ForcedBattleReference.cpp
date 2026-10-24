@@ -271,20 +271,38 @@ protected:
 		ASSERT_NE(handler, nullptr);
 		auto attacker = army(PlayerColor(0), ownCreature, 20);
 		auto defender = army(PlayerColor::NEUTRAL, 58, 10);
-		if(withObstacles)
-			for(int slot = 1; slot < 7; ++slot)
-			{
-				attacker->setCreature(SlotID(slot), CreatureID(ownCreature), 20);
-				defender->setCreature(SlotID(slot), CreatureID(58), 10);
-			}
 		auto layout = BattleLayout::createDefaultLayout(*server.state, attacker.get(), defender.get());
 		layout.obstaclesAllowed = withObstacles;
 		layout.tacticsAllowed = false;
+        if(withObstacles)
+        {
+            // Fixed geometry control, not seed or outcome selection. Native
+            // obstacle1 at113 blocks113..115; flank it with legal starts.
+            // Engine obstacle generation precedes unit placement from layout.
+            layout.units[BattleSide::ATTACKER][0] = BattleHex(112);
+            layout.units[BattleSide::DEFENDER][0] = BattleHex(116);
+        }
 		const auto id = server.state->nextBattleID;
 		handler->battles->startBattle(attacker.get(), defender.get(), battleTile, nullptr, nullptr, layout, nullptr);
 		const auto * initial = server.state->getBattle(id);
 		ASSERT_NE(initial, nullptr);
-		if(withObstacles) { ASSERT_FALSE(initial->battleGetAllObstacles().empty()); }
+        if(withObstacles)
+        {
+            const auto obstacles = initial->battleGetAllObstacles();
+            ASSERT_FALSE(obstacles.empty());
+            for(const int hex : {113, 114, 115})
+            {
+                ASSERT_TRUE(std::any_of(obstacles.begin(), obstacles.end(), [hex](const auto & obstacle)
+                {
+                    return obstacle->getBlockedTiles().contains(BattleHex(hex));
+                })) << "Declared native obstacle geometry changed at " << hex;
+            }
+            ASSERT_EQ(initial->battleAliveUnits().size(), 2u);
+            for(const auto * unit : initial->battleAliveUnits())
+            {
+                ASSERT_EQ(unit->getPosition(), BattleHex(unit->unitSide() == BattleSide::ATTACKER ? 112 : 116));
+            }
+        }
 		traceNeutralState(*initial, "movement_control", "actual_initial", 0, true);
 		unsigned actions = 0, moves = 0, obstacleProgress = 0;
 		while(!server.result && actions < 2000)
@@ -302,7 +320,7 @@ protected:
 			const auto rngBefore = RandomizerCapture::capture(*handler->randomizer);
 			const auto reach = battle->getReachability(actor);
 			const auto action = chooseAction(*battle, actor);
-			if(!actions && !withObstacles) { ASSERT_EQ(action.actionType, EActionType::WALK); }
+			if(!actions) { ASSERT_EQ(action.actionType, EActionType::WALK); }
 			const auto distanceToContact = [&](const ReachabilityInfo & cache)
 			{
 				uint32_t distance = ReachabilityInfo::INFINITE_DIST;
@@ -326,6 +344,7 @@ protected:
 				const auto withoutObstacles = geometry.makeBFS(unblocked, reach.params);
 				obstacleInfluenced = distanceBefore > distanceToContact(withoutObstacles);
 			}
+			if(withObstacles && !actions) { ASSERT_TRUE(obstacleInfluenced); }
 			EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), rngBefore);
 			const auto oldPosition = actor->getPosition();
 			if(action.actionType == EActionType::WALK)

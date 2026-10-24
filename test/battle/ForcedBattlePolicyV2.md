@@ -18,9 +18,12 @@ sampled model and are not included in sampled accuracy/support counts.
 
 Three separate `ForcedMovementReference.*` controls require real server actions:
 
-- NativeObstacleDetourProgress: seven walking-dead stacks on each side, native
-  default layout and engine-generated obstacles, fixed seed17041 and public
-  MiniTest battle tile. No geometry or outcome search. At least one actual move
+- NativeObstacleDetourProgress: one native walking-dead stack on each side,
+  declared legal starts112/116 flanking the engine-generated obstacle1 at113
+  (blocked113/114/115), fixed seed17041 and public MiniTest battle tile. Actual
+  blocked geometry and exact unit placement are asserted. No seed or outcome
+  search; the explicit layout isolates the known obstacle instead of allowing
+  nearest-of-seven targets to bypass it. At least one actual move
   must be on a route measurably lengthened by obstacles, and must reduce remaining
   engine BFS distance to legal contact. To attribute that effect to obstacles,
   compare with engine BFS on a local accessibility copy changing only OBSTACLE
@@ -41,3 +44,10 @@ The three mechanics controls do not join the58/19 terminal-outcome parsers.
 
 Source review and local Python parser tests are not native execution evidence.
 No obstacle, flyer or double-wide pass is claimed until the real controls run.
+
+The original default-layout seven-stack control actually failed its route-impact
+precondition (zero relevant detours, despite21legal moves/57actions), while flyer
+and double-wide controls passed. This geometry-only repair retains the strict
+positive obstacle-progress assertion, real server actions and terminal result.
+It changes neither movement policy nor generated obstacles or creature stats.
+The repaired layout has not yet run natively; no repaired pass is claimed.

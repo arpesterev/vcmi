@@ -1,11 +1,12 @@
 # Controlled defence reaction after productive economy
 
-Status: staged, native execution pending. The original strict day3 mine-recovery
-case is retained separately, including its observed failure. No production change,
+Status: replacement case passed natively in qualification8 run 40118626275.
+Qualification9 promotes it to the normative interaction; the original strict day3
+mine-recovery case and its failure remain preserved in frozen qualification8. No production change,
 map edit, army bonus, fog grant or runtime-budget expansion is made here.
 
 Native qualification7 established that the threatened town was actually empty at
-the end of red day2. Hero0 had 24pikemen and 9archers, raw army 3054, zero movement,
+the end of red day2. Hero0 had 24pikemen and 9 archers, raw army 3054, zero movement,
 HERO_CHAIN lock 3 and an unblocked current-army return path at turn 1 with strength 3359.
 Enemy arrival was turn 1 with strength 2640. That is an opportunity, not demonstrated
 coverage. Per-turn resetState clears HERO_CHAIN locks; the test does not clear
@@ -39,7 +40,9 @@ and the hero must survive. Unsupported battles remain explicit failures, not win
 This validates a controlled defensive response, not optimal play, a full battle,
 or a replay showing what the original enemy would have done.
 
-Run this as a separate subprocess alongside the retained original case under the
+Run this as the normative isolated subprocess under the
 existing 180-second per-case/600-second aggregate interaction budget. Use the same
 single generated defence_economy_three_turns.vmap and provenance; no second map is
-needed. The historical day3-only assumption must not be silently relabeled green.
+needed. The historical day3-only assumption remains a documented failure in frozen
+qualification8; see AdventureInteractionScenarios.md for exact commit, artifact
+ID, expiration and evidence summary.

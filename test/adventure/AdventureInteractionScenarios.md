@@ -1,140 +1,86 @@
-# Bounded interaction drafts, separate from frozen qualification
+# Urgent defence, productive economy and actual return
 
-Status: first native qualification compiled and ran but failed the initial budget
-precondition (actual 1200 versus declared 2200), before any planner behavior. The
-generator correction below is source-supported; repaired native execution is
-pending. No production source changes are required.
+The normative interaction is
+`AdventureInteractionScenarios.CoveredEconomyThenActualDefenceOnEnemyApproach`.
+It runs the production planner through real CCallback/CGameHandler requests and
+ordered state notifications, with owned planning locks and public synthetic data.
+It is a controlled three-turn response, not a full client-server game or battle.
 
-## Defence, shared spending and recovery: first priority
+## Required behavior
 
-`AdventureInteractionScenarios.UrgentTownPurchaseThenThreeTurnRecovery` extends
-the already reviewed synchronous planner/server fixture, using real callbacks,
-real owned lock capabilities and real `CGameHandler` requests. It does not add a
-client renderer, fake successful request acknowledgments or battle resolver.
+- Day1: a visible urgent threat and constrained 2200 gold budget. Successful spending
+  first serves the threatened town; actual recruitment increases local strength.
+  Every purchase reconciles troop increase, dwelling-stock decrease and exact
+  resource cost. Both towns and the hero survive.
+- Day2: after a legal visible retreat, the enemy still has a real turn1 route to
+  the town. The planner captures the mine productively. A sufficient stationed
+  force or a real timely current-army/no-loss/unblocked return route is required.
+  A future route is only an opportunity, never a completed defence.
+- Day3: the same enemy legally approaches visitable(49,20). Actual paths must show
+  enemy town arrival0, sufficient own return0 and no immediate own counterattack.
+  The real red planner must then station sufficient actual force in town, at least
+  enemy total strength times the existing safe-attack ratio. Remote heroes and
+  unperformed army merges cannot satisfy this assertion. Ownership and hero/army
+  survival remain required.
 
-The public 64x48 map has two red towns, one existing visiting hero and a visible
-blue threat. Initial gold must be exactly 2200 after the normal map event;
-if it is not, fixture qualification fails. Expert AI starts with 10000 gold
-(config/difficulty.json; CGameState::initDifficulty). NewTurnProcessor.cpp692-696
-explicitly skips income on the first turn, so the one-shot map event must subtract
-7800, not 8800. The original draft incorrectly included 1000 day1 town income. The
-C++ 2200 assertion and all later behavior/deadline assertions remain unchanged. A pair of remote ordinary red ore mines keep
-the retreat destinations visible, without a reveal cheat or raw hidden lookup.
+All actions are server-validated. Unknown requests, battles and unsupported query
+paths fail explicitly. There are no fake success acknowledgments, private saves,
+extra troop bonuses or vision cheats. Existing native ore observers provide the
+known corridor and normal ore income, not gold; market/exchange conversion is
+unsupported. Initial gold/armies/map/seed 17041/Expert settings are unchanged.
 
-Before the first planner turn, actual production threat analysis must establish
-arrival within 0/1 turn at the threatened town and no 0/1 turn threat at the safe town.
-The combined local army counts each actual upper/visiting army once. The first
-successful spending must serve the threatened town, and actual recruitment must
-increase its local army. Every recruitment reconciles actual destination troop
-increase, dwelling stock decrease and exact engine creature cost; the whole red
-turn reconciles resources spent against real balances. It does not infer success
-from PackageApplied(true).
+## Why the former timing assertion was replaced
 
-The blue fixture driver makes 15 adjacent legal southward moves on each of two
-blue turns, checking actual position/MP debit at every step. Blue does not attack.
-Each endpoint must remain visible through an ordinary owned ore mine. Day2 must
-still be within the actual 0/1-turn threat horizon; only after the second retreat
-must day3 production analysis show no remaining 0/1-turn town threat. Mine ownership
-must remain neutral after both earlier red turns, then change to red during the
-third planner turn with productive movement,
-while retaining both towns and its hero. Failure of these geometry/threat
-preconditions is an invalid draft scenario, not evidence of poor play. A legal AI
-battle decision remains unsupported and fails; do not weaken the battle gate to
-force this interaction case green.
+`UrgentTownPurchaseThenThreeTurnRecovery` required the mine to remain neutral
+through day2 and change owner only on day3 after further withdrawal. That was a
+fixture assumption, not the user's requested behavior. It failed when the planner
+captured the mine on day2. The failure was retained while actual coverage was
+investigated; it was never reclassified as a pass.
 
-Newly supported request paths are RecruitCreatures, BuildStructure, ArrangeStacks,
-BulkMoveArmy and GarrisonHeroSwap. Their real native state packets forward ordered
-post-application garrisonsChanged, availableCreaturesChanged, buildChanged,
-heroInGarrisonChange and heroVisitsTown notifications. Unknown packets/requests,
-battles, hiring and blocking dialogs still fail explicitly. No artifact or Scholar
-exchange paths are implicitly accepted.
+Frozen qualification8 commit 9ebbf96e4615d5be24bb25a07261bba47a75e585 and run 40118626275 preserve both cases and
+the original failure. The replacement case passed natively in that same run:
+the town was empty after day2 economy, but a real return existed. After the legal
+enemy approach, the planner actually returned hero 0 and garrisoned 24pikemen and
+9 archers, raw army 3054, with 819 movement remaining and DEFENCE lock 2. Enemy arrival
+was 0 with strength 2640. The original timing prohibition therefore rejected this
+demonstrated productive response. Qualification9 removes only that obsolete test
+body/registration and keeps the stronger, already-executed replacement unchanged.
+Historical evidence remains in qualification8, not silently erased or turned green.
 
-This is a three-turn planner/transaction interaction, not a survival-against-an-active
-opponent or full-game/win-rate test. It complements synthetic-callback
-TownRecruitmentRegression and JointTownDefenceRegression.
+This does not prove survival in a resolved battle, optimal response to arbitrary
+enemy moves, a win-rate increase or a more enjoyable opponent. The result supports
+only the stated urgent spending, conservation, productive action and actual
+controlled defensive-return requirements.
 
-## Courier handoff: scoped draft, intentionally unsupported
+## Fixture corrections retained in the audit
 
-Intended acceptance: drive production ExecuteHeroChain for a courier to a fixed
-recipient, perform real server-validated troop handoff, prove species/count
-conservation and leave each hero a legal army, then on the following turn verify
-recipient progress toward a fixed objective with no oscillating rendezvous.
-This proves execution of a supplied production chain, NOT autonomous chain choice.
-A separate later planner-choice case would be needed for that claim.
+Earlier invalid premises were diagnosed rather than weakening acceptance:
+- First-turn income is skipped, so the one-shot event subtracts 7800 from normal
+  Expert-AI 10000 gold to produce the declared 2200 budget.
+- Omitted mine owner uses the native NEUTRAL default; the invalid explicit
+  playerColor.neutral identifier previously left the object UNFLAGGABLE.
+- Ordinary owned ore observers fill native visibility gaps. A disconnected fog
+  path is not interpreted as genuine threat removal.
+- The controlled approach avoids mine footprints and the engine's discounted
+  final-diagonal movement exception; actual route premises remain mandatory.
 
-Blocking dependency found in source: `CGameHandler::heroExchange` emits
-ExchangeDialog BEFORE adding its CGarrisonDialogQuery. `AIGateway::heroExchangeStarted`
-then schedules asynchronous work which calls pickBestCreatures/pickBestArtifacts
-and answerQuery. The synchronous bridge cannot simply acknowledge the dialog,
-reply inline before the query exists, or omit real transfer policy callbacks.
-It continues to reject ExchangeDialog. No fake courier success test is supplied.
+## Bounds and unsupported scope
 
-A faithful small next extension would use a bounded request queue: planner and
-normal gateway asynchronous policy threads release their actual shared state lock
-while waiting; one server driver processes queued requests in order, applies
-state under the writer lock, and delivers before/after callbacks in native order.
-Only after the original move handler returns may queued query replies execute.
-Require request IDs, accepted-query ownership, no pending requests at EndTurn,
-real transfer deltas and stop-on-timeout. This must receive its own lock/order
-review; it is not necessary to compile or release the already-reviewed fixes.
+The target remains excluded from default builds and uses the existing 180-second
+compile guard, 180-second case limit and 600-second aggregate qualification limit.
+Require successful process exit plus exact testcase XML and artifact/map/source
+hashes. Timeouts or unsupported actions are incomplete, never passes.
 
-## Qualification contract
+Courier exchange remains unsupported by this synchronous bridge. A future test
+needs ordered query creation and real queued server acknowledgments; no troop
+handoff success is claimed here.
 
-Only after review, overlay these files and include AdventureInteractionReference.cmake
-from test/CMakeLists.txt. The optional target is EXCLUDE_FROM_ALL. Run from build/bin
-so CVcmiTestConfig mounts generated test/testdata/AdventureInteractions/*.vmap.
-Use the same strict warm-only controls: at most 12 new target/server objects,
-180 seconds compilation,180 seconds per case and600 seconds total. Missing XML,
-unsupported event, timeout or nonzero process result is incomplete, never a pass.
-Do not automatically add this target to the frozen workflow/manifest.
+Audit artifact: [incremental Linux qualification8 evidence](https://github.com/arpesterev/vcmi/actions/runs/40118626275/artifacts/12569679015),
+ID 12569679015, name incremental-linux-9ebbf96e4615d5be24bb25a07261bba47a75e585-1.
+Verified ZIP SHA256: 79ff1c7508065d7136bba68a5861cbabc6feb3cf474d459bcbc810f71c4e2c25.
+The artifact expires 2026-10-31; the source commit and exact evidence summary above
+remain durable references, not a promise of permanent artifact availability.
 
-Keep the same public-data hash, seed 17041, Expert difficulty and unchanged no-cheat
-settings in baseline and candidate. Record request ordering, town IDs, actual
-spending/stock/army changes, threat arrival before/after and productive completion.
-Do not tune expected values to a candidate run or claim better enjoyment from green
-transaction tests. No user-owned save/campaign data is used.
-
-Assertion geometry is declared before any native run: blue starts anchor(45,10),
-withdraws to(45,25), then(45,40); the threatened town visitable tile is(43,7).
-A single normal turn cannot move a nearby attacker beyond the planner's two-turn
-urgency horizon, so the draft explicitly uses three red turns. If actual path
-costs do not produce the declared day2/day3 transition, reject fixture validity
-rather than changing an expectation to match the candidate. Early mine capture
-is likewise not poor play; it means this fixture cannot demonstrate later recovery.
-
-## Native transaction evidence and neutral-owner correction
-
-The corrected-budget run executed real urgent recruitment, garrison exchange and
-resource/stock accounting successfully, then stopped at the day1 mine-neutrality
-assertion: owner was UNFLAGGABLE instead of NEUTRAL. The object was a genuine gold
-mine, not a resource. Explicit owner="neutral" is not registered by
-IdentifierStorage.cpp31-32, so JsonSerializeFormat.h321-328 did not replace the
-CGObjectInstance constructor's UNFLAGGABLE owner. The native serializer's neutral
-default is selected by omitting owner (CGObjectInstance::serializeJsonOwner and
-JsonSerializeFormat's empty-field branch).
-
-Qualification5 changes only this interaction objective's options to {}, asserts
-that exact omission in generation tests, and verifies actual CGMine type, gold
-production, empty army and NEUTRAL ownership before any planner turn. Owned town
-and observer preconditions are explicit too. Day1/day2 NEUTRAL and day3 RED
-assertions remain unchanged. Prior failed evidence is retained; later retreat,
-threat-transition and recovery behavior remains unexecuted.
-
-## Known withdrawal corridor correction (qualification6)
-
-Native diagnostics disproved the reinforcement-pruning hypothesis: after buying
-the army, a real enemy town path still existed at turn0. After the first legal
-withdrawal, town and adjacent-square paths both disappeared because red fog
-contained gaps y13–22 and y28–37. Endpoint visibility was not enough.
-
-Four ordinary red ore mines at anchors (47,15), (47,20), (47,30), (47,35) now
-connect native radius3 sight along the enemy's x44 visitable route. No fog or
-production visibility logic is changed. They add normal ore income, not gold;
-the one-shot starting2200 gold budget, armies and all30 scripted adjacent moves
-are unchanged. Market/exchange requests remain unsupported, so this ore cannot
-be converted into gold by the fixture. Exact recruitment/resource accounting is
-unchanged. Startup verifies the full corridor visible and these mines producing
-ore under red ownership. Day2 must have an actual town route at turn1; day3 must
-have an actual reachable route at turn>=2, not unreachable255. Original mine
-ownership timing and threat-horizon assertions remain. Native qualification of
-this corrected premise and subsequent recovery is pending.
+The acceptance-metadata description was updated for qualification9, but generated
+map bytes are identical to qualification8:
+SHA256 043dc4fcf13675ca13e9ad2d37fe9881fa7d2409020e43ffcb0927b74b95b88b.

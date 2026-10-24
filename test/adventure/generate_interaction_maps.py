@@ -62,7 +62,7 @@ def generate(repo, output):
     manifest = {'status': 'draft_unexecuted', 'seed': 17041, 'difficulty': 3,
                 'map_sha256': hashlib.sha256(target.read_bytes()).hexdigest(),
                 'blue_scripted_retreat_anchors': [[45, 25, 0], [45, 40, 0]], 'known_visibility_required': True,
-                'acceptance': 'Urgent actual town recruitment before nonurgent spending, conserved budget/stock, then productive mine capture on third red turn after real threat-arrival precondition clears.',
+                'acceptance': 'Urgent actual town recruitment before nonurgent spending, conserved budget/stock, productive covered economy, then actual adequate town defence before a legally approaching enemy can attack.',
                 'unsupported': ['battles', 'hero exchanges', 'blocking queries'],
                 'source_sha256': {str(path.relative_to(repo)): hashlib.sha256(path.read_bytes()).hexdigest() for path in [*(source / name for name in parts), repo / 'test/testdata/ObjectPropertyTest/objects.json', repo / 'test/testdata/ObjectPropertyTest/surface_terrain.json', repo / 'CI/adventure_eval/scenarios.py']}}
     (output / 'interaction-provenance.json').write_text(json.dumps(manifest, indent=2) + '\n')

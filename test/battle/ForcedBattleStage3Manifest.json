@@ -45,7 +45,7 @@
   "files": [
     {
       "path": "test/battle/ForcedBattleReference.cpp",
-      "sha256": "4c4f4797bc28f6d6dc815984e4f8235455d1d692acf7c359e502d45396a33591"
+      "sha256": "779a2b5239d0279d28f80f961d533be5320b1b614f74f2e5399f1962436a5f37"
     },
     {
       "path": "test/battle/ForcedBattleStage3.md",
