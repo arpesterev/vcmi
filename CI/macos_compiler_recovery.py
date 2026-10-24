@@ -19,6 +19,13 @@ PROFILE = 'macos-arm-conan-ninja-release'
 # ccache 4.14 uses a 160-bit hexadecimal key, without the former M/R suffix.
 # https://github.com/ccache/ccache/blob/v4.14/src/ccache/storage/local/localstorage.cpp
 ENTRY_NAME = re.compile(r'[0-9a-f]{40}\Z')
+# Native 4.14 on APFS creates a disposable mmap index in tmp. Never persist it
+# or let restored inode/hash associations reach a compiler on a different runner.
+# https://github.com/ccache/ccache/blob/v4.14/src/ccache/inodecache.cpp
+INODE_CACHE_NAME = 'inode-cache-64.v3'
+# Darwin arm64 ABI: uint32 version + padding + three atomic<int64> counters;
+# 32768 buckets of atomic<pid_t> plus four (20-byte key, 20-byte hash, int) entries.
+INODE_CACHE_BYTES = 32 + 32768 * (4 + 4 * (20 + 20 + 4))
 IDENTITY_STRINGS = (
     'profile', 'workspace', 'home', 'os', 'arch', 'runner_image', 'cmake',
     'ninja', 'bootstrap_compiler', 'dependency_commit', 'presets_sha256',
@@ -101,6 +108,32 @@ def inspect_entries(entries, executable, environment):
     return results
 
 
+def discard_inode_cache(root):
+    """Discard only the known 64-bit v3 index, with all compilers stopped.
+
+    Its contents are never trusted or loaded by ccache. All other temporary
+    files remain subject to the unchanged pinned inventory's strict rejection.
+    """
+    root = core.canonical(root)
+    expected = core.canonical(Path.home() / '.cache' / 'vcmi-incremental' / PROFILE)
+    if root != expected or not root.is_dir():
+        raise ValueError('Only the existing profile ccache directory is allowed')
+    path = root / 'tmp' / INODE_CACHE_NAME
+    # Check every ancestor even if the file itself is absent.
+    core.canonical(path)
+    try:
+        info = core.regular(path)
+    except FileNotFoundError:
+        return 0
+    if info.st_uid != core.os.getuid() or info.st_size != INODE_CACHE_BYTES:
+        raise ValueError('Unexpected temporary ccache inode index owner/size')
+    with path.open('rb') as stream:
+        if stream.read(4) != b'\x03\x00\x00\x00':
+            raise ValueError('Unexpected temporary ccache inode index version')
+    path.unlink()
+    return info.st_size
+
+
 def recover(operation, identity_path, validation_path, baseline=None):
     identity, fingerprint = prerequisites(identity_path, validation_path)
     root = core.canonical(Path.home() / '.cache' / 'vcmi-incremental' / PROFILE)
@@ -122,6 +155,7 @@ def recover(operation, identity_path, validation_path, baseline=None):
                        or not isinstance(value, str) or not core.HEX.fullmatch(value)
                        for name, value in old['result_entries'].items())):
             raise ValueError('Baseline must be a matching post-restore check report')
+    discarded = discard_inode_cache(root)
     details, entries = core.inventory(root, enforce_size=operation != 'bound')
     executable, environment = core.ccache_command(identity, root)
     results = inspect_entries(entries, executable, environment)
@@ -129,9 +163,10 @@ def recover(operation, identity_path, validation_path, baseline=None):
         subprocess.run([executable, '--max-size=768M', '--cleanup'], check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                        env=environment, timeout=60)
+        discarded += discard_inode_cache(root)
         details, entries = core.inventory(root)
         results = inspect_entries(entries, executable, environment)
-    result.update(details, result_entries=results)
+    result.update(details, result_entries=results, discarded_inode_cache_bytes=discarded)
     if old is not None:
         changed = sum(old['result_entries'].get(name) != value for name, value in results.items())
         result.update(new_or_changed_results=changed, save_needed=changed > 0)

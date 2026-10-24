@@ -86,6 +86,14 @@ class MacRecoveryTests(unittest.TestCase):
         path.write_text(json.dumps(self.execute()))
         return path
 
+    def inode_index(self):
+        path = self.cache / 'tmp' / recovery.INODE_CACHE_NAME
+        path.parent.mkdir(exist_ok=True)
+        with path.open('wb') as stream:
+            stream.write(b'\x03\x00\x00\x00')
+            stream.truncate(recovery.INODE_CACHE_BYTES)
+        return path
+
     def test_real_installed_fixture_and_full_byte_identity(self):
         installed = json.loads(FIXTURE.read_bytes())
         self.assertEqual(installed['ccache'].splitlines()[0], 'ccache version 4.14')
@@ -187,6 +195,80 @@ class MacRecoveryTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.execute('bound')
                 path.unlink()
+        self.run.assert_not_called()
+
+    def test_known_inode_index_is_discarded_before_inspection_and_never_saved(self):
+        baseline = self.baseline()
+        inode = self.cache / 'tmp' / recovery.INODE_CACHE_NAME
+        for operation in ('check', 'bound'):
+            with self.subTest(operation=operation):
+                self.inode_index()
+                result = self.execute(operation, baseline if operation == 'bound' else None)
+                self.assertFalse(inode.exists())
+                self.assertEqual(result['discarded_inode_cache_bytes'], 5898272)
+                self.assertFalse(result['save_needed'])
+                self.assertNotIn(recovery.INODE_CACHE_NAME, json.dumps(result['result_entries']))
+        self.assertFalse(any(recovery.INODE_CACHE_NAME in str(call.args[0])
+                             for call in self.run.call_args_list))
+
+    def test_inode_index_links_special_files_versions_and_oversize_remain_rejected(self):
+        inode = self.cache / 'tmp' / recovery.INODE_CACHE_NAME
+        inode.parent.mkdir()
+        for mode in ('symlink', 'hardlink', 'fifo', 'directory', 'empty', 'short', 'bad_version', 'oversize'):
+            if mode == 'symlink':
+                inode.symlink_to(self.entry)
+            elif mode == 'hardlink':
+                os.link(self.entry, inode)
+            elif mode == 'fifo':
+                os.mkfifo(inode)
+            elif mode == 'directory':
+                inode.mkdir()
+            elif mode == 'oversize':
+                with inode.open('wb') as stream:
+                    stream.write(b'\x03\x00\x00\x00')
+                    stream.truncate(recovery.INODE_CACHE_BYTES + 1)
+            elif mode == 'bad_version':
+                self.inode_index()
+                with inode.open('r+b') as stream:
+                    stream.write(b'\x04\x00\x00\x00')
+            else:
+                inode.write_bytes(b'' if mode == 'empty' else b'\x03\x00\x00\x00')
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                self.execute('bound')
+            self.assertTrue(inode.exists() or inode.is_symlink())
+            inode.rmdir() if inode.is_dir() else inode.unlink()
+        self.run.assert_not_called()
+
+    def test_inode_index_wrong_owner_is_not_removed(self):
+        inode = self.inode_index()
+        with mock.patch.object(recovery.core.os, 'getuid', return_value=os.getuid() + 1):
+            with self.assertRaisesRegex(ValueError, 'owner/size'):
+                self.execute('bound')
+        self.assertTrue(inode.exists())
+        self.run.assert_not_called()
+
+    def test_inode_near_names_unknown_tmp_and_symlink_ancestor_remain_rejected(self):
+        temporary = self.cache / 'tmp'
+        temporary.mkdir()
+        for name in ('inode-cache-32.v3', 'inode-cache-64.v2', 'inode-cache-64.v4',
+                     'inode-cache-64.v3.tmp', 'inode-cache-64.v3.secret'):
+            path = temporary / name
+            path.write_bytes(b'\x03\x00\x00\x00')
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.execute()
+            self.assertTrue(path.exists())
+            path.unlink()
+        temporary.rmdir()
+        outside = self.home / 'outside'
+        outside.mkdir()
+        target = outside / recovery.INODE_CACHE_NAME
+        target.write_bytes(b'\x03\x00\x00\x00')
+        temporary.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            self.execute()
+        self.assertTrue(target.exists())
+        with self.assertRaises(ValueError):
+            recovery.discard_inode_cache(outside)
         self.run.assert_not_called()
 
     def test_symlinks_hardlinks_special_files_and_wrong_root_rejected(self):
@@ -352,6 +434,8 @@ class NativeMacCcacheTests(unittest.TestCase):
             source.write_text('int fixture() { return 1; }\n')
             arguments = (compiler, '-std=c++20', '-c', str(source), '-o', str(root / 'fixture.o'))
             native(*arguments)
+            inode = cache / 'tmp' / recovery.INODE_CACHE_NAME
+            self.assertTrue(inode.is_file(), 'Native APFS smoke must exercise the inode index')
             identity = installed_identity(root, root, Path(ccache))
             identity['ccache'] = native('--version').stdout.strip()
             identity['compiler_sha256'] = recovery.core.sha256(Path(compiler))
@@ -360,6 +444,8 @@ class NativeMacCcacheTests(unittest.TestCase):
             validation_path.write_text(json.dumps(restore_evidence()))
             with mock.patch.object(Path, 'home', return_value=root), mock.patch.object(Path, 'cwd', return_value=root):
                 baseline = recovery.recover('check', identity_path, validation_path)
+                self.assertFalse(inode.exists())
+                self.assertGreater(baseline['discarded_inode_cache_bytes'], 0)
                 self.assertGreater(len(baseline['result_entries']), 0)
                 baseline_path = root / 'baseline.json'
                 baseline_path.write_text(json.dumps(baseline))
@@ -375,6 +461,7 @@ class NativeMacCcacheTests(unittest.TestCase):
                 self.assertNotEqual(native(*arguments, check=False).returncode, 0)
                 result = recovery.recover('bound', identity_path, validation_path, baseline_path)
                 self.assertTrue(result['save_needed'])
+                self.assertFalse(inode.exists())
                 self.assertLessEqual(result['logical_bytes'], 768 * 1024**2)
                 _, entries = recovery.core.inventory(cache)
                 entry = next(path for name, path in entries.items()
