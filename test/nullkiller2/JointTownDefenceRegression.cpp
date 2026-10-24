@@ -8,6 +8,7 @@
 #include "../../AI/Nullkiller2/Engine/Nullkiller.h"
 #include "../../AI/Nullkiller2/Goals/RecruitHero.h"
 #include "../../AI/Nullkiller2/Goals/BuyArmy.h"
+#include "../../lib/CPlayerState.h"
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/gameState/TavernHeroesPool.h"
 #include "../../lib/mapping/CMap.h"
@@ -60,6 +61,8 @@ public:
 
 class JointDefenceCallback final : public CCallback
 {
+	std::shared_ptr<CGameState> fixtureState;
+
 public:
 	using CCallback::getResourceAmount;
 	std::vector<const CGTownInstance *> towns;
@@ -75,9 +78,10 @@ public:
 	bool applyMerge = true;
 	int recruitmentLimit = std::numeric_limits<int>::max();
 
-	explicit JointDefenceCallback(std::shared_ptr<CGameState> state) : CCallback(state, PlayerColor(0), nullptr) {}
+	explicit JointDefenceCallback(std::shared_ptr<CGameState> state)
+		: CCallback(state, PlayerColor(0), nullptr), fixtureState(std::move(state)) {}
 	TResources getResourceAmount() const override { return resources; }
-	const IGameSettings & getSettings() const override { return gameState().getMap().getSettings(); }
+	const IGameSettings & getSettings() const override { return fixtureState->getMap().getSettings(); }
 	int getDate(Date) const override { return 1; }
 	int3 getMapSize() const override { return int3(2, 1, 1); }
 	std::vector<const CGTownInstance *> getTownsInfo(bool = true) const override { return towns; }
@@ -88,7 +92,7 @@ public:
 	const PlayerState * getPlayerState(PlayerColor, bool = true) const override { return nullptr; }
 	const CGObjectInstance * getObj(ObjectInstanceID id, bool = true) const override
 	{
-		const auto & objects = gameState().getMap().objects;
+		const auto & objects = fixtureState->getMap().objects;
 		return id.hasValue() && id.getNum() < objects.size() ? objects[id.getNum()].get() : nullptr;
 	}
 	void recruitHero(const CGObjectInstance * location, const CGHeroInstance * hero, const HeroTypeID &) override
@@ -96,11 +100,11 @@ public:
 		++hireRequests;
 		if(!applyHire)
 			return;
-		auto hired = gameState().heroesPool->takeHeroFromPool(hero->getHeroTypeID());
+		auto hired = fixtureState->heroesPool->takeHeroFromPool(hero->getHeroTypeID());
 		ASSERT_NE(hired, nullptr);
 		resources[EGameResID::GOLD] -= GameConstants::HERO_GOLD_COST;
 		hired->tempOwner = PlayerColor(0);
-		gameState().getMap().objects.at(hired->id.getNum()) = hired;
+		fixtureState->getMap().objects.at(hired->id.getNum()) = hired;
 		heroes.push_back(hired.get());
 		const_cast<CGTownInstance *>(dynamic_cast<const CGTownInstance *>(location))->setVisitingHero(hired.get());
 	}

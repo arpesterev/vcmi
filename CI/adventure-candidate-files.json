@@ -79,7 +79,7 @@
     "test/game/CGameStateTest.cpp": "9738fd7bd10dad1b79c7e2d54a4a4fd575f45b5364f1309d267c02ac22be4313",
     "test/nullkiller2/AIPathMetadataRegression.cpp": "569651e5316c17b2f618d7970e72e27354e9d3603fb18d35bfe3d31d446b0047",
     "test/nullkiller2/AdventureBattleRiskRegression.cpp": "5b5e3b68624b662895de3008c01f0d141ac0cce74fbab8102182fbb656813198",
-    "test/nullkiller2/JointTownDefenceRegression.cpp": "31fe69b2f4203a2f1bc7deca0091d7b6d15f7d5476ee8872209d09b0a1adb921",
+    "test/nullkiller2/JointTownDefenceRegression.cpp": "d1ac9858b9ba912cd0007e6f45eecdd74f8c925a97f9081bd524a951d215c9e5",
     "test/nullkiller2/PlannerContinuityRegression.cpp": "3ece67d303913c943b276402d735c77e0c7dd961c6b8286f42f22184f485562a",
     "test/nullkiller2/PlanningRiskSchedulerRegression.cpp": "339d86c1195de59923197524d5b7f9f6a94f2ecdaf791a63bc6211a4baf6a4c5",
     "test/nullkiller2/PlanningRiskTableTest.cpp": "2995386d196fa43410f14b46986d64f831c8828646578bbbe2f9210cda6f538a",
