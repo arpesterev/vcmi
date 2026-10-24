@@ -81,7 +81,7 @@
     "test/nullkiller2/AdventureBattleRiskRegression.cpp": "5b5e3b68624b662895de3008c01f0d141ac0cce74fbab8102182fbb656813198",
     "test/nullkiller2/JointTownDefenceRegression.cpp": "31fe69b2f4203a2f1bc7deca0091d7b6d15f7d5476ee8872209d09b0a1adb921",
     "test/nullkiller2/PlannerContinuityRegression.cpp": "3ece67d303913c943b276402d735c77e0c7dd961c6b8286f42f22184f485562a",
-    "test/nullkiller2/PlanningRiskSchedulerRegression.cpp": "2dfbc2d363d8c0ecbe5e36b0e774c24802ca329a960582abe7a0153545212050",
+    "test/nullkiller2/PlanningRiskSchedulerRegression.cpp": "339d86c1195de59923197524d5b7f9f6a94f2ecdaf791a63bc6211a4baf6a4c5",
     "test/nullkiller2/PlanningRiskTableTest.cpp": "2995386d196fa43410f14b46986d64f831c8828646578bbbe2f9210cda6f538a",
     "test/nullkiller2/TownDefenceRegression.cpp": "eed50607ed236e91e5de99631644571ab010040b739a6bdabf8cca6cf357fdcb",
     "test/nullkiller2/TownRecruitmentRegression.cpp": "00544961c4f9e4e07087b087d8d8a2044c2732e44a96a0b1c5b5e11bd008b4b0"

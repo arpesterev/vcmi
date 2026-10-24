@@ -196,7 +196,9 @@ TEST(PlanningRiskScheduler, NestedScopesRejectButConcurrentSameGatewayWorkersQue
 		const auto observed = contention.wait_for(std::chrono::seconds(2));
 		EXPECT_EQ(observed, std::future_status::ready);
 		if(observed == std::future_status::ready)
+		{
 			EXPECT_FALSE(contention.get());
+		}
 	});
 	queued.get();
 	EXPECT_TRUE(ran);
@@ -371,7 +373,9 @@ TEST(PlanningRiskScheduler, TwoAiContendersDoNotRetainReadersAheadOfServerWriter
 				const auto observed = secondContention.wait_for(std::chrono::seconds(2));
 				EXPECT_EQ(observed, std::future_status::ready);
 				if(observed == std::future_status::ready)
+				{
 					EXPECT_FALSE(secondContention.get());
+				}
 				writerSucceeded = std::async(std::launch::async, [&]
 				{
 					const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
