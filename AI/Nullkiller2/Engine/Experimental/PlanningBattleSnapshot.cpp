@@ -3,6 +3,7 @@
  * GPL-2.0-or-later; see license.txt.
  */
 #include "../../StdInc.h"
+#include "../../../../lib/callback/PlanningBattleTerrain.h"
 #include "PlanningBattleSnapshot.h"
 #include "../../../../lib/battle/BattleInfo.h"
 #include "../../../../lib/battle/CObstacleInstance.h"
@@ -11,7 +12,7 @@
 #include "../../../../lib/bonuses/Updaters.h"
 #include "../../../../lib/GameSettings.h"
 #include "../../../../lib/json/JsonNode.h"
-#include "../../../../lib/callback/CCallback.h"
+#include "../../../../lib/callback/CGameInfoCallback.h"
 #include "../../../../lib/mapObjects/army/CArmedInstance.h"
 #include "../../../../lib/mapObjects/army/CStackInstance.h"
 #include "../../../../lib/mapping/TerrainTile.h"
@@ -22,9 +23,17 @@
 
 namespace NK2AI::experimental
 {
+namespace
+{
+struct UnsupportedSnapshotQuery : std::logic_error
+{
+	UnsupportedSnapshotQuery() : std::logic_error("unsupported snapshot game-state access") {}
+};
+}
+
 struct PlanningBattleSnapshot::Impl
 {
-	class SnapshotCallback final : public CCallback
+	class SnapshotCallback final : public CGameInfoCallback
 	{
 		GameSettings settings;
 		std::array<int, 5> dates{};
@@ -32,13 +41,14 @@ struct PlanningBattleSnapshot::Impl
 		TerrainTile tile;
 		std::array<const CArmedInstance *, 2> armies{};
 		explicit SnapshotCallback(const IGameInfoCallback & source, TerrainId terrain)
-			: CCallback(nullptr, std::nullopt, nullptr)
 		{
 			tile.terrainType = terrain;
 			settings.loadBase(source.getSettings().getFullConfig());
 			for(size_t index = 0; index < dates.size(); ++index)
 				dates[index] = source.getDate(static_cast<Date>(index));
 		}
+		CGameState & gameState() override { throw UnsupportedSnapshotQuery(); }
+		const CGameState & gameState() const override { throw UnsupportedSnapshotQuery(); }
 		const IGameSettings & getSettings() const override { return settings; }
 		int getDate(Date mode) const override { return dates.at(static_cast<size_t>(mode)); }
 		const CGObjectInstance * getObjInstance(ObjectInstanceID id) const override
@@ -141,6 +151,7 @@ std::unique_ptr<PlanningBattleSnapshot> PlanningBattleSnapshot::create(
 std::unique_ptr<PlanningBattleSnapshot> PlanningBattleSnapshot::createOwned(
 	const IGameInfoCallback & visibleInfo, const CArmedInstance & attacker,
 	const CArmedInstance & defender, const PlanningBattleContext & context, bool initializeBattle, std::string * unknownReason)
+try
 {
 	if(unknownReason) *unknownReason = "none";
 	auto unknown = [unknownReason](const std::string & reason) -> std::unique_ptr<PlanningBattleSnapshot>
@@ -150,6 +161,9 @@ std::unique_ptr<PlanningBattleSnapshot> PlanningBattleSnapshot::createOwned(
 	};
 	if(!context.tile.isValid() || context.terrain == TerrainId::NONE || context.battlefield == BattleField::NONE)
 		return unknown("invalid destination context");
+	// Validate geometry before any effective bonus query can invoke terrain limiters.
+	if(!attacker.appearance || !defender.appearance)
+		return unknown("missing army appearance");
 	// This snapshot follows a no-spell policy. Affordable own magic is retained
 	// as a directional-use restriction, never silently converted into weakness.
 	bool unmodelledOwnMagic = false;
@@ -220,9 +234,16 @@ std::unique_ptr<PlanningBattleSnapshot> PlanningBattleSnapshot::createOwned(
 	return std::unique_ptr<PlanningBattleSnapshot>(new PlanningBattleSnapshot(std::move(implementation)));
 }
 
+catch(const UnsupportedSnapshotQuery & error)
+{
+	if(unknownReason) *unknownReason = error.what();
+	return nullptr;
+}
+
 std::unique_ptr<PlanningBattleSnapshot> PlanningBattleSnapshot::createNeutralEncounter(
 	const IGameInfoCallback & visibleInfo, const CGHeroInstance & attacker,
 	const CGCreature & defender, const PlanningBattleContext & context, std::string * unknownReason)
+try
 {
 	if(unknownReason) *unknownReason = "none";
 	auto unknown = [unknownReason](const std::string & reason) -> std::unique_ptr<PlanningBattleSnapshot>
@@ -230,21 +251,24 @@ std::unique_ptr<PlanningBattleSnapshot> PlanningBattleSnapshot::createNeutralEnc
 		if(unknownReason) *unknownReason = reason;
 		return nullptr;
 	};
+	if(!attacker.appearance || !defender.appearance) return unknown("missing army appearance");
 	// This entry point is stricter than the raw snapshot test adapter: only our
 	// current hero and an ordinary visible neutral object may be inspected.
 	const auto * publicInfo = dynamic_cast<const CGameInfoCallback *>(&visibleInfo);
 	if(!publicInfo || !publicInfo->getPlayerID() || *publicInfo->getPlayerID() != attacker.getOwner()
 		|| publicInfo->getObj(attacker.id, false) != &attacker
 		|| publicInfo->getObj(defender.id, false) != &defender || defender.ID != Obj::MONSTER
+		|| typeid(defender) != typeid(CGCreature)
 		|| context.tile != defender.visitablePos())
 		return unknown("visibility, owner or ordinary-object eligibility");
-	const auto * tile = publicInfo->getTile(context.tile, false);
-	if(!tile || tile->terrainType != context.terrain)
+	const auto terrain = getNeutralBattleTerrain(*publicInfo, context.tile);
+	if(!terrain || *terrain != context.terrain)
 		return unknown("unknown destination terrain");
 	const auto fields = publicInfo->getBattlefieldCandidates(context.tile);
 	if(std::find(fields.begin(), fields.end(), context.battlefield) == fields.end())
 		return unknown("unknown battlefield variant");
-	if(defender.getOwner() != PlayerColor::NEUTRAL || defender.CArmedInstance::stacksCount() != 1
+	if((defender.getOwner() != PlayerColor::NEUTRAL && defender.getOwner() != PlayerColor::UNFLAGGABLE)
+		|| defender.CArmedInstance::stacksCount() != 1
 		|| !defender.hasStackAtSlot(SlotID(0)))
 		return unknown("nonordinary neutral army");
 	const int split = defender.getNumberOfStacks(&attacker); // Pure engine rule.
@@ -331,6 +355,12 @@ std::unique_ptr<PlanningBattleSnapshot> PlanningBattleSnapshot::createNeutralEnc
 	result->impl->combat->localInit();
 	result->impl->capturedSource += ":neutral-split:" + std::to_string(split);
 	return result;
+}
+
+catch(const UnsupportedSnapshotQuery & error)
+{
+	if(unknownReason) *unknownReason = error.what();
+	return nullptr;
 }
 
 const CBattleInfoCallback & PlanningBattleSnapshot::battle() const { return *impl->combat; }

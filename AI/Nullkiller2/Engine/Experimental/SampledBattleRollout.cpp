@@ -33,6 +33,8 @@ bool supportedBonuses(const battle::Unit & unit, SampledBattleOutcome & result)
 			return false;
 		switch(bonus->type)
 		{
+		// Jousting itself is unsupported; its defender-only immunity is inert.
+		case BonusType::CHARGE_IMMUNITY:
 		case BonusType::PRIMARY_SKILL:
 		case BonusType::STACK_HEALTH:
 		case BonusType::CREATURE_DAMAGE:
@@ -216,9 +218,10 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 		return result;
 	}
 	for(const auto & obstacle : initial.battleGetAllObstacles())
-		if(obstacle->obstacleType != CObstacleInstance::USUAL && obstacle->obstacleType != CObstacleInstance::ABSOLUTE_OBSTACLE)
+		if(!obstacle || typeid(*obstacle) != typeid(CObstacleInstance)
+			|| (obstacle->obstacleType != CObstacleInstance::USUAL && obstacle->obstacleType != CObstacleInstance::ABSOLUTE_OBSTACLE))
 		{
-			result.unsupportedReason = "dynamic obstacle";
+			result.unsupportedReason = "dynamic or subclassed obstacle";
 			return result;
 		}
 	const auto source = initial.battleAliveUnits();

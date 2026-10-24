@@ -9,6 +9,7 @@
  */
 #include "StdInc.h"
 #include "CGameInfoCallback.h"
+#include "PlanningBattleTerrain.h"
 
 #include "../entities/building/CBuilding.h"
 #include "../gameState/CGameState.h"
@@ -33,6 +34,26 @@ VCMI_LIB_NAMESPACE_BEGIN
 #define ERROR_VERBOSE_OR_NOT_RET_VAL_IF(cond, verbose, txt, retVal) do {if(cond){if(verbose)logGlobal->error("%s: %s",BOOST_CURRENT_FUNCTION, txt); return retVal;}} while(0)
 #define ERROR_RET_IF(cond, txt) do {if(cond){logGlobal->error("%s: %s", BOOST_CURRENT_FUNCTION, txt); return;}} while(0)
 #define ERROR_RET_VAL_IF(cond, txt, retVal) do {if(cond){logGlobal->error("%s: %s", BOOST_CURRENT_FUNCTION, txt); return retVal;}} while(0)
+
+std::optional<TerrainId> getNeutralBattleTerrain(const CGameInfoCallback & visibleInfo, int3 pos)
+{
+	const auto * tile = visibleInfo.getTile(pos, false);
+	if(!tile) return std::nullopt;
+	if(tile->isWater()) return tile->terrainType;
+	bool coastal = false;
+	for(int dx = -1; dx <= 1; ++dx)
+		for(int dy = -1; dy <= 1; ++dy)
+		{
+			if(dx == 0 && dy == 0) continue;
+			const int3 neighbour = pos + int3(dx, dy, 0);
+			if(!visibleInfo.isInTheMap(neighbour)) continue;
+			const auto * visible = visibleInfo.getTile(neighbour, false);
+			if(!visible) return std::nullopt;
+			coastal |= visible->isWater();
+		}
+	// Server combat terrain is sand on coastal land even with a field override.
+	return coastal ? TerrainId(ETerrainId::SAND) : tile->terrainType;
+}
 
 std::vector<BattleField> CGameInfoCallback::getBattlefieldCandidates(int3 pos) const
 {

@@ -1,5 +1,6 @@
 /* GPL-2.0-or-later; see license.txt. Experimental, not production-wired. */
 #include "../../StdInc.h"
+#include "../../../../lib/callback/PlanningBattleTerrain.h"
 #include "PlanningRiskTable.h"
 #include "../../../../lib/callback/CGameInfoCallback.h"
 #include "../../../../lib/mapObjects/CGHeroInstance.h"
@@ -48,12 +49,14 @@ std::optional<CapturedRiskRequest> captureNeutralRisk(const CGameInfoCallback & 
 		if(unknownReason) *unknownReason = reason;
 		return std::nullopt;
 	};
+	if(!hero.appearance || !target.appearance) return unknown("missing army appearance");
 	if(!visibleInfo.getPlayerID() || *visibleInfo.getPlayerID() != hero.getOwner()
 		|| visibleInfo.getObj(hero.id, false) != &hero || visibleInfo.getObj(target.id, false) != &target
-		|| target.ID != Obj::MONSTER || target.getOwner() != PlayerColor::NEUTRAL)
+		|| target.ID != Obj::MONSTER || typeid(target) != typeid(CGCreature)
+		|| (target.getOwner() != PlayerColor::NEUTRAL && target.getOwner() != PlayerColor::UNFLAGGABLE))
 		return unknown("visibility, owner or ordinary-object eligibility");
 	const auto tile = target.visitablePos();
-	const auto * terrain = visibleInfo.getTile(tile, false);
+	const auto terrain = getNeutralBattleTerrain(visibleInfo, tile);
 	if(!terrain) return unknown("unknown destination terrain");
 	const auto fields = visibleInfo.getBattlefieldCandidates(tile);
 	if(fields.empty()) return unknown("unknown battlefield context");
@@ -65,7 +68,7 @@ std::optional<CapturedRiskRequest> captureNeutralRisk(const CGameInfoCallback & 
 	const auto layout = BattleLayout::createDefaultLayout(visibleInfo, &hero, &target);
 	for(const auto field : fields)
 	{
-		PlanningBattleContext context{tile, terrain->terrainType, field, layout};
+		PlanningBattleContext context{tile, *terrain, field, layout};
 		auto snapshot = PlanningBattleSnapshot::createNeutralEncounter(visibleInfo, hero, target, context, unknownReason);
 		if(!snapshot) return std::nullopt;
 		const auto & descriptor = snapshot->capturedSourceState();

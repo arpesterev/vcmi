@@ -337,8 +337,9 @@ ILimiter::EDecision TerrainLimiter::limit(const BonusLimitationContext &context)
 std::string TerrainLimiter::toString() const
 {
 	boost::format fmt("CreatureTerrainLimiter(terrainType=%s)");
-	auto terrainName = LIBRARY->terrainTypeHandler->getById(terrainType)->getJsonKey();
-	fmt % (terrainType == ETerrainId::NATIVE_TERRAIN ? "native" : terrainName);
+	const auto terrainName = terrainType == ETerrainId::NATIVE_TERRAIN
+		? std::string("native") : LIBRARY->terrainTypeHandler->getById(terrainType)->getJsonKey();
+	fmt % terrainName;
 	return fmt.str();
 }
 
@@ -347,6 +348,12 @@ JsonNode TerrainLimiter::toJsonNode() const
 	JsonNode root;
 
 	root["type"].String() = "CREATURE_TERRAIN_LIMITER";
+	if(terrainType == ETerrainId::NATIVE_TERRAIN)
+	{
+		// The existing parser treats explicit null terrain as the native sentinel.
+		root["terrain"] = JsonNode();
+		return root;
+	}
 	auto terrainName = LIBRARY->terrainTypeHandler->getById(terrainType)->getJsonKey();
 	root["parameters"].Vector().emplace_back(terrainName);
 

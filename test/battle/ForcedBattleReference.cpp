@@ -4,6 +4,7 @@
  */
 #include "StdInc.h"
 #include "PlanningBattleSnapshotChecks.h"
+#include "../../AI/Nullkiller2/Engine/Experimental/PlanningRiskTable.h"
 #include "../../lib/mapObjects/CGCreature.h"
 #include "../../lib/callback/CGameInfoCallback.h"
 #include "../../lib/serializer/BinarySerializer.h"
@@ -86,6 +87,25 @@ public:
 	const CGameState & gameState() const override { return state; }
 	std::optional<PlayerColor> getPlayerID() const override { return owner; }
 };
+
+// An experimental forecast failure must not suppress the independent server
+// fight. Keep it a visible test failure; only the forecast boundary is caught.
+// Actual setup/actions/results below are deliberately outside these catches.
+template<typename Work>
+auto inspectForecast(const char * phase, const std::string & identity, std::string & error, Work work) -> decltype(work())
+{
+	try
+	{
+		return work();
+	}
+	catch(const std::exception & failure)
+	{
+		error = std::string("forecast exception: ") + failure.what();
+		std::cout << "FORCED_FORECAST_EXCEPTION case=" << identity << " phase=" << phase << " reason=" << error << std::endl;
+		ADD_FAILURE() << identity << " / " << phase << ": " << error;
+		return {};
+	}
+}
 
 struct Duel
 {
@@ -209,6 +229,7 @@ protected:
 	void runNeutral(bool upgrade, bool specialty = false)
 	{
 		const int seed = 17041;
+		const auto identity = "neutral_" + std::to_string(upgrade) + "_" + std::to_string(specialty);
 		ASSERT_NO_FATAL_FAILURE(initialize(seed));
 		ASSERT_NE(handler, nullptr);
 		ASSERT_NE(map, nullptr);
@@ -231,11 +252,81 @@ protected:
 		monster->upgradedStackPresence = upgrade ? CGCreature::UpgradedStackPresence::ALWAYS : CGCreature::UpgradedStackPresence::NEVER;
 		PlayerReferenceView visible(*server.state, hero->getOwner());
 		ASSERT_EQ(visible.getObj(monsterID, false), monster);
+		std::cout << "FORCED_NEUTRAL_SOURCE upgrade=" << upgrade << " specialty=" << specialty
+			<< " owner=" << monster->getOwner().getNum() << " stacks=" << monster->CArmedInstance::stacksCount()
+			<< " slot0=" << monster->getStackCount(SlotID(0)) << std::endl;
 		const int split = monster->getNumberOfStacks(hero);
 		ASSERT_GT(split, 1);
 		const auto fields = visible.getBattlefieldCandidates(monster->visitablePos());
 		ASSERT_FALSE(fields.empty());
 		const auto oracleRandomBefore = RandomizerCapture::capture(*handler->randomizer);
+		const auto originalOwner = monster->getOwner();
+		// A visible map monster owned by either player is not an ordinary
+		// neutral encounter. Restore the authentic owner even on an exception
+		// or assertion return; never normalize it to manufacture eligibility.
+		for(const auto ownedBy : {PlayerColor(0), PlayerColor(1)})
+		{
+			struct RestoreOwner
+			{
+				CGCreature & creature;
+				PlayerColor original;
+				~RestoreOwner() { creature.tempOwner = original; }
+			} restore{*monster, originalOwner};
+			monster->tempOwner = ownedBy;
+			NK2AI::experimental::PlanningBattleContext context{monster->visitablePos(),
+				visible.getTile(monster->visitablePos())->getTerrainID(), fields.front(),
+				BattleLayout::createDefaultLayout(visible, hero, monster)};
+			std::string reason;
+			auto rejected = inspectForecast("owned_neutral_control", identity, reason, [&]
+			{
+				return NK2AI::experimental::PlanningBattleSnapshot::createNeutralEncounter(visible, *hero, *monster, context, &reason);
+			});
+			EXPECT_EQ(rejected, nullptr) << "Player-owned monster must not become a neutral planning encounter";
+			std::string requestReason;
+			auto rejectedRequest = inspectForecast("owned_neutral_request_control", identity, requestReason, [&]
+			{
+				return NK2AI::experimental::captureNeutralRisk(visible, *hero, *monster, 1, &requestReason);
+			});
+			EXPECT_FALSE(rejectedRequest.has_value()) << "Player-owned monster must not become a neutral risk request";
+			std::cout << "FORCED_NEUTRAL_OWNERSHIP_CONTROL case=" << identity << " owner=" << ownedBy.getNum()
+				<< " rejected=" << !rejected << " reason=" << reason
+				<< " request_rejected=" << !rejectedRequest << " request_reason=" << requestReason << std::endl;
+		}
+		ASSERT_EQ(monster->getOwner(), originalOwner);
+		{
+			// Build valid context before removing appearance. Every capture API
+			// must reject the malformed source before reading its geometry.
+			NK2AI::experimental::PlanningBattleContext context{monster->visitablePos(),
+				visible.getTile(monster->visitablePos())->getTerrainID(), fields.front(),
+				BattleLayout::createDefaultLayout(visible, hero, monster)};
+			struct RestoreAppearance
+			{
+				CGCreature & creature;
+				std::shared_ptr<const ObjectTemplate> original;
+				~RestoreAppearance() { creature.appearance = original; }
+			} restore{*monster, monster->appearance};
+			monster->appearance.reset();
+			std::string rawReason, neutralReason, requestReason;
+			auto raw = inspectForecast("missing_appearance_raw_control", identity, rawReason, [&]
+			{
+				return NK2AI::experimental::PlanningBattleSnapshot::create(visible, *hero, *monster, context, &rawReason);
+			});
+			auto neutral = inspectForecast("missing_appearance_neutral_control", identity, neutralReason, [&]
+			{
+				return NK2AI::experimental::PlanningBattleSnapshot::createNeutralEncounter(visible, *hero, *monster, context, &neutralReason);
+			});
+			auto request = inspectForecast("missing_appearance_request_control", identity, requestReason, [&]
+			{
+				return NK2AI::experimental::captureNeutralRisk(visible, *hero, *monster, 1, &requestReason);
+			});
+			EXPECT_EQ(raw, nullptr);
+			EXPECT_EQ(neutral, nullptr);
+			EXPECT_FALSE(request.has_value());
+			std::cout << "FORCED_MISSING_APPEARANCE_CONTROL case=" << identity
+				<< " raw_rejected=" << !raw << " neutral_rejected=" << !neutral << " request_rejected=" << !request
+				<< " raw_reason=" << rawReason << " neutral_reason=" << neutralReason << " request_reason=" << requestReason << std::endl;
+		}
+		ASSERT_NE(monster->appearance, nullptr);
 		std::vector<std::pair<BattleField, std::unique_ptr<NK2AI::experimental::PlanningBattleSnapshot>>> variants;
 		for(const auto field : fields)
 		{
@@ -243,7 +334,10 @@ protected:
 				visible.getTile(monster->visitablePos())->getTerrainID(), field,
 				BattleLayout::createDefaultLayout(visible, hero, monster)};
 			std::string reason;
-			variants.emplace_back(field, NK2AI::experimental::PlanningBattleSnapshot::createNeutralEncounter(visible, *hero, *monster, context, &reason));
+			variants.emplace_back(field, inspectForecast("neutral_capture", identity, reason, [&]
+			{
+				return NK2AI::experimental::PlanningBattleSnapshot::createNeutralEncounter(visible, *hero, *monster, context, &reason);
+			}));
 			std::cout << "FORCED_NEUTRAL_CAPTURE upgrade=" << upgrade << " specialty=" << specialty
 				<< " field=" << field.getNum() << " admitted=" << static_cast<bool>(variants.back().second)
 				<< " reason=" << reason << std::endl;
@@ -263,28 +357,33 @@ protected:
 		EXPECT_NE(selected, variants.end());
 		if(selected != variants.end() && selected->second)
 		{
-			const auto predicted = selected->second->battle().battleAliveUnits();
-			const auto actual = real->battleAliveUnits();
-			EXPECT_EQ(predicted.size(), actual.size());
-			for(const auto * unit : actual)
+			std::string error;
+			inspectForecast("neutral_comparison", identity, error, [&]
 			{
-				const auto found = std::find_if(predicted.begin(), predicted.end(), [unit](const auto * copy) { return copy->unitSide() == unit->unitSide() && copy->unitSlot() == unit->unitSlot(); });
-				EXPECT_NE(found, predicted.end());
-				if(found == predicted.end()) continue;
-				EXPECT_EQ((*found)->creatureId(), unit->creatureId());
-				EXPECT_EQ((*found)->getCount(), unit->getCount());
-				EXPECT_EQ((*found)->getPosition(), unit->getPosition());
-				EXPECT_EQ((*found)->getAvailableHealth(), unit->getAvailableHealth());
-				EXPECT_EQ((*found)->getMovementRange(), unit->getMovementRange());
-				EXPECT_EQ((*found)->moraleVal(), unit->moraleVal());
-				for(const bool ranged : {false, true})
+				const auto predicted = selected->second->battle().battleAliveUnits();
+				const auto actual = real->battleAliveUnits();
+				EXPECT_EQ(predicted.size(), actual.size());
+				for(const auto * unit : actual)
 				{
-					EXPECT_EQ((*found)->getAttack(ranged), unit->getAttack(ranged));
-					EXPECT_EQ((*found)->getDefense(ranged), unit->getDefense(ranged));
-					EXPECT_EQ((*found)->getMinDamage(ranged), unit->getMinDamage(ranged));
-					EXPECT_EQ((*found)->getMaxDamage(ranged), unit->getMaxDamage(ranged));
+					const auto found = std::find_if(predicted.begin(), predicted.end(), [unit](const auto * copy) { return copy->unitSide() == unit->unitSide() && copy->unitSlot() == unit->unitSlot(); });
+					EXPECT_NE(found, predicted.end());
+					if(found == predicted.end()) continue;
+					EXPECT_EQ((*found)->creatureId(), unit->creatureId());
+					EXPECT_EQ((*found)->getCount(), unit->getCount());
+					EXPECT_EQ((*found)->getPosition(), unit->getPosition());
+					EXPECT_EQ((*found)->getAvailableHealth(), unit->getAvailableHealth());
+					EXPECT_EQ((*found)->getMovementRange(), unit->getMovementRange());
+					EXPECT_EQ((*found)->moraleVal(), unit->moraleVal());
+					for(const bool ranged : {false, true})
+					{
+						EXPECT_EQ((*found)->getAttack(ranged), unit->getAttack(ranged));
+						EXPECT_EQ((*found)->getDefense(ranged), unit->getDefense(ranged));
+						EXPECT_EQ((*found)->getMinDamage(ranged), unit->getMinDamage(ranged));
+						EXPECT_EQ((*found)->getMaxDamage(ranged), unit->getMaxDamage(ranged));
+					}
 				}
-			}
+				return true;
+			});
 		}
 		else std::cout << "FORCED_NEUTRAL_CAPTURE selected=unsupported_or_unavailable" << std::endl;
 		const auto oracleRandomAfterPreparation = RandomizerCapture::capture(*handler->randomizer);
@@ -293,12 +392,22 @@ protected:
 			// A previously admitted capture must also survive the stronger
 			// invariance check. Failure stays visible, but no returned pointer
 			// from that helper is used to drive the independent real battle.
-			test::verifyPlanningSnapshot(visible, *hero, *monster, *real);
+			std::string error;
+			inspectForecast("neutral_invariance", identity, error, [&]
+			{
+				test::verifyPlanningSnapshot(visible, *hero, *monster, *real);
+				return true;
+			});
 		}
 		if(selected != variants.end() && selected->second)
 			for(const int sampleSeed : {17041, 17047, 17053})
 			{
-				const auto outcome = NK2AI::experimental::runSampledBattle(selected->second->battle(), selected->second->frozenGameInfo(), sampleSeed);
+				std::string error;
+				auto outcome = inspectForecast("neutral_sample", identity, error, [&]
+				{
+					return NK2AI::experimental::runSampledBattle(selected->second->battle(), selected->second->frozenGameInfo(), sampleSeed);
+				});
+				if(!error.empty()) outcome.unsupportedReason = error.c_str();
 				std::cout << "FORCED_NEUTRAL_SAMPLE upgrade=" << upgrade << " specialty=" << specialty << " sample_seed=" << sampleSeed
 					<< " status=" << static_cast<int>(outcome.status) << " winner=" << static_cast<int>(outcome.winner)
 					<< " reason=" << outcome.unsupportedReason << std::endl;
@@ -373,22 +482,45 @@ protected:
 		NK2AI::experimental::PlanningBattleContext context{
 			battleTile, initial->getTerrainType(), initial->getBattlefieldType(), layout};
 		std::string captureReason;
-		auto snapshot = NK2AI::experimental::PlanningBattleSnapshot::create(*server.state, *attacker, *defender, context, &captureReason);
+		auto snapshot = inspectForecast("capture", duel.name, captureReason, [&]
+		{
+			return NK2AI::experimental::PlanningBattleSnapshot::create(*server.state, *attacker, *defender, context, &captureReason);
+		});
 		std::cout << "FORCED_BATTLE_CAPTURE case=" << duel.name << " seed=" << seed
 			<< " admitted=" << static_cast<bool>(snapshot) << " reason=" << captureReason << std::endl;
 		if(snapshot)
 		{
-			test::verifyPlanningSnapshot(*server.state, *attacker, *defender, *initial);
+			EXPECT_THROW(snapshot->frozenGameInfo().gameState(), std::logic_error);
+			std::string error;
+			inspectForecast("invariance", duel.name, error, [&]
+			{
+				test::verifyPlanningSnapshot(*server.state, *attacker, *defender, *initial);
+				return true;
+			});
 		}
 		std::vector<NK2AI::experimental::SampledBattleOutcome> samples;
+		// Own exception strings until all rows are emitted; outcome reason
+		// pointers must not refer to a destroyed catch-local string.
+		std::array<std::string, 3> sampleErrors;
 		if(snapshot)
+		{
 			for(const int sampleSeed : {17041, 17047, 17053})
-				samples.push_back(NK2AI::experimental::runSampledBattle(snapshot->battle(), snapshot->frozenGameInfo(), sampleSeed));
+			{
+				auto & error = sampleErrors[samples.size()];
+				auto outcome = inspectForecast("sample", duel.name, error, [&]
+				{
+					return NK2AI::experimental::runSampledBattle(snapshot->battle(), snapshot->frozenGameInfo(), sampleSeed);
+				});
+				if(!error.empty()) outcome.unsupportedReason = error.c_str();
+				samples.push_back(outcome);
+			}
+		}
 		snapshot.reset();
 		EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), oracleRandomBefore)
 			<< "Forecast changed authoritative randomizer, including bias history";
-		const auto pessimistic = NK2AI::experimental::runDetachedDuel(*initial, false);
-		const auto optimistic = NK2AI::experimental::runDetachedDuel(*initial, true);
+		std::string pessimisticError, optimisticError;
+		const auto pessimistic = inspectForecast("legacy_pessimistic", duel.name, pessimisticError, [&] { return NK2AI::experimental::runDetachedDuel(*initial, false); });
+		const auto optimistic = inspectForecast("legacy_optimistic", duel.name, optimisticError, [&] { return NK2AI::experimental::runDetachedDuel(*initial, true); });
 		ASSERT_EQ(attacker->battle, initial);
 		ASSERT_EQ(defender->battle, initial);
 		for(const auto * unit : initial->battleGetUnitsIf([](const battle::Unit *) { return true; }))

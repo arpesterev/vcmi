@@ -45,11 +45,11 @@
   "files": [
     {
       "path": "test/battle/ForcedBattleReference.cpp",
-      "sha256": "64b0bd37b76c384ade730621ec9917a191ddc69e0e3297d1b90b9df1c5f53fca"
+      "sha256": "c4b966386c47302510675cc71c59724aa38a7cb2585a311b5f155a5c9fd861a0"
     },
     {
       "path": "test/battle/ForcedBattleStage3.md",
-      "sha256": "da0910a076d3bcc89ed2fa75e08b920c101bcd717283c0d087de8e1d8ee6bdec"
+      "sha256": "5ab345155ee24c27b608e30e9aaa8ffd8e1dc66365757389a8074a0577718159"
     },
     {
       "path": "test/battle/PlanningBattleSnapshotChecks.h",

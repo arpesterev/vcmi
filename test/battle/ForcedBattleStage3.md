@@ -110,3 +110,23 @@ that all 174 possible samples are supported is made.
 The exact 58 gtest names and evidence identities are exported by
 CI/forced_battle_evidence.py (expected_cases / EXPECTED_TEST_NAMES), with
 CI/forced-battle-cases.json as a machine-readable copy.
+
+
+## Forecast-failure isolation and eligibility controls
+
+Only experimental capture, comparison, invariance and forecast calls have a
+std::exception boundary. Such an exception emits its phase and exact reason,
+records ADD_FAILURE, and becomes an unsupported forecast/null capture so the
+independent server fight can still produce evidence. Real server initialization,
+visits, actions and terminal results are never caught as successful outcomes.
+Existing live-state/RNG assertions remain mandatory; an exception or mutation
+still fails qualification. Sample error strings remain owned through logging.
+
+Within the three existing neutral rows, temporary player-owned targets must be
+rejected by both neutral snapshot and risk-request APIs. A missing-appearance
+target must be rejected by raw/neutral/request capture before geometry reads.
+RAII restores authentic ownership and appearance before the real encounter.
+Admitted snapshots also require unsupported access to live gameState to throw
+std::logic_error. Full server RNG comparison surrounds these controls. Exact
+custom obstacle-subclass rejection and coastal native-terrain comparisons remain
+separate unexecuted follow-on controls; no coverage is claimed for them here.

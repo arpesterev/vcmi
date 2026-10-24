@@ -71,5 +71,23 @@ class BridgeQualificationTest(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 validate_xml(Path(directory) / 'absent.xml', CASES[0])
 
+class BridgeWorkflowGateTest(unittest.TestCase):
+    def test_reference_failure_does_not_hide_bridge_and_cannot_promote_cache(self):
+        from pathlib import Path
+        import yaml
+        workflow = yaml.safe_load((Path(__file__).parents[1] / '.github/workflows/vcmi-incremental.yml').read_text())
+        steps = workflow['jobs']['linux']['steps']
+        ordinary = next(s for s in steps if s.get('id') == 'ordinary_regressions')
+        bridge = next(s for s in steps if s.get('name') == 'Qualify bounded real planner turns on public synthetic maps')
+        snapshot = next(s for s in steps if s.get('name') == 'Snapshot only successful build outputs, with bounded upload size')
+        self.assertIn("!cancelled()", bridge['if'])
+        self.assertIn("steps.ordinary_regressions.outcome == 'success'", bridge['if'])
+        self.assertNotIn('continue-on-error', bridge)
+        self.assertNotIn('continue-on-error', ordinary)
+        self.assertNotIn('if', snapshot)  # GitHub's default success() remains required.
+        self.assertLess(steps.index(ordinary), steps.index(bridge))
+        self.assertLess(steps.index(bridge), steps.index(snapshot))
+        self.assertIn('linux', workflow['jobs']['macos']['needs'])
+
 if __name__ == '__main__':
     unittest.main()

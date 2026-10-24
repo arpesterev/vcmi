@@ -9,6 +9,10 @@
  */
 #include "StdInc.h"
 #include "../../lib/BattleFieldHandler.h"
+#include "../../lib/bonuses/Limiters.h"
+#include "../../lib/callback/CGameInfoCallback.h"
+#include "../../lib/callback/PlanningBattleTerrain.h"
+#include "../../lib/mapping/TerrainTile.h"
 
 #include "mock/mock_Services.h"
 #include "mock/mock_MapService.h"
@@ -600,4 +604,83 @@ TEST_F(CGameStateTest, PureObjectCandidatesDoNotSampleThreadGlobalRandomness)
 		EXPECT_EQ(BattleFieldHandler::objectBattlefieldCandidates(object, map->mapLayers.at(0)), candidates);
 	CRandomGenerator::getDefault().serialize(after);
 	EXPECT_EQ(after.state, before.state);
+}
+
+namespace
+{
+class VisibleTerrainReference final : public CGameInfoCallback
+{
+public:
+	std::array<TerrainTile, 9> tiles;
+	std::optional<int3> hidden;
+	VisibleTerrainReference()
+	{
+		for(auto & tile : tiles) tile.terrainType = ETerrainId::GRASS;
+	}
+	CGameState & gameState() override { throw std::logic_error("unexpected authoritative state read"); }
+	const CGameState & gameState() const override { throw std::logic_error("unexpected authoritative state read"); }
+	bool isInTheMap(const int3 & pos) const override
+	{
+		return pos.z == 0 && pos.x >= 0 && pos.x < 3 && pos.y >= 0 && pos.y < 3;
+	}
+	const TerrainTile * getTile(int3 pos, bool = true) const override
+	{
+		if(!isInTheMap(pos) || (hidden && *hidden == pos)) return nullptr;
+		return &tiles.at(pos.y * 3 + pos.x);
+	}
+};
+}
+
+TEST(PlanningCombatTerrain, CoastalLandUsesSandWithoutAuthoritativeState)
+{
+	VisibleTerrainReference view;
+	view.tiles.at(0).terrainType = ETerrainId::WATER; // Diagonal coast counts too.
+	EXPECT_EQ(getNeutralBattleTerrain(view, int3(1, 1, 0)), TerrainId(ETerrainId::SAND));
+}
+
+TEST(PlanningCombatTerrain, HiddenNeighbourIsUnknownEvenWhenAnotherShowsWater)
+{
+	VisibleTerrainReference view;
+	view.tiles.at(0).terrainType = ETerrainId::WATER;
+	view.hidden = int3(2, 2, 0);
+	EXPECT_FALSE(getNeutralBattleTerrain(view, int3(1, 1, 0)).has_value());
+}
+
+TEST(PlanningCombatTerrain, InlandAndWaterRetainVisibleTerrain)
+{
+	VisibleTerrainReference view;
+	EXPECT_EQ(getNeutralBattleTerrain(view, int3(0, 0, 0)), TerrainId(ETerrainId::GRASS));
+	view.tiles.at(4).terrainType = ETerrainId::WATER;
+	view.hidden = int3(2, 2, 0);
+	EXPECT_EQ(getNeutralBattleTerrain(view, int3(1, 1, 0)), TerrainId(ETerrainId::WATER));
+}
+
+TEST_F(CGameStateTest, NativeTerrainLimiterSerializationRoundTripsWithoutSentinelLookup)
+{
+	startTestGame();
+	TerrainLimiter limiter;
+	EXPECT_EQ(limiter.toString(), "CreatureTerrainLimiter(terrainType=native)");
+	const auto json = limiter.toJsonNode();
+	ASSERT_TRUE(json.Struct().count("terrain"));
+	EXPECT_TRUE(json["terrain"].isNull());
+	const auto restored = std::dynamic_pointer_cast<const TerrainLimiter>(JsonUtils::parseLimiter(json));
+	ASSERT_NE(restored, nullptr);
+	EXPECT_EQ(restored->terrainType, ETerrainId::NATIVE_TERRAIN);
+	EXPECT_EQ(restored->toJsonNode().toString(), json.toString());
+}
+
+TEST_F(CGameStateTest, ConcreteTerrainLimiterKeepsExistingEncoding)
+{
+	startTestGame();
+	TerrainLimiter limiter;
+	limiter.terrainType = ETerrainId::GRASS;
+	const auto key = LIBRARY->terrainTypeHandler->getById(ETerrainId::GRASS)->getJsonKey();
+	const auto json = limiter.toJsonNode();
+	EXPECT_FALSE(json.Struct().count("terrain"));
+	ASSERT_EQ(json["parameters"].Vector().size(), 1u);
+	EXPECT_EQ(json["parameters"][0].String(), key);
+	EXPECT_EQ(limiter.toString(), "CreatureTerrainLimiter(terrainType=" + key + ")");
+	const auto restored = std::dynamic_pointer_cast<const TerrainLimiter>(JsonUtils::parseLimiter(json));
+	ASSERT_NE(restored, nullptr);
+	EXPECT_EQ(restored->terrainType, ETerrainId::GRASS);
 }

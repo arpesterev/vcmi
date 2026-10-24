@@ -317,6 +317,7 @@ jobs:
       timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 65 || 20 }}
       run: bash CI/incremental-build.sh linux-gcc-test
     - name: Run every enabled regression, including required AI tests
+      id: ordinary_regressions
       timeout-minutes: 4
       working-directory: out/build/linux-gcc-test/bin
       run: |
@@ -331,7 +332,7 @@ jobs:
         python3 CI/adventure_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z --resource-root "$HOME/.local/share/vcmi"
         ccache --print-stats > incremental-evidence/forced-battle/ccache-after.tsv
     - name: Qualify bounded real planner turns on public synthetic maps
-      if: startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]')
+      if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
       timeout-minutes: 15
       run: |
         export CCACHE_DIR="$HOME/.cache/vcmi-incremental/linux-gcc-test"
