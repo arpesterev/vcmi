@@ -155,7 +155,7 @@ public:
 		this->map = map;
 	}
 
-	void startTestGame()
+	void startTestGame(PlayerStartingBonus startingBonus = PlayerStartingBonus::RANDOM)
 	{
 		StartInfo si;
 		si.mapname = "anything";//does not matter, map service mocked
@@ -179,6 +179,7 @@ public:
 			pset.color = PlayerColor(i);
 			pset.connectedPlayerIDs.insert(static_cast<PlayerConnectionID>(i));
 			pset.name = "Player";
+			pset.bonus = startingBonus;
 
 			pset.castle = pinfo.defaultCastle();
 			pset.hero = pinfo.defaultHero();
@@ -473,7 +474,10 @@ TEST_F(CGameStateTest, battleInterference)
 	auto skillBonus = JsonUtils::parseBonus(skillJson);
 	auto specialtyBonus = JsonUtils::parseBonus(specialtyJson);
 
-	startTestGame();
+	// Random starting artifacts can add primary-skill bonuses on top of the
+	// absolute HERO_BASE_SKILL value. This interference fixture needs no such
+	// equipment; a gold bonus leaves both heroes' combat attributes unchanged.
+	startTestGame(PlayerStartingBonus::GOLD);
 
 	auto attacker = getHeroByOwner(PlayerColor(0));
 	auto defender = getHeroByOwner(PlayerColor(1));
@@ -489,6 +493,9 @@ TEST_F(CGameStateTest, battleInterference)
 
 	defender->setPrimarySkill(PrimarySkill::SPELL_POWER, 100, ChangeValueMode::ABSOLUTE);
 	defender->level = 10;
+
+	ASSERT_EQ(attacker->getPrimSkillLevel(PrimarySkill::SPELL_POWER), 100);
+	ASSERT_EQ(defender->getPrimSkillLevel(PrimarySkill::SPELL_POWER), 100);
 
 	startTestBattle(attacker, defender);
 

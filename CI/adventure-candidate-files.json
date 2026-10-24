@@ -89,7 +89,7 @@
     "test/battle/ForcedDefendReference.md": "cd3d3ef9e86ee134c2ba1f32ba718232eb93304fa445d78779682b1ae88c79dc",
     "test/battle/PlanningBattleSnapshotChecks.h": "bcc5d9cfd45b18ed9accfe3e53f7416c4249e37b11b87374f14d2cf990c646e7",
     "test/battle/update_stage3_manifest.py": "0046101e881ca6f79d43e154078eea8a7abe75fe808875b8f878fc449c7418ac",
-    "test/game/CGameStateTest.cpp": "9738fd7bd10dad1b79c7e2d54a4a4fd575f45b5364f1309d267c02ac22be4313",
+    "test/game/CGameStateTest.cpp": "cda1d0afb7ccc3f0a9a295e4b9f0bca1d962af825bd63c51ea995780329eff08",
     "test/nullkiller2/AIPathMetadataRegression.cpp": "569651e5316c17b2f618d7970e72e27354e9d3603fb18d35bfe3d31d446b0047",
     "test/nullkiller2/AdventureBattleRiskRegression.cpp": "5b5e3b68624b662895de3008c01f0d141ac0cce74fbab8102182fbb656813198",
     "test/nullkiller2/JointTownDefenceRegression.cpp": "d1ac9858b9ba912cd0007e6f45eecdd74f8c925a97f9081bd524a951d215c9e5",
