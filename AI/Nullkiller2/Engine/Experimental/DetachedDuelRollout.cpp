@@ -9,6 +9,7 @@
 #include "../../../../lib/battle/CUnitState.h"
 #include "../../../../lib/mapObjects/CGHeroInstance.h"
 #include <vcmi/spells/Spell.h>
+#include "../../../../lib/spells/CSpellHandler.h"
 
 namespace NK2AI
 {

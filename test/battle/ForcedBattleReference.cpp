@@ -215,9 +215,13 @@ protected:
 		EXPECT_NE(server.result->winner, BattleSide::NONE);
 		EXPECT_GT(melee + shots, 0);
 		if(duel.attackerCreature == 2 || duel.defenderCreature == 2)
+		{
 			EXPECT_GT(shots, 0);
+		}
 		if(std::string(duel.name) == "undead_melee")
+		{
 			EXPECT_GT(server.retaliationPackets, 0);
+		}
 		const auto losingSide = server.result->winner == BattleSide::ATTACKER ? BattleSide::DEFENDER : BattleSide::ATTACKER;
 		const auto losingCreature = CreatureID(losingSide == BattleSide::ATTACKER ? duel.attackerCreature : duel.defenderCreature);
 		const auto losingCount = losingSide == BattleSide::ATTACKER ? duel.attackerCount : duel.defenderCount;
