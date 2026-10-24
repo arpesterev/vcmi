@@ -15,10 +15,30 @@
 #include "json/JsonBonus.h"
 #include "modding/IdentifierStorage.h"
 #include "CRandomGenerator.h"
+#include "mapObjects/CGHeroInstance.h"
+#include "mapObjects/CGCreature.h"
+#include "mapObjects/MiscObjects.h"
+#include "mapObjectConstructors/AObjectTypeHandler.h"
+#include "mapObjectConstructors/CObjectClassesHandler.h"
 
 #include <vstd/RNG.h>
 
 VCMI_LIB_NAMESPACE_BEGIN
+
+std::optional<std::vector<BattleField>> BattleFieldHandler::objectBattlefieldCandidates(
+	const CGObjectInstance & object, MapLayerId layer)
+{
+	// Do not extend CGObjectInstance's vtable or invoke its RNG-consuming
+	// virtual getter. Only audited native dynamic types are modeled; a plugin
+	// override or other object class is unknown, never silently terrain fallback.
+	if(typeid(object) == typeid(CGHeroInstance) || typeid(object) == typeid(CGArtifact))
+		return std::vector<BattleField>{};
+	if(typeid(object) != typeid(CGCreature) && typeid(object) != typeid(CGTerrainPatch)
+		&& typeid(object) != typeid(CGObjectInstance))
+		return std::nullopt;
+	const auto & fields = LIBRARY->objtypeh->getHandlerFor(object.ID, object.subID)->getBattlefields();
+	return compatibleBattlefields(fields, layer);
+}
 
 std::shared_ptr<BattleFieldInfo> BattleFieldHandler::loadFromJson(const std::string & scope, const JsonNode & json, const std::string & identifier, size_t index)
 {
@@ -111,7 +131,7 @@ BattleField BattleFieldInfo::getId() const
 	return battlefield;
 }
 
-BattleField BattleFieldHandler::selectRandomBattlefield(const std::vector<BattleField> & battleFields, MapLayerId currentLayer, vstd::RNG & randomGenerator)
+std::vector<BattleField> BattleFieldHandler::compatibleBattlefields(const std::vector<BattleField> & battleFields, MapLayerId currentLayer)
 {
 	std::vector<BattleField> filteredBattleFields;
 	for(auto & battleField : battleFields)
@@ -124,7 +144,13 @@ BattleField BattleFieldHandler::selectRandomBattlefield(const std::vector<Battle
 		filteredBattleFields = battleFields;
 	}
 
-	if (filteredBattleFields.empty())
+	return filteredBattleFields;
+}
+
+BattleField BattleFieldHandler::selectRandomBattlefield(const std::vector<BattleField> & battleFields, MapLayerId currentLayer, vstd::RNG & randomGenerator)
+{
+	const auto filteredBattleFields = compatibleBattlefields(battleFields, currentLayer);
+	if(filteredBattleFields.empty())
 		return BattleField::NONE;
 
 	return *RandomGeneratorUtil::nextItem(filteredBattleFields, randomGenerator);

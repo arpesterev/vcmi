@@ -1,4 +1,7 @@
 set(Nullkiller2_SRCS
+		Engine/Experimental/PlanningBattleSnapshot.cpp
+		Engine/Experimental/SampledBattleRollout.cpp
+		Engine/Experimental/PlanningRiskTable.cpp
 		Pathfinding/AIPathfinderConfig.cpp
 		Pathfinding/AIPathfinder.cpp
 		Pathfinding/AINodeStorage.cpp
@@ -70,6 +73,9 @@ set(Nullkiller2_SRCS
 )
 
 set(Nullkiller2_HEADERS
+		Engine/Experimental/PlanningBattleSnapshot.h
+		Engine/Experimental/SampledBattleRollout.h
+		Engine/Experimental/PlanningRiskTable.h
 		StdInc.h
 		
 		Pathfinding/AIPathfinderConfig.h

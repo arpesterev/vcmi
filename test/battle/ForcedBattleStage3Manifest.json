@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "scope": "fixture-side staged inventory; integrator must generate complete candidate/build manifest",
+  "status": "uncompiled_unexecuted",
+  "frozen_candidate_modified": false,
+  "expected_cases": 58,
+  "matrix": {
+    "first_oracle": 6,
+    "count_sweep": {
+      "cases": 42,
+      "archers": 20,
+      "walking_dead_counts": [
+        10,
+        20,
+        30,
+        40,
+        60,
+        80,
+        120
+      ],
+      "orientations": 2,
+      "oracle_seeds": [
+        17041,
+        17047,
+        17053
+      ]
+    },
+    "mixed_army": 2,
+    "real_neutral_split_upgrade": 2,
+    "native_mechanics_and_specialty": 6
+  },
+  "sample_seeds": [
+    17041,
+    17047,
+    17053
+  ],
+  "server_action_cap_per_battle": 2000,
+  "filter": "ForcedBattleReference.*:Predeclared/ForcedBattleCountSweep.*",
+  "known_unqualified": [
+    "exhausted ammunition",
+    "explicit blocked-edge double-wide placement",
+    "obstacle-rich matrix",
+    "own spellcasting policy"
+  ],
+  "files": [
+    {
+      "path": "test/battle/ForcedBattleReference.cpp",
+      "sha256": "25e19cafde1c34957fa0829cac1970e4709c28e6afb96ecdd5c71f6617c647b3"
+    },
+    {
+      "path": "test/battle/ForcedBattleStage3.md",
+      "sha256": "9e58b280f3ec8683209bb54985c3cd281f94e6ed6681c0c6f907cfb29502de91"
+    },
+    {
+      "path": "test/battle/PlanningBattleSnapshotChecks.h",
+      "sha256": "42e357b7cdd822afce28face244b87acadfc0662c3b9f6863cecdcdc71dc5f0b"
+    },
+    {
+      "path": "AI/Nullkiller2/Engine/Experimental/PlanningBattleSnapshot.h",
+      "sha256": "e65023762b2bf979969105add1de67847c4a838e4aaff60b90be6f9521ad1052"
+    },
+    {
+      "path": "AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.h",
+      "sha256": "17b006752a2f39335396040fed0086e5456f06ddcb544e691e13e1afd2552bbc"
+    }
+  ]
+}

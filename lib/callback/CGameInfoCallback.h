@@ -66,6 +66,9 @@ public:
 	//objects
 
 	const CGObjectInstance * getObj(ObjectInstanceID objId, bool verbose = true) const override; // Get with some checks and visibility checks. Raw get is MapInfoCallback::getObjInstance
+	// Possible battlefields from visible context, never the server RNG's future choice.
+	// Empty means incomplete visibility or unavailable context.
+	std::vector<BattleField> getBattlefieldCandidates(int3 pos) const;
 	std::vector<const CGObjectInstance *> getBlockingObjs(int3 pos) const;
 	std::vector<const CGObjectInstance *> getVisitableObjs(int3 pos, bool verbose = true) const;
 	std::vector<const CGObjectInstance *> getAllVisitableObjs() const;

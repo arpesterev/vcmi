@@ -19,6 +19,8 @@
 
 VCMI_LIB_NAMESPACE_BEGIN
 
+class CGObjectInstance;
+
 class DLL_LINKAGE BattleFieldInfo : public EntityT<BattleField>
 {
 public:
@@ -77,6 +79,9 @@ public:
 	const std::vector<std::string> & getTypeNames() const override;
 	std::vector<JsonNode> loadLegacyData() override;
 
+	// Nullopt means an unmodelled native subclass/override, not no override.
+	static std::optional<std::vector<BattleField>> objectBattlefieldCandidates(const CGObjectInstance & object, MapLayerId layer);
+	static std::vector<BattleField> compatibleBattlefields(const std::vector<BattleField> & battleFields, MapLayerId currentLayer);
 	static BattleField selectRandomBattlefield(const std::vector<BattleField> & battleFields, MapLayerId currentLayer, vstd::RNG & randomGenerator);
 };
 

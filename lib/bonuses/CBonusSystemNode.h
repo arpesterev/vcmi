@@ -126,6 +126,8 @@ public:
 	const BonusList & getExportedBonusList() const;
 	BonusNodeType getNodeType() const;
 	const TCNodesVector & getParentNodes() const;
+	// Read-only graph inspection for snapshot invariance and diagnostics.
+	TCNodesVector getChildrenNodes() const;
 
 	void nodeHasChanged();
 

@@ -8,6 +8,7 @@
  *
  */
 #include "StdInc.h"
+#include "../../lib/BattleFieldHandler.h"
 
 #include "mock/mock_Services.h"
 #include "mock/mock_MapService.h"
@@ -27,6 +28,7 @@
 #include "../../lib/TerrainHandler.h"
 
 #include "../../lib/battle/BattleInfo.h"
+#include "../../lib/mapObjects/MiscObjects.h"
 #include "../../lib/battle/BattleLayout.h"
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/CStack.h"
@@ -488,4 +490,114 @@ TEST_F(CGameStateTest, battleInterference)
 
 	EXPECT_EQ(attacker->getPrimSkillLevel(PrimarySkill::SPELL_POWER), 100);
 	EXPECT_EQ(defender->getPrimSkillLevel(PrimarySkill::SPELL_POWER), 80);
+}
+
+
+// Pure battlefield-context selection must preserve the authoritative random
+// stream, including the distinction between fixed and one-choice-random fields.
+namespace
+{
+class FixedFieldReferenceObject : public CGObjectInstance
+{
+	BattleField field;
+public:
+	FixedFieldReferenceObject(IGameInfoCallback * cb, BattleField field)
+		: CGObjectInstance(cb), field(field) {}
+	BattleField getBattlefield() const override { return field; }
+};
+}
+
+TEST_F(CGameStateTest, PlanningBattlefieldFixedOverrideDoesNotConsumeRandomness)
+{
+	startTestGame();
+	const int3 tile(4, 4, 0);
+	auto object = std::make_shared<FixedFieldReferenceObject>(gameState.get(), BattleField(0));
+	object->id = ObjectInstanceID(map->objects.size());
+	map->objects.push_back(object);
+	map->getTile(tile).visitableObjects = {object->id};
+	// An unrecognized override remains unknown without altering any vtable.
+	const auto selection = gameState->battleGetBattlefieldCandidates(tile);
+	EXPECT_TRUE(selection.empty());
+	CRandomGenerator actual(91241), untouched(91241);
+	EXPECT_EQ(gameState->battleGetBattlefieldType(tile, actual), BattleField(0));
+	EXPECT_EQ(actual.nextInt(), untouched.nextInt());
+}
+
+TEST_F(CGameStateTest, PlanningBattlefieldCoastDoesNotConsumeRandomness)
+{
+	startTestGame();
+	const int3 tile(4, 4, 0);
+	map->getTile(tile).visitableObjects.clear();
+	map->getTile(tile).terrainType = ETerrainId::GRASS;
+	map->getTile(tile + int3(1, 0, 0)).terrainType = ETerrainId::WATER;
+	const auto selection = gameState->battleGetBattlefieldCandidates(tile);
+	ASSERT_EQ(selection.size(), 1u);
+	CRandomGenerator actual(91241), untouched(91241);
+	map->getTile(tile).visitableObjects = {getHeroByOwner(PlayerColor(0))->id};
+	EXPECT_EQ(gameState->battleGetBattlefieldType(tile, actual), selection.front());
+	EXPECT_EQ(actual.nextInt(), untouched.nextInt());
+}
+
+TEST_F(CGameStateTest, PlanningBattlefieldEmptyTileAndOneChoicePreserveRandomSelection)
+{
+	startTestGame();
+	const int3 tile(4, 4, 0);
+	for(int dx = -1; dx <= 1; ++dx)
+		for(int dy = -1; dy <= 1; ++dy)
+			map->getTile(tile + int3(dx, dy, 0)).terrainType = ETerrainId::SAND;
+	map->getTile(tile).visitableObjects.clear(); // New pure query must handle empty tile.
+	const auto selection = gameState->battleGetBattlefieldCandidates(tile);
+	ASSERT_EQ(selection.size(), 1u);
+	// Preserve the old authoritative resolver precondition (nonempty object list).
+	map->getTile(tile).visitableObjects = {getHeroByOwner(PlayerColor(0))->id};
+	CRandomGenerator actual(91241), expected(91241);
+	const auto selected = *RandomGeneratorUtil::nextItem(selection, expected);
+	EXPECT_EQ(gameState->battleGetBattlefieldType(tile, actual), selected);
+	EXPECT_EQ(actual.nextInt(), expected.nextInt());
+}
+
+TEST_F(CGameStateTest, PlanningBattlefieldEnumerationPreservesRandomVariantOrder)
+{
+	startTestGame();
+	const int3 tile(4, 4, 0);
+	for(int dx = -1; dx <= 1; ++dx)
+		for(int dy = -1; dy <= 1; ++dy)
+			map->getTile(tile + int3(dx, dy, 0)).terrainType = ETerrainId::GRASS;
+	map->getTile(tile).visitableObjects.clear();
+	const auto selection = gameState->battleGetBattlefieldCandidates(tile);
+	ASSERT_GT(selection.size(), 1u);
+	map->getTile(tile).visitableObjects = {getHeroByOwner(PlayerColor(0))->id};
+	CRandomGenerator actual(91241), expected(91241);
+	for(int iteration = 0; iteration < 20; ++iteration)
+	{
+		const auto selected = *RandomGeneratorUtil::nextItem(selection, expected);
+		EXPECT_EQ(gameState->battleGetBattlefieldType(tile, actual), selected);
+	}
+	EXPECT_EQ(actual.nextInt(), expected.nextInt());
+}
+
+TEST_F(CGameStateTest, PureObjectCandidatesDoNotSampleThreadGlobalRandomness)
+{
+	startTestGame();
+	CGTerrainPatch object(gameState.get());
+	object.ID = Obj::CURSED_GROUND1;
+	object.subID = MapObjectSubID(0);
+	object.pos = int3(4, 4, 0);
+	struct RandomStateCapture
+	{
+		bool saving = true;
+		std::string state;
+		RandomStateCapture & operator&(std::string & value) { state = value; return *this; }
+	};
+	RandomStateCapture before, after;
+	CRandomGenerator::getDefault().serialize(before);
+	// Exercise the real native object implementation, not a fixed override.
+	const auto candidates = BattleFieldHandler::objectBattlefieldCandidates(object, map->mapLayers.at(0));
+	ASSERT_TRUE(candidates.has_value());
+	ASSERT_FALSE(candidates->empty());
+	// Nor may repeated candidate inspection consume the private/default stream.
+	for(int i = 0; i < 20; ++i)
+		EXPECT_EQ(BattleFieldHandler::objectBattlefieldCandidates(object, map->mapLayers.at(0)), candidates);
+	CRandomGenerator::getDefault().serialize(after);
+	EXPECT_EQ(after.state, before.state);
 }

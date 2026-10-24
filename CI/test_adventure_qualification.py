@@ -13,6 +13,16 @@ class ReferenceBudgetTest(unittest.TestCase):
     def test_large_reference_plan_rejected(self):
         with self.assertRaises(ValueError):
             validate_plan('\n'.join('[1/49] Building CXX object server/CMakeFiles/vcmiservercommon.dir/a%d.cpp.o' % i for i in range(49)), 48)
+    def test_precompiled_headers_count_and_unknown_compile_rejected(self):
+        plan = '[1/1] Building CXX precompiled header test/CMakeFiles/vcmi_forced_battle_reference.dir/cmake_pch.hxx.gch'
+        self.assertEqual(len(validate_plan(plan, 48)), 1)
+        with self.assertRaises(ValueError):
+            validate_plan(plan, 0)
+        with self.assertRaises(ValueError):
+            validate_plan('[1/1] Building UNKNOWN source strange.output', 48)
+        with self.assertRaises(ValueError):
+            validate_plan('[1/1] Building CXX object test/CMakeFiles/vcmi_forced_battle_reference.dir/../../other.cpp.o', 48)
+
     def test_noop_allowed(self):
         self.assertEqual(validate_plan('ninja: no work to do.', 48), [])
 

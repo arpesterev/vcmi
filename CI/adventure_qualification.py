@@ -14,13 +14,20 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 
-OBJECT = re.compile(r'Building (?:CXX|C|ASM) object\s+(.+\.(?:o|obj))\s*$')
+OBJECT = re.compile(r'Building (?:CXX|C|ASM) (?:object|precompiled header)\s+(.+\.(?:o|obj|gch|pch))\s*$')
 ALLOWED = re.compile(r'^(?:server/CMakeFiles/vcmiservercommon(?:_battles|_queries|_processors)?\.dir/|test/CMakeFiles/vcmi_forced_battle_reference\.dir/)')
 
 
 def validate_plan(text, limit):
-    objects = {match.group(1) for line in text.splitlines() if (match := OBJECT.search(line))}
-    unexpected = sorted(obj for obj in objects if not ALLOWED.match(obj) and obj != 'lib/CMakeFiles/vcmi.dir/__/Version.cpp.o')
+    objects = set()
+    for line in text.splitlines():
+        if 'Building ' not in line:
+            continue
+        match = OBJECT.search(line)
+        if not match:
+            raise ValueError('Unrecognized compile edge: ' + line)
+        objects.add(match.group(1))
+    unexpected = sorted(obj for obj in objects if obj != 'lib/CMakeFiles/vcmi.dir/__/Version.cpp.o' and (not ALLOWED.match(obj) or '..' in Path(obj).parts))
     if unexpected:
         raise ValueError('Reference target unexpectedly rebuilds existing core/AI/client objects: ' + repr(unexpected))
     if len(objects) > limit:
@@ -104,6 +111,9 @@ def main():
     source = Path(__file__).resolve().parent.parent
     fixture_paths = ['test/battle/ForcedBattleReference.cpp', 'AI/Nullkiller2/Engine/Experimental/DetachedDuelRollout.cpp',
                      'AI/Nullkiller2/Engine/Experimental/DetachedDuelRollout.h',
+                     'test/battle/PlanningBattleSnapshotChecks.h',
+                     'AI/Nullkiller2/Engine/Experimental/PlanningBattleSnapshot.cpp',
+                     'AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.cpp',
                      'test/testdata/MiniTest/header.json', 'test/testdata/MiniTest/objects.json',
                      'test/testdata/MiniTest/surface_terrain.json']
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True, timeout=10).strip()
@@ -130,32 +140,28 @@ def main():
             (evidence / 'ninja-before.log').write_bytes((build / '.ninja_log').read_bytes())
         result['compile_seconds'] = run(['cmake', '--build', str(build), '--target', target, '--parallel', '2', '--', '-d', 'explain'],
                                         evidence / 'build.log', config['reference_compile_seconds'])
+        result['compiled_objects'] = validate_plan((evidence / 'build.log').read_text(), config['reference_max_object_edges'])
         (evidence / 'ninja-after.log').write_bytes((build / '.ninja_log').read_bytes())
         result['executable_sha256'] = hashlib.sha256((build / 'bin' / target).read_bytes()).hexdigest()
         run(['cmake', '--build', str(build), '--target', target, '--parallel', '2'], evidence / 'noop.log', 30)
         noop = (evidence / 'noop.log').read_text()
-        if re.search(r'\[\d+/\d+\].*(?:Building .* object|Linking |Archiving )', noop):
+        if validate_plan(noop, config['reference_max_object_edges']) or re.search(r'\[\d+/\d+\].*(?:Linking |Archiving )', noop):
             raise RuntimeError('Immediate reference rebuild was not a no-op')
         reference_started = True
         result['execution_seconds'] = run([str(build / 'bin' / target), '--gmock_verbose=error',
-                                           '--gtest_filter=ForcedBattleReference.*', '--gtest_output=xml:' + str(evidence / 'tests.xml')],
+                                           '--gtest_filter=' + config['reference_filter'], '--gtest_output=xml:' + str(evidence / 'tests.xml')],
                                           evidence / 'tests.log', config['reference_execution_seconds'], build / 'bin')
         cases = ET.parse(evidence / 'tests.xml').getroot().findall('.//testcase')
         names = {case.attrib['classname'] + '.' + case.attrib['name'] for case in cases}
-        if not set(config['reference_required_tests']).issubset(names) or any(
+        if set(config['reference_required_tests']) != names or len(cases) != len(names) or any(
                 case.find('failure') is not None or case.find('skipped') is not None
                 or case.attrib.get('status') != 'run' for case in cases):
             raise RuntimeError('Reference suite missing, skipped, or failed')
-        reference_rows = [line for line in (evidence / 'tests.log').read_text().splitlines()
-                          if line.startswith('FORCED_BATTLE_REFERENCE ')]
-        counts = Counter(int(value) for row in reference_rows for value in re.findall(r'forecast_status=(\d+)', row))
-        agreements = Counter(int(value) for row in reference_rows for value in re.findall(r'forecast_winner_agrees=(\d+)', row))
-        if len(reference_rows) != len(config['reference_required_tests']) or sum(counts.values()) != 2 * len(reference_rows) or set(counts) - {0, 1, 2} or sum(agreements.values()) != counts[2]:
-            raise RuntimeError('Reference/forecast evidence rows are incomplete or inconsistent')
-        result.update(status='completed', executed_tests=sorted(names), reference_encounters=len(reference_rows),
-                      forecast_support={'unsupported': counts[0], 'budget_exhausted': counts[1], 'finished': counts[2]},
-                      finished_forecast_winner_agreement={'agreed': agreements[1], 'disagreed': agreements[0]},
+        from forced_battle_evidence import summarize_evidence
+        result.update(status='completed', executed_tests=sorted(names),
+                      battle_evidence=summarize_evidence((evidence / 'tests.log').read_text()),
                       qualification_scope='Fixed-policy server references, not calibrated adventure strength or production integration')
+
     except Exception as error:
         result['reason'] = str(error)
         if reference_started and re.search(r'returncode=-(?:11|6),', str(error)):

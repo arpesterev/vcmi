@@ -1049,6 +1049,47 @@ BattleInfo * CGameState::getBattle(const BattleID & battle)
 	return nullptr;
 }
 
+std::vector<BattleField> CGameState::battleGetBattlefieldCandidates(int3 tile) const
+{
+	assert(tile.isValid());
+
+	if(!tile.isValid())
+		return {};
+
+	const TerrainTile &t = map->getTile(tile);
+	const auto currentLayer = map->mapLayers.at(tile.z);
+
+	ObjectInstanceID topObjectID = t.visitableObjects.empty() ? ObjectInstanceID() : t.visitableObjects.front();
+	const CGObjectInstance * topObject = topObjectID.hasValue() ? getObjInstance(topObjectID) : nullptr;
+	if(topObject)
+	{
+		auto fields = BattleFieldHandler::objectBattlefieldCandidates(*topObject, currentLayer);
+		if(!fields) return {};
+		if(!fields->empty()) return *fields;
+	}
+
+	for(auto & obj : map->getObjects<CGTerrainPatch>())
+	{
+		//look only for magical terrain-like objects covering given tile
+		if(!obj->coveringAt(tile))
+			continue;
+
+		auto fields = BattleFieldHandler::objectBattlefieldCandidates(*obj, currentLayer);
+		if(!fields) return {};
+		if(!fields->empty()) return *fields;
+	}
+
+	if(map->isCoastalTile(tile)) //coastal tile is always ground
+		return {BattleField(*LIBRARY->identifiers()->getIdentifier("core", "battlefield.sand_shore"))};
+	
+	const auto & terrainBattlefields = t.getTerrain()->battleFields;
+
+	if (terrainBattlefields.empty())
+		throw std::runtime_error("Failed to find battlefield for terrain " + t.getTerrain()->getJsonKey());
+
+	return BattleFieldHandler::compatibleBattlefields(terrainBattlefields, currentLayer);
+}
+
 BattleField CGameState::battleGetBattlefieldType(int3 tile, vstd::RNG & randomGenerator) const
 {
 	assert(tile.isValid());

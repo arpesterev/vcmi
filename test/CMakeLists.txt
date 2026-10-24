@@ -166,6 +166,7 @@ if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS)
 		nullkiller2/TownRecruitmentRegression.cpp
 		nullkiller2/AdventurePlanningRegression.cpp
 		nullkiller2/PlannerContinuityRegression.cpp
+		nullkiller2/PlanningRiskTableTest.cpp
 		nullkiller2/AdventureBattleRiskRegression.cpp
 		nullkiller2/TownDefenceRegression.cpp
 		nullkiller2/PlanningCacheRegression.cpp
@@ -301,3 +302,6 @@ foreach(resource ${testdata})
 	set(output "${CMAKE_BINARY_DIR}/bin/test/testdata/${output}/${filename}")
 	configure_file(${resource} ${output} COPYONLY)
 endforeach()
+
+# Asset-free actual planner-turn evidence, explicitly built only.
+include(adventure/AdventureScenarioReference.cmake)

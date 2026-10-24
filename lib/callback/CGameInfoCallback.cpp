@@ -34,6 +34,34 @@ VCMI_LIB_NAMESPACE_BEGIN
 #define ERROR_RET_IF(cond, txt) do {if(cond){logGlobal->error("%s: %s", BOOST_CURRENT_FUNCTION, txt); return;}} while(0)
 #define ERROR_RET_VAL_IF(cond, txt, retVal) do {if(cond){logGlobal->error("%s: %s", BOOST_CURRENT_FUNCTION, txt); return retVal;}} while(0)
 
+std::vector<BattleField> CGameInfoCallback::getBattlefieldCandidates(int3 pos) const
+{
+	const auto * tile = getTile(pos, false);
+	if(!tile)
+		return {};
+	// Coastal terrain resolution examines all eight neighbours. Do not reveal
+	// hidden water through a supposedly read-only planning query.
+	if(!tile->isWater())
+		for(int dx = -1; dx <= 1; ++dx)
+			for(int dy = -1; dy <= 1; ++dy)
+			{
+				const int3 neighbour = pos + int3(dx, dy, 0);
+				if(isInTheMap(neighbour) && !getTile(neighbour, false))
+					return {};
+			}
+	// Do not read an invisible event's field override through a visible tile.
+	if(!tile->visitableObjects.empty())
+	{
+		const auto * top = getObj(tile->visitableObjects.front(), false);
+		if(!top || (getPlayerID() && top->ID == Obj::EVENT))
+			return {};
+	}
+	for(const auto & patch : gameState().getMap().getObjects<CGTerrainPatch>())
+		if(patch->coveringAt(pos) && !isVisible(patch))
+			return {};
+	return gameState().battleGetBattlefieldCandidates(pos);
+}
+
 const IMarket * CGameInfoCallback::getMarket(ObjectInstanceID objid) const
 {
 	const CGObjectInstance * obj = getObj(objid, false);

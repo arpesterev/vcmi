@@ -542,6 +542,11 @@ BonusNodeType CBonusSystemNode::getNodeType() const
 	return nodeType;
 }
 
+TCNodesVector CBonusSystemNode::getChildrenNodes() const
+{
+	return TCNodesVector(children.begin(), children.end());
+}
+
 const TCNodesVector& CBonusSystemNode::getParentNodes() const
 {
 	return parentsToInherit;

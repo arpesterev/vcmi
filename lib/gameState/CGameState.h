@@ -94,6 +94,7 @@ public:
 	HeroTypeID pickNextHeroType(vstd::RNG & randomGenerator, const PlayerColor & owner);
 
 	void apply(CPackForClient & pack);
+	std::vector<BattleField> battleGetBattlefieldCandidates(int3 tile) const;
 	BattleField battleGetBattlefieldType(int3 tile, vstd::RNG & randomGenerator) const;
 
 	PlayerRelations getPlayerRelations(PlayerColor color1, PlayerColor color2) const override;

@@ -1,0 +1,86 @@
+# Staged asset-free adventure scenario reference
+
+Status: generated and Python-tested, **C++ not compiled or executed**. Not part
+of the first frozen qualification. No production changes, private maps/saves,
+renderer assets, graphical client, headless client, or external network transport.
+
+## Build and run after independent review and integration approval
+
+The integrator may include `adventure/AdventureScenarioReference.cmake` from
+`test/CMakeLists.txt`. The target is EXCLUDE_FROM_ALL and needs the existing static
+Nullkiller2/server/test configuration, public pinned test data and installed VCMI
+configuration files, just like `vcmitest` and `vcmi_forced_battle_reference`.
+
+```
+cmake --build <existing-build> --target vcmi_adventure_scenario_reference
+cd <existing-build>/bin
+./vcmi_adventure_scenario_reference --gtest_filter=AdventureScenarioBridge.RealCallbackMoveConsumesMovementAndChangesPosition --gtest_output=xml:adventure-move.xml
+./vcmi_adventure_scenario_reference --gtest_filter=AdventureScenarioBridge.ProductionPlannerCapturesReachableMine --gtest_output=xml:adventure-planner.xml
+```
+
+Use a subprocess supervisor with a 180-second hard cap per scenario and
+600-second cap for the initial qualification; nonzero exit, unsupported event,
+missing XML, crash or timeout is incomplete/failure, never pass. Internal request
+and time checks are cooperative, not a replacement for that supervisor. Start
+with the move test, then planner smoke, before enabling either draft quality case.
+Do not launch graphical smoke: public test data does not establish renderability.
+
+## What runs
+
+Generated native `.vmap` inputs derive solely from repository `MiniTest` and
+`ObjectPropertyTest` JSON. `generate_maps.py` emits per-map/source SHA256 hashes in
+`provenance.json`. The fixed native maps use ordinary creatures, normal player
+visibility, Expert difficulty, seed 17041, and an explicit normal RESOURCE starting
+bonus. No reveal cheat or nonstandard army bonus is allowed.
+
+`CGameHandler::init` creates the real seeded state, server event bus and turn
+processor. A real player-specific `CCallback` sends requests to
+`CGameHandler::handleReceivedPack`; state packs apply exactly once. Calls into the
+real production `Nullkiller::makeTurn` use visible-object memory preparation from
+the gateway. Blue deliberately ends turns without moving in these first cases.
+
+The bridge synchronously forwards the supported movement, visit, resource,
+visibility, ownership, blocked and game-over callbacks. All state updates
+conservatively invalidate planning caches. This differs from normal cache timing
+and is not a performance benchmark. Only MoveHero, EndTurn and SetFormation requests are supported. Recruitment, garrison exchange, construction and artifact changes are not yet qualified. Unknown requests/state packs, battles,
+blocking queries, teleports and asynchronous requests fail explicitly.
+`PackageApplied(true)` is NOT action-success evidence: this server emits it even
+when a visitor rejects a request. Assertions require actual position/movement
+point deltas, mine ownership, surviving heroes and real victory state.
+
+This is production planner-turn/map-state integration, **not a full client game**.
+It does not exercise asynchronous YourTurn/network ordering. Its synchronous
+callback ordering requires independent review before qualification. Tests do not
+prove an enjoyable opponent or improved win rate.
+
+## Cases and acceptance
+
+1. `productive_move`: real adjacent callback move must change hero position and
+   debit movement. Planner smoke must capture an initially visible mine by day 2.
+2. `stable_goal_progress`: visible symmetric mine goals across a water barrier;
+   own both by day 6. Before interpreting oscillation, verify real initial routes
+   exceed one turn and neither is bypassed by a spell/boat. Capture alone is not
+   proof of fewer oscillations.
+3. `blocked_goal_alternative`: an unsafe guarded reward and another hero with a
+   reachable mine; capture mine by day 2, keep both heroes, leave reward uncollected.
+   This is NOT an injected executeTask-failure regression.
+4. `urgent_two_town_defence` is a generator draft only, deliberately not in this
+   target. It needs qualified battles, recruitment/garrison state callbacks and
+   validated initial gold/income/stock. Do not assert survival while blue is idle.
+5. Wider search needs measured initial pathfinder costs outside scout range plus
+   safe reachable objective completion. Not claimed by these three fixtures.
+
+Pair baseline and candidate with identical map hashes, seed, public-data hash,
+settings and target source. Record exact commit/toolchain, stdout/XML and generated
+provenance. `ADVENTURE_BRIDGE` traces record day/player/request type and observed
+productive-move deltas plus each own hero position/movement before and after requests, not synthetic successful acknowledgments. Supplement with
+existing planner traces for goal ID, hero, priorities, retention/expiry/failure,
+and route costs. Compare productive captures/moves, idle turns, goal switching and
+completion day; do not reward blanket refusal. Initial smoke uses seed 17041;
+quality qualification must also exercise 17047 and 17053 by explicitly
+parameterizing the fixture, which is not implemented yet.
+
+Real server forced-battle outcomes belong to the separate
+`vcmi_forced_battle_reference` target. Paired equal-scalar mismatches must count
+false-safe attacks and false-dangerous refusals using completed battles, not the
+planner's own formula. Neither target currently calibrates skipped attacks.

@@ -1,0 +1,423 @@
+{
+  "expected_tests": [
+    "ForcedBattleReference.FlyingAgainstRanged",
+    "ForcedBattleReference.MixedArmyHigherDefenderCount",
+    "ForcedBattleReference.MixedArmyLowerDefenderCount",
+    "ForcedBattleReference.NativeGrandElfDoubleShot",
+    "ForcedBattleReference.NativeGriffinRetaliation",
+    "ForcedBattleReference.NativeHeroSpecialtyTroops",
+    "ForcedBattleReference.NativeMarksmanDoubleShot",
+    "ForcedBattleReference.NativeRoyalGriffinRetaliation",
+    "ForcedBattleReference.NativeSpriteBlocksRetaliation",
+    "ForcedBattleReference.OrdinaryMelee",
+    "ForcedBattleReference.RangedAgainstSlowMelee",
+    "ForcedBattleReference.RangedMirror",
+    "ForcedBattleReference.RealNeutralSingleUpgrade",
+    "ForcedBattleReference.RealNeutralSplit",
+    "ForcedBattleReference.SlowMeleeAgainstRanged",
+    "ForcedBattleReference.UndeadMelee",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/0",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/1",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/10",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/11",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/12",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/13",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/14",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/15",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/16",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/17",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/18",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/19",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/2",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/20",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/21",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/22",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/23",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/24",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/25",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/26",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/27",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/28",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/29",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/3",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/30",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/31",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/32",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/33",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/34",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/35",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/36",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/37",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/38",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/39",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/4",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/40",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/41",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/5",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/6",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/7",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/8",
+    "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/9"
+  ],
+  "cases": [
+    {
+      "id": "ordinary_melee",
+      "kind": "direct",
+      "test": "ForcedBattleReference.OrdinaryMelee",
+      "seed": 17041
+    },
+    {
+      "id": "ranged_slow_melee",
+      "kind": "direct",
+      "test": "ForcedBattleReference.RangedAgainstSlowMelee",
+      "seed": 17047
+    },
+    {
+      "id": "slow_melee_ranged",
+      "kind": "direct",
+      "test": "ForcedBattleReference.SlowMeleeAgainstRanged",
+      "seed": 17053
+    },
+    {
+      "id": "undead_melee",
+      "kind": "direct",
+      "test": "ForcedBattleReference.UndeadMelee",
+      "seed": 17041
+    },
+    {
+      "id": "flying_ranged",
+      "kind": "direct",
+      "test": "ForcedBattleReference.FlyingAgainstRanged",
+      "seed": 17053
+    },
+    {
+      "id": "ranged_mirror",
+      "kind": "direct",
+      "test": "ForcedBattleReference.RangedMirror",
+      "seed": 17047
+    },
+    {
+      "id": "mixed_low",
+      "kind": "direct",
+      "test": "ForcedBattleReference.MixedArmyLowerDefenderCount",
+      "seed": 17041
+    },
+    {
+      "id": "mixed_high",
+      "kind": "direct",
+      "test": "ForcedBattleReference.MixedArmyHigherDefenderCount",
+      "seed": 17041
+    },
+    {
+      "id": "marksman_double_shot",
+      "kind": "direct",
+      "test": "ForcedBattleReference.NativeMarksmanDoubleShot",
+      "seed": 17041
+    },
+    {
+      "id": "grand_elf_double_shot",
+      "kind": "direct",
+      "test": "ForcedBattleReference.NativeGrandElfDoubleShot",
+      "seed": 17047
+    },
+    {
+      "id": "griffin_retaliation",
+      "kind": "direct",
+      "test": "ForcedBattleReference.NativeGriffinRetaliation",
+      "seed": 17041
+    },
+    {
+      "id": "royal_griffin_retaliation",
+      "kind": "direct",
+      "test": "ForcedBattleReference.NativeRoyalGriffinRetaliation",
+      "seed": 17047
+    },
+    {
+      "id": "sprite_blocks_retaliation",
+      "kind": "direct",
+      "test": "ForcedBattleReference.NativeSpriteBlocksRetaliation",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_ranged_slow_10_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/0",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_slow_ranged_10_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/1",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_ranged_slow_10_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/2",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_slow_ranged_10_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/3",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_ranged_slow_10_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/4",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_slow_ranged_10_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/5",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_ranged_slow_20_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/6",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_slow_ranged_20_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/7",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_ranged_slow_20_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/8",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_slow_ranged_20_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/9",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_ranged_slow_20_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/10",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_slow_ranged_20_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/11",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_ranged_slow_30_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/12",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_slow_ranged_30_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/13",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_ranged_slow_30_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/14",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_slow_ranged_30_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/15",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_ranged_slow_30_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/16",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_slow_ranged_30_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/17",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_ranged_slow_40_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/18",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_slow_ranged_40_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/19",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_ranged_slow_40_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/20",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_slow_ranged_40_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/21",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_ranged_slow_40_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/22",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_slow_ranged_40_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/23",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_ranged_slow_60_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/24",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_slow_ranged_60_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/25",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_ranged_slow_60_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/26",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_slow_ranged_60_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/27",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_ranged_slow_60_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/28",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_slow_ranged_60_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/29",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_ranged_slow_80_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/30",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_slow_ranged_80_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/31",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_ranged_slow_80_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/32",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_slow_ranged_80_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/33",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_ranged_slow_80_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/34",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_slow_ranged_80_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/35",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_ranged_slow_120_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/36",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_slow_ranged_120_17041",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/37",
+      "seed": 17041
+    },
+    {
+      "id": "sweep_ranged_slow_120_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/38",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_slow_ranged_120_17047",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/39",
+      "seed": 17047
+    },
+    {
+      "id": "sweep_ranged_slow_120_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/40",
+      "seed": 17053
+    },
+    {
+      "id": "sweep_slow_ranged_120_17053",
+      "kind": "direct",
+      "test": "Predeclared/ForcedBattleCountSweep.ArcherWalkingDead/41",
+      "seed": 17053
+    },
+    {
+      "id": "neutral_0_0",
+      "kind": "neutral",
+      "upgrade": 0,
+      "specialty": 0,
+      "test": "ForcedBattleReference.RealNeutralSplit",
+      "seed": 17041
+    },
+    {
+      "id": "neutral_1_0",
+      "kind": "neutral",
+      "upgrade": 1,
+      "specialty": 0,
+      "test": "ForcedBattleReference.RealNeutralSingleUpgrade",
+      "seed": 17041
+    },
+    {
+      "id": "neutral_0_1",
+      "kind": "neutral",
+      "upgrade": 0,
+      "specialty": 1,
+      "test": "ForcedBattleReference.NativeHeroSpecialtyTroops",
+      "seed": 17041
+    }
+  ],
+  "required_supported_smokes": [
+    "ordinary_melee",
+    "ranged_slow_melee",
+    "undead_melee"
+  ]
+}
