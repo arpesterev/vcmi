@@ -45,6 +45,9 @@ struct AIPathNode : public CGPathNode
 	uint64_t armyLoss;
 	uint64_t arrivalArmyLoss = 0;
 	uint64_t arrivalDanger = 0;
+	ObjectInstanceID singleForecastEncounter;
+	bool hasSingleForecastEncounter = false;
+	uint64_t singleForecastArmyLoss = 0;
 	uint32_t version;
 
 	int32_t manaCost;
@@ -57,6 +60,9 @@ struct AIPathNode : public CGPathNode
 		armyLoss = source.armyLoss;
 		arrivalArmyLoss = source.armyLoss;
 		arrivalDanger = source.danger;
+		singleForecastEncounter = source.singleForecastEncounter;
+		hasSingleForecastEncounter = source.hasSingleForecastEncounter;
+		singleForecastArmyLoss = source.singleForecastArmyLoss;
 		manaCost = source.manaCost;
 		danger = source.danger;
 	}
@@ -72,6 +78,9 @@ struct AIPathNode : public CGPathNode
 		armyLoss = 0;
 		arrivalArmyLoss = 0;
 		arrivalDanger = 0;
+		hasSingleForecastEncounter = false;
+		singleForecastArmyLoss = 0;
+		singleForecastEncounter = ObjectInstanceID();
 		chainOther = nullptr;
 		dayFlags = DayFlags::NONE;
 		this->layer = layer;
@@ -102,6 +111,9 @@ struct AIPath
 	uint64_t targetObjectDanger = 0;
 	uint64_t destinationObjectDanger = 0;
 	uint64_t beforeDestinationDanger = 0;
+	ObjectInstanceID singleForecastEncounter;
+	bool hasSingleForecastEncounter = false;
+	uint64_t singleForecastArmyLoss = 0;
 	bool hasEarlierDangerProvenance = false;
 	int32_t destinationHeroManaCost = 0;
 	bool hasDestinationRiskProvenance = false;

@@ -40,6 +40,11 @@ def generate(repo, output):
     objects['retreat_observer'].update(x=47, y=25, options={'owner': 'red'})
     objects['retreat_observer_far'] = copy.deepcopy(objects['retreat_observer'])
     objects['retreat_observer_far'].update(y=40)
+    # Native radius3 sight at x46 covers retreat x44 over y±2. Fill both
+    # observed gaps without granting vision or occupying blue's route.
+    for y in (15, 20, 30, 35):
+        objects[f'retreat_corridor_{y}'] = copy.deepcopy(objects['retreat_observer'])
+        objects[f'retreat_corridor_{y}']['y'] = y
     header['triggeredEvents'] = {
         'objectiveVictory': {'condition': ['allOf', ['daysPassed', {'value': 3}],
             scenarios.control_object(objects, 'town_safe', 'town'),

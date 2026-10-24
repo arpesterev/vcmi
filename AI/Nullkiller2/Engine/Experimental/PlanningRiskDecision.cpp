@@ -42,6 +42,32 @@ bool captureNeutralLossPolicy(const Nullkiller & ai, const CGHeroInstance & hero
 	return true;
 }
 
+const CGCreature * resolveVisibleNeutralEncounter(const Nullkiller & ai, const int3 & destination)
+{
+	const auto objects = ai.cc->getVisitableObjs(destination, false);
+	const CGCreature * target = nullptr;
+	if(objects.size() > 1) return nullptr;
+	if(!objects.empty()) target = dynamic_cast<const CGCreature *>(objects.front());
+	if(!objects.empty() && !target) return nullptr;
+	for(const auto * guard : ai.cc->getGuardingCreatures(destination))
+	{
+		const auto * monster = dynamic_cast<const CGCreature *>(guard);
+		if(!monster || (target && target != monster)) return nullptr;
+		target = monster;
+	}
+	if(!target || typeid(*target) != typeid(CGCreature) || target->ID != Obj::MONSTER
+		|| !target->appearance || ai.cc->getObj(target->id, false) != target
+		|| (target->getOwner() != PlayerColor::NEUTRAL && target->getOwner() != PlayerColor::UNFLAGGABLE))
+		return nullptr;
+	// A guard-zone entry invokes this monster's visit handler. The server's
+	// startBattle(army1,army2) uses army2->visitablePos(), not the entry tile.
+	const auto atMonster = ai.cc->getVisitableObjs(target->visitablePos(), false);
+	if(atMonster.size() != 1 || atMonster.front() != target) return nullptr;
+	for(const auto * guard : ai.cc->getGuardingCreatures(target->visitablePos()))
+		if(guard != target) return nullptr;
+	return target;
+}
+
 PlanningRiskDecision decideNeutralRisk(const Nullkiller & ai, const CGHeroInstance & hero,
 	const CCreatureSet * army, const int3 & destination, PlanningRiskRoute route,
 	bool permitDefeatRecommendation)
@@ -52,21 +78,14 @@ PlanningRiskDecision decideNeutralRisk(const Nullkiller & ai, const CGHeroInstan
 	if(!route.usesCurrentHeroArmy || !route.knownEarlierDanger || route.earlierDanger
 		|| route.earlierArmyLoss || route.spentMana || hero.getOwner() != ai.playerID)
 		return result;
-	const auto objects = ai.cc->getVisitableObjs(destination, false);
-	// A guard of another object, or overlapping encounter, is not the captured
-	// single neutral fight. No guessed split of aggregate danger is permitted.
-	if(objects.size() != 1) return result;
-	const auto * target = dynamic_cast<const CGCreature *>(objects.front());
-	if(!target || typeid(*target) != typeid(CGCreature) || target->ID != Obj::MONSTER
-		|| !target->appearance || target->visitablePos() != destination
-		|| (target->getOwner() != PlayerColor::NEUTRAL && target->getOwner() != PlayerColor::UNFLAGGABLE))
-		return result;
-	for(const auto * guard : ai.cc->getGuardingCreatures(destination))
-		if(guard != target) return result;
+	const auto * target = resolveVisibleNeutralEncounter(ai, destination);
+	if(!target) return result;
 	const auto record = ai.findPlanningRisk(hero.id, target->id, route);
 	if(!record || !record->decisionEvidence || !record->contextualSummaryReady) return result;
 
 	result.recommendation = record->contextualAssessment.recommendation;
+	result.encounter = target->id;
+	result.decisiveEvidence = result.recommendation != RiskRecommendation::UNKNOWN;
 	if(!permitDefeatRecommendation && result.recommendation == RiskRecommendation::LIKELY_DEFEAT)
 		result.recommendation = RiskRecommendation::UNKNOWN;
 	result.sampledLoss = record->contextualWorstLoss;

@@ -39,3 +39,11 @@ with zipfile.ZipFile(a.output / 'risk_earlier_guard.vmap', 'w', zipfile.ZIP_DEFL
     for name, data in sorted(parts.items()):
         info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
         z.writestr(info, json.dumps(data, sort_keys=True, separators=(',', ':')))
+
+# Independent declared control: actual pathfinder must round this prior fight's
+# loss to zero while retaining positive encounter danger. No production bonuses.
+parts['objects.json']['earlier_guard']['subtype'] = 'peasant'
+with zipfile.ZipFile(a.output / 'risk_zero_loss_earlier_guard.vmap', 'w', zipfile.ZIP_DEFLATED) as z:
+    for name, data in sorted(parts.items()):
+        info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+        z.writestr(info, json.dumps(data, sort_keys=True, separators=(',', ':')))

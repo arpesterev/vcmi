@@ -35,6 +35,14 @@ class PublicInteractionMapTest(unittest.TestCase):
             self.assertEqual(objects['hero_1']['options']['army'], [{'type': 'core:pikeman', 'amount': 30}])
             self.assertEqual(objects['retreat_observer']['options'], {'owner': 'red'})
             self.assertEqual(objects['retreat_observer_far']['options'], {'owner': 'red'})
+            for y in (15, 20, 30, 35):
+                observer = objects[f'retreat_corridor_{y}']
+                self.assertEqual((observer['x'], observer['y']), (47, y))
+                self.assertEqual(observer['type'], 'mine')
+                self.assertEqual(observer['subtype'], 'orePit')
+                self.assertEqual(observer['options'], {'owner': 'red'})
+            # No gold-mine income or army/retreat/budget changes were added.
+            self.assertEqual(sum(obj.get('subtype') == 'goldMine' for obj in objects.values()), 1)
             self.assertEqual(header['events'][0]['resources'], {'gold': -7800})
             self.assertEqual(10000 + header['events'][0]['resources']['gold'], 2200)
             self.assertEqual(header['events'][0]['firstOccurrence'], 0)

@@ -17,10 +17,13 @@ struct PlanningRiskDecision
 {
 	RiskRecommendation recommendation = RiskRecommendation::UNKNOWN;
 	double sampledLoss = 1;
+	ObjectInstanceID encounter;
+	bool decisiveEvidence = false;
 };
 // Capture and recapture under the same actual game-state reader lock. Appends
 // policy inputs to source identity, not the reusable combat-physics memo key.
 bool captureNeutralLossPolicy(const Nullkiller & ai, const CGHeroInstance & hero, CapturedRiskRequest & request);
+const CGCreature * resolveVisibleNeutralEncounter(const Nullkiller & ai, const int3 & destination);
 PlanningRiskDecision decideNeutralRisk(const Nullkiller & ai, const CGHeroInstance & hero,
 	const CCreatureSet * army, const int3 & destination, PlanningRiskRoute route,
 	bool permitDefeatRecommendation);

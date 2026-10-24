@@ -102,6 +102,14 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			route.spentMana = static_cast<uint32_t>(path.destinationHeroManaCost);
 			route.earlierDanger = path.beforeDestinationDanger;
 			route.knownEarlierDanger = path.hasEarlierDangerProvenance;
+			const bool sameEncounter = path.hasSingleForecastEncounter
+				&& path.singleForecastEncounter == objToVisit->id
+				&& (path.armyLoss == path.singleForecastArmyLoss || path.armyLoss == 0);
+			if(sameEncounter)
+			{
+				route.earlierArmyLoss = 0;
+				route.earlierDanger = 0;
+			}
 			const auto decision = experimental::decideNeutralRisk(*nullkiller, *hero,
 				path.heroArmy, path.targetTile(), route, !force);
 			if(decision.recommendation == experimental::RiskRecommendation::LIKELY_DEFEAT)
@@ -109,6 +117,7 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			else if(decision.recommendation == experimental::RiskRecommendation::FAVORABLE)
 			{
 				isSafe = true;
+				if(sameEncounter) evaluatedPath.armyLoss = 0;
 				evaluatedPath.targetObjectArmyLoss = static_cast<uint64_t>(std::ceil(
 					decision.sampledLoss * path.heroArmy->getArmyStrength()));
 			}

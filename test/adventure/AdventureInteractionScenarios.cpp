@@ -19,9 +19,10 @@ protected:
 		NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway, false);
 	}
 
-	void diagnoseThreat(const char * phase, const CGHeroInstance * enemy, const CGTownInstance * town)
+	int diagnoseThreat(const char * phase, const CGHeroInstance * enemy, const CGTownInstance * town)
 	{
-		// Diagnostic only. Same real callback/fog, no revealing or executing actions.
+		// Same real callback/fog, no revealing or executing actions.
+		int earliestTownArrival = 255;
 		NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway, false, [&](NK2AI::Nullkiller & ai)
 		{
 			NK2AI::PathfinderSettings config;
@@ -45,12 +46,16 @@ protected:
 				std::cout << "INTERACTION_DIAGNOSTIC phase=" << phase << " target=" << target.toString()
 					<< " paths=" << paths.size();
 				for(const auto & path : paths)
+				{
+					if(target == town->visitablePos()) earliestTownArrival = std::min(earliestTownArrival, static_cast<int>(path.turn()));
 					std::cout << " turn=" << static_cast<int>(path.turn()) << " danger=" << path.getTotalDanger()
 						<< " loss=" << path.getTotalArmyLoss();
+				}
 				std::cout << std::endl;
 			}
 			gateway->invalidatePaths(); // never leave enemy-only cached paths for planner
 		});
+		return earliestTownArrival;
 	}
 
 	static uint64_t uniqueLocalStrength(const CGTownInstance * town)
@@ -83,6 +88,15 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	ASSERT_EQ(safeTown->getOwner(), PlayerColor(0));
 	ASSERT_EQ(observer->getOwner(), PlayerColor(0));
 	ASSERT_EQ(observerFar->getOwner(), PlayerColor(0));
+	for(int y : {15, 20, 30, 35})
+	{
+		const auto * corridor = dynamic_cast<const CGMine *>(object("retreat_corridor_" + std::to_string(y)));
+		ASSERT_NE(corridor, nullptr);
+		ASSERT_EQ(corridor->getOwner(), PlayerColor(0));
+		ASSERT_EQ(corridor->producedResource, GameResID::ORE);
+	}
+	for(int y = 7; y <= 40; ++y)
+		ASSERT_TRUE(bridge.callback->isVisible(int3(44, y, 0))) << "Unknown corridor tile y=" << y;
 	ASSERT_TRUE(bridge.callback->isVisible(enemy));
 	ASSERT_TRUE(bridge.callback->isVisible(objective));
 	ASSERT_EQ(bridge.callback->getResourceAmount(EGameResID::GOLD), 2200)
@@ -133,7 +147,8 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	finishActiveTurn();
 	ASSERT_EQ(bridge.active, PlayerColor(0));
 	ASSERT_EQ(bridge.handler->gameState().getDate(Date::DAY), 2);
-	diagnoseThreat("after_first_withdrawal", enemy, threatened);
+	ASSERT_EQ(diagnoseThreat("after_first_withdrawal", enemy, threatened), 1)
+		<< "First withdrawal must leave an actually reachable next-turn threat";
 	observeThreats();
 	ASSERT_LE(gateway->nullkiller->dangerHitMap->getObjectThreat(threatened).fastestDanger.turn, 1)
 		<< "Day2 is deliberately still inside the two-turn threat horizon";
@@ -155,8 +170,13 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	finishActiveTurn();
 	ASSERT_EQ(bridge.active, PlayerColor(0));
 	ASSERT_EQ(bridge.handler->gameState().getDate(Date::DAY), 3);
+	const int laterArrival = diagnoseThreat("after_second_withdrawal", enemy, threatened);
+	ASSERT_GE(laterArrival, 2);
+	ASSERT_LT(laterArrival, 255) << "Do not interpret disconnected fog paths as urgency removal";
 	observeThreats();
-	for(const auto & threat : gateway->nullkiller->dangerHitMap->getTownThreats(threatened))
+	const auto & laterThreats = gateway->nullkiller->dangerHitMap->getTownThreats(threatened);
+	ASSERT_FALSE(laterThreats.empty());
+	for(const auto & threat : laterThreats)
 		ASSERT_GT(threat.turn, 1) << "Second legal retreat did not clear the predeclared two-turn urgency horizon";
 	const int movesBefore = bridge.productiveMoves;
 	NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway);

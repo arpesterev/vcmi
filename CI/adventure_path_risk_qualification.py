@@ -12,12 +12,13 @@ from adventure_qualification import OBJECT, RISK_BUILD_SOURCES, run
 
 TARGET = 'vcmi_path_risk_reference'
 CASES = ('AdventurePathRiskReference.ActualPathfinderRequiresEligibleFavorablePublication',
-         'AdventurePathRiskReference.ActualEarlierCombatCannotUseDestinationOnlyPublication')
+         'AdventurePathRiskReference.ActualEarlierCombatCannotUseDestinationOnlyPublication',
+         'AdventurePathRiskReference.ZeroRoundedLossEarlierCombatStillRejectsDestinationOnlyPublication')
 EXECUTION_SECONDS = 360
 MAX_OBJECT_EDGES = 12
 COMPILE_SECONDS = 180
 ALLOWED = re.compile(r'^(?:server/CMakeFiles/vcmiservercommon(?:_battles|_queries|_processors)?\.dir/|test/CMakeFiles/vcmi_path_risk_reference\.dir/)')
-MAP_NAME = 'risk_earlier_guard'
+MAP_NAMES = ('risk_earlier_guard', 'risk_zero_loss_earlier_guard')
 MAP_INPUTS = (
     'test/testdata/MiniTest/header.json', 'test/testdata/MiniTest/objects.json',
     'test/testdata/MiniTest/surface_terrain.json', 'test/testdata/ObjectPropertyTest/objects.json',
@@ -28,6 +29,7 @@ SOURCES = MAP_INPUTS + RISK_BUILD_SOURCES + (
     'AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.cpp',
     'AI/Nullkiller2/Engine/Experimental/DetachedDefendBonuses.h',
     'AI/Nullkiller2/AIUtility.cpp', 'AI/Nullkiller2/AIUtility.h',
+    'AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.cpp', 'AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.h',
     'AI/Nullkiller2/Pathfinding/AINodeStorage.cpp', 'AI/Nullkiller2/Pathfinding/AINodeStorage.h',
     'AI/Nullkiller2/Pathfinding/Rules/AIMovementAfterDestinationRule.cpp',
     'AI/Nullkiller2/Pathfinding/Rules/AIMovementAfterDestinationRule.h',
@@ -68,15 +70,19 @@ def map_hashes(build, source):
     for name, record in base_provenance.items():
         if record.get('source_sha256') != expected_sources:
             raise ValueError('Base-map provenance does not match current public sources: ' + name)
-    hashes[MAP_NAME] = digest(directory / (MAP_NAME + '.vmap'))
+    for name in MAP_NAMES:
+        hashes[name] = digest(directory / (name + '.vmap'))
     provenance = {
         'base_maps': base_provenance,
         'base_provenance_sha256': digest(directory / 'provenance.json'),
-        'corridor': {'map_sha256': hashes[MAP_NAME],
-                     'source_map_sha256': hashes['blocked_goal_alternative'],
-                     'generator_sha256': digest(source / 'test/adventure/generate_path_risk_map.py'),
-                     'public_source_sha256': {name: digest(source / name) for name in MAP_INPUTS}},
     }
+    for label, name in zip(('corridor', 'zero_loss_corridor'), MAP_NAMES):
+        provenance[label] = {
+            'map_sha256': hashes[name],
+            'source_map_sha256': hashes['blocked_goal_alternative'],
+            'generator_sha256': digest(source / 'test/adventure/generate_path_risk_map.py'),
+            'public_source_sha256': {path: digest(source / path) for path in MAP_INPUTS},
+        }
     encoded = json.dumps(provenance, sort_keys=True, separators=(',', ':')).encode()
     return hashes, provenance, hashlib.sha256(encoded).hexdigest()
 

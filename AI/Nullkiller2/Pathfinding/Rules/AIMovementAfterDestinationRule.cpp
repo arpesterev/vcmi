@@ -333,16 +333,31 @@ namespace AIPathfinding
 		// Admit favorable supported fights BEFORE the scalar loss pruner. A
 		// shared path expansion must not impose an ordinary-capture defeat veto
 		// on defence/escape callers; that contextual rejection occurs later.
-		if(srcNode->manaCost >= 0)
+		experimental::PlanningRiskDecision decision;
+		bool sameEncounter = false;
+		if(srcNode->manaCost >= 0 && aiNk->hasPlanningRisk())
 		{
 			experimental::PlanningRiskRoute route;
 			route.earlierArmyLoss = srcNode->armyLoss;
 			route.spentMana = static_cast<uint32_t>(srcNode->manaCost);
 			route.earlierDanger = srcNode->danger;
 			route.knownEarlierDanger = true;
-			const auto decision = experimental::decideNeutralRisk(*aiNk, *hero,
+			const auto * encounter = experimental::resolveVisibleNeutralEncounter(*aiNk, destination.coord);
+			sameEncounter = encounter && srcNode->hasSingleForecastEncounter
+				&& srcNode->singleForecastEncounter == encounter->id
+				&& srcNode->armyLoss == srcNode->singleForecastArmyLoss;
+			if(sameEncounter)
+			{
+				// This is the same compulsory guardian already charged on entry
+				// to its halo, not a second fight or an inferred danger match.
+				route.earlierArmyLoss = 0;
+				route.earlierDanger = 0;
+			}
+			decision = experimental::decideNeutralRisk(*aiNk, *hero,
 				srcNode->actor->creatureSet, destination.coord, route, false);
-			if(decision.recommendation == experimental::RiskRecommendation::FAVORABLE)
+			if(sameEncounter && decision.decisiveEvidence)
+				loss = 0;
+			else if(decision.recommendation == experimental::RiskRecommendation::FAVORABLE)
 				loss = static_cast<uint64_t>(std::ceil(decision.sampledLoss * actualArmyValue));
 		}
 
@@ -357,6 +372,9 @@ namespace AIPathfinding
 			nodeStorage->commit(destination, source);
 
 			battleNode->armyLoss += loss;
+			battleNode->hasSingleForecastEncounter = decision.decisiveEvidence;
+			battleNode->singleForecastEncounter = decision.encounter;
+			battleNode->singleForecastArmyLoss = battleNode->armyLoss;
 
 			vstd::amax(battleNode->danger, danger);
 

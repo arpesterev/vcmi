@@ -77,6 +77,9 @@ bool supportedBonuses(const battle::Unit & unit, SampledBattleOutcome & result)
 		case BonusType::MAX_LEARNABLE_SPELL_LEVEL:
 		case BonusType::HERO_SPELL_CASTS_PER_COMBAT_TURN:
 		case BonusType::SPELL_DAMAGE:
+		// Used only by CGHeroInstance::getEffectDuration when casting. No
+		// spells or spell-trigger abilities are admitted by this rollout.
+		case BonusType::SPELL_DURATION:
 			break;
 		default:
 			result.unsupportedBonusType = static_cast<int>(bonus->type);

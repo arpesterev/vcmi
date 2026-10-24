@@ -22,18 +22,24 @@ class ConsumerCallback final : public CCallback
 {
 public:
 	TerrainTile tile;
+	TerrainTile approach;
+	std::vector<const CGObjectInstance *> approachGuards;
+	std::vector<const CGObjectInstance *> targetGuards;
+	bool hideTarget = false;
+	const CGObjectInstance * extra = nullptr;
 	const CGHeroInstance * hero = nullptr;
 	const CGCreature * target = nullptr;
 	PlayerState player{this};
 	ConsumerCallback() : CCallback(nullptr, PlayerColor(0), nullptr) {}
-	const TerrainTile * getTile(int3, bool = true) const override { return &tile; }
+	const TerrainTile * getTile(int3 pos, bool = true) const override { return pos == int3(0,0,0) ? &tile : &approach; }
 	const CGObjectInstance * getObj(ObjectInstanceID id, bool = true) const override
 	{
+		if(extra && id == extra->id) return extra;
 		if(hero && id == hero->id) return hero;
-		if(target && id == target->id) return target;
+		if(target && id == target->id && !hideTarget) return target;
 		return nullptr;
 	}
-	std::vector<const CGObjectInstance *> getGuardingCreatures(int3) const override { return {}; }
+	std::vector<const CGObjectInstance *> getGuardingCreatures(int3 pos) const override { return pos == int3(0,0,0) ? targetGuards : approachGuards; }
 	PlayerRelations getPlayerRelations(PlayerColor, PlayerColor) const override { return PlayerRelations::ENEMIES; }
 	const PlayerState * getPlayerState(PlayerColor, bool = true) const override { return &player; }
 	std::vector<const CGHeroInstance *> getHeroesInfo() const override { return hero ? std::vector<const CGHeroInstance *>{hero} : std::vector<const CGHeroInstance *>{}; }
@@ -145,4 +151,58 @@ TEST_F(PlanningRiskConsumerRegression, FreshPolicyDoesNotDependOnEmptyOrRefreshe
 	EXPECT_EQ(first.contextualLossTolerance, second.contextualLossTolerance);
 	EXPECT_EQ(first.key.capturedState, second.key.capturedState);
 }
+TEST_F(PlanningRiskConsumerRegression, UniqueVisibleHaloUsesDefenderContextAndRejectsOtherObjects)
+{
+	publish(true, .1);
+	callback.approachGuards = {&target};
+	const PlanningRiskRoute clean{true, 0, 0, 0, true};
+	EXPECT_EQ(decideNeutralRisk(ai, hero, &hero, int3(-1,0,0), clean, false).recommendation,
+		RiskRecommendation::FAVORABLE);
+	callback.hideTarget = true;
+	EXPECT_EQ(decideNeutralRisk(ai, hero, &hero, int3(-1,0,0), clean, false).recommendation,
+		RiskRecommendation::UNKNOWN);
+	callback.hideTarget = false;
+	callback.approach.visitableObjects.push_back(hero.id);
+	EXPECT_EQ(decideNeutralRisk(ai, hero, &hero, int3(-1,0,0), clean, false).recommendation,
+		RiskRecommendation::UNKNOWN);
+	callback.approach.visitableObjects.clear();
+	callback.approachGuards.push_back(&hero);
+	EXPECT_EQ(decideNeutralRisk(ai, hero, &hero, int3(-1,0,0), clean, false).recommendation,
+		RiskRecommendation::UNKNOWN);
+	callback.approachGuards = {&target};
+	CGCreature other(&callback);
+	other.id = ObjectInstanceID(99);
+	other.ID = Obj::MONSTER;
+	other.appearance = target.appearance;
+	callback.extra = &other;
+	callback.targetGuards = {&other};
+	EXPECT_EQ(decideNeutralRisk(ai, hero, &hero, int3(-1,0,0), clean, false).recommendation,
+		RiskRecommendation::UNKNOWN);
+}
+TEST_F(PlanningRiskConsumerRegression, ExactSameEncounterDoesNotDoubleChargeCapture)
+{
+	provenance(hero.getArmyStrength() * 2, hero.getArmyStrength() * 2);
+	publish(true, .1);
+	path.hasSingleForecastEncounter = true;
+	path.singleForecastEncounter = target.id;
+	path.singleForecastArmyLoss = path.armyLoss = hero.getArmyStrength() / 10;
+	const auto goals = Goals::CaptureObjectsBehavior::getVisitGoals({path}, &ai, &target, true);
+	ASSERT_EQ(goals.size(), 1u);
+	const auto * chain = dynamic_cast<const Goals::ExecuteHeroChain *>(goals[0].get());
+	ASSERT_NE(chain, nullptr);
+	EXPECT_EQ(chain->getPath().getTotalArmyLoss(), hero.getArmyStrength() / 10);
+	// A different identity is not interchangeable even at identical danger.
+	path.singleForecastEncounter = ObjectInstanceID(99);
+	EXPECT_FALSE(captured(true));
+	path.singleForecastEncounter = target.id;
+	path.armyLoss += 1;
+	EXPECT_FALSE(captured(true));
+	path.armyLoss = path.singleForecastArmyLoss;
+	path.destinationHeroManaCost = 1;
+	EXPECT_FALSE(captured(true));
+	path.destinationHeroManaCost = 0;
+	path.heroArmy = &target;
+	EXPECT_FALSE(captured(true));
+}
+
 }

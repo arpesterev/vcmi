@@ -119,3 +119,22 @@ production, empty army and NEUTRAL ownership before any planner turn. Owned town
 and observer preconditions are explicit too. Day1/day2 NEUTRAL and day3 RED
 assertions remain unchanged. Prior failed evidence is retained; later retreat,
 threat-transition and recovery behavior remains unexecuted.
+
+## Known withdrawal corridor correction (qualification6)
+
+Native diagnostics disproved the reinforcement-pruning hypothesis: after buying
+the army, a real enemy town path still existed at turn0. After the first legal
+withdrawal, town and adjacent-square paths both disappeared because red fog
+contained gaps y13–22 and y28–37. Endpoint visibility was not enough.
+
+Four ordinary red ore mines at anchors (47,15), (47,20), (47,30), (47,35) now
+connect native radius3 sight along the enemy's x44 visitable route. No fog or
+production visibility logic is changed. They add normal ore income, not gold;
+the one-shot starting2200 gold budget, armies and all30 scripted adjacent moves
+are unchanged. Market/exchange requests remain unsupported, so this ore cannot
+be converted into gold by the fixture. Exact recruitment/resource accounting is
+unchanged. Startup verifies the full corridor visible and these mines producing
+ore under red ownership. Day2 must have an actual town route at turn1; day3 must
+have an actual reachable route at turn>=2, not unreachable255. Original mine
+ownership timing and threat-horizon assertions remain. Native qualification of
+this corrected premise and subsequent recovery is pending.

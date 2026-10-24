@@ -62,28 +62,39 @@ class PathRiskBudgetTest(unittest.TestCase):
             return 0.1
         with tempfile.TemporaryDirectory() as temporary:
             results, _ = execute_cases(Path('/unused'), Path(temporary), Path(temporary), run_case=run,
-                clock=Mock(side_effect=[0, 0, 181, 359]), cases=qualification.CASES, total_seconds=360)
-        self.assertEqual([call[2] for call in calls], [180, 179])
-        self.assertEqual([call[1].name for call in calls], ['test-0.log', 'test-1.log'])
+                clock=Mock(side_effect=[0, 0, 181, 300, 359]), cases=qualification.CASES, total_seconds=360)
+        self.assertEqual([call[2] for call in calls], [180, 179, 60])
+        self.assertEqual([call[1].name for call in calls], ['test-0.log', 'test-1.log', 'test-2.log'])
         self.assertEqual([record['test'] for record in results], list(qualification.CASES))
         self.assertTrue(all(record['status'] == 'completed' for record in results))
 
-    def test_failure_does_not_hide_second_case_but_total_timeout_stops_it(self):
+    def test_failure_does_not_hide_later_cases_but_total_timeout_stops_them(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             run = Mock(side_effect=RuntimeError('timeout=True'))
             results, _ = execute_cases(Path('/unused'), directory, directory, run_case=run,
-                clock=Mock(side_effect=[0, 0, 100, 110]), cases=qualification.CASES, total_seconds=360)
-            self.assertEqual(run.call_count, 2)
+                clock=Mock(side_effect=[0, 0, 100, 110, 120]), cases=qualification.CASES, total_seconds=360)
+            self.assertEqual(run.call_count, 3)
             self.assertTrue(all(record['status'] == 'incomplete' for record in results))
             run.reset_mock()
             results, _ = execute_cases(Path('/unused'), directory, directory, run_case=run,
-                clock=Mock(side_effect=[0, 0, 361, 361]), cases=qualification.CASES, total_seconds=360)
+                clock=Mock(side_effect=[0, 0, 361, 361, 361]), cases=qualification.CASES, total_seconds=360)
             self.assertEqual(run.call_count, 1)
-            self.assertFalse(results[1]['attempted'])
+            self.assertTrue(all(not record['attempted'] for record in results[1:]))
             for invalid in (0, -1, 601, True, 360.0):
                 with self.assertRaises(ValueError):
                     execute_cases(Path('/unused'), directory, directory, total_seconds=invalid)
+
+    def test_third_case_cannot_reset_exhausted_shared_budget(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run = Mock(side_effect=RuntimeError('timeout=True'))
+            results, elapsed = execute_cases(Path('/unused'), directory, directory, run_case=run,
+                clock=Mock(side_effect=[0, 0, 180, 360, 360]), cases=qualification.CASES, total_seconds=360)
+        self.assertEqual([call.args[2] for call in run.call_args_list], [180, 180])
+        self.assertFalse(results[2]['attempted'])
+        self.assertEqual(results[2]['status'], 'incomplete')
+        self.assertEqual(elapsed, 360)
 
     def test_exact_case_xml_rejects_sibling_and_duplicates(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -100,9 +111,11 @@ class PathRiskBudgetTest(unittest.TestCase):
             directory = generate_maps(ROOT, first)
             generate_maps(ROOT, second)
             self.assertEqual(qualification.map_hashes(first, ROOT), qualification.map_hashes(second, ROOT))
-            hashes, _, _ = qualification.map_hashes(first, ROOT)
+            hashes, records, _ = qualification.map_hashes(first, ROOT)
             self.assertIn('blocked_goal_alternative', hashes)
-            self.assertIn('risk_earlier_guard', hashes)
+            self.assertEqual(qualification.MAP_NAMES, ('risk_earlier_guard', 'risk_zero_loss_earlier_guard'))
+            self.assertEqual(records['corridor']['map_sha256'], hashes['risk_earlier_guard'])
+            self.assertEqual(records['zero_loss_corridor']['map_sha256'], hashes['risk_zero_loss_earlier_guard'])
             provenance_path = directory / 'provenance.json'
             provenance = json.loads(provenance_path.read_text())
             provenance['blocked_goal_alternative']['source_sha256']['header.json'] = 'wrong'
@@ -156,12 +169,16 @@ class PathRiskRunnerTest(unittest.TestCase):
                         if mode == 'compile-timeout': raise RuntimeError('timeout=True')
                         binary.write_bytes(b'compiled path-risk test')
                         generate_maps(source, build)
+                        if mode == 'missing-zero-loss-map':
+                            (build / 'bin/test/testdata/AdventureEvaluation/risk_zero_loss_earlier_guard.vmap').unlink()
                     else:
                         logfile.write_text('ninja: no work to do.')
                         if mode == 'noop-links': logfile.write_text('[1/1] Linking CXX executable bin/' + qualification.TARGET)
                         if mode == 'noop-binary': binary.write_bytes(b'changed')
                         if mode == 'noop-map':
                             (build / 'bin/test/testdata/AdventureEvaluation/risk_earlier_guard.vmap').write_bytes(b'changed')
+                        if mode == 'noop-zero-loss-map':
+                            (build / 'bin/test/testdata/AdventureEvaluation/risk_zero_loss_earlier_guard.vmap').write_bytes(b'changed')
                         if mode == 'noop-source':
                             (source / 'AI/Nullkiller2/Engine/Experimental/DecisionRiskBudget.h').write_text('changed')
                 else:
@@ -171,8 +188,11 @@ class PathRiskRunnerTest(unittest.TestCase):
                     case_calls.append(case)
                     logfile.write_text('path protocol attempt')
                     xml = Path(next(arg.removeprefix('--gtest_output=xml:') for arg in command if arg.startswith('--gtest_output=')))
-                    if mode != 'missing-xml' or len(case_calls) == 2: xml.write_text(case_xml(case))
+                    if mode != 'missing-xml' or len(case_calls) != 1: xml.write_text(case_xml(case))
                     if mode == 'first-case-timeout' and len(case_calls) == 1: raise RuntimeError('timeout=True')
+                    if mode == 'third-case-timeout' and len(case_calls) == 3: raise RuntimeError('timeout=True')
+                    if mode == 'third-case-wrong-xml' and len(case_calls) == 3:
+                        xml.write_text(case_xml(qualification.CASES[1]))
                 return 0.1
 
             def run_cases(executable, directory, cwd, cases, total_seconds):
@@ -194,23 +214,26 @@ class PathRiskRunnerTest(unittest.TestCase):
             self.assertFalse(result['cold_fallback'])
             self.assertFalse(result['activation_approved'])
             if mode in ('cold', 'invalid-restore', 'missing-model', 'unrelated-build'): self.assertEqual(commands, [])
-            if mode in ('success', 'first-case-timeout', 'missing-xml'):
+            if mode in ('success', 'first-case-timeout', 'missing-xml', 'third-case-timeout', 'third-case-wrong-xml'):
                 self.assertEqual(case_calls, list(qualification.CASES))
                 self.assertTrue(result['noop_verified'])
                 self.assertEqual(result['case_results'][1]['status'], 'completed')
+                self.assertEqual(result['case_results'][2]['status'],
+                                 'incomplete' if mode.startswith('third-case-') else 'completed')
             else: self.assertEqual(case_calls, [])
 
-    def test_success_requires_warm_build_noop_sources_and_two_exact_cases(self):
+    def test_success_requires_warm_build_noop_sources_and_three_exact_cases(self):
         self.exercise('success')
 
-    def test_incomplete_stages_never_promote_and_second_case_remains_independent(self):
+    def test_incomplete_stages_never_promote_and_all_cases_remain_independent(self):
         for mode in ('cold', 'invalid-restore', 'missing-model', 'unrelated-build', 'compile-timeout',
-                     'noop-links', 'noop-binary', 'noop-map', 'noop-source', 'missing-xml', 'first-case-timeout'):
+                     'missing-zero-loss-map', 'noop-links', 'noop-binary', 'noop-map', 'noop-zero-loss-map', 'noop-source', 'missing-xml',
+                     'first-case-timeout', 'third-case-timeout', 'third-case-wrong-xml'):
             with self.subTest(mode=mode): self.exercise(mode)
 
 
 class PathRiskWorkflowTest(unittest.TestCase):
-    def test_exact_two_fixture_tests_target_and_after_scenario_maps_registration(self):
+    def test_exact_three_fixture_tests_target_and_after_scenario_maps_registration(self):
         fixture = (ROOT / 'test/adventure/AdventurePathRiskReference.cpp').read_text()
         names = re.findall(r'TEST_F\(AdventurePathRiskReference,\s*(\w+)\)', fixture)
         self.assertEqual(set(qualification.CASES), {'AdventurePathRiskReference.' + name for name in names})
@@ -223,6 +246,23 @@ class PathRiskWorkflowTest(unittest.TestCase):
         self.assertIn('vcmi_path_risk_reference EXCLUDE_FROM_ALL', target)
         self.assertNotIn('add_test(', target)
         self.assertTrue(set(qualification.RISK_BUILD_SOURCES) <= set(qualification.SOURCES))
+        self.assertIn('AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.cpp', qualification.SOURCES)
+        self.assertIn('AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.h', qualification.SOURCES)
+
+    def test_two_guard_consumer_cases_are_required_without_dropping_other_tests(self):
+        required = json.loads((ROOT / 'CI/ai-full-required-tests.json').read_text())
+        expected = {
+            'PlanningRiskConsumerRegression.UniqueVisibleHaloUsesDefenderContextAndRejectsOtherObjects',
+            'PlanningRiskConsumerRegression.ExactSameEncounterDoesNotDoubleChargeCapture',
+        }
+        fixture = (ROOT / 'test/nullkiller2/PlanningRiskConsumerRegression.cpp').read_text()
+        names = {'PlanningRiskConsumerRegression.' + name for name in re.findall(
+            r'TEST_F\(PlanningRiskConsumerRegression,\s*(\w+)\)', fixture)}
+        self.assertTrue(expected <= names)
+        self.assertTrue(expected <= set(required['required_tests']))
+        self.assertEqual(len(required['required_tests']), len(set(required['required_tests'])))
+        self.assertGreaterEqual(len(required['required_tests']), 266)
+        self.assertGreaterEqual(required['minimum_executed_tests'], 458)
 
     def test_independent_gates_cannot_promote_failure_or_change_prior_gates(self):
         import yaml
