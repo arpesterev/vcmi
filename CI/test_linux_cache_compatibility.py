@@ -368,7 +368,42 @@ class WorkflowOrderingTests(unittest.TestCase):
             self.assertNotIn('||', line)
         for line in self.linux.splitlines():
             if 'python3 CI/compiler_recovery.py ' in line:
-                self.assertIn('--identity incremental-evidence/toolchain-identity.json', line)
+                self.assertIn('--identity incremental-evidence/cache-toolchain-identity.json', line)
+
+    def test_installed_alias_and_strict_restore_precede_recovery_smoke_and_scope(self):
+        guard = self.linux.index('python3 CI/linux_cache_compatibility.py toolchain ')
+        strict_restore = self.linux.index('python3 CI/incremental_cache.py restore ')
+        smoke = self.linux.index("python3 -m unittest discover -s CI -p 'test_compiler_recovery.py'")
+        scope = self.linux.index('python3 CI/compiler_recovery.py prepare ')
+        supplement = self.linux.index('id: compiler_cache\n')
+        self.assertLess(guard, strict_restore)
+        self.assertLess(strict_restore, smoke)
+        self.assertLess(smoke, scope)
+        self.assertLess(scope, supplement)
+        # A failed strict alias/restore must not become a successful recovery gate.
+        gate = self.linux[guard:scope]
+        self.assertNotIn('continue-on-error', gate)
+        self.assertNotIn('||', gate)
+        self.assertNotIn('always()', gate)
+        self.assertIn("if: steps.verified_cache.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]')", gate)
+
+    def test_recovery_still_requires_exact_pinned_installed_identity_on_both_images(self):
+        baseline = (ROOT / 'linux-diagnostic-baseline/toolchain-identity.json').read_bytes()
+        for image in (OLD_IMAGE, NEW_IMAGE):
+            observed = json.loads(baseline)
+            observed['runner_image'] = image
+            canonical, report = COMPAT.certify('toolchain', json.dumps(observed).encode())
+            self.assertTrue(report['accepted'])
+            self.assertEqual(hashlib.sha256(canonical).hexdigest(), PINS['toolchain'])
+            observed['compiler_sha256'] = '0' * 64
+            canonical, report = COMPAT.certify('toolchain', json.dumps(observed).encode())
+            self.assertIsNone(canonical)
+            self.assertFalse(report['accepted'])
+        observed = json.loads(baseline)
+        observed['runner_image'] = '20261024.334.3'
+        canonical, report = COMPAT.certify('toolchain', json.dumps(observed).encode())
+        self.assertIsNone(canonical)
+        self.assertFalse(report['accepted'])
 
     def test_macos_retains_direct_exact_fingerprints_and_no_alias(self):
         self.assertNotIn('linux_cache_compatibility.py', self.macos)

@@ -418,6 +418,7 @@
   "required_supported_smokes": [
     "ordinary_melee",
     "ranged_slow_melee",
-    "undead_melee"
+    "undead_melee",
+    "neutral_0_0"
   ]
 }

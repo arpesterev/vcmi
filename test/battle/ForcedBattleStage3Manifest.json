@@ -49,7 +49,7 @@
     },
     {
       "path": "test/battle/ForcedBattleStage3.md",
-      "sha256": "9e58b280f3ec8683209bb54985c3cd281f94e6ed6681c0c6f907cfb29502de91"
+      "sha256": "da0910a076d3bcc89ed2fa75e08b920c101bcd717283c0d087de8e1d8ee6bdec"
     },
     {
       "path": "test/battle/PlanningBattleSnapshotChecks.h",

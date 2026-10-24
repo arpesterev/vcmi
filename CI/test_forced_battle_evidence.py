@@ -36,9 +36,9 @@ class EvidenceTest(unittest.TestCase):
     def test_partial_support_is_valid_not_174_predictions(self):
         data=summarize_evidence(make_log())
         self.assertEqual(data['counts']['actual_terminal'],58)
-        self.assertEqual(data['counts']['sample_executions'],9)
-        self.assertEqual(data['counts']['selected_capture_rejected'],55)
-        self.assertEqual(data['rejected_capture_reasons'],{'visibility or owner eligibility is unsupported':55})
+        self.assertEqual(data['counts']['sample_executions'],12)
+        self.assertEqual(data['counts']['selected_capture_rejected'],54)
+        self.assertEqual(data['rejected_capture_reasons'],{'visibility or owner eligibility is unsupported':54})
 
     def test_full_support_174_samples(self):
         data=summarize_evidence(make_log(True))
@@ -50,8 +50,8 @@ class EvidenceTest(unittest.TestCase):
         text=make_log()+'\nFORCED_NEUTRAL_CAPTURE upgrade=0 specialty=0 field=4 admitted=1 reason=none'
         data=summarize_evidence(text)
         self.assertEqual(data['counts']['capture_opportunities'],59)
-        self.assertEqual(data['counts']['captures_admitted'],4)
-        self.assertEqual(data['counts']['sample_executions'],9)
+        self.assertEqual(data['counts']['captures_admitted'],5)
+        self.assertEqual(data['counts']['sample_executions'],12)
 
     def test_non_smoke_unsupported_sample_reason_spaces_preserved(self):
         text=make_log(True).replace('case=mixed_high oracle_seed=17041 sample_index=0 status=2 winner=0 reason=none bonus=-1 a_survivors=10 d_survivors=0 a_lost_value=60 d_lost_value=100 agrees=1',
@@ -83,6 +83,16 @@ class EvidenceTest(unittest.TestCase):
     def test_smoke_rejected_even_when_all_real_battles_complete(self):
         text=make_log().replace('case=ordinary_melee seed=17041 admitted=1 reason=none','case=ordinary_melee seed=17041 admitted=0 reason=unsupported ordinary troops')
         self.assert_bad('\n'.join(x for x in text.splitlines() if not x.startswith('FORCED_BATTLE_SAMPLE case=ordinary_melee ')))
+    def test_production_neutral_capture_cannot_all_be_unknown(self):
+        text=make_log().replace('FORCED_NEUTRAL_CAPTURE upgrade=0 specialty=0 field=3 admitted=1 reason=none',
+          'FORCED_NEUTRAL_CAPTURE upgrade=0 specialty=0 field=3 admitted=0 reason=visibility or owner unsupported')
+        self.assert_bad('\n'.join(x for x in text.splitlines() if not x.startswith('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 ')))
+
+    def test_production_neutral_samples_must_finish(self):
+        text=make_log().replace('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
+          'FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=1 winner=-1 reason=budget exhausted')
+        self.assert_bad(text)
+
     def test_smoke_samples_must_finish(self):
         text=make_log().replace('case=ordinary_melee oracle_seed=17041 sample_index=0 status=2 winner=0 reason=none bonus=-1 a_survivors=10 d_survivors=0 a_lost_value=60 d_lost_value=100 agrees=1',
           'case=ordinary_melee oracle_seed=17041 sample_index=0 status=1 winner=-1 reason=budget exhausted bonus=-1')

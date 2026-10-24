@@ -4,7 +4,8 @@ import math
 import re
 
 SEEDS = (17041, 17047, 17053)
-REQUIRED_SMOKES = ('ordinary_melee', 'ranged_slow_melee', 'undead_melee')
+# Include the player-bound production capture path, not just direct battle snapshots.
+REQUIRED_SMOKES = ('ordinary_melee', 'ranged_slow_melee', 'undead_melee', 'neutral_0_0')
 
 def expected_cases():
     rows = []

@@ -101,10 +101,10 @@ separate from finished winners and are never counted as losses. Legacy min/max
 endpoint straddles are not an accuracy score.
 
 Predeclared minimum supported smoke rows are ordinary_melee, ranged_slow_melee
-and undead_melee: each must capture successfully and execute all three sampled
+undead_melee and neutral_0_0: each must capture successfully and execute all three sampled
 rollouts to a terminal result. Winner agreement is not required, so observed
 disagreement cannot remove a case. These assertions prevent an all-unknown model
-from qualifying merely because actual forced fights completed. No assumption
+from qualifying merely because actual forced fights completed. The neutral_0_0 gate also requires the player-bound ordinary-neutral split capture used by production, rather than only direct battle snapshots. No assumption
 that all 174 possible samples are supported is made.
 
 The exact 58 gtest names and evidence identities are exported by

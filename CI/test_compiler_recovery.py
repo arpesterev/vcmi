@@ -492,6 +492,64 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('--report incremental-evidence/compiler-recovery-restored.json', check)
         self.assertNotIn('continue-on-error', check)
 
+    def assert_canonical_recovery_inputs(self, linux):
+        commands = [line.strip() for line in linux.splitlines()
+                    if 'python3 CI/compiler_recovery.py ' in line]
+        self.assertEqual(len(commands), 3)
+        for operation in ('prepare', 'check', 'bound'):
+            matches = [line for line in commands if 'compiler_recovery.py ' + operation + ' ' in line]
+            self.assertEqual(len(matches), 1, operation)
+            self.assertIn('--identity incremental-evidence/cache-toolchain-identity.json ', matches[0])
+            self.assertNotIn('--identity incremental-evidence/toolchain-identity.json', matches[0])
+            self.assertIn('--validation incremental-evidence/cache-validation.json ', matches[0])
+
+    def test_all_recovery_operations_use_same_validated_canonical_identity(self):
+        self.assert_canonical_recovery_inputs(self.linux)
+        verified = self.step('id: verified_cache\n')
+        self.assertIn('--observed incremental-evidence/toolchain-identity.json --output incremental-evidence/cache-toolchain-identity.json', verified)
+        self.assertIn('--fingerprint incremental-evidence/cache-toolchain-identity.json', verified)
+        self.assertLess(verified.index('CI/linux_cache_compatibility.py toolchain '),
+                        verified.index('CI/incremental_cache.py restore '))
+
+    def test_approved_images_produce_the_same_actual_recovery_fingerprint(self):
+        compatibility_spec = importlib.util.spec_from_file_location(
+            'linux_cache_compatibility', Path(__file__).with_name('linux_cache_compatibility.py'))
+        compatibility = importlib.util.module_from_spec(compatibility_spec)
+        compatibility_spec.loader.exec_module(compatibility)
+        pinned = Path(__file__).with_name('linux-diagnostic-baseline') / 'toolchain-identity.json'
+        identity = json.loads(pinned.read_bytes())
+        expected = 'e923c33704e900860b291feb4ad31b5d3049137100f6511e561f74809d233b8d'
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary).resolve()
+            canonical_path = directory / 'cache-toolchain-identity.json'
+            validation = directory / 'cache-validation.json'
+            validation.write_text(json.dumps({
+                'operation': 'restore', 'verified_build_files': 1, 'verified_external_files': 0,
+                'unchanged_sources': 1, 'changed_sources': [], 'removed_sources': [],
+            }))
+            for image in ('20261012.334.1', '20261023.334.3'):
+                with self.subTest(image=image):
+                    observed = dict(identity, runner_image=image)
+                    raw = json.dumps(observed).encode()
+                    canonical, report = compatibility.certify('toolchain', raw)
+                    self.assertTrue(report['accepted'])
+                    self.assertEqual(json.loads(raw)['runner_image'], image)
+                    canonical_path.write_bytes(canonical)
+                    with mock.patch.object(recovery.Path, 'home', return_value=Path(identity['home'])), \
+                            mock.patch.object(recovery.Path, 'cwd', return_value=Path(identity['workspace'])):
+                        result = recovery.recover('prepare', canonical_path, validation)
+                    self.assertEqual(result['fingerprint'], expected)
+
+    def test_contract_rejects_raw_identity_in_any_one_recovery_phase(self):
+        for operation in ('prepare', 'check', 'bound'):
+            with self.subTest(operation=operation):
+                changed = self.linux.replace(
+                    'compiler_recovery.py ' + operation + ' --identity incremental-evidence/cache-toolchain-identity.json',
+                    'compiler_recovery.py ' + operation + ' --identity incremental-evidence/toolchain-identity.json')
+                self.assertNotEqual(changed, self.linux)
+                with self.assertRaises(AssertionError):
+                    self.assert_canonical_recovery_inputs(changed)
+
     def test_failure_recovery_requires_validation_non_cancelled_build_and_real_delta(self):
         bound = self.step('id: compiler_save_ready\n')
         for required in ['always() && !cancelled()', "steps.verified_cache.outcome == 'success'",
