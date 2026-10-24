@@ -231,6 +231,7 @@ TEST_F(Nullkiller2PlannerContinuityRegression, LocalFailureAllowsIndependentTask
 	ai.lockHero(&second, NK2AI::HeroLockedReason::DEFENCE);
 	auto firstPass = PlannerRegressionAccess::select(ai, {failed, good});
 	ASSERT_EQ(firstPass.size(), 2u);
+	ASSERT_EQ(dynamic_cast<const AbstractGoal &>(*firstPass.front()).objid, 10);
 	EXPECT_EQ(PlannerRegressionAccess::execute(ai, firstPass.front()), TaskExecutionResult::REPLAN);
 	EXPECT_TRUE(PlannerRegressionAccess::dirty(ai));
 	EXPECT_FALSE(ai.isHeroLocked(&first));
@@ -244,6 +245,36 @@ TEST_F(Nullkiller2PlannerContinuityRegression, LocalFailureAllowsIndependentTask
 	EXPECT_EQ(successfulExecutions, 1);
 	PlannerRegressionAccess::nextTurn(ai);
 	EXPECT_EQ(PlannerRegressionAccess::select(ai, {freshFailed, good}).size(), 2u);
+}
+
+TEST_F(Nullkiller2PlannerContinuityRegression, RankedIndependentTasksKeepPriorityOrderAfterCloning)
+{
+	int executions = 0;
+	for(int pass = 0; pass < 16; ++pass)
+	{
+		TGoalVec candidates;
+		for(int index = 0; index < 8; ++index)
+			candidates.push_back(sptr(ScriptedGoal(100 + index, executions, false).setpriority(8 - index)));
+		if(pass % 2)
+			std::reverse(candidates.begin(), candidates.end());
+		const auto selected = PlannerRegressionAccess::select(ai, candidates);
+		ASSERT_EQ(selected.size(), 8u);
+		for(size_t index = 0; index < selected.size(); ++index)
+			EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*selected[index]).objid, 100 + index);
+	}
+}
+
+TEST_F(Nullkiller2PlannerContinuityRegression, EqualPriorityIndependentTasksKeepDecompositionOrder)
+{
+	int executions = 0;
+	const auto selected = PlannerRegressionAccess::select(ai, {
+		sptr(ScriptedGoal(103, executions, false)),
+		sptr(ScriptedGoal(101, executions, false)),
+		sptr(ScriptedGoal(102, executions, false))});
+	ASSERT_EQ(selected.size(), 3u);
+	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*selected[0]).objid, 103);
+	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*selected[1]).objid, 101);
+	EXPECT_EQ(dynamic_cast<const AbstractGoal &>(*selected[2]).objid, 102);
 }
 
 TEST_F(Nullkiller2PlannerContinuityRegression, RecoveryHasStrictPerTurnBudget)

@@ -199,7 +199,8 @@ Goals::TTaskVec TaskPlan::getTasks() const
 		result.push_back(taskptr(*item.task));
 	}
 
-	vstd::removeDuplicates(result);
+	// Every item is cloned once. Sorting these distinct shared_ptrs to remove
+	// duplicates would replace ranked plan order with allocator address order.
 
 	return result;
 }
