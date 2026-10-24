@@ -54,7 +54,8 @@ class HoldoutQualificationTest(unittest.TestCase):
     def test_mandatory_provenance_includes_decision_consumer_and_shared_budget(self):
         sources = qualification.REQUIRED_BUILD_SOURCES
         for name in ('PlanningRiskDecision.cpp', 'PlanningRiskDecision.h', 'DecisionRiskBudget.h',
-                     'PlanningRiskEvidence.h', 'PlanningRiskTable.cpp', 'PlanningRiskTable.h'):
+                     'PlanningRiskEvidence.h', 'PlanningRiskTable.cpp', 'PlanningRiskTable.h',
+                     'PlanningBattleMovement.h'):
             self.assertIn('AI/Nullkiller2/Engine/Experimental/' + name, sources)
         self.assertIn('AI/Nullkiller2/Engine/Nullkiller.cpp', sources)
         self.assertIn('AI/Nullkiller2/AIGateway.cpp', sources)

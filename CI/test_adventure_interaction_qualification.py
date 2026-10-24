@@ -53,19 +53,22 @@ class InteractionContractTest(unittest.TestCase):
         self.assertEqual(qualification.MAX_OBJECT_EDGES, 12)
         self.assertEqual(qualification.COMPILE_SECONDS, 180)
 
-    def test_only_declared_interaction_is_executed_and_exact_xml_required(self):
+    def test_both_declared_interactions_have_independent_processes_and_exact_xml(self):
         calls = []
         def run(command, logfile, seconds, cwd):
             calls.append(command)
             self.assertEqual(seconds, 180)
             xml = Path(next(arg.removeprefix('--gtest_output=xml:') for arg in command if arg.startswith('--gtest_output=')))
-            xml.write_text(case_xml())
+            case = next(arg.split('=', 1)[1] for arg in command if arg.startswith('--gtest_filter='))
+            xml.write_text(case_xml(case))
             return 0.1
         with tempfile.TemporaryDirectory() as temporary:
             results, _ = execute_cases(Path('/unused'), Path(temporary), Path(temporary), run_case=run, cases=qualification.CASES)
-            self.assertEqual([result['status'] for result in results], ['completed'])
-            self.assertEqual(len(calls), 1)
-            self.assertIn('--gtest_filter=' + qualification.CASES[0], calls[0])
+            self.assertEqual([result['status'] for result in results], ['completed', 'completed'])
+            self.assertEqual(len(calls), 2)
+            for index, case in enumerate(qualification.CASES):
+                self.assertIn('--gtest_filter=' + case, calls[index])
+                self.assertIn('--gtest_output=xml:' + str(Path(temporary) / f'test-{index}.xml'), calls[index])
             file = Path(temporary) / 'test-0.xml'
             file.write_text(case_xml().replace('status="run"', 'status="notrun"'))
             with self.assertRaises(ValueError):
@@ -76,7 +79,7 @@ class InteractionContractTest(unittest.TestCase):
         run = Mock(side_effect=RuntimeError('timeout=True'))
         with tempfile.TemporaryDirectory() as temporary:
             results, elapsed = execute_cases(Path('/unused'), Path(temporary), Path(temporary),
-                run_case=run, clock=clock, cases=('Scenario.One', 'Scenario.Two'))
+                run_case=run, clock=clock, cases=qualification.CASES)
         self.assertEqual([call.args[2] for call in run.call_args_list], [180, 10])
         self.assertEqual([result['status'] for result in results], ['incomplete', 'incomplete'])
         self.assertEqual(elapsed, 601)
@@ -117,7 +120,7 @@ class InteractionRunnerTest(unittest.TestCase):
             plan = 'Building CXX object ' + obj
             if mode == 'unrelated-build':
                 plan = 'Building CXX object client/CMakeFiles/vcmiclient.dir/main.cpp.o'
-            commands = []
+            commands, case_calls = [], []
             def check_output(command, **kwargs):
                 if command == ['git', 'rev-parse', 'HEAD']:
                     return 'commit'
@@ -152,11 +155,16 @@ class InteractionRunnerTest(unittest.TestCase):
                 else:
                     self.assertEqual(command[0], str(binary))
                     self.assertEqual(seconds, 180)
-                    self.assertIn('--gtest_filter=' + qualification.CASES[0], command)
+                    case = next(arg.split('=', 1)[1] for arg in command if arg.startswith('--gtest_filter='))
+                    self.assertEqual(case, qualification.CASES[len(case_calls)])
+                    case_calls.append(case)
                     logfile.write_text('interaction attempt')
+                    xml = Path(next(arg.removeprefix('--gtest_output=xml:') for arg in command if arg.startswith('--gtest_output=')))
                     if mode != 'missing-xml':
-                        (evidence / 'test-0.xml').write_text(case_xml())
-                    if mode == 'case-timeout':
+                        xml.write_text(case_xml(case))
+                    if mode == 'second-case-wrong-xml' and len(case_calls) == 2:
+                        xml.write_text(case_xml(qualification.CASES[0]))
+                    if mode == 'case-timeout' or (mode == 'first-case-timeout' and len(case_calls) == 1) or (mode == 'second-case-timeout' and len(case_calls) == 2):
                         raise RuntimeError('timeout=True')
                 return 0.1
 
@@ -185,6 +193,13 @@ class InteractionRunnerTest(unittest.TestCase):
             elif mode in ('case-timeout', 'missing-xml'):
                 self.assertEqual(result['executed_tests'], [])
                 self.assertEqual(result['case_results'][0]['status'], 'incomplete')
+                self.assertEqual(case_calls, list(qualification.CASES))
+            elif mode == 'first-case-timeout':
+                self.assertEqual(result['executed_tests'], [qualification.CASES[1]])
+                self.assertEqual(case_calls, list(qualification.CASES))
+            elif mode in ('second-case-timeout', 'second-case-wrong-xml'):
+                self.assertEqual(result['executed_tests'], [qualification.CASES[0]])
+                self.assertEqual(case_calls, list(qualification.CASES))
             else:
                 self.assertNotIn('case_results', result)
 
@@ -193,12 +208,21 @@ class InteractionRunnerTest(unittest.TestCase):
 
     def test_every_incomplete_stage_remains_failed_without_fallback(self):
         for mode in ('cold', 'invalid-restore', 'unrelated-build', 'compile-timeout', 'noop-links',
-                     'noop-mutates-binary', 'noop-mutates-provenance', 'missing-xml', 'case-timeout'):
+                     'noop-mutates-binary', 'noop-mutates-provenance', 'missing-xml', 'case-timeout',
+                     'first-case-timeout', 'second-case-timeout', 'second-case-wrong-xml'):
             with self.subTest(mode=mode):
                 self.exercise(mode)
 
 
 class FollowOnRegistrationTest(unittest.TestCase):
+    def test_exact_two_interactions_preserve_strict_original_and_add_real_return(self):
+        self.assertEqual(qualification.CASES, (
+            'AdventureInteractionScenarios.UrgentTownPurchaseThenThreeTurnRecovery',
+            'AdventureInteractionScenarios.CoveredEconomyThenActualDefenceOnEnemyApproach'))
+        fixture = (ROOT / 'test/adventure/AdventureInteractionScenarios.cpp').read_text()
+        names = re.findall(r'TEST_F\(AdventureInteractionScenarios,\s*(\w+)\)', fixture)
+        self.assertEqual(set(qualification.CASES), {'AdventureInteractionScenarios.' + name for name in names})
+
     def test_exact_new_ordinary_tests_are_registered_in_static_nk2_suite(self):
         required = json.loads((ROOT / 'CI/ai-full-required-tests.json').read_text())
         names = []

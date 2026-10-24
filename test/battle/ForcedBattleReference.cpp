@@ -27,6 +27,7 @@
 #include "../../AI/Nullkiller2/AIUtility.h"
 #include "../../AI/Nullkiller2/Engine/Experimental/PlanningRiskDecision.h"
 #include "../../AI/Nullkiller2/Engine/Experimental/DetachedDefendBonuses.h"
+#include "../../AI/Nullkiller2/Engine/Experimental/PlanningBattleMovement.h"
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/filesystem/ResourcePath.h"
@@ -45,7 +46,7 @@ void traceNeutralState(const CBattleInfoCallback & battle, const std::string & i
     const char * source, int step, bool obstacles)
 {
     for(const auto * unit : battle.battleAliveUnits())
-        std::cout << "FORCED_NEUTRAL_STATE case=" << identity << " source=" << source << " step=" << step
+        std::cout << "FORCED_NEUTRAL_STATE policy_version=2 case=" << identity << " source=" << source << " step=" << step
             << " unit=" << unit->unitId() << " side=" << static_cast<int>(unit->unitSide())
             << " slot=" << unit->unitSlot().getNum() << " creature=" << unit->creatureId().getNum()
             << " count=" << unit->getCount() << " health=" << unit->getAvailableHealth()
@@ -54,7 +55,7 @@ void traceNeutralState(const CBattleInfoCallback & battle, const std::string & i
     if(obstacles)
         for(const auto & obstacle : battle.battleGetAllObstacles())
         {
-            std::cout << "FORCED_NEUTRAL_OBSTACLE case=" << identity << " source=" << source
+            std::cout << "FORCED_NEUTRAL_OBSTACLE policy_version=2 case=" << identity << " source=" << source
                 << " id=" << obstacle->ID << " unique=" << obstacle->uniqueID
                 << " type=" << static_cast<int>(obstacle->obstacleType) << " hex=" << obstacle->pos.toInt()
                 << " blocked=";
@@ -62,6 +63,21 @@ void traceNeutralState(const CBattleInfoCallback & battle, const std::string & i
             std::cout << std::endl;
         }
 }
+
+// Diagnostic view exposes the engine BFS on its own legitimate callback object.
+// It forwards the same immutable battle context, never casts access privileges.
+class GeometryReferenceView final : public CBattleInfoCallback
+{
+    const CBattleInfoCallback & source;
+public:
+    explicit GeometryReferenceView(const CBattleInfoCallback & source) : source(source) {}
+    const IBattleInfo * getBattle() const override { return source.getBattle(); }
+    std::optional<PlayerColor> getPlayerID() const override { return source.getPlayerID(); }
+#if SCRIPTING_ENABLED
+    scripting::Pool * getContextPool() const override { return source.getContextPool(); }
+#endif
+    using CBattleInfoCallback::makeBFS;
+};
 
 class ReferenceServer final : public IGameServer
 {
@@ -133,7 +149,7 @@ auto inspectForecast(const char * phase, const std::string & identity, std::stri
 	catch(const std::exception & failure)
 	{
 		error = std::string("forecast exception: ") + failure.what();
-		std::cout << "FORCED_FORECAST_EXCEPTION case=" << identity << " phase=" << phase << " reason=" << error << std::endl;
+		std::cout << "FORCED_FORECAST_EXCEPTION policy_version=2 case=" << identity << " phase=" << phase << " reason=" << error << std::endl;
 		ADD_FAILURE() << identity << " / " << phase << ": " << error;
 		return {};
 	}
@@ -162,7 +178,7 @@ protected:
 
 	void initialize(int seed)
 	{
-		std::cout << "FORCED_REFERENCE_PHASE phase=initialize seed=" << seed << std::endl;
+		std::cout << "FORCED_REFERENCE_PHASE policy_version=2 phase=initialize seed=" << seed << std::endl;
 		CRandomGenerator::getDefault().setSeed(seed);
 		server.state = std::make_shared<CGameState>();
 		server.state->preInit(LIBRARY);
@@ -190,9 +206,9 @@ protected:
 		GameRandomizer randomizer(*server.state);
 		randomizer.setSeed(seed);
 		Load::ProgressAccumulator progress;
-		std::cout << "FORCED_REFERENCE_PHASE phase=map_init_begin seed=" << seed << std::endl;
+		std::cout << "FORCED_REFERENCE_PHASE policy_version=2 phase=map_init_begin seed=" << seed << std::endl;
 		server.state->init(&mapService, &start, randomizer, progress, false);
-		std::cout << "FORCED_REFERENCE_PHASE phase=map_init_end seed=" << seed << std::endl;
+		std::cout << "FORCED_REFERENCE_PHASE policy_version=2 phase=map_init_end seed=" << seed << std::endl;
 		ASSERT_NE(map, nullptr);
 		ASSERT_FALSE(map->getHeroesOnMap().empty());
 		const auto * contextHero = dynamic_cast<const CGHeroInstance *>(map->getObject(*map->getHeroesOnMap().begin()));
@@ -236,7 +252,8 @@ protected:
 			return unit->alive() && unit->unitSide() != active->unitSide();
 		});
 		std::sort(enemies.begin(), enemies.end(), [](const auto * a, const auto * b) { return a->unitId() < b->unitId(); });
-		const auto available = battle.battleGetAvailableHexes(active, true);
+		const auto reach = battle.getReachability(active);
+		const auto available = battle.battleGetAvailableHexes(reach, active, true);
 		for(const auto * enemy : enemies)
 			if(battle.battleCanShoot(active, enemy->getPosition()))
 				return BattleAction::makeShotAttack(active, enemy);
@@ -244,18 +261,101 @@ protected:
 			for(const auto hex : enemy->getAttackableHexes(active))
 				if(available.contains(hex) && battle.battleCanAttackUnit(active, enemy))
 					return BattleAction::makeMeleeAttack(active, enemy, hex);
-		BattleHex best = active->getPosition();
-		auto distance = [&enemies](BattleHex hex)
-		{
-			int result = 1000;
-			for(const auto * enemy : enemies)
-				result = std::min(result, static_cast<int>(BattleHex::getDistance(hex, enemy->getPosition())));
-			return result;
-		};
-		for(const auto hex : available)
-			if(distance(hex) < distance(best) || (distance(hex) == distance(best) && hex.toInt() < best.toInt()))
-				best = hex;
+		const auto best = NK2AI::experimental::choosePlanningBattleMove(battle, *active, reach, available);
 		return best == active->getPosition() ? BattleAction::makeDefend(active) : BattleAction::makeMove(active, best);
+	}
+
+	void verifyMovementPolicy(int ownCreature, bool flying, bool wide, bool withObstacles)
+	{
+		ASSERT_NO_FATAL_FAILURE(initialize(17041));
+		ASSERT_NE(handler, nullptr);
+		auto attacker = army(PlayerColor(0), ownCreature, 20);
+		auto defender = army(PlayerColor::NEUTRAL, 58, 10);
+		if(withObstacles)
+			for(int slot = 1; slot < 7; ++slot)
+			{
+				attacker->setCreature(SlotID(slot), CreatureID(ownCreature), 20);
+				defender->setCreature(SlotID(slot), CreatureID(58), 10);
+			}
+		auto layout = BattleLayout::createDefaultLayout(*server.state, attacker.get(), defender.get());
+		layout.obstaclesAllowed = withObstacles;
+		layout.tacticsAllowed = false;
+		const auto id = server.state->nextBattleID;
+		handler->battles->startBattle(attacker.get(), defender.get(), battleTile, nullptr, nullptr, layout, nullptr);
+		const auto * initial = server.state->getBattle(id);
+		ASSERT_NE(initial, nullptr);
+		if(withObstacles) { ASSERT_FALSE(initial->battleGetAllObstacles().empty()); }
+		traceNeutralState(*initial, "movement_control", "actual_initial", 0, true);
+		unsigned actions = 0, moves = 0, obstacleProgress = 0;
+		while(!server.result && actions < 2000)
+		{
+			const auto * battle = server.state->getBattle(id);
+			ASSERT_NE(battle, nullptr);
+			const auto * actor = battle->battleActiveUnit();
+			ASSERT_NE(actor, nullptr);
+			if(!actions && !withObstacles)
+			{
+				ASSERT_EQ(actor->unitSide(), BattleSide::ATTACKER);
+				ASSERT_EQ(actor->hasBonusOfType(BonusType::FLYING), flying);
+				ASSERT_EQ(actor->doubleWide(), wide);
+			}
+			const auto rngBefore = RandomizerCapture::capture(*handler->randomizer);
+			const auto reach = battle->getReachability(actor);
+			const auto action = chooseAction(*battle, actor);
+			if(!actions && !withObstacles) { ASSERT_EQ(action.actionType, EActionType::WALK); }
+			const auto distanceToContact = [&](const ReachabilityInfo & cache)
+			{
+				uint32_t distance = ReachabilityInfo::INFINITE_DIST;
+				for(const auto * enemy : battle->battleAliveUnits())
+					if(enemy->unitSide() != actor->unitSide() && battle->battleCanAttackUnit(actor, enemy))
+						for(const auto hex : enemy->getAttackableHexes(actor))
+							if(hex.isAvailable() && cache.isReachable(hex))
+								distance = std::min(distance, cache.distances[hex.toInt()]);
+				return distance;
+			};
+			bool obstacleInfluenced = false;
+			const auto distanceBefore = distanceToContact(reach);
+			if(withObstacles && action.actionType == EActionType::WALK)
+			{
+				// Geometry-only diagnostic counterfactual. Never use this copied
+				// unblocked map to choose or submit a live action.
+				auto unblocked = reach.accessibility;
+				for(auto & value : unblocked)
+					if(value == EAccessibility::OBSTACLE) value = EAccessibility::ACCESSIBLE;
+				const GeometryReferenceView geometry(*battle);
+				const auto withoutObstacles = geometry.makeBFS(unblocked, reach.params);
+				obstacleInfluenced = distanceBefore > distanceToContact(withoutObstacles);
+			}
+			EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), rngBefore);
+			const auto oldPosition = actor->getPosition();
+			if(action.actionType == EActionType::WALK)
+			{
+				ASSERT_EQ(action.target.size(), 1u);
+				ASSERT_TRUE(battle->battleGetAvailableHexes(reach, actor, true).contains(action.target.front().hexValue));
+			}
+			ASSERT_TRUE(handler->battles->makePlayerBattleAction(id, battle->battleGetOwner(actor), action));
+			if(action.actionType == EActionType::WALK)
+			{
+				// Ordinary generated obstacles have no damage/turn triggers.
+				ASSERT_FALSE(server.result.has_value());
+				ASSERT_TRUE(actor->alive());
+				EXPECT_NE(actor->getPosition(), oldPosition);
+				++moves;
+				if(obstacleInfluenced)
+				{
+					const auto distanceAfter = distanceToContact(battle->getReachability(actor));
+					EXPECT_LT(distanceAfter, distanceBefore);
+					if(distanceAfter < distanceBefore) ++obstacleProgress;
+				}
+			}
+			++actions;
+		}
+		ASSERT_TRUE(server.result.has_value());
+		EXPECT_GT(moves, 0u);
+		if(withObstacles) { EXPECT_GT(obstacleProgress, 0u) << "Generated board did not exercise an obstacle detour"; }
+		std::cout << "FORCED_MOVEMENT_REFERENCE policy_version=2 creature=" << ownCreature << " obstacles=" << withObstacles
+			<< " actions=" << actions << " moves=" << moves << " obstacle_progress=" << obstacleProgress
+			<< " winner=" << static_cast<int>(server.result->winner) << std::endl;
 	}
 
 	void runNeutral(bool upgrade, bool specialty = false)
@@ -271,7 +371,7 @@ protected:
 		hero->clearSlots();
 		hero->setCreature(SlotID(0), CreatureID(specialty ? 6 : 2), 20);
 		hero->setCreature(SlotID(1), CreatureID(specialty ? 2 : 0), 20);
-		std::cout << "FORCED_NEUTRAL_HERO type=" << hero->getHeroTypeID().getNum()
+		std::cout << "FORCED_NEUTRAL_HERO policy_version=2 type=" << hero->getHeroTypeID().getNum()
 			<< " specialty_case=" << specialty << std::endl;
 		// Actual object factory registers appearance, blocking/visitable tiles,
 		// ownership and bonus parents. No mock split or fake action result.
@@ -284,7 +384,7 @@ protected:
 		monster->upgradedStackPresence = upgrade ? CGCreature::UpgradedStackPresence::ALWAYS : CGCreature::UpgradedStackPresence::NEVER;
 		PlayerReferenceView visible(*server.state, hero->getOwner());
 		ASSERT_EQ(visible.getObj(monsterID, false), monster);
-		std::cout << "FORCED_NEUTRAL_SOURCE upgrade=" << upgrade << " specialty=" << specialty
+		std::cout << "FORCED_NEUTRAL_SOURCE policy_version=2 upgrade=" << upgrade << " specialty=" << specialty
 			<< " owner=" << monster->getOwner().getNum() << " stacks=" << monster->CArmedInstance::stacksCount()
 			<< " slot0=" << monster->getStackCount(SlotID(0)) << std::endl;
 		const int split = monster->getNumberOfStacks(hero);
@@ -320,7 +420,7 @@ protected:
 				return NK2AI::experimental::captureNeutralRisk(visible, *hero, *monster, 1, &requestReason);
 			});
 			EXPECT_FALSE(rejectedRequest.has_value()) << "Player-owned monster must not become a neutral risk request";
-			std::cout << "FORCED_NEUTRAL_OWNERSHIP_CONTROL case=" << identity << " owner=" << ownedBy.getNum()
+			std::cout << "FORCED_NEUTRAL_OWNERSHIP_CONTROL policy_version=2 case=" << identity << " owner=" << ownedBy.getNum()
 				<< " rejected=" << !rejected << " reason=" << reason
 				<< " request_rejected=" << !rejectedRequest << " request_reason=" << requestReason << std::endl;
 		}
@@ -354,7 +454,7 @@ protected:
 			EXPECT_EQ(raw, nullptr);
 			EXPECT_EQ(neutral, nullptr);
 			EXPECT_FALSE(request.has_value());
-			std::cout << "FORCED_MISSING_APPEARANCE_CONTROL case=" << identity
+			std::cout << "FORCED_MISSING_APPEARANCE_CONTROL policy_version=2 case=" << identity
 				<< " raw_rejected=" << !raw << " neutral_rejected=" << !neutral << " request_rejected=" << !request
 				<< " raw_reason=" << rawReason << " neutral_reason=" << neutralReason << " request_reason=" << requestReason << std::endl;
 		}
@@ -370,7 +470,7 @@ protected:
 			{
 				return NK2AI::experimental::PlanningBattleSnapshot::createNeutralEncounter(visible, *hero, *monster, context, &reason);
 			}));
-			std::cout << "FORCED_NEUTRAL_CAPTURE upgrade=" << upgrade << " specialty=" << specialty
+			std::cout << "FORCED_NEUTRAL_CAPTURE policy_version=2 upgrade=" << upgrade << " specialty=" << specialty
 				<< " field=" << field.getNum() << " admitted=" << static_cast<bool>(variants.back().second)
 				<< " reason=" << reason << std::endl;
 		}
@@ -380,7 +480,7 @@ protected:
 		const auto id = server.state->nextBattleID;
 		// This invokes the real private fight path, including actual server
 		// stack-move/type-change packets and the singleton-upgrade RNG draw.
-		std::cout << "FORCED_REFERENCE_PHASE phase=neutral_visit upgrade=" << upgrade << std::endl;
+		std::cout << "FORCED_REFERENCE_PHASE policy_version=2 phase=neutral_visit upgrade=" << upgrade << std::endl;
 		monster->onHeroVisit(*handler, hero);
 		const auto * real = server.state->getBattle(id);
 		ASSERT_NE(real, nullptr);
@@ -419,7 +519,7 @@ protected:
 				return true;
 			});
 		}
-		else std::cout << "FORCED_NEUTRAL_CAPTURE selected=unsupported_or_unavailable" << std::endl;
+		else std::cout << "FORCED_NEUTRAL_CAPTURE policy_version=2 selected=unsupported_or_unavailable" << std::endl;
 		const auto oracleRandomAfterPreparation = RandomizerCapture::capture(*handler->randomizer);
 		if(selected != variants.end() && selected->second)
 		{
@@ -443,7 +543,7 @@ protected:
 					return NK2AI::experimental::runSampledBattle(selected->second->battle(), selected->second->frozenGameInfo(), sampleSeed, &trace);
 				});
 				if(!error.empty()) outcome.unsupportedReason = error.c_str();
-				std::cout << "FORCED_NEUTRAL_SAMPLE upgrade=" << upgrade << " specialty=" << specialty << " sample_seed=" << sampleSeed
+				std::cout << "FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=" << upgrade << " specialty=" << specialty << " sample_seed=" << sampleSeed
 					<< " status=" << static_cast<int>(outcome.status) << " winner=" << static_cast<int>(outcome.winner)
 					<< " actions=" << outcome.actions << " bonus=" << outcome.unsupportedBonusType
                     << " bonus_name=" << (outcome.unsupportedBonusType < 0 ? "none" : LIBRARY->bth->bonusToString(static_cast<BonusType>(outcome.unsupportedBonusType)))
@@ -452,9 +552,9 @@ protected:
                     << " d_lost_value=" << outcome.initialArmyValue[1] - outcome.remainingArmyValue[1]
                     << " reason=" << outcome.unsupportedReason << std::endl;
                 for(const auto & line : trace)
-                    std::cout << "FORCED_NEUTRAL_SAMPLE_TRACE case=" << identity << " seed=" << sampleSeed << ' ' << line << std::endl;
+                    std::cout << "FORCED_NEUTRAL_SAMPLE_TRACE policy_version=2 case=" << identity << " seed=" << sampleSeed << ' ' << line << std::endl;
                 for(const auto & stack : outcome.stacks)
-                    std::cout << "FORCED_NEUTRAL_SAMPLE_STACK case=" << identity << " seed=" << sampleSeed
+                    std::cout << "FORCED_NEUTRAL_SAMPLE_STACK policy_version=2 case=" << identity << " seed=" << sampleSeed
                         << " unit=" << stack.unit << " creature=" << stack.creature.getNum()
                         << " side=" << static_cast<int>(stack.side) << " initial=" << stack.initialCount
                         << " survivors=" << stack.survivors << std::endl;
@@ -471,7 +571,7 @@ protected:
 			ASSERT_NE(unit, nullptr);
             const auto action = chooseAction(*battle, unit);
             traceNeutralState(*battle, identity, "actual_pre", actions, false);
-            std::cout << "FORCED_NEUTRAL_ACTION case=" << identity << " step=" << actions
+            std::cout << "FORCED_NEUTRAL_ACTION policy_version=2 case=" << identity << " step=" << actions
                 << " actor=" << unit->unitId() << " action=" << action.toString() << std::endl;
             ASSERT_TRUE(handler->battles->makePlayerBattleAction(id, battle->battleGetOwner(unit), action));
             // The final action can erase BattleInfo. Never reuse battle/unit here.
@@ -480,7 +580,7 @@ protected:
 			++actions;
 		}
 		ASSERT_TRUE(server.result.has_value());
-		std::cout << "FORCED_NEUTRAL_REFERENCE upgrade=" << upgrade << " specialty=" << specialty
+		std::cout << "FORCED_NEUTRAL_REFERENCE policy_version=2 upgrade=" << upgrade << " specialty=" << specialty
 			<< " battlefield=" << selectedBattlefield.getNum() << " seed=" << seed << " split=" << split
 			<< " winner=" << static_cast<int>(server.result->winner) << " actions=" << actions;
 		for(const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
@@ -535,7 +635,7 @@ protected:
             // baseline-rejection precondition rather than claiming a rescue.
             EXPECT_FALSE(scalarSafe);
         }
-        std::cout << "FORCED_DECISION_SCALAR family=" << family << " oracle_seed=" << seed
+        std::cout << "FORCED_DECISION_SCALAR policy_version=2 family=" << family << " oracle_seed=" << seed
             << " hero_type=" << hero->getHeroTypeID().getNum()
             << " attack=" << hero->getPrimSkillLevel(PrimarySkill::ATTACK)
             << " defense=" << hero->getPrimSkillLevel(PrimarySkill::DEFENSE)
@@ -578,7 +678,7 @@ protected:
 			unmodelledMagic = request->unmodelledOwnMagic;
 			const auto key = request->key;
             for(size_t variant = 0; variant < request->variants.size(); ++variant)
-                std::cout << "FORCED_DECISION_VARIANT family=" << family << " oracle_seed=" << seed
+                std::cout << "FORCED_DECISION_VARIANT policy_version=2 family=" << family << " oracle_seed=" << seed
                     << " variant=" << variant << " battlefield=" << request->variants[variant]->battle().battleGetBattlefieldType().getNum()
                     << " terrain=" << request->variants[variant]->battle().battleTerrainType().getNum() << std::endl;
             std::vector<CapturedRiskRequest> requests;
@@ -608,7 +708,7 @@ protected:
 				for(size_t index = 0; index < record->variantScenarios[variant].size(); ++index)
 				{
 					const auto & outcome = record->variantScenarios[variant][index];
-					std::cout << "FORCED_DECISION_SAMPLE family=" << family << " oracle_seed=" << seed
+					std::cout << "FORCED_DECISION_SAMPLE policy_version=2 family=" << family << " oracle_seed=" << seed
 						<< " variant=" << variant << " index=" << index << " sampler_seed=" << 104729 + index * 7919
 						<< " status=" << static_cast<int>(outcome.status) << " winner=" << static_cast<int>(outcome.winner)
 						<< " initial_value=" << outcome.initialArmyValue[0] << " remaining_value=" << outcome.remainingArmyValue[0]
@@ -619,7 +719,7 @@ protected:
 		});
 		EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), oracleBefore);
 		const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(DecisionRiskBudget::Clock::now() - budget.startedAt()).count();
-		std::cout << "FORCED_DECISION_FORECAST family=" << family << " oracle_seed=" << seed
+		std::cout << "FORCED_DECISION_FORECAST policy_version=2 family=" << family << " oracle_seed=" << seed
 			<< " captured=" << captured << " policy=" << policyCaptured << " revalidated=" << revalidated << " record=" << recordFound
 			<< " variants=" << variantCount << " draws=" << budget.drawsStarted() << " samples=" << assessment.samples
 			<< " recommendation=" << static_cast<int>(assessment.recommendation) << " adverse_upper=" << assessment.adverseUpper
@@ -648,7 +748,7 @@ protected:
 		double lostValue = 0;
 		for(const auto & [creature, count] : server.result->casualties[BattleSide::ATTACKER])
 			lostValue += count * creature.toCreature()->getAIValue();
-		std::cout << "FORCED_DECISION_REFERENCE family=" << family << " oracle_seed=" << seed
+		std::cout << "FORCED_DECISION_REFERENCE policy_version=2 family=" << family << " oracle_seed=" << seed
 			<< " winner=" << static_cast<int>(server.result->winner) << " actions=" << actions
 			<< " battlefield=" << field << " split=" << split << " scalar_ratio=" << scalarRatio
 			<< " initial_value=" << initialValue << " lost_value=" << lostValue << " loss_fraction=" << lostValue / initialValue;
@@ -713,7 +813,7 @@ protected:
 			EXPECT_EQ(detached.min, live.min);
 			EXPECT_EQ(detached.max, live.max);
 			EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), rngBefore);
-			std::cout << "FORCED_DEFEND_CONTROL creature=" << creature << " stance=" << extraStance
+			std::cout << "FORCED_DEFEND_CONTROL policy_version=2 creature=" << creature << " stance=" << extraStance
 				<< " phase=" << phase << " round=" << real->battleGetRound()
 				<< " defense=" << target->getDefense(false) << " min=" << live.min << " max=" << live.max << std::endl;
 		};
@@ -789,18 +889,18 @@ protected:
 		layout.obstaclesAllowed = false;
 		layout.tacticsAllowed = false;
 		const BattleID id = server.state->nextBattleID;
-		std::cout << "FORCED_REFERENCE_PHASE phase=battle_start case=" << duel.name << std::endl;
+		std::cout << "FORCED_REFERENCE_PHASE policy_version=2 phase=battle_start case=" << duel.name << std::endl;
 		handler->battles->startBattle(attacker.get(), defender.get(), battleTile, nullptr, nullptr, layout, nullptr);
 		const auto * initial = server.state->getBattle(id);
 		ASSERT_NE(initial, nullptr);
-		std::cout << "FORCED_BATTLE_CONTEXT case=" << duel.name << " seed=" << seed
+		std::cout << "FORCED_BATTLE_CONTEXT policy_version=2 case=" << duel.name << " seed=" << seed
 			<< " tile=" << battleTile.x << ',' << battleTile.y << ',' << battleTile.z
 			<< " terrain=" << initial->getTerrainType().getNum()
 			<< " battlefield=" << initial->getBattlefieldType().getNum() << std::endl;
 		// Both forecasts consume the same live snapshot read-only. Neither can
 		// veto the forced battle or select its real damage rolls/actions.
 		for(const auto * unit : initial->battleGetUnitsIf([](const battle::Unit *) { return true; }))
-			std::cout << "FORCED_BATTLE_INITIAL case=" << duel.name << " seed=" << seed
+			std::cout << "FORCED_BATTLE_INITIAL policy_version=2 case=" << duel.name << " seed=" << seed
 				<< " unit=" << unit->unitId() << " side=" << static_cast<int>(unit->unitSide())
 				<< " hex=" << unit->getPosition().toInt() << " health=" << unit->getAvailableHealth()
 				<< " morale=" << unit->moraleVal() << " luck=" << unit->luckVal() << std::endl;
@@ -812,7 +912,7 @@ protected:
 		{
 			return NK2AI::experimental::PlanningBattleSnapshot::create(*server.state, *attacker, *defender, context, &captureReason);
 		});
-		std::cout << "FORCED_BATTLE_CAPTURE case=" << duel.name << " seed=" << seed
+		std::cout << "FORCED_BATTLE_CAPTURE policy_version=2 case=" << duel.name << " seed=" << seed
 			<< " admitted=" << static_cast<bool>(snapshot) << " reason=" << captureReason << std::endl;
 		if(snapshot)
 		{
@@ -862,7 +962,7 @@ protected:
 			const auto * active = battle->battleActiveUnit();
 			ASSERT_NE(active, nullptr);
 			const auto action = chooseAction(*battle, active);
-			std::cout << "FORCED_BATTLE_ACTION case=" << duel.name << " seed=" << seed
+			std::cout << "FORCED_BATTLE_ACTION policy_version=2 case=" << duel.name << " seed=" << seed
 				<< " index=" << actions << ' ' << action.toString() << std::endl;
 			shots += action.actionType == EActionType::SHOOT;
 			melee += action.actionType == EActionType::WALK_AND_ATTACK;
@@ -889,7 +989,7 @@ protected:
 			losingCounts[CreatureID(extra.first)] += extra.second;
 		for(const auto & [creature, count] : losingCounts)
 			EXPECT_EQ(server.result->casualties[losingSide][creature], count);
-		std::cout << "FORCED_BATTLE_REFERENCE case=" << duel.name << " seed=" << seed
+		std::cout << "FORCED_BATTLE_REFERENCE policy_version=2 case=" << duel.name << " seed=" << seed
 			<< " attacker=" << duel.attackerCreature << ':' << duel.attackerCount
 			<< " defender=" << duel.defenderCreature << ':' << duel.defenderCount
 			<< " scalar_ratio=" << scalarRatio
@@ -909,7 +1009,7 @@ protected:
 		}
 		for(const auto & forecast : {pessimistic, optimistic})
 		{
-			std::cout << " forecast_status=" << static_cast<int>(forecast.status)
+			std::cout << " forecast_policy_version=1 forecast_status=" << static_cast<int>(forecast.status)
 				<< " forecast_winner=" << static_cast<int>(forecast.winner)
 				<< " forecast_a_survivors=" << forecast.attackerSurvivors
 				<< " forecast_d_survivors=" << forecast.defenderSurvivors;
@@ -920,7 +1020,7 @@ protected:
 		for(size_t index = 0; index < samples.size(); ++index)
 		{
 			const auto & sample = samples[index];
-			std::cout << "FORCED_BATTLE_SAMPLE case=" << duel.name << " oracle_seed=" << seed
+			std::cout << "FORCED_BATTLE_SAMPLE policy_version=2 case=" << duel.name << " oracle_seed=" << seed
 				<< " sample_index=" << index << " status=" << static_cast<int>(sample.status)
 				<< " winner=" << static_cast<int>(sample.winner)
 				<< " reason=" << sample.unsupportedReason << " bonus=" << sample.unsupportedBonusType
@@ -1070,5 +1170,19 @@ std::vector<DecisionHoldoutCase> decisionHoldouts()
     return cases;
 }
 INSTANTIATE_TEST_SUITE_P(IndependentServer, ForcedDecisionHoldout, ::testing::ValuesIn(decisionHoldouts()));
+
+class ForcedMovementReference : public ForcedBattleReference {};
+TEST_F(ForcedMovementReference, NativeObstacleDetourProgress)
+{
+    ASSERT_NO_FATAL_FAILURE(verifyMovementPolicy(58, false, false, true));
+}
+TEST_F(ForcedMovementReference, NativeDistantFlyerAdvances)
+{
+    ASSERT_NO_FATAL_FAILURE(verifyMovementPolicy(30, true, false, false));
+}
+TEST_F(ForcedMovementReference, NativeDoubleWideAdvanceLegal)
+{
+    ASSERT_NO_FATAL_FAILURE(verifyMovementPolicy(14, false, true, false));
+}
 
 }

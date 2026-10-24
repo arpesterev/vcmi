@@ -1,6 +1,7 @@
 /* Staged asset-free interaction draft; no production or frozen-target edits. */
 #include "AdventureInteractionBridge.h"
 #include "../../lib/mapObjects/MiscObjects.h"
+#include <cmath>
 
 namespace
 {
@@ -98,6 +99,73 @@ protected:
 			}
 			gateway->invalidatePaths();
 		});
+	}
+
+	bool hasTimelyDefender(const CGTownInstance * town, int enemyArrival, uint64_t requiredStrength)
+	{
+		bool covered = false;
+		NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway, false, [&](NK2AI::Nullkiller & ai)
+		{
+			NK2AI::PathfinderSettings config;
+			config.useHeroChain = false;
+			config.mainTurnDistanceLimit = config.scoutTurnDistanceLimit = 2;
+			for(const auto * hero : bridge.callback->getHeroesInfo())
+			{
+				ai.pathfinder->updatePaths({{hero, NK2AI::HeroRole::MAIN}}, config);
+				for(const auto & path : ai.pathfinder->getPathInfo(town->visitablePos()))
+				{
+					const auto lock = ai.getHeroLockedReason(hero);
+					// HERO_CHAIN clears in real resetState on the next own turn.
+					// This is only an opportunity check; actual arrival is asserted later.
+					const bool available = !ai.arePathHeroesLocked(path)
+						|| (path.turn() > 0 && lock == NK2AI::HeroLockedReason::HERO_CHAIN);
+					covered |= available && path.targetHero == hero && path.heroArmy == hero
+						&& path.exchangeCount == 1 && !path.getFirstBlockedAction()
+						&& path.getTotalArmyLoss() == 0 && path.turn() <= enemyArrival
+						&& path.getHeroStrength() >= requiredStrength;
+				}
+			}
+			gateway->invalidatePaths();
+		});
+		return covered;
+	}
+
+	bool controlledApproachGeometry(const CGTownInstance * town, const CGHeroInstance * enemy, uint64_t requiredStrength)
+	{
+		bool canReturn = false;
+		bool canAttack = false;
+		NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway, false, [&](NK2AI::Nullkiller & ai)
+		{
+			NK2AI::PathfinderSettings config;
+			config.useHeroChain = false;
+			config.mainTurnDistanceLimit = config.scoutTurnDistanceLimit = 2;
+			for(const auto * hero : bridge.callback->getHeroesInfo())
+			{
+				ai.pathfinder->updatePaths({{hero, NK2AI::HeroRole::MAIN}}, config);
+				for(const auto & path : ai.pathfinder->getPathInfo(enemy->visitablePos()))
+					canAttack |= path.turn() == 0 && !path.getFirstBlockedAction();
+				for(const auto & path : ai.pathfinder->getPathInfo(town->visitablePos()))
+					canReturn |= path.turn() == 0 && path.targetHero == hero && path.heroArmy == hero
+						&& path.exchangeCount == 1 && !path.getFirstBlockedAction()
+						&& path.getTotalArmyLoss() == 0 && path.getHeroStrength() >= requiredStrength;
+				std::cout << "DEFENCE_APPROACH hero=" << hero->id.getNum()
+					<< " movement=" << hero->movementPointsRemaining() << " can_return=" << canReturn
+					<< " can_attack=" << canAttack << std::endl;
+			}
+			gateway->invalidatePaths();
+		});
+		// Geometry only, before real makeTurn clears prior-turn HERO_CHAIN locks.
+		// The subsequent actual stationed-strength assertion proves execution.
+		return canReturn && !canAttack;
+	}
+
+	static uint64_t actualStationedStrength(const CGTownInstance * town)
+	{
+		// Never add a remote hero or assume an unperformed garrison merge.
+		uint64_t strength = town->getGarrisonHero() ? town->getGarrisonHero()->getTotalStrength()
+			: town->getUpperArmy()->getArmyStrength();
+		if(town->getVisitingHero()) strength = std::max(strength, town->getVisitingHero()->getTotalStrength());
+		return strength;
 	}
 
 	static uint64_t uniqueLocalStrength(const CGTownInstance * town)
@@ -229,4 +297,136 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	EXPECT_EQ(safeTown->getOwner(), PlayerColor(0));
 	EXPECT_EQ(bridge.callback->getHeroesInfo().size(), 1u);
 }
+
+TEST_F(AdventureInteractionScenarios, CoveredEconomyThenActualDefenceOnEnemyApproach)
+{
+	ASSERT_NO_FATAL_FAILURE(initialize("defence_economy_three_turns"));
+	ASSERT_NO_FATAL_FAILURE(initializePlanner());
+	const auto * threatened = dynamic_cast<const CGTownInstance *>(object("town_threatened"));
+	const auto * safeTown = dynamic_cast<const CGTownInstance *>(object("town_safe"));
+	const auto * objective = dynamic_cast<const CGMine *>(object("safe_objective"));
+	const auto * observer = object("retreat_observer");
+	const auto * observerFar = object("retreat_observer_far");
+	const auto * enemy = dynamic_cast<const CGHeroInstance *>(object("hero_1"));
+	ASSERT_NE(threatened, nullptr); ASSERT_NE(safeTown, nullptr);
+	ASSERT_NE(objective, nullptr); ASSERT_NE(observer, nullptr); ASSERT_NE(observerFar, nullptr); ASSERT_NE(enemy, nullptr);
+	ASSERT_EQ(objective->ID, Obj::MINE);
+	ASSERT_EQ(objective->producedResource, GameResID::GOLD);
+	ASSERT_EQ(objective->stacksCount(), 0);
+	ASSERT_EQ(objective->getOwner(), PlayerColor::NEUTRAL);
+	ASSERT_EQ(threatened->getOwner(), PlayerColor(0));
+	ASSERT_EQ(safeTown->getOwner(), PlayerColor(0));
+	ASSERT_EQ(observer->getOwner(), PlayerColor(0));
+	ASSERT_EQ(observerFar->getOwner(), PlayerColor(0));
+	for(int y : {15, 20, 30, 35})
+	{
+		const auto * corridor = dynamic_cast<const CGMine *>(object("retreat_corridor_" + std::to_string(y)));
+		ASSERT_NE(corridor, nullptr);
+		ASSERT_EQ(corridor->getOwner(), PlayerColor(0));
+		ASSERT_EQ(corridor->producedResource, GameResID::ORE);
+	}
+	for(int y = 7; y <= 40; ++y)
+		ASSERT_TRUE(bridge.callback->isVisible(int3(44, y, 0))) << "Unknown corridor tile y=" << y;
+	ASSERT_TRUE(bridge.callback->isVisible(enemy));
+	ASSERT_TRUE(bridge.callback->isVisible(objective));
+	ASSERT_EQ(bridge.callback->getResourceAmount(EGameResID::GOLD), 2200)
+		<< "Reject changed fixture income/event timing instead of tuning acceptance";
+	const auto initialResources = bridge.callback->getResourceAmount();
+	const auto initialStrength = uniqueLocalStrength(threatened);
+	diagnoseThreat("before_recruitment", enemy, threatened);
+	observeThreats();
+	const auto initialThreat = gateway->nullkiller->dangerHitMap->getObjectThreat(threatened).fastestDanger;
+	ASSERT_LE(initialThreat.turn, 1);
+	ASSERT_GT(initialThreat.danger, initialStrength);
+	for(const auto & threat : gateway->nullkiller->dangerHitMap->getTownThreats(safeTown))
+		ASSERT_GT(threat.turn, 1);
+
+	NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway);
+	ASSERT_EQ(bridge.callback->getPlayerStatus(PlayerColor(0)), EPlayerStatus::INGAME);
+	ASSERT_GT(uniqueLocalStrength(threatened), initialStrength);
+	const auto firstPurchase = std::find_if(bridge.purchases.begin(), bridge.purchases.end(),
+		[](const auto & purchase) { return purchase.bought > 0; });
+	ASSERT_NE(firstPurchase, bridge.purchases.end());
+	EXPECT_EQ(firstPurchase->town, threatened->id);
+	ASSERT_FALSE(bridge.spending.empty());
+	EXPECT_EQ(bridge.spending.front().town, threatened->id)
+		<< "Nonurgent construction/recruitment must not consume the urgent budget first";
+	TResources actualSpent;
+	for(const auto & spend : bridge.spending) actualSpent += spend.resources;
+	EXPECT_EQ(initialResources - bridge.callback->getResourceAmount(), actualSpent);
+	EXPECT_EQ(threatened->getOwner(), PlayerColor(0));
+	EXPECT_EQ(safeTown->getOwner(), PlayerColor(0));
+	ASSERT_EQ(objective->getOwner(), PlayerColor::NEUTRAL)
+		<< "Recovery objective must not already be captured before urgency removal";
+	diagnoseThreat("after_recruitment_before_withdrawal", enemy, threatened);
+	finishActiveTurn();
+	ASSERT_EQ(bridge.active, PlayerColor(1));
+
+	// Script only legal own-player requests. No teleport, army edit or fog grant.
+	CCallback blue(bridge.handler->gs, PlayerColor(1), &bridge);
+	for(int y = 11; y <= 25; ++y)
+	{
+		const int3 next(45, y, 0);
+		const auto beforeMovement = enemy->movementPointsRemaining();
+		blue.moveHero(enemy, next, false);
+		ASSERT_EQ(enemy->anchorPos(), next);
+		ASSERT_LT(enemy->movementPointsRemaining(), beforeMovement);
+	}
+	ASSERT_TRUE(bridge.callback->isVisible(enemy)) << "Owned ore-mine sight must expose retreat endpoint";
+	ASSERT_EQ(observer->getOwner(), PlayerColor(0));
+	finishActiveTurn();
+	ASSERT_EQ(bridge.active, PlayerColor(0));
+	ASSERT_EQ(bridge.handler->gameState().getDate(Date::DAY), 2);
+	ASSERT_EQ(diagnoseThreat("after_first_withdrawal", enemy, threatened), 1)
+		<< "First withdrawal must leave an actually reachable next-turn threat";
+	observeThreats();
+	ASSERT_LE(gateway->nullkiller->dangerHitMap->getObjectThreat(threatened).fastestDanger.turn, 1)
+		<< "Day2 is deliberately still inside the two-turn threat horizon";
+	const int productiveBefore = bridge.productiveMoves;
+	NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway);
+	traceDefensiveCoverage(threatened, enemy);
+	ASSERT_EQ(objective->getOwner(), PlayerColor(0));
+	ASSERT_GT(bridge.productiveMoves, productiveBefore);
+	const auto requiredStrength = static_cast<uint64_t>(std::ceil(enemy->getTotalStrength()
+		* gateway->nullkiller->settings->getSafeAttackRatio()));
+	const int enemyArrival = diagnoseThreat("covered_economy_end", enemy, threatened);
+	ASSERT_EQ(enemyArrival, 1);
+	ASSERT_TRUE(actualStationedStrength(threatened) >= requiredStrength
+		|| hasTimelyDefender(threatened, enemyArrival, requiredStrength));
+	finishActiveTurn();
+	ASSERT_EQ(bridge.active, PlayerColor(1));
+	// Predeclared approach around the ore-mine blocking footprints.
+	// Same army/map; no teleport, extra movement or enemy-state edit.
+	const std::vector<int3> approach = {
+		{45, 24, 0}, {45, 23, 0}, {45, 22, 0},
+		{46, 22, 0}, {47, 22, 0}, {48, 22, 0}, {49, 22, 0},
+		{50, 21, 0}, {50, 20, 0}};
+	for(const auto & next : approach)
+	{
+		const auto beforeMovement = enemy->movementPointsRemaining();
+		blue.moveHero(enemy, next, false);
+		ASSERT_EQ(enemy->anchorPos(), next);
+		ASSERT_LT(enemy->movementPointsRemaining(), beforeMovement);
+	}
+	ASSERT_EQ(enemy->visitablePos(), int3(49, 20, 0));
+	ASSERT_TRUE(bridge.callback->isVisible(enemy));
+	ASSERT_EQ(enemy->getStackCount(SlotID(0)), 30);
+	finishActiveTurn();
+	ASSERT_EQ(bridge.active, PlayerColor(0));
+	ASSERT_EQ(bridge.handler->gameState().getDate(Date::DAY), 3);
+	ASSERT_EQ(bridge.callback->getPlayerStatus(PlayerColor(0)), EPlayerStatus::INGAME);
+	ASSERT_EQ(diagnoseThreat("enemy_reapproached", enemy, threatened), 0);
+	ASSERT_TRUE(controlledApproachGeometry(threatened, enemy, requiredStrength))
+		<< "Reject invalid geometry: town return must be reachable now but immediate counterattack must not be";
+	NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway);
+	traceDefensiveCoverage(threatened, enemy);
+	// A numerical return opportunity alone never passes this test.
+	ASSERT_GE(actualStationedStrength(threatened), requiredStrength);
+	EXPECT_EQ(threatened->getOwner(), PlayerColor(0));
+	EXPECT_EQ(safeTown->getOwner(), PlayerColor(0));
+	EXPECT_EQ(objective->getOwner(), PlayerColor(0));
+	EXPECT_EQ(bridge.callback->getHeroesInfo().size(), 1u);
+	EXPECT_EQ(enemy->getStackCount(SlotID(0)), 30);
+}
+
 }

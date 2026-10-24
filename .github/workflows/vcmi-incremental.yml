@@ -52,6 +52,7 @@ jobs:
         python3 -m unittest discover -s CI -p "test_adventure_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_bridge_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_defend_qualification.py" -v
+        python3 -m unittest discover -s CI -p "test_adventure_movement_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_interaction_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_holdout_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_path_risk_qualification.py" -v
@@ -348,6 +349,11 @@ jobs:
       if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
       timeout-minutes: 2
       run: python3 CI/adventure_holdout_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/decision-holdouts --reference-evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
+    - name: Qualify native policy-v2 movement with the verified reference binary
+      id: movement_references
+      if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
+      timeout-minutes: 2
+      run: python3 CI/adventure_movement_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/forced-movement --reference-evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
     - name: Qualify bounded real planner turns on public synthetic maps
       if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
       timeout-minutes: 15

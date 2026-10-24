@@ -26,6 +26,7 @@ RISK_BUILD_SOURCES = (
     'AI/Nullkiller2/Engine/Experimental/PlanningRiskTable.cpp',
     'AI/Nullkiller2/Engine/Experimental/PlanningRiskTable.h',
     'AI/Nullkiller2/Engine/Experimental/PlanningBattleSnapshot.h',
+    'AI/Nullkiller2/Engine/Experimental/PlanningBattleMovement.h',
     'AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.h',
     'AI/Nullkiller2/AIGateway.cpp', 'AI/Nullkiller2/AIGateway.h',
     'AI/Nullkiller2/Engine/Nullkiller.cpp', 'AI/Nullkiller2/Engine/Nullkiller.h',

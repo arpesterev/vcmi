@@ -8,23 +8,27 @@ def make_log(all_admitted=False):
         name=spec['id']; seed=spec['seed']; admitted=int(all_admitted or name in REQUIRED_SMOKES)
         reason='none' if admitted else 'visibility or owner eligibility is unsupported'
         if spec['kind']=='direct':
-            lines.append(f'FORCED_BATTLE_CAPTURE case={name} seed={seed} admitted={admitted} reason={reason}')
-            lines.append(f'FORCED_BATTLE_REFERENCE case={name} seed={seed} winner=attacker actions=9 scalar_ratio=1.2 lost_ai_a=60 lost_ai_d=100 loss_a_56=1 forecast_status=0 forecast_winner=-1 forecast_status=0 forecast_winner=-1')
+            lines.append(f'FORCED_BATTLE_CAPTURE policy_version=2 case={name} seed={seed} admitted={admitted} reason={reason}')
+            lines.append(f'FORCED_BATTLE_REFERENCE policy_version=2 case={name} seed={seed} winner=attacker actions=9 scalar_ratio=1.2 lost_ai_a=60 lost_ai_d=100 loss_a_56=1 forecast_status=0 forecast_winner=-1 forecast_status=0 forecast_winner=-1')
             if admitted:
                 for index in range(3):
-                    lines.append(f'FORCED_BATTLE_SAMPLE case={name} oracle_seed={seed} sample_index={index} status=2 winner=0 reason=none bonus=-1 a_survivors=10 d_survivors=0 a_lost_value=60 d_lost_value=100 agrees=1')
+                    lines.append(f'FORCED_BATTLE_SAMPLE policy_version=2 case={name} oracle_seed={seed} sample_index={index} status=2 winner=0 reason=none bonus=-1 a_survivors=10 d_survivors=0 a_lost_value=60 d_lost_value=100 agrees=1')
         else:
             key=f"upgrade={spec['upgrade']} specialty={spec['specialty']}"
-            lines.append(f'FORCED_NEUTRAL_CAPTURE {key} field=3 admitted={admitted} reason={reason}')
+            lines.append(f'FORCED_NEUTRAL_CAPTURE policy_version=2 {key} field=3 admitted={admitted} reason={reason}')
             if admitted:
                 # Real fixture emits neutral samples before its terminal row.
                 for sample_seed in (17041,17047,17053):
-                    lines.append(f'FORCED_NEUTRAL_SAMPLE {key} sample_seed={sample_seed} status=2 winner=1 reason=none')
-            lines.append(f'FORCED_NEUTRAL_REFERENCE {key} battlefield=3 seed={seed} split=3 winner=1 actions=20 loss_0_2=20 loss_1_58=12')
+                    lines.append(f'FORCED_NEUTRAL_SAMPLE policy_version=2 {key} sample_seed={sample_seed} status=2 winner=1 reason=none')
+            lines.append(f'FORCED_NEUTRAL_REFERENCE policy_version=2 {key} battlefield=3 seed={seed} split=3 winner=1 actions=20 loss_0_2=20 loss_1_58=12')
     return '\n'.join(lines)
 
 
 class EvidenceTest(unittest.TestCase):
+    def test_policy_version_is_required_and_not_interchangeable(self):
+        for text in (make_log().replace('policy_version=2','policy_version=1'),make_log().replace('policy_version=2 ','')):
+            with self.assertRaises((ValueError,KeyError)): summarize_evidence(text)
+
     def test_exact_matrix(self):
         specs=expected_cases()
         self.assertEqual(len(specs),58)
@@ -47,7 +51,7 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(data['counts']['finished_winner_agrees'],174)
 
     def test_neutral_variants_counted_separately(self):
-        text=make_log()+'\nFORCED_NEUTRAL_CAPTURE upgrade=0 specialty=0 field=4 admitted=1 reason=none'
+        text=make_log()+'\nFORCED_NEUTRAL_CAPTURE policy_version=2 upgrade=0 specialty=0 field=4 admitted=1 reason=none'
         data=summarize_evidence(text)
         self.assertEqual(data['counts']['capture_opportunities'],59)
         self.assertEqual(data['counts']['captures_admitted'],5)
@@ -62,8 +66,8 @@ class EvidenceTest(unittest.TestCase):
 
     def test_rollout_limit_is_nonterminal_and_not_agreement(self):
         text=make_log(True)
-        old=next(x for x in text.splitlines() if x.startswith('FORCED_BATTLE_SAMPLE case=mixed_high ') and 'sample_index=0 ' in x)
-        new='FORCED_BATTLE_SAMPLE case=mixed_high oracle_seed=17041 sample_index=0 status=3 winner=-1 reason=intrinsic action limit reached bonus=-1'
+        old=next(x for x in text.splitlines() if x.startswith('FORCED_BATTLE_SAMPLE policy_version=2 case=mixed_high ') and 'sample_index=0 ' in x)
+        new='FORCED_BATTLE_SAMPLE policy_version=2 case=mixed_high oracle_seed=17041 sample_index=0 status=3 winner=-1 reason=intrinsic action limit reached bonus=-1'
         text=text.replace(old,new)
         data=summarize_evidence(text)
         self.assertEqual(data['counts']['samples_rollout_limit'],1)
@@ -74,8 +78,8 @@ class EvidenceTest(unittest.TestCase):
             self.assert_bad(text.replace(new,bad))
 
     def test_rollout_limit_cannot_pass_required_smoke(self):
-        text=make_log().replace('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
-            'FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=3 winner=-1 reason=intrinsic round limit reached')
+        text=make_log().replace('FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
+            'FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=0 specialty=0 sample_seed=17041 status=3 winner=-1 reason=intrinsic round limit reached')
         self.assert_bad(text)
         data=summarize_evidence(text,require_smokes=False)
         self.assertEqual(data['counts']['samples_rollout_limit'],1)
@@ -90,7 +94,7 @@ class EvidenceTest(unittest.TestCase):
         with self.assertRaises(ValueError): summarize_evidence(text)
 
     def test_missing_actual(self):
-        self.assert_bad('\n'.join(x for x in make_log().splitlines() if not x.startswith('FORCED_BATTLE_REFERENCE case=ordinary_melee ')))
+        self.assert_bad('\n'.join(x for x in make_log().splitlines() if not x.startswith('FORCED_BATTLE_REFERENCE policy_version=2 case=ordinary_melee ')))
     def test_duplicate_actual(self):
         text=make_log(); self.assert_bad(text+'\n'+next(x for x in text.splitlines() if x.startswith('FORCED_BATTLE_REFERENCE')))
     def test_duplicate_capture(self):
@@ -100,18 +104,18 @@ class EvidenceTest(unittest.TestCase):
     def test_missing_admitted_sample(self):
         text=make_log(); self.assert_bad(text.replace(next(x for x in text.splitlines() if x.startswith('FORCED_BATTLE_SAMPLE')),''))
     def test_extra_sample_for_rejected_capture(self):
-        self.assert_bad(make_log()+'\nFORCED_BATTLE_SAMPLE case=mixed_high oracle_seed=17041 sample_index=0 status=2 winner=0 reason=none')
+        self.assert_bad(make_log()+'\nFORCED_BATTLE_SAMPLE policy_version=2 case=mixed_high oracle_seed=17041 sample_index=0 status=2 winner=0 reason=none')
     def test_smoke_rejected_even_when_all_real_battles_complete(self):
         text=make_log().replace('case=ordinary_melee seed=17041 admitted=1 reason=none','case=ordinary_melee seed=17041 admitted=0 reason=unsupported ordinary troops')
-        self.assert_bad('\n'.join(x for x in text.splitlines() if not x.startswith('FORCED_BATTLE_SAMPLE case=ordinary_melee ')))
+        self.assert_bad('\n'.join(x for x in text.splitlines() if not x.startswith('FORCED_BATTLE_SAMPLE policy_version=2 case=ordinary_melee ')))
     def test_production_neutral_capture_cannot_all_be_unknown(self):
-        text=make_log().replace('FORCED_NEUTRAL_CAPTURE upgrade=0 specialty=0 field=3 admitted=1 reason=none',
-          'FORCED_NEUTRAL_CAPTURE upgrade=0 specialty=0 field=3 admitted=0 reason=visibility or owner unsupported')
-        self.assert_bad('\n'.join(x for x in text.splitlines() if not x.startswith('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 ')))
+        text=make_log().replace('FORCED_NEUTRAL_CAPTURE policy_version=2 upgrade=0 specialty=0 field=3 admitted=1 reason=none',
+          'FORCED_NEUTRAL_CAPTURE policy_version=2 upgrade=0 specialty=0 field=3 admitted=0 reason=visibility or owner unsupported')
+        self.assert_bad('\n'.join(x for x in text.splitlines() if not x.startswith('FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=0 specialty=0 ')))
 
     def test_production_neutral_samples_must_finish(self):
-        text=make_log().replace('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
-          'FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=1 winner=-1 reason=budget exhausted')
+        text=make_log().replace('FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
+          'FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=0 specialty=0 sample_seed=17041 status=1 winner=-1 reason=budget exhausted')
         self.assert_bad(text)
 
     def test_smoke_samples_must_finish(self):
@@ -119,8 +123,8 @@ class EvidenceTest(unittest.TestCase):
           'case=ordinary_melee oracle_seed=17041 sample_index=0 status=1 winner=-1 reason=budget exhausted bonus=-1')
         self.assert_bad(text)
     def test_descriptive_summary_retains_failed_smoke_without_accepting_it(self):
-        text=make_log().replace('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
-          'FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=1 winner=-1 reason=budget exhausted')
+        text=make_log().replace('FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
+          'FORCED_NEUTRAL_SAMPLE policy_version=2 upgrade=0 specialty=0 sample_seed=17041 status=1 winner=-1 reason=budget exhausted')
         summary=summarize_evidence(text, require_smokes=False)
         self.assertEqual(summary['counts']['actual_terminal'],58)
         self.assertEqual(len(summary['supported_smoke_failures']),1)
@@ -132,7 +136,7 @@ class EvidenceTest(unittest.TestCase):
             summarize_evidence(make_log().replace('status=2 winner=0','status=7 winner=0'), require_smokes=False)
 
     def test_neutral_specialty_is_required(self):
-        self.assert_bad(make_log().replace('FORCED_NEUTRAL_REFERENCE upgrade=0 specialty=1','FORCED_NEUTRAL_REFERENCE upgrade=0'))
+        self.assert_bad(make_log().replace('FORCED_NEUTRAL_REFERENCE policy_version=2 upgrade=0 specialty=1','FORCED_NEUTRAL_REFERENCE policy_version=2 upgrade=0'))
     def test_wrong_neutral_field(self):
         self.assert_bad(make_log().replace('battlefield=3','battlefield=99'))
     def test_wrong_seed(self): self.assert_bad(make_log().replace('case=ordinary_melee seed=17041 winner','case=ordinary_melee seed=9 winner'))

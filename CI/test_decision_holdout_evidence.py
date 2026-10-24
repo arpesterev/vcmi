@@ -5,11 +5,15 @@ def log():
     lines=[]
     for family,seed in CASES:
         prefix=f'family={family} oracle_seed={seed}'
-        lines.append(f'FORCED_DECISION_FORECAST {prefix} captured=0 policy=0 revalidated=0 record=0 variants=0 draws=0 samples=0 recommendation=0 adverse_upper=1 defeat_lower=0 tolerance=-1 worst_loss=1 all_finished=0 own_magic=0 elapsed_us=42 stopped=0 reason=unsupported actual mechanics')
-        lines.append(f'FORCED_DECISION_REFERENCE {prefix} winner=1 actions=20 battlefield=3 split=3 scalar_ratio=2 initial_value=100 lost_value=100 loss_fraction=1 loss_0_2=20')
+        lines.append(f'FORCED_DECISION_FORECAST policy_version=2 {prefix} captured=0 policy=0 revalidated=0 record=0 variants=0 draws=0 samples=0 recommendation=0 adverse_upper=1 defeat_lower=0 tolerance=-1 worst_loss=1 all_finished=0 own_magic=0 elapsed_us=42 stopped=0 reason=unsupported actual mechanics')
+        lines.append(f'FORCED_DECISION_REFERENCE policy_version=2 {prefix} winner=1 actions=20 battlefield=3 split=3 scalar_ratio=2 initial_value=100 lost_value=100 loss_fraction=1 loss_0_2=20')
     return '\n'.join(lines)
 
 class HoldoutEvidenceTest(unittest.TestCase):
+    def test_policy_version_is_required_and_not_interchangeable(self):
+        for text in (log().replace('policy_version=2','policy_version=1'),log().replace('policy_version=2 ','')):
+            with self.assertRaises((ValueError,KeyError)): summarize_holdouts(text)
+
     def test_exact_expansion_preserves_original_and_all_six_new(self):
         self.assertEqual(len(CASES),19)
         self.assertEqual(len(set(CASES)),19)
@@ -28,7 +32,7 @@ class HoldoutEvidenceTest(unittest.TestCase):
         text=log(); family,seed=CASES[0]; first=text.splitlines()[0]
         text=text.replace(first, first.replace('variants=0','variants=3'))
         for variant in range(3):
-            text+=f'\nFORCED_DECISION_VARIANT family={family} oracle_seed={seed} variant={variant} battlefield={variant+2} terrain=0'
+            text+=f'\nFORCED_DECISION_VARIANT policy_version=2 family={family} oracle_seed={seed} variant={variant} battlefield={variant+2} terrain=0'
         self.assertEqual(len(summarize_holdouts(text)['cases'][0]['variants']),3)
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('variants=3','variants=4'))
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('draws=0','draws=385'))
@@ -50,10 +54,10 @@ class HoldoutEvidenceTest(unittest.TestCase):
     def test_rollout_limit_retained_unknown_not_terminal_or_favorable(self):
         text=log(); family,seed=CASES[0]; prefix=f'family={family} oracle_seed={seed}'
         first=text.splitlines()[0]
-        forecast=f'FORCED_DECISION_FORECAST {prefix} captured=1 policy=1 revalidated=1 record=1 variants=1 draws=1 samples=0 recommendation=0 adverse_upper=1 defeat_lower=0 tolerance=0.2 worst_loss=1 all_finished=0 own_magic=0 elapsed_us=10000 stopped=0 reason=none'
+        forecast=f'FORCED_DECISION_FORECAST policy_version=2 {prefix} captured=1 policy=1 revalidated=1 record=1 variants=1 draws=1 samples=0 recommendation=0 adverse_upper=1 defeat_lower=0 tolerance=0.2 worst_loss=1 all_finished=0 own_magic=0 elapsed_us=10000 stopped=0 reason=none'
         text=text.replace(first,forecast)
-        text+=f'\nFORCED_DECISION_VARIANT {prefix} variant=0 battlefield=3 terrain=0'
-        sample=f'FORCED_DECISION_SAMPLE {prefix} variant=0 index=0 sampler_seed=104729 status=3 winner=-1 initial_value=100 remaining_value=50 actions=256 bonus=-1 reason=intrinsic action limit reached'
+        text+=f'\nFORCED_DECISION_VARIANT policy_version=2 {prefix} variant=0 battlefield=3 terrain=0'
+        sample=f'FORCED_DECISION_SAMPLE policy_version=2 {prefix} variant=0 index=0 sampler_seed=104729 status=3 winner=-1 initial_value=100 remaining_value=50 actions=256 bonus=-1 reason=intrinsic action limit reached'
         text+='\n'+sample
         data=summarize_holdouts(text)
         self.assertEqual(data['counts']['rollout_limit_samples'],1)
@@ -66,10 +70,10 @@ class HoldoutEvidenceTest(unittest.TestCase):
     def test_valid_admitted_prefix_and_disagreement_kept(self):
         text=log(); family,seed=CASES[0]; prefix=f'family={family} oracle_seed={seed}'
         original=text.splitlines()[0]
-        text=text.replace(original,f'FORCED_DECISION_FORECAST {prefix} captured=1 policy=1 revalidated=1 record=1 variants=1 draws=128 samples=128 recommendation=1 adverse_upper=0.04 defeat_lower=0 tolerance=0.2 worst_loss=0 all_finished=1 own_magic=0 elapsed_us=10000 stopped=0 reason=')
-        text+=f'\nFORCED_DECISION_VARIANT {prefix} variant=0 battlefield=3 terrain=0'
+        text=text.replace(original,f'FORCED_DECISION_FORECAST policy_version=2 {prefix} captured=1 policy=1 revalidated=1 record=1 variants=1 draws=128 samples=128 recommendation=1 adverse_upper=0.04 defeat_lower=0 tolerance=0.2 worst_loss=0 all_finished=1 own_magic=0 elapsed_us=10000 stopped=0 reason=')
+        text+=f'\nFORCED_DECISION_VARIANT policy_version=2 {prefix} variant=0 battlefield=3 terrain=0'
         for i in range(128):
-            text+=f'\nFORCED_DECISION_SAMPLE {prefix} variant=0 index={i} sampler_seed={104729+i*7919} status=2 winner=0 initial_value=100 remaining_value=100 actions=9 bonus=-1 reason=none'
+            text+=f'\nFORCED_DECISION_SAMPLE policy_version=2 {prefix} variant=0 index={i} sampler_seed={104729+i*7919} status=2 winner=0 initial_value=100 remaining_value=100 actions=9 bonus=-1 reason=none'
         self.assertEqual(summarize_holdouts(text)['counts']['false_favorable_observations'],1)
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('status=2 winner=0','status=3 winner=-1').replace('reason=none','reason=intrinsic action limit reached'))
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('tolerance=0.2','tolerance=-1'))

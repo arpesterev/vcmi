@@ -2,6 +2,7 @@
 #include "../../StdInc.h"
 #include "SampledBattleRollout.h"
 #include "DetachedDefendBonuses.h"
+#include "PlanningBattleMovement.h"
 #include "../../../../lib/battle/BattleInfo.h"
 #include "../../../../lib/battle/BattleLayout.h"
 #include "../../../../lib/battle/CUnitState.h"
@@ -183,7 +184,8 @@ public:
 					hit(actor, *enemy, true, false);
 				return;
 			}
-		const auto available = battleGetAvailableHexes(&actor, true);
+		const auto reach = getReachability(&actor);
+		const auto available = battleGetAvailableHexes(reach, &actor, true);
 		for(auto & enemy : units)
 			if(enemy->alive() && enemy->unitSide() != actor.unitSide())
 				for(const auto hex : enemy->getAttackableHexes(&actor))
@@ -203,17 +205,7 @@ public:
 						}
 						return;
 					}
-		auto distance = [&](BattleHex hex)
-		{
-			int best = 1000;
-			for(const auto & enemy : units)
-				if(enemy->alive() && enemy->unitSide() != actor.unitSide())
-					best = std::min(best, static_cast<int>(BattleHex::getDistance(hex, enemy->position)));
-			return best;
-		};
-		BattleHex best = actor.position;
-		for(const auto hex : available)
-			if(distance(hex) < distance(best) || (distance(hex) == distance(best) && hex.toInt() < best.toInt())) best = hex;
+		const auto best = choosePlanningBattleMove(*this, actor, reach, available);
 		if(trace) record(std::string(best == actor.position ? "defend actor=" : "move actor=") + std::to_string(actor.unitId()) + " hex=" + std::to_string(best.toInt()));
 		if(best == actor.position)
 		{

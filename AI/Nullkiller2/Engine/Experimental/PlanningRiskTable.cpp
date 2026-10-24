@@ -227,7 +227,7 @@ std::shared_ptr<const PlanningRiskTable> PlanningRiskTable::buildDecision(std::v
 		active[i] = !request.key.capturedState.empty() && counts.at(request.key) == 1
 			&& !request.variants.empty() && request.variants.size() <= MAX_VARIANTS
 			&& std::all_of(request.variants.begin(), request.variants.end(), [](const auto & variant) { return bool(variant); });
-		const auto cached = memo->entries.find("decision-v1:" + request.physicsState);
+		const auto cached = memo->entries.find("decision-v2:" + request.physicsState);
 		if(active[i] && !request.physicsState.empty() && cached != memo->entries.end()
 			&& cached->second.decisionEvidence && cached->second.variantScenarios.size() == request.variants.size())
 		{
@@ -322,7 +322,7 @@ std::shared_ptr<const PlanningRiskTable> PlanningRiskTable::buildDecision(std::v
 		record.finalizeDecisionSummary();
 		record.scenarios.clear();
 		for(const auto & variant : record.variantScenarios) record.scenarios.insert(record.scenarios.end(), variant.begin(), variant.end());
-		const auto memoKey = "decision-v1:" + requests[i].physicsState;
+		const auto memoKey = "decision-v2:" + requests[i].physicsState;
 		if(!requests[i].physicsState.empty() && (memo->entries.count(memoKey) || memo->entries.size() < MAX_MEMO_ENTRIES))
 			memo->entries[memoKey] = record;
 		if(counts.at(requests[i].key) == 1) table->entries.emplace(std::move(requests[i].key), std::move(record));

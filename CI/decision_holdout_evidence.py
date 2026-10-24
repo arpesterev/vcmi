@@ -23,7 +23,9 @@ def summarize_holdouts(log):
     for line in log.splitlines():
         tag, _, text=line.partition(' ')
         if tag not in ('FORCED_DECISION_FORECAST','FORCED_DECISION_REFERENCE','FORCED_DECISION_SAMPLE','FORCED_DECISION_VARIANT'): continue
-        row=_fields(text); key=(row['family'],integer(row,'oracle_seed'))
+        row=_fields(text)
+        if integer(row,'policy_version') != 2: raise ValueError('wrong battle policy version')
+        key=(row['family'],integer(row,'oracle_seed'))
         if key not in CASES: raise ValueError(f'undeclared holdout {key}')
         if tag.endswith('SAMPLE'):
             variant=integer(row,'variant',{0,1,2}); index=integer(row,'index',range(128))
@@ -86,4 +88,4 @@ def summarize_holdouts(log):
         cases.append(dict(family=key[0],oracle_seed=key[1],forecast=forecast,actual=actual,
             variants=list(variants[key].values()),samples=list(samples[key].values()),
             false_favorable_observation=false_favorable,false_defeat_observation=false_defeat))
-    return dict(counts=dict(counts),cases=cases,interpretation='Independent fixed-policy server outcomes; simulator bounds are not calibrated real battle odds. No automatic activation approval.')
+    return dict(policy_version=2, counts=dict(counts),cases=cases,interpretation='Independent fixed-policy server outcomes; simulator bounds are not calibrated real battle odds. No automatic activation approval.')

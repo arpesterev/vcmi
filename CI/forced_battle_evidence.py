@@ -79,8 +79,9 @@ def summarize_evidence(log, *, require_smokes=True):
         tag, _, text = line.partition(' ')
         if tag not in tags: continue
         row = _fields(text)
+        if _int(row,'policy_version') != 2: raise ValueError('wrong battle policy version')
         # Existing informational line, not a capture opportunity/result.
-        if tag == 'FORCED_NEUTRAL_CAPTURE' and set(row) == {'selected'}:
+        if tag == 'FORCED_NEUTRAL_CAPTURE' and set(row) == {'selected','policy_version'}:
             continue
         neutral = tag.startswith('FORCED_NEUTRAL_')
         if neutral:
@@ -172,6 +173,6 @@ def summarize_evidence(log, *, require_smokes=True):
         counts.setdefault(key,0)
     if require_smokes and smoke_failures:
         raise ValueError("; ".join(smoke_failures))
-    return dict(supported_smoke_failures=smoke_failures, expected_cases=58, counts=dict(counts),required_supported_smokes=list(REQUIRED_SMOKES),
+    return dict(policy_version=2, supported_smoke_failures=smoke_failures, expected_cases=58, counts=dict(counts),required_supported_smokes=list(REQUIRED_SMOKES),
                 rejected_capture_reasons=dict(capture_reasons),nonterminal_sample_reasons=dict(sample_reasons),cases=results,
                 interpretation='Fixed-policy outcome comparisons only. Unsupported, budget and intrinsic rollout-limit outcomes are not losses; endpoint straddles are not accuracy; no calibrated probability or safety claim.')
