@@ -279,7 +279,7 @@ protected:
             // Fixed geometry control, not seed or outcome selection. Native
             // obstacle1 at113 blocks113..115; flank it with legal starts.
             // Engine obstacle generation precedes unit placement from layout.
-            layout.units[BattleSide::ATTACKER][0] = BattleHex(112);
+            layout.units[BattleSide::ATTACKER][0] = BattleHex(111);
             layout.units[BattleSide::DEFENDER][0] = BattleHex(116);
         }
 		const auto id = server.state->nextBattleID;
@@ -300,7 +300,7 @@ protected:
             ASSERT_EQ(initial->battleAliveUnits().size(), 2u);
             for(const auto * unit : initial->battleAliveUnits())
             {
-                ASSERT_EQ(unit->getPosition(), BattleHex(unit->unitSide() == BattleSide::ATTACKER ? 112 : 116));
+                ASSERT_EQ(unit->getPosition(), BattleHex(unit->unitSide() == BattleSide::ATTACKER ? 111 : 116));
             }
         }
 		traceNeutralState(*initial, "movement_control", "actual_initial", 0, true);
@@ -320,7 +320,6 @@ protected:
 			const auto rngBefore = RandomizerCapture::capture(*handler->randomizer);
 			const auto reach = battle->getReachability(actor);
 			const auto action = chooseAction(*battle, actor);
-			if(!actions) { ASSERT_EQ(action.actionType, EActionType::WALK); }
 			const auto distanceToContact = [&](const ReachabilityInfo & cache)
 			{
 				uint32_t distance = ReachabilityInfo::INFINITE_DIST;
@@ -333,7 +332,8 @@ protected:
 			};
 			bool obstacleInfluenced = false;
 			const auto distanceBefore = distanceToContact(reach);
-			if(withObstacles && action.actionType == EActionType::WALK)
+			uint32_t distanceWithoutObstacles = ReachabilityInfo::INFINITE_DIST;
+			if(withObstacles && (!actions || action.actionType == EActionType::WALK))
 			{
 				// Geometry-only diagnostic counterfactual. Never use this copied
 				// unblocked map to choose or submit a live action.
@@ -342,9 +342,24 @@ protected:
 					if(value == EAccessibility::OBSTACLE) value = EAccessibility::ACCESSIBLE;
 				const GeometryReferenceView geometry(*battle);
 				const auto withoutObstacles = geometry.makeBFS(unblocked, reach.params);
-				obstacleInfluenced = distanceBefore > distanceToContact(withoutObstacles);
+				distanceWithoutObstacles = distanceToContact(withoutObstacles);
+				obstacleInfluenced = distanceBefore > distanceWithoutObstacles;
 			}
-			if(withObstacles && !actions) { ASSERT_TRUE(obstacleInfluenced); }
+            if(!actions)
+            {
+                if(withObstacles)
+                {
+                    std::cout << "FORCED_MOVEMENT_GEOMETRY policy_version=2 actor=" << actor->unitId()
+                        << " speed=" << actor->getMovementRange() << " constrained_contact=" << distanceBefore
+                        << " clear_contact=" << distanceWithoutObstacles << " action=" << static_cast<int>(action.actionType) << std::endl;
+                    ASSERT_EQ(actor->getMovementRange(), 4u);
+                    ASSERT_EQ(distanceBefore, 5u);
+                    ASSERT_EQ(distanceWithoutObstacles, 4u);
+                    ASSERT_GT(distanceBefore, actor->getMovementRange());
+                    ASSERT_TRUE(obstacleInfluenced);
+                }
+                ASSERT_EQ(action.actionType, EActionType::WALK);
+            }
 			EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), rngBefore);
 			const auto oldPosition = actor->getPosition();
 			if(action.actionType == EActionType::WALK)
@@ -363,6 +378,9 @@ protected:
 				if(obstacleInfluenced)
 				{
 					const auto distanceAfter = distanceToContact(battle->getReachability(actor));
+                    std::cout << "FORCED_MOVEMENT_PROGRESS policy_version=2 actor=" << actor->unitId()
+                        << " from=" << oldPosition.toInt() << " to=" << actor->getPosition().toInt()
+                        << " contact_before=" << distanceBefore << " contact_after=" << distanceAfter << std::endl;
 					EXPECT_LT(distanceAfter, distanceBefore);
 					if(distanceAfter < distanceBefore) ++obstacleProgress;
 				}

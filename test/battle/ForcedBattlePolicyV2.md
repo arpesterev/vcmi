@@ -19,7 +19,7 @@ sampled model and are not included in sampled accuracy/support counts.
 Three separate `ForcedMovementReference.*` controls require real server actions:
 
 - NativeObstacleDetourProgress: one native walking-dead stack on each side,
-  declared legal starts112/116 flanking the engine-generated obstacle1 at113
+  declared legal starts111/116 flanking the engine-generated obstacle1 at113
   (blocked113/114/115), fixed seed17041 and public MiniTest battle tile. Actual
   blocked geometry and exact unit placement are asserted. No seed or outcome
   search; the explicit layout isolates the known obstacle instead of allowing
@@ -51,3 +51,14 @@ and double-wide controls passed. This geometry-only repair retains the strict
 positive obstacle-progress assertion, real server actions and terminal result.
 It changes neither movement policy nor generated obstacles or creature stats.
 The repaired layout has not yet run natively; no repaired pass is claimed.
+
+Q9 confirmed that starts112/116 have contact distance4 and permit immediate
+move-and-attack, bypassing the movement fallback. The corrected start111 is
+source-derived, not random: BattleHex.h neighbor offsets with actual Q9 blocked
+cells give constrained contact5 versus obstacle-free4 (in either direction).
+The small ObstacleGeometryProof.py diagnosis records both the failed and corrected
+placements; it is not a battle/damage oracle and never drives submitted actions.
+Before the first real action the fixture asserts actual native movement range4,
+engine BFS contact5/4, and WALK. It logs accepted movement and requires a decrease
+in remaining constrained contact distance after that very move. No native speed,
+seed, obstacle, ability, movement-policy or outcome gate changes.
