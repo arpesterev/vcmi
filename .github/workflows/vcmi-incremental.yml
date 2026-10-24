@@ -50,6 +50,7 @@ jobs:
         fi
         python3 -m unittest discover -s CI -p "test_incremental*.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_qualification.py" -v
+        python3 -m unittest discover -s CI -p "test_compiler_recovery.py" -v
         bash -n CI/incremental-build.sh
         python3 -m py_compile CI/incremental*.py
         python3 cmake_modules/tests/test_source_modules.py --cmake cmake --ninja ninja
@@ -266,6 +267,7 @@ jobs:
           .ci/apt-cache
         key: ${{ steps.deps.outputs.cache-primary-key }}
     - name: Verify cached state and restore timestamps by content, never by pathname alone
+      id: verified_cache
       run: |
         start=$(date +%s)
         python3 CI/incremental_identity.py linux-gcc-test --installed --output incremental-evidence/toolchain-identity.json
@@ -273,6 +275,29 @@ jobs:
           python3 CI/incremental_cache.py restore --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json | tee incremental-evidence/cache-validation.json
         fi
         printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/cache-verification-seconds.txt
+    - name: Prepare exact installed-identity compiler recovery scope
+      id: compiler_scope
+      if: steps.verified_cache.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]')
+      timeout-minutes: 1
+      run: |
+        command -v ccache >/dev/null
+        command -v g++-14 >/dev/null
+        python3 -m unittest discover -s CI -p 'test_compiler_recovery.py' -v > incremental-evidence/compiler-recovery-tests.log 2>&1
+        python3 CI/compiler_recovery.py prepare --identity incremental-evidence/toolchain-identity.json --validation incremental-evidence/cache-validation.json --report incremental-evidence/compiler-recovery-scope.json --github-output "$GITHUB_OUTPUT"
+    - name: Restore optional compatible compiler entries only
+      id: compiler_cache
+      if: steps.compiler_scope.outcome == 'success'
+      timeout-minutes: 3
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ~/.cache/vcmi-incremental/linux-gcc-test
+        key: vcmi-compiler-v1-linux-${{ steps.compiler_scope.outputs.fingerprint }}-${{ hashFiles('CI/compiler_recovery.py') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: vcmi-compiler-v1-linux-${{ steps.compiler_scope.outputs.fingerprint }}-${{ hashFiles('CI/compiler_recovery.py') }}-
+    - name: Validate compiler recovery content before use
+      id: compiler_ready
+      if: steps.compiler_scope.outcome == 'success'
+      timeout-minutes: 3
+      run: python3 CI/compiler_recovery.py check --identity incremental-evidence/toolchain-identity.json --validation incremental-evidence/cache-validation.json --report incremental-evidence/compiler-recovery-restored.json
     - name: Build affected Ninja targets and prove immediate no-op
       id: build
       timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 65 || 20 }}
@@ -311,6 +336,18 @@ jobs:
           .ci/incremental-state.json
           ~/.cache/vcmi-incremental/linux-gcc-test
         key: ${{ steps.cache.outputs.cache-primary-key }}
+    - name: Bound compiler-only recovery even after a failed build or test
+      id: compiler_save_ready
+      if: always() && !cancelled() && steps.verified_cache.outcome == 'success' && steps.compiler_ready.outcome == 'success' && (steps.build.outcome == 'success' || steps.build.outcome == 'failure')
+      timeout-minutes: 4
+      run: python3 CI/compiler_recovery.py bound --identity incremental-evidence/toolchain-identity.json --validation incremental-evidence/cache-validation.json --report incremental-evidence/compiler-recovery-save.json --baseline incremental-evidence/compiler-recovery-restored.json --github-output "$GITHUB_OUTPUT"
+    - name: Retain successful compiler entries without promoting incomplete build state
+      if: always() && !cancelled() && steps.compiler_save_ready.outcome == 'success' && steps.compiler_save_ready.outputs.save-needed == 'true'
+      timeout-minutes: 3
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ~/.cache/vcmi-incremental/linux-gcc-test
+        key: ${{ steps.compiler_cache.outputs.cache-primary-key }}
     - name: Always retain timing, cache and Ninja evidence
       if: always()
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f

@@ -375,7 +375,7 @@ TEST_F(Nullkiller2PlannerContinuityRegression, TurnBoundaryWaitsUntilOutstanding
 
 TEST_F(Nullkiller2PlannerContinuityRegression, RealChainFailedArrivalTriggersSuppressionButNextDayWaitDoesNot)
 {
-	first.movement = 0;
+	first.setMovementPoints(0);
 	auto path = pathTo(first, east);
 	path.nodes.front().turns = 0;
 	auto broken = sptr(ExecuteHeroChain(path).setpriority(2));
@@ -396,8 +396,8 @@ TEST_F(Nullkiller2PlannerContinuityRegression, FailedTownSwapDoesNotSuppressAnot
 	townB.id = ObjectInstanceID(21);
 	townA.ID = townB.ID = Obj::TOWN;
 	townA.subID = townB.subID = 0;
-	townA.customName = "Town A";
-	townB.customName = "Town B";
+	townA.setCustomName("Town A");
+	townB.setCustomName("Town B");
 	auto failed = sptr(ExchangeSwapTownHeroes(&townA).setpriority(2));
 	EXPECT_EQ(PlannerRegressionAccess::execute(ai, taskptr(*failed)), TaskExecutionResult::REPLAN);
 	auto other = sptr(ExchangeSwapTownHeroes(&townB).setpriority(1));

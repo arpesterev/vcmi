@@ -3,7 +3,7 @@
   "baseline_commit": "8fda7bdc69887e8c86d27a149681fc598c3cd8d1",
   "scope": "First warm compile/reference qualification, not final gameplay delivery. Detached experimental oracle only; planning snapshot adapter excluded.",
   "files": {
-    ".github/workflows/vcmi-incremental.yml": "bce1fc1c9a5cb2513936465743323457581d9048feeddeb2c1f73d3364cf8d4c",
+    ".github/workflows/vcmi-incremental.yml": "0d9e6ad65d58b48e4d41b8db79e5744d98c59f6ea2db8fb58dc9e222e6c506e3",
     "AI/Nullkiller2/AIGateway.cpp": "d76927de853f90a773715e62606f57afa808d124db2249e6ae4d742fe46637a0",
     "AI/Nullkiller2/AIGateway.h": "e99aea65e4742935c120d711654489134ce496201caa57b09927668fd442ab47",
     "AI/Nullkiller2/AIUtility.cpp": "903fe666fff18247be90da7054318abd16cab4c88a37fb0d8f18f87f88620042",
@@ -28,15 +28,17 @@
     "CI/adventure_eval/asset_inventory.py": "7e5e00a8f28589c0c10458b5c94975c09a3b6ef648c99f770ed610f84446f0be",
     "CI/adventure_qualification.py": "5cc71d5ac6c18dcaed0b738e4240c3490d9d92ce2a56b579f6761414ddfb844a",
     "CI/ai-full-required-tests.json": "f18c4f8443f7a165b73394de3b15f187bb4ef060f7791d24dcc3393568d81113",
+    "CI/compiler_recovery.py": "f998c4b75212618cd20d095f36ffc5abe9bfe42aa68be6fdf87e1649096463b2",
     "CI/test_adventure_qualification.py": "3074948fb164d24e5bae59f0aac96383475a4770adf098f7acfbf0039b46c9da",
+    "CI/test_compiler_recovery.py": "9c41f4c87699baddc3d5a901b0b9e10ace24e0423e87e4c1f4bbbc54da59749f",
     "CMakeLists.txt": "9e63dbcddef90458365e7ddafd7bd4befdc49f0a1efd85a80353f9c705ec12a6",
     "docs/developers/AdventurePlannerContinuity.md": "cc6e3586ff73a0c6dc3019be174f1706459dae96c65a7c46d4707a184b52cebd",
     "test/CMakeLists.txt": "6ec4f0142a7b8ba87980aaa11d9315db3feee4d1199372ec2c7c1315e45d2619",
     "test/battle/ForcedBattleReference.cpp": "7f89ed8c48b8d19cc6150905b61c02512aefa0d64e5bc7e2654c62b2f76ac7d3",
     "test/battle/ForcedBattleReference.md": "ea0928ee3948aa6b5da51c14bfb2cd8187ec2dd6026ca6ba4554a77975c8bed4",
     "test/nullkiller2/AIPathMetadataRegression.cpp": "569651e5316c17b2f618d7970e72e27354e9d3603fb18d35bfe3d31d446b0047",
-    "test/nullkiller2/AdventureBattleRiskRegression.cpp": "31da78543fb8ec383c6fde8cd41a1abe953874465729ef8dfb97e6edefa6de5b",
-    "test/nullkiller2/PlannerContinuityRegression.cpp": "8b16f0c2646afacc9174834edc8385f8748dd43764ee6ae5f4181cf5bfc6a96b",
+    "test/nullkiller2/AdventureBattleRiskRegression.cpp": "ba4ba55399524fc63aa589f4561ed8289605dd39d9f6ed84ccb7280e055085bd",
+    "test/nullkiller2/PlannerContinuityRegression.cpp": "d34760a2779c73b89874572f1ee4a1b855951934ca3ee9ec6e7fc06b430c5d6f",
     "test/nullkiller2/TownDefenceRegression.cpp": "f5ca3c8e87de76832c49344456b16f9fc6d1eac63c60c3d26a20257b13e30ae9",
     "test/nullkiller2/TownRecruitmentRegression.cpp": "00544961c4f9e4e07087b087d8d8a2044c2732e44a96a0b1c5b5e11bd008b4b0"
   }

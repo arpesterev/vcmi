@@ -32,7 +32,7 @@ class Nullkiller2AdventureBattleRiskRegression : public ::testing::Test
 protected:
 	RiskCallback callback;
 	CGHeroInstance hero{&callback};
-	CArtifactInstance book{&callback, ArtifactID::SPELLBOOK.toArtifact()};
+	CArtifactInstance book{&callback, ArtifactID(ArtifactID::SPELLBOOK).toArtifact()};
 	NK2AI::AIPath path;
 
 	void SetUp() override
@@ -102,7 +102,7 @@ TEST_F(Nullkiller2AdventureBattleRiskRegression, UnaffordableCombatSpellDoesNotM
 {
 	equipBook();
 	hero.addSpellToSpellbook(SpellID::MAGIC_ARROW);
-	const auto cost = hero.getSpellCost(SpellID::MAGIC_ARROW.toSpell());
+	const auto cost = hero.getSpellCost(SpellID(SpellID::MAGIC_ARROW).toSpell());
 	ASSERT_GT(cost, 1);
 	hero.mana = cost - 1;
 	const auto danger = static_cast<uint64_t>(hero.getArmyStrength() * 1.1);
@@ -137,7 +137,7 @@ TEST_F(Nullkiller2AdventureBattleRiskRegression, RouteSpellsCannotReuseManaInDes
 {
 	equipBook();
 	hero.addSpellToSpellbook(SpellID::MAGIC_ARROW);
-	const auto cost = hero.getSpellCost(SpellID::MAGIC_ARROW.toSpell());
+	const auto cost = hero.getSpellCost(SpellID(SpellID::MAGIC_ARROW).toSpell());
 	hero.mana = cost;
 	path.setDangerProvenance(static_cast<uint64_t>(hero.getArmyStrength() * 1.1), 0);
 	ASSERT_TRUE(NK2AI::isSafeToVisit(path, 1.0f));
