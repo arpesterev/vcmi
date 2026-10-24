@@ -406,7 +406,7 @@ void Nullkiller::resetState()
 void Nullkiller::invalidatePlanningRisk()
 {
 	planningRiskEpoch.fetch_add(1, std::memory_order_acq_rel);
-	std::atomic_store_explicit(&preparedPlanningRisk,
+	preparedPlanningRisk.store(
 		std::shared_ptr<const PreparedPlanningRisk>{}, std::memory_order_release);
 }
 
@@ -417,7 +417,7 @@ void Nullkiller::preparePlanningRiskForStateUpdate()
 	const auto * capability = planningTurnLocks;
 	if(!capability || capability->planner != this)
 		return;
-	std::atomic_store_explicit(&preparedPlanningRisk,
+	preparedPlanningRisk.store(
 		std::shared_ptr<const PreparedPlanningRisk>{}, std::memory_order_release);
 	if(capability->ensureReady)
 		capability->ensureReady();

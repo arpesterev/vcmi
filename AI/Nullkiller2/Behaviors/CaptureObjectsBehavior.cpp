@@ -79,7 +79,6 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 		}
 
 		const auto * hero = path.targetHero;
-		const auto danger = path.getTotalDanger();
 		if (hero->getOwner() != nullkiller->playerID)
 			continue;
 
@@ -93,9 +92,13 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			continue;
 		}
 
+		const auto isSafe = isSafeToVisit(path, nullkiller->settings->getSafeAttackRatio());
 		auto firstBlockedAction = path.getFirstBlockedAction();
 		if(firstBlockedAction)
 		{
+			// Dependencies must not wrap an already unsafe executable hero chain.
+			if(!isSafe)
+				continue;
 			auto subGoal = firstBlockedAction->decompose(nullkiller, path.targetHero);
 
 #if NK2AI_TRACE_LEVEL >= 2
@@ -116,7 +119,6 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			continue;
 		}
 
-		auto isSafe = isSafeToVisit(hero, path.heroArmy, danger, nullkiller->settings->getSafeAttackRatio());
 
 #if NK2AI_TRACE_LEVEL >= 2
 		logAi->trace(
@@ -125,7 +127,7 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			objToVisit ? objToVisit->getObjectName() : path.targetTile().toString(),
 			hero->getObjectName(),
 			path.getHeroStrength(),
-			danger,
+			path.getTotalDanger(),
 			path.getTotalArmyLoss());
 #endif
 

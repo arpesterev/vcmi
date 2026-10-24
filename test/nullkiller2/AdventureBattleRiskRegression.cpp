@@ -3,6 +3,10 @@
  * License: GNU General Public License v2.0 or later
  */
 #include "../StdInc.h"
+#include "../../AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.h"
+#include "../../AI/Nullkiller2/Engine/Nullkiller.h"
+#include "../../AI/Nullkiller2/Goals/ExecuteHeroChain.h"
+#include "../../AI/Nullkiller2/Pathfinding/Actions/SpecialAction.h"
 #include "../../AI/Nullkiller2/AIUtility.h"
 #include "../../AI/Nullkiller2/Pathfinding/AINodeStorage.h"
 #include "../../lib/callback/CCallback.h"
@@ -15,6 +19,18 @@ namespace test
 {
 namespace
 {
+class CaptureDependency final : public NK2AI::SpecialAction
+{
+	NK2AI::AIPath dependencyPath;
+public:
+	explicit CaptureDependency(const NK2AI::AIPath & path) : dependencyPath(path) {}
+	NK2AI::Goals::TSubgoal decompose(const NK2AI::Nullkiller *, const CGHeroInstance *) const override
+	{
+		return NK2AI::Goals::sptr(NK2AI::Goals::ExecuteHeroChain(dependencyPath));
+	}
+	std::string toString() const override { return "Capture safety dependency control"; }
+};
+
 class RiskCallback final : public CCallback
 {
 public:
@@ -34,6 +50,7 @@ protected:
 	CGHeroInstance hero{&callback};
 	CArtifactInstance book{&callback, ArtifactID(ArtifactID::SPELLBOOK).toArtifact()};
 	NK2AI::AIPath path;
+	NK2AI::Nullkiller ai;
 
 	void SetUp() override
 	{
@@ -46,6 +63,41 @@ protected:
 		ASSERT_TRUE(hero.setCreature(SlotID(0), CreatureID(0), 100));
 		path.targetHero = &hero;
 		path.heroArmy = &hero;
+	}
+
+	void prepareCapture()
+	{
+		ai.cc = std::shared_ptr<RiskCallback>(&callback, [](RiskCallback *) {});
+		ai.playerID = PlayerColor(0);
+		ai.settings = std::make_unique<NK2AI::Settings>(0);
+		ai.heroManager = std::make_unique<NK2AI::HeroManager>(&callback, &ai);
+		ai.buildAnalyzer = std::make_unique<NK2AI::BuildAnalyzer>(&ai);
+		hero.id = ObjectInstanceID(1);
+		hero.tempOwner = ai.playerID;
+		hero.setHeroType(HeroTypeID(0));
+		path.chainMask = 1;
+		path.exchangeCount = 1;
+		NK2AI::AIPathNodeInfo node{};
+		node.cost = 0.5f;
+		node.turns = 0;
+		node.coord = int3(0, 0, 0);
+		node.layer = EPathfindingLayer::LAND;
+		node.targetHero = &hero;
+		node.parentIndex = -1;
+		node.chainMask = 1;
+		path.nodes.push_back(node);
+	}
+
+	void captureProvenance(uint64_t destinationDanger, uint64_t earlierLoss, int manaSpent)
+	{
+		NK2AI::ChainActor actor;
+		actor.hero = &hero;
+		NK2AI::AIPathNode destination;
+		destination.actor = &actor;
+		destination.arrivalArmyLoss = earlierLoss;
+		destination.armyLoss = earlierLoss;
+		destination.manaCost = manaSpent;
+		path.setRiskProvenance(destination, destinationDanger, 0);
 	}
 
 	void equipBook()
@@ -152,4 +204,56 @@ TEST_F(Nullkiller2AdventureBattleRiskRegression, InvalidSafetyRatioCannotAuthori
 	EXPECT_FALSE(NK2AI::isSafeToVisit(&hero, 1, std::numeric_limits<float>::quiet_NaN()));
 	EXPECT_TRUE(NK2AI::isSafeToVisit(&hero, 0, 1.1f));
 }
+
+TEST_F(Nullkiller2AdventureBattleRiskRegression, CaptureProducerRejectsPriorLossAndKeepsSafeRoute)
+{
+	prepareCapture();
+	const auto army = hero.getArmyStrength();
+	captureProvenance(army / 2, army / 10, 0);
+	auto safe = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals({path}, &ai);
+	ASSERT_EQ(safe.size(), 1u);
+	EXPECT_FALSE(safe.front()->invalid());
+	captureProvenance(army / 2, army * 3 / 4, 0);
+	ASSERT_TRUE(NK2AI::isSafeToVisit(&hero, path.heroArmy, path.getTotalDanger(), ai.settings->getSafeAttackRatio()));
+	auto unsafe = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals({path}, &ai);
+	ASSERT_EQ(unsafe.size(), 1u);
+	EXPECT_TRUE(unsafe.front()->invalid());
+}
+
+TEST_F(Nullkiller2AdventureBattleRiskRegression, CaptureProducerCannotReuseRouteSpellMana)
+{
+	prepareCapture();
+	equipBook();
+	hero.addSpellToSpellbook(SpellID::MAGIC_ARROW);
+	const auto cost = hero.getSpellCost(SpellID(SpellID::MAGIC_ARROW).toSpell());
+	hero.mana = cost;
+	captureProvenance(hero.getArmyStrength(), 0, 0);
+	auto affordable = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals({path}, &ai);
+	ASSERT_EQ(affordable.size(), 1u);
+	ASSERT_FALSE(affordable.front()->invalid());
+	captureProvenance(hero.getArmyStrength(), 0, 1);
+	ASSERT_TRUE(NK2AI::isSafeToVisit(&hero, path.heroArmy, path.getTotalDanger(), ai.settings->getSafeAttackRatio()));
+	auto spent = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals({path}, &ai);
+	ASSERT_EQ(spent.size(), 1u);
+	EXPECT_TRUE(spent.front()->invalid());
+	EXPECT_EQ(hero.mana, cost);
+}
+
+
+TEST_F(Nullkiller2AdventureBattleRiskRegression, BlockedDependencyCannotWrapUnsafeCaptureChain)
+{
+	prepareCapture();
+	const auto army = hero.getArmyStrength();
+	path.nodes.front().specialAction = std::make_shared<CaptureDependency>(path);
+	path.nodes.front().actionIsBlocked = true;
+	captureProvenance(army / 2, army / 10, 0);
+	auto safeDependency = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals({path}, &ai);
+	ASSERT_EQ(safeDependency.size(), 1u);
+	ASSERT_FALSE(safeDependency.front()->invalid());
+	captureProvenance(army / 2, army * 3 / 4, 0);
+	auto unsafeDependency = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals({path}, &ai);
+	ASSERT_EQ(unsafeDependency.size(), 1u);
+	EXPECT_TRUE(unsafeDependency.front()->invalid());
+}
+
 }

@@ -46,7 +46,7 @@ public:
 	}
 	static auto publication(const Nullkiller & ai)
 	{
-		return std::atomic_load_explicit(&ai.preparedPlanningRisk, std::memory_order_acquire);
+		return ai.preparedPlanningRisk.load(std::memory_order_acquire);
 	}
 	static auto memo(const AIGateway & gateway) { return gateway.planningRiskMemo; }
 	static uint64_t generation(const AIGateway & gateway)

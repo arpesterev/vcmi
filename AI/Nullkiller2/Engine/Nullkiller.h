@@ -23,6 +23,7 @@
 #include "../Helpers/ArmyFormation.h"
 
 #include "../../../lib/ConditionalWait.h"
+#include <atomic>
 #include <shared_mutex>
 #include <thread>
 
@@ -132,9 +133,9 @@ private:
 		std::vector<experimental::PlanningRiskKey> keys;
 		std::shared_ptr<const experimental::PlanningRiskTable> table;
 	};
-	// Access this shared_ptr only through atomic_load/atomic_store. No decision
+	// Use the C++20 atomic shared_ptr member API for publication. No decision
 	// consumer is enabled: calibration and producer-path tests are still gates.
-	std::shared_ptr<const PreparedPlanningRisk> preparedPlanningRisk;
+	std::atomic<std::shared_ptr<const PreparedPlanningRisk>> preparedPlanningRisk;
 	void invalidatePlanningRisk();
 	void preparePlanningRiskForStateUpdate();
 	PathfinderSettings getPathfinderSettings() const;
