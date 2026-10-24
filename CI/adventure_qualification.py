@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -47,6 +48,36 @@ def run(command, logfile, seconds, cwd=None):
     if timed_out or process.returncode:
         raise RuntimeError(f'{command[0]} failed: returncode={process.returncode}, timeout={timed_out}; see {logfile}')
     return time.monotonic() - started
+
+
+
+def capture_first_case_backtrace(executable, evidence, cwd):
+    """Diagnostic only: no debugger outcome can validate the failed suite."""
+    debugger = shutil.which('lldb-18') or shutil.which('lldb') or shutil.which('gdb')
+    result = {'attempted': False, 'scenario_passed': False, 'seconds_limit': 30}
+    if not debugger:
+        result['reason'] = 'No existing debugger; no packages were installed'
+        return result
+    case = '--gtest_filter=ForcedBattleReference.OrdinaryMelee'
+    if Path(debugger).name.startswith('lldb'):
+        command = [debugger, '--no-lldbinit', '--batch', '-o', 'settings set target.load-script-from-symbol-file false',
+                   '-o', 'settings set target.disable-aslr false',
+                   '-o', 'run', '-k', 'thread backtrace all', '--', str(executable), case]
+    else:
+        command = [debugger, '--nx', '--nh', '--batch', '-iex', 'set auto-load off',
+                   '-ex', 'set disable-randomization off',
+                   '-ex', 'run', '-ex', 'thread apply all bt', '--args', str(executable), case]
+    result.update(attempted=True, debugger=debugger, log='crash-backtrace.log')
+    try:
+        started = time.monotonic()
+        startup_flags = ['--no-lldbinit'] if Path(debugger).name.startswith('lldb') else ['--nx', '--nh']
+        run([debugger, *startup_flags, '--help'], evidence / 'debugger-help.log', 5, cwd)
+        remaining = max(0.1, 30 - (time.monotonic() - started))
+        result['seconds'] = run(command, evidence / 'crash-backtrace.log', remaining, cwd)
+        result['reason'] = 'Diagnostic command completed; original suite failure remains'
+    except Exception as error:
+        result['reason'] = str(error)
+    return result
 
 
 def main():
@@ -88,6 +119,7 @@ def main():
                      qualification_status='incomplete' if inventory['preflight_passed'] else 'blocked_render_assets')
     (evidence / 'asset-inventory.json').write_text(json.dumps(inventory, indent=2) + '\n')
     result['graphical_smoke'] = inventory['qualification_status']
+    reference_started = False
     try:
         plan = subprocess.check_output(['ninja', '-C', str(build), '-n', target], text=True, stderr=subprocess.STDOUT, timeout=30)
         (evidence / 'build-plan.txt').write_text(plan)
@@ -104,6 +136,7 @@ def main():
         noop = (evidence / 'noop.log').read_text()
         if re.search(r'\[\d+/\d+\].*(?:Building .* object|Linking |Archiving )', noop):
             raise RuntimeError('Immediate reference rebuild was not a no-op')
+        reference_started = True
         result['execution_seconds'] = run([str(build / 'bin' / target), '--gmock_verbose=error',
                                            '--gtest_filter=ForcedBattleReference.*', '--gtest_output=xml:' + str(evidence / 'tests.xml')],
                                           evidence / 'tests.log', config['reference_execution_seconds'], build / 'bin')
@@ -125,6 +158,8 @@ def main():
                       qualification_scope='Fixed-policy server references, not calibrated adventure strength or production integration')
     except Exception as error:
         result['reason'] = str(error)
+        if reference_started and re.search(r'returncode=-(?:11|6),', str(error)):
+            result['crash_diagnostic'] = capture_first_case_backtrace(build / 'bin' / target, evidence, build / 'bin')
         raise
     finally:
         (evidence / 'qualification.json').write_text(json.dumps(result, indent=2) + '\n')

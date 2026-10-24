@@ -27,3 +27,40 @@ class ReferenceBudgetTest(unittest.TestCase):
                      'client/CMakeFiles/vcmiclient.dir/__/Version.cpp.o'):
             with self.assertRaises(ValueError):
                 validate_plan('[1/1] Building CXX object ' + path, 48)
+
+class ReferenceCrashDiagnosticTest(unittest.TestCase):
+    def test_missing_debugger_does_not_install_or_pass(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from adventure_qualification import capture_first_case_backtrace
+        with patch('adventure_qualification.shutil.which', return_value=None), patch('adventure_qualification.run') as run:
+            result = capture_first_case_backtrace(Path('/bin/reference'), Path('/evidence'), Path('/bin'))
+        self.assertFalse(result['attempted'])
+        self.assertFalse(result['scenario_passed'])
+        run.assert_not_called()
+
+    def test_existing_lldb_only_runs_fixed_case_and_bounded_backtrace(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from adventure_qualification import capture_first_case_backtrace
+        with patch('adventure_qualification.shutil.which', return_value='/usr/bin/lldb-18'), patch('adventure_qualification.run', return_value=0.1) as run:
+            result = capture_first_case_backtrace(Path('/bin/reference'), Path('/evidence'), Path('/bin'))
+        self.assertFalse(result['scenario_passed'])
+        self.assertGreater(run.call_args.args[2], 0)
+        self.assertLessEqual(run.call_args.args[2], 30)
+        self.assertEqual(run.call_args_list[0].args[0], ['/usr/bin/lldb-18', '--no-lldbinit', '--help'])
+        command = run.call_args.args[0]
+        self.assertIn('thread backtrace all', command)
+        self.assertIn('--no-lldbinit', command)
+        self.assertIn('-k', command)
+        self.assertIn('--gtest_filter=ForcedBattleReference.OrdinaryMelee', command)
+        self.assertNotIn('memory read', ' '.join(command))
+
+    def test_debugger_failure_cannot_replace_original_failure_with_pass(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from adventure_qualification import capture_first_case_backtrace
+        with patch('adventure_qualification.shutil.which', return_value='/usr/bin/lldb-18'), patch('adventure_qualification.run', side_effect=RuntimeError('diagnostic timeout')):
+            result = capture_first_case_backtrace(Path('/bin/reference'), Path('/evidence'), Path('/bin'))
+        self.assertFalse(result['scenario_passed'])
+        self.assertEqual(result['reason'], 'diagnostic timeout')
