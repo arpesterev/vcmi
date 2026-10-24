@@ -1,5 +1,6 @@
 /* Staged asset-free interaction draft; no production or frozen-target edits. */
 #include "AdventureInteractionBridge.h"
+#include "../../lib/mapObjects/MiscObjects.h"
 
 namespace
 {
@@ -34,12 +35,20 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	ASSERT_NO_FATAL_FAILURE(initializePlanner());
 	const auto * threatened = dynamic_cast<const CGTownInstance *>(object("town_threatened"));
 	const auto * safeTown = dynamic_cast<const CGTownInstance *>(object("town_safe"));
-	const auto * objective = object("safe_objective");
+	const auto * objective = dynamic_cast<const CGMine *>(object("safe_objective"));
 	const auto * observer = object("retreat_observer");
 	const auto * observerFar = object("retreat_observer_far");
 	const auto * enemy = dynamic_cast<const CGHeroInstance *>(object("hero_1"));
 	ASSERT_NE(threatened, nullptr); ASSERT_NE(safeTown, nullptr);
 	ASSERT_NE(objective, nullptr); ASSERT_NE(observer, nullptr); ASSERT_NE(observerFar, nullptr); ASSERT_NE(enemy, nullptr);
+	ASSERT_EQ(objective->ID, Obj::MINE);
+	ASSERT_EQ(objective->producedResource, GameResID::GOLD);
+	ASSERT_EQ(objective->stacksCount(), 0);
+	ASSERT_EQ(objective->getOwner(), PlayerColor::NEUTRAL);
+	ASSERT_EQ(threatened->getOwner(), PlayerColor(0));
+	ASSERT_EQ(safeTown->getOwner(), PlayerColor(0));
+	ASSERT_EQ(observer->getOwner(), PlayerColor(0));
+	ASSERT_EQ(observerFar->getOwner(), PlayerColor(0));
 	ASSERT_TRUE(bridge.callback->isVisible(enemy));
 	ASSERT_TRUE(bridge.callback->isVisible(objective));
 	ASSERT_EQ(bridge.callback->getResourceAmount(EGameResID::GOLD), 2200)

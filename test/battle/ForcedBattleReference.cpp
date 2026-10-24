@@ -21,6 +21,10 @@
 #include "../../lib/battle/Unit.h"
 #include "../../lib/battle/CUnitState.h"
 #include "../../lib/battle/BattleAttackInfo.h"
+#include "../../lib/callback/CCallback.h"
+#include "../../AI/Nullkiller2/Engine/Nullkiller.h"
+#include "../../AI/Nullkiller2/Engine/Settings.h"
+#include "../../AI/Nullkiller2/Engine/Experimental/PlanningRiskDecision.h"
 #include "../../AI/Nullkiller2/Engine/Experimental/DetachedDefendBonuses.h"
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/gameState/CGameState.h"
@@ -484,6 +488,151 @@ protected:
 		std::cout << std::endl;
 	}
 
+	// Production capture/builder, followed by a verdict-independent server fight.
+	void runDecisionHoldout(const char * family, int seed, int ownCreature, int ownCount, int enemyCreature, int enemyCount)
+	{
+		using namespace NK2AI::experimental;
+		ASSERT_NO_FATAL_FAILURE(initialize(seed));
+		ASSERT_NE(handler, nullptr);
+		ASSERT_NE(map, nullptr);
+		auto * hero = dynamic_cast<CGHeroInstance *>(map->getObject(*map->getHeroesOnMap().begin()));
+		ASSERT_NE(hero, nullptr);
+		hero->clearSlots();
+		if(ownCreature < 0)
+		{
+			hero->setCreature(SlotID(0), CreatureID(2), 20);
+			hero->setCreature(SlotID(1), CreatureID(0), 20);
+		}
+		else hero->setCreature(SlotID(0), CreatureID(ownCreature), ownCount);
+		double initialValue = 0;
+		for(const auto & slot : hero->Slots())
+			initialValue += slot.second->getCount() * slot.second->getCreatureID().toCreature()->getAIValue();
+		ASSERT_GT(initialValue, 0);
+		const ObjectInstanceID monsterID(map->objects.size());
+		handler->createWanderingMonster(int3(3, 2, 0), CreatureID(enemyCreature), enemyCount);
+		auto * monster = dynamic_cast<CGCreature *>(map->getObject(monsterID));
+		ASSERT_NE(monster, nullptr);
+		monster->neverFlees = true;
+		monster->agression = 127;
+		monster->upgradedStackPresence = CGCreature::UpgradedStackPresence::NEVER;
+		NK2AI::Nullkiller ai;
+		ai.playerID = hero->getOwner();
+		ai.aiGw = nullptr;
+		ai.cc = std::make_shared<CCallback>(server.state, ai.playerID, nullptr);
+		ai.settings = std::make_unique<NK2AI::Settings>(ai.cc->getStartInfo()->difficulty);
+		ASSERT_EQ(ai.cc->getObj(monsterID, false), monster);
+		const int split = monster->getNumberOfStacks(hero);
+		const double scalarRatio = static_cast<double>(hero->getArmyStrength()) / monster->getArmyStrength();
+		const auto oracleBefore = RandomizerCapture::capture(*handler->randomizer);
+		DecisionRiskBudget::Settings settings;
+		settings.wallTime = std::chrono::milliseconds(2000);
+		settings.maximumDraws = 3 * 128;
+		settings.requestedWorkers = 1;
+		settings.availableThreads = 1;
+		// One budget starts before production capture, never once per variant.
+		DecisionRiskBudget budget(settings);
+		RiskAssessment assessment;
+		double tolerance = -1, worstLoss = 1;
+		bool captured = false, policyCaptured = false, recordFound = false, allFinished = false, revalidated = false;
+		bool unmodelledMagic = false;
+		size_t variantCount = 0;
+		std::string reason, exception;
+		inspectForecast("decision_holdout", family, exception, [&]
+		{
+			std::optional<CapturedRiskRequest> request;
+            {
+                std::shared_lock lock(CGameState::mutex);
+                request = captureNeutralRisk(*ai.cc, *hero, *monster, 1, &reason);
+                captured = request.has_value();
+                if(!request) return false;
+                policyCaptured = captureNeutralLossPolicy(ai, *hero, *request);
+            }
+			if(!policyCaptured) { reason = "production loss policy unavailable"; return false; }
+			tolerance = request->contextualLossTolerance;
+			variantCount = request->variants.size();
+			unmodelledMagic = request->unmodelledOwnMagic;
+			const auto key = request->key;
+            for(size_t variant = 0; variant < request->variants.size(); ++variant)
+                std::cout << "FORCED_DECISION_VARIANT family=" << family << " oracle_seed=" << seed
+                    << " variant=" << variant << " battlefield=" << request->variants[variant]->battle().battleGetBattlefieldType().getNum()
+                    << " terrain=" << request->variants[variant]->battle().battleTerrainType().getNum() << std::endl;
+            std::vector<CapturedRiskRequest> requests;
+			requests.push_back(std::move(*request));
+			const auto table = PlanningRiskTable::buildDecision(std::move(requests), 1, budget);
+            {
+                std::shared_lock lock(CGameState::mutex);
+                std::string revalidationReason;
+                auto current = captureNeutralRisk(*ai.cc, *hero, *monster, 1, &revalidationReason);
+                EXPECT_TRUE(current.has_value()) << revalidationReason;
+                if(current)
+                {
+                    const bool currentPolicy = captureNeutralLossPolicy(ai, *hero, *current);
+                    EXPECT_TRUE(currentPolicy);
+                    revalidated = currentPolicy && current->key == key;
+                    EXPECT_TRUE(revalidated) << "Builder changed the captured live source";
+                }
+            }
+			if(!revalidated) { reason = "source revalidation failed"; return false; }
+			const auto * record = table->find(key, PlanningRiskRoute{true, 0, 0, 0, true});
+			recordFound = record != nullptr;
+			if(!record) { reason = "exact current-army record unavailable"; return false; }
+			assessment = record->assess(record->contextualLossTolerance, true);
+			worstLoss = record->worstSampledLoss();
+			allFinished = record->allScenariosFinished;
+			for(size_t variant = 0; variant < record->variantScenarios.size(); ++variant)
+				for(size_t index = 0; index < record->variantScenarios[variant].size(); ++index)
+				{
+					const auto & outcome = record->variantScenarios[variant][index];
+					std::cout << "FORCED_DECISION_SAMPLE family=" << family << " oracle_seed=" << seed
+						<< " variant=" << variant << " index=" << index << " sampler_seed=" << 104729 + index * 7919
+						<< " status=" << static_cast<int>(outcome.status) << " winner=" << static_cast<int>(outcome.winner)
+						<< " initial_value=" << outcome.initialArmyValue[0] << " remaining_value=" << outcome.remainingArmyValue[0]
+						<< " actions=" << outcome.actions << " bonus=" << outcome.unsupportedBonusType
+						<< " reason=" << outcome.unsupportedReason << std::endl;
+				}
+			return true;
+		});
+		EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), oracleBefore);
+		const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(DecisionRiskBudget::Clock::now() - budget.startedAt()).count();
+		std::cout << "FORCED_DECISION_FORECAST family=" << family << " oracle_seed=" << seed
+			<< " captured=" << captured << " policy=" << policyCaptured << " revalidated=" << revalidated << " record=" << recordFound
+			<< " variants=" << variantCount << " draws=" << budget.drawsStarted() << " samples=" << assessment.samples
+			<< " recommendation=" << static_cast<int>(assessment.recommendation) << " adverse_upper=" << assessment.adverseUpper
+			<< " defeat_lower=" << assessment.defeatLower << " tolerance=" << tolerance << " worst_loss=" << worstLoss
+			<< " all_finished=" << allFinished << " own_magic=" << unmodelledMagic
+			<< " elapsed_us=" << elapsed << " stopped=" << budget.shouldStop()
+			<< " reason=" << (exception.empty() ? reason : exception) << std::endl;
+		// No forecast admission, deadline, support or recommendation can veto this.
+		const auto id = server.state->nextBattleID;
+		monster->onHeroVisit(*handler, hero);
+		const auto * initial = server.state->getBattle(id);
+		ASSERT_NE(initial, nullptr);
+		const int field = initial->getBattlefieldType().getNum();
+		int actions = 0;
+		while(!server.result && actions < 2000)
+		{
+			const auto * battle = server.state->getBattle(id);
+			ASSERT_NE(battle, nullptr);
+			const auto * actor = battle->battleActiveUnit();
+			ASSERT_NE(actor, nullptr);
+			const auto action = chooseAction(*battle, actor);
+			ASSERT_TRUE(handler->battles->makePlayerBattleAction(id, battle->battleGetOwner(actor), action));
+			++actions;
+		}
+		ASSERT_TRUE(server.result.has_value());
+		double lostValue = 0;
+		for(const auto & [creature, count] : server.result->casualties[BattleSide::ATTACKER])
+			lostValue += count * creature.toCreature()->getAIValue();
+		std::cout << "FORCED_DECISION_REFERENCE family=" << family << " oracle_seed=" << seed
+			<< " winner=" << static_cast<int>(server.result->winner) << " actions=" << actions
+			<< " battlefield=" << field << " split=" << split << " scalar_ratio=" << scalarRatio
+			<< " initial_value=" << initialValue << " lost_value=" << lostValue << " loss_fraction=" << lostValue / initialValue;
+		for(const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
+			for(const auto & [creature, count] : server.result->casualties[side])
+				std::cout << " loss_" << static_cast<int>(side) << '_' << creature.getNum() << '=' << count;
+		std::cout << std::endl;
+	}
+
 	// Scripted mechanics control, not a policy-selected battle or outcome sample.
 	void verifyDefend(int creature, bool weak, bool positiveMorale, int extraStance = 0)
 	{
@@ -867,5 +1016,28 @@ TEST_F(ForcedDefendReference, DefendExplicitStanceMechanicsOnly)
 {
     ASSERT_NO_FATAL_FAILURE(verifyDefend(0, false, true, 3));
 }
+
+struct DecisionHoldoutCase { const char * family; int ownCreature, ownCount, enemyCreature, enemyCount, seed; };
+class ForcedDecisionHoldout : public ForcedBattleReference, public ::testing::WithParamInterface<DecisionHoldoutCase> {};
+TEST_P(ForcedDecisionHoldout, ProducerThenIndependentServer)
+{
+    const auto c = GetParam();
+    ASSERT_NO_FATAL_FAILURE(runDecisionHoldout(c.family, c.seed, c.ownCreature, c.ownCount, c.enemyCreature, c.enemyCount));
+}
+std::vector<DecisionHoldoutCase> decisionHoldouts()
+{
+    std::vector<DecisionHoldoutCase> cases;
+    for(const int seed : {29009, 29017, 29021})
+    {
+        cases.push_back({"neutral_challenge", -1, 0, 58, 47, seed});
+        cases.push_back({"grandelf_70", 19, 20, 58, 70, seed});
+        cases.push_back({"grandelf_80", 19, 20, 58, 80, seed});
+        cases.push_back({"sprite_skeleton", 119, 40, 56, 40, seed});
+    }
+    // Known regression is explicit, not mislabeled as a new holdout.
+    cases.push_back({"neutral_known_regression", -1, 0, 58, 47, 17041});
+    return cases;
+}
+INSTANTIATE_TEST_SUITE_P(IndependentServer, ForcedDecisionHoldout, ::testing::ValuesIn(decisionHoldouts()));
 
 }

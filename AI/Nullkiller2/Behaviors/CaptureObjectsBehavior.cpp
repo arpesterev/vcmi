@@ -15,6 +15,7 @@
 #include "../Goals/Invalid.h"
 #include "CaptureObjectsBehavior.h"
 #include "../AIUtility.h"
+#include "../Engine/Experimental/PlanningRiskDecision.h"
 
 namespace NK2AI
 {
@@ -92,7 +93,26 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			continue;
 		}
 
-		const auto isSafe = isSafeToVisit(path, nullkiller->settings->getSafeAttackRatio());
+		auto evaluatedPath = path;
+		bool isSafe = isSafeToVisit(path, nullkiller->settings->getSafeAttackRatio());
+		if(objToVisit && path.hasDestinationRiskProvenance && path.destinationHeroManaCost >= 0)
+		{
+			experimental::PlanningRiskRoute route;
+			route.earlierArmyLoss = path.armyLoss;
+			route.spentMana = static_cast<uint32_t>(path.destinationHeroManaCost);
+			route.earlierDanger = path.beforeDestinationDanger;
+			route.knownEarlierDanger = path.hasEarlierDangerProvenance;
+			const auto decision = experimental::decideNeutralRisk(*nullkiller, *hero,
+				path.heroArmy, path.targetTile(), route, !force);
+			if(decision.recommendation == experimental::RiskRecommendation::LIKELY_DEFEAT)
+				isSafe = false;
+			else if(decision.recommendation == experimental::RiskRecommendation::FAVORABLE)
+			{
+				isSafe = true;
+				evaluatedPath.targetObjectArmyLoss = static_cast<uint64_t>(std::ceil(
+					decision.sampledLoss * path.heroArmy->getArmyStrength()));
+			}
+		}
 		auto firstBlockedAction = path.getFirstBlockedAction();
 		if(firstBlockedAction)
 		{
@@ -110,7 +130,7 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			{
 				Composition composition;
 
-				composition.addNext(ExecuteHeroChain(path, objToVisit));
+				composition.addNext(ExecuteHeroChain(evaluatedPath, objToVisit));
 				composition.addNext(subGoal);
 
 				tasks[tasks.size() - 1] = sptr(composition);
@@ -133,7 +153,7 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 		if(isSafe)
 		{
-			auto newWay = new ExecuteHeroChain(path, objToVisit);
+			auto newWay = new ExecuteHeroChain(evaluatedPath, objToVisit);
 			TSubgoal sharedPtr;
 			sharedPtr.reset(newWay);
 			auto heroRole = nullkiller->heroManager->getHeroRoleOrDefaultInefficient(path.targetHero);

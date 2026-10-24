@@ -31,7 +31,9 @@ def generate(repo, output):
     for key, position in {'town_safe': (3, 3), 'town_threatened': (45, 7), 'hero_0': (44, 7), 'hero_1': (45, 10)}.items():
         objects[key].update(x=position[0], y=position[1])
     objects['safe_objective'] = copy.deepcopy(templates['mine_3'])
-    objects['safe_objective'].update(x=40, y=9, options={'owner': 'neutral'})
+    # Omit owner for the native NEUTRAL default. 'neutral' is not a
+    # registered playerColor identifier and leaves constructor UNFLAGGABLE.
+    objects['safe_objective'].update(x=40, y=9, options={})
     # An ordinary owned ore mine, not a reveal cheat, keeps the scripted retreat
     # endpoint observable. The enemy must not step on/capture its visitable tile.
     objects['retreat_observer'] = copy.deepcopy(templates['mine_4'])

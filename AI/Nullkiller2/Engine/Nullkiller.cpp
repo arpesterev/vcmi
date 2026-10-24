@@ -410,6 +410,43 @@ void Nullkiller::invalidatePlanningRisk()
 		std::shared_ptr<const PreparedPlanningRisk>{}, std::memory_order_release);
 }
 
+bool Nullkiller::hasPlanningRisk() const
+{
+	const auto publication = preparedPlanningRisk.load(std::memory_order_acquire);
+	return publication && planningRiskEpoch.load(std::memory_order_acquire) == publication->epoch;
+}
+
+std::shared_ptr<const experimental::PlanningRiskRecord> Nullkiller::findPlanningRisk(
+	ObjectInstanceID hero, ObjectInstanceID target, const experimental::PlanningRiskRoute & route) const
+{
+	const auto publication = preparedPlanningRisk.load(std::memory_order_acquire);
+	if(!publication || planningRiskEpoch.load(std::memory_order_acquire) != publication->epoch)
+		return {};
+	for(const auto & key : publication->keys)
+	{
+		if(key.hero != hero || key.target != target)
+			continue;
+		const auto * record = publication->table->find(key, route);
+		if(!record || planningRiskEpoch.load(std::memory_order_acquire) != publication->epoch)
+			return {};
+		return std::shared_ptr<const experimental::PlanningRiskRecord>(publication->table, record);
+	}
+	return {};
+}
+
+void Nullkiller::finishPlanningRiskDecision()
+{
+	// An attempted action closes this decision, including a locally failed task.
+	// Search expansion and repeated updateState calls alone never renew its budget.
+	if(planningTurnLocks && planningTurnLocks->planner == this)
+	{
+		if(planningTurnLocks->riskDecision)
+			planningTurnLocks->riskDecision->cancel();
+		planningTurnLocks->riskDecision.reset();
+	}
+	invalidatePlanningRisk();
+}
+
 void Nullkiller::preparePlanningRiskForStateUpdate()
 {
 	// This thread sees only its own scoped capability. An unbound standalone
@@ -722,7 +759,12 @@ void Nullkiller::makeTurn()
 		}
 
 		for(const auto * heroInfo : cc->getHeroesInfo())
+		{
+			// Server artifact callbacks may arrive outside the writer lock. Revoke
+			// before requesting an internal swap, not after a stale consumer runs.
+			invalidatePlanningRisk();
 			AIGateway::pickBestArtifacts(cc, heroInfo);
+		}
 
 		if(pass == settings->getMaxPass())
 			logAi->warn("MaxPass reached. Terminating AI turn.");
@@ -832,6 +874,7 @@ TaskExecutionResult Nullkiller::executeTask(const Goals::TTask & task)
 
 	try
 	{
+		finishPlanningRiskDecision();
 		task->accept(aiGw);
 		logAi->trace("Task %s completed in %lld", taskDescr, timeElapsed(start));
 	}

@@ -7,6 +7,12 @@
 #include "../../lib/callback/CCallback.h"
 #include "../../lib/networkPacks/PacksForClient.h"
 #include "../../lib/networkPacks/PacksForServer.h"
+#include "../../lib/networkPacks/ArtifactLocation.h"
+#include "../../lib/mapping/CMap.h"
+#include "../../lib/mapObjects/CGCreature.h"
+#include "../../lib/mapObjects/CGHeroInstance.h"
+#include "../../lib/mapObjects/ObjectTemplate.h"
+#include "../../lib/json/JsonNode.h"
 #include "../../lib/serializer/CTypeList.h"
 #include <future>
 #include <stdexcept>
@@ -49,6 +55,29 @@ public:
 		return ai.preparedPlanningRisk.load(std::memory_order_acquire);
 	}
 	static auto memo(const AIGateway & gateway) { return gateway.planningRiskMemo; }
+	static void boundedBatch(AIGateway & gateway, std::shared_lock<std::shared_mutex> & lock,
+		uint64_t turn, std::vector<experimental::PlanningRiskCandidate> candidates,
+		const Capture & capture, const std::function<bool()> & eligible,
+		const experimental::DecisionRiskBudget & budget,
+		const Build & build = experimental::PlanningRiskTable::build)
+	{
+		gateway.preparePlanningRiskBatch(lock, turn, std::move(candidates), capture, eligible, build, &budget);
+	}
+	static auto decision(const Nullkiller & ai)
+	{
+		if(!bound(ai)) throw std::logic_error("Decision lookup requires its owning scope");
+		return Nullkiller::planningTurnLocks->riskDecision;
+	}
+	static void finishDecision(Nullkiller & ai) { ai.finishPlanningRiskDecision(); }
+	static void advanceRiskEpochOnly(Nullkiller & ai)
+	{
+		ai.planningRiskEpoch.fetch_add(1, std::memory_order_acq_rel);
+	}
+	static auto discover(AIGateway & gateway, std::shared_lock<std::shared_mutex> & lock,
+		const experimental::DecisionRiskBudget & budget)
+	{
+		return gateway.discoverPlanningRiskCandidates(lock, budget);
+	}
 	static uint64_t generation(const AIGateway & gateway)
 	{
 		return gateway.planningTurnGeneration.load(std::memory_order_acquire);
@@ -139,6 +168,7 @@ TEST(PlanningRiskScheduler, RemainsInactiveAndStandaloneCallsDoNotInventLockOwne
 	// An unbound preparation step is a no-op even if no game lock exists.
 	EXPECT_NO_THROW(Access::prepareStandalone(ai));
 	EXPECT_FALSE(Access::publication(ai));
+	EXPECT_FALSE(ai.hasPlanningRisk());
 	// Real makeTurn cannot acquire global storage under an unknown caller lock.
 	EXPECT_THROW(ai.makeTurn(), std::logic_error);
 }
@@ -685,4 +715,386 @@ TEST_F(PlanningRiskTurnLifecycle, ForecastFallbackDoesNotSwallowCancellationOrTe
 {
 	EXPECT_THROW(Access::bestEffort(gateway, [] { throw InterruptionRequestedException(); }), InterruptionRequestedException);
 	EXPECT_THROW(Access::bestEffort(gateway, [] { throw TerminationRequestedException(); }), TerminationRequestedException);
+}
+
+namespace
+{
+struct SchedulerDecisionClock
+{
+	std::atomic<int64_t> milliseconds{0};
+	DecisionRiskBudget makeBudget(unsigned draws = 128)
+	{
+		DecisionRiskBudget::Settings settings;
+		settings.wallTime = std::chrono::milliseconds(100);
+		settings.maximumDraws = draws;
+		return DecisionRiskBudget(settings, {}, [this]
+		{
+			return DecisionRiskBudget::Clock::time_point(std::chrono::milliseconds(milliseconds.load()));
+		});
+	}
+};
+}
+
+TEST(PlanningRiskScheduler, ExpiredDecisionDoesNotCaptureOrBuild)
+{
+	AIGateway gateway;
+	SchedulerDecisionClock clock;
+	auto budget = clock.makeBudget();
+	clock.milliseconds = 100;
+	unsigned captures = 0, builds = 0;
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::boundedBatch(gateway, lock, 1, onePair(),
+			[&](const auto & pair, uint64_t epoch) { ++captures; return captureUnknown(pair, epoch); }, eligible, budget,
+			[&](auto requests, uint64_t turn, unsigned draws, auto memo)
+			{
+				++builds;
+				return PlanningRiskTable::build(std::move(requests), turn, draws, memo);
+			});
+		EXPECT_TRUE(lock.owns_lock());
+	});
+	EXPECT_EQ(captures, 0u);
+	EXPECT_EQ(builds, 0u);
+	EXPECT_FALSE(Access::publication(*gateway.nullkiller));
+}
+
+TEST(PlanningRiskScheduler, CaptureTimeConsumesTheSameDecisionDeadline)
+{
+	AIGateway gateway;
+	SchedulerDecisionClock clock;
+	auto budget = clock.makeBudget();
+	unsigned captures = 0, builds = 0;
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::boundedBatch(gateway, lock, 1, onePair(),
+			[&](const auto & pair, uint64_t epoch)
+			{
+				++captures;
+				clock.milliseconds = 100;
+				return captureUnknown(pair, epoch);
+			}, eligible, budget,
+			[&](auto requests, uint64_t turn, unsigned draws, auto memo)
+			{
+				++builds;
+				return PlanningRiskTable::build(std::move(requests), turn, draws, memo);
+			});
+		EXPECT_TRUE(lock.owns_lock());
+	});
+	EXPECT_EQ(captures, 1u);
+	EXPECT_EQ(builds, 0u);
+	EXPECT_FALSE(Access::publication(*gateway.nullkiller));
+}
+
+TEST(PlanningRiskScheduler, ExpiredDetachedWorkRelocksAndRetainsSpentMemoWithoutRecapture)
+{
+	AIGateway gateway;
+	SchedulerDecisionClock clock;
+	auto budget = clock.makeBudget();
+	unsigned captures = 0;
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::boundedBatch(gateway, lock, 1, onePair(),
+			[&](const auto & pair, uint64_t epoch) { ++captures; return captureUnknown(pair, epoch); }, eligible, budget,
+			[&](auto requests, uint64_t turn, unsigned draws, auto)
+			{
+				EXPECT_FALSE(lock.owns_lock());
+				EXPECT_TRUE(budget.tryStartDraw());
+				clock.milliseconds = 100;
+				EXPECT_TRUE(budget.shouldStop());
+				auto spent = std::make_shared<PlanningRiskMemo>();
+				spent->turn = turn;
+				spent->consumedScenarios = budget.drawsStarted();
+				return PlanningRiskTable::build(std::move(requests), turn, draws, spent);
+			});
+		EXPECT_TRUE(lock.owns_lock());
+		ASSERT_TRUE(Access::memo(gateway));
+		EXPECT_EQ(Access::memo(gateway)->consumedScenarios, 1u);
+	});
+	EXPECT_EQ(captures, 1u);
+	EXPECT_FALSE(Access::publication(*gateway.nullkiller));
+}
+
+TEST(PlanningRiskScheduler, RecaptureTimeCannotPublishAnExpiredDecision)
+{
+	AIGateway gateway;
+	SchedulerDecisionClock clock;
+	auto budget = clock.makeBudget();
+	unsigned captures = 0;
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::boundedBatch(gateway, lock, 1, onePair(),
+			[&](const auto & pair, uint64_t epoch)
+			{
+				if(++captures == 2) clock.milliseconds = 100;
+				return captureUnknown(pair, epoch);
+			}, eligible, budget);
+		EXPECT_TRUE(lock.owns_lock());
+	});
+	EXPECT_EQ(captures, 2u);
+	EXPECT_FALSE(Access::publication(*gateway.nullkiller));
+}
+
+TEST(PlanningRiskScheduler, AdaptiveExceptionChargesExactClaimsAndDoesNotRenewAllowance)
+{
+	AIGateway gateway;
+	SchedulerDecisionClock clock;
+	auto budget = clock.makeBudget(3);
+	Access::locked(gateway, [&](auto & lock)
+	{
+		EXPECT_THROW(Access::boundedBatch(gateway, lock, 1, onePair(), defaultCapture(), eligible, budget,
+			[&](auto, uint64_t, unsigned, auto) -> std::shared_ptr<const PlanningRiskTable>
+			{
+				EXPECT_TRUE(budget.tryStartDraw());
+				EXPECT_TRUE(budget.tryStartDraw());
+				throw StopBeforeStateAnalyzers();
+			}), StopBeforeStateAnalyzers);
+		EXPECT_TRUE(lock.owns_lock());
+		ASSERT_TRUE(Access::memo(gateway));
+		EXPECT_EQ(Access::memo(gateway)->consumedScenarios, 2u);
+		EXPECT_EQ(budget.remainingDraws(), 1u);
+		Access::boundedBatch(gateway, lock, 1, onePair(), defaultCapture(), eligible, budget,
+			[&](auto requests, uint64_t turn, unsigned draws, auto memo)
+			{
+				EXPECT_EQ(memo->consumedScenarios, 2u);
+				EXPECT_TRUE(budget.tryStartDraw());
+				EXPECT_FALSE(budget.tryStartDraw());
+				auto spent = std::make_shared<PlanningRiskMemo>(*memo);
+				spent->consumedScenarios = budget.drawsStarted();
+				return PlanningRiskTable::build(std::move(requests), turn, draws, spent);
+			});
+		EXPECT_EQ(Access::memo(gateway)->consumedScenarios, 3u);
+	});
+}
+
+TEST(PlanningRiskScheduler, ReplanningSharesDecisionUntilAnActionAttemptClosesIt)
+{
+	AIGateway gateway;
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::scoped(gateway, lock, [&]
+		{
+			Access::prepareStandalone(*gateway.nullkiller); // No callback: capture fails closed.
+			auto first = Access::decision(*gateway.nullkiller);
+			ASSERT_TRUE(first);
+			EXPECT_TRUE(first->tryStartDraw());
+			Access::prepareStandalone(*gateway.nullkiller);
+			auto repeated = Access::decision(*gateway.nullkiller);
+			ASSERT_TRUE(repeated);
+			EXPECT_EQ(repeated->startedAt(), first->startedAt());
+			EXPECT_EQ(repeated->drawsStarted(), 1u);
+			Access::finishDecision(*gateway.nullkiller);
+			EXPECT_TRUE(first->shouldStop());
+			EXPECT_FALSE(Access::decision(*gateway.nullkiller));
+			Access::prepareStandalone(*gateway.nullkiller);
+			auto next = Access::decision(*gateway.nullkiller);
+			ASSERT_TRUE(next);
+			EXPECT_EQ(next->drawsStarted(), 0u);
+		});
+	});
+}
+
+TEST_F(PlanningRiskTurnLifecycle, CooperativeGenerationCancellationRelocksBeforeRejectingOldWorker)
+{
+	const auto generation = Access::generation(gateway);
+	DecisionRiskBudget budget({}, [&] { return Access::generation(gateway) != generation; });
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::installReadiness(gateway, lock);
+		EXPECT_THROW(Access::boundedBatch(gateway, lock, 1, onePair(), defaultCapture(), eligible, budget,
+			[&](auto requests, uint64_t turn, unsigned draws, auto memo)
+			{
+				EXPECT_FALSE(lock.owns_lock());
+				EXPECT_TRUE(budget.tryStartDraw());
+				Access::advanceGeneration(gateway);
+				EXPECT_TRUE(budget.shouldStop());
+				return PlanningRiskTable::build(std::move(requests), turn, draws, memo);
+			}), InterruptionRequestedException);
+		EXPECT_TRUE(lock.owns_lock());
+		EXPECT_FALSE(Access::publication(*gateway.nullkiller));
+		EXPECT_THROW(gateway.endTurn(), InterruptionRequestedException);
+	});
+	EXPECT_EQ(callback->endRequests, 0u);
+}
+
+TEST(PlanningRiskScheduler, AliasingLookupRejectsChangedEpochAndRetainsSafeRecordLifetime)
+{
+	AIGateway gateway;
+	std::shared_ptr<const PlanningRiskRecord> held;
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::batch(gateway, lock, 1, onePair(), defaultCapture(), eligible);
+		held = gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {true, 0, 0});
+		ASSERT_TRUE(held);
+		EXPECT_FALSE(gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {false, 0, 0}));
+		EXPECT_FALSE(gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {true, 1, 0}));
+		EXPECT_FALSE(gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {true, 0, 1}));
+		gateway.garrisonsChanged(ObjectInstanceID(1), ObjectInstanceID(100));
+		EXPECT_FALSE(gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {true, 0, 0}));
+	});
+	ASSERT_TRUE(held);
+	EXPECT_FALSE(held->allScenariosFinished); // Memory remains valid, not fresh authority.
+}
+
+TEST(PlanningRiskScheduler, ArtifactNotificationInvalidatesBeforeAConsumerLookup)
+{
+	AIGateway gateway;
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::batch(gateway, lock, 1, onePair(), defaultCapture(), eligible);
+		ASSERT_TRUE(gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {true, 0, 0}));
+		gateway.artifactMoved(ArtifactLocation(), ArtifactLocation());
+		EXPECT_FALSE(gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {true, 0, 0}));
+	});
+}
+
+TEST(PlanningRiskScheduler, MalformedAdaptiveAccountingCannotRefundSpentAttempts)
+{
+	AIGateway gateway;
+	SchedulerDecisionClock clock;
+	auto budget = clock.makeBudget();
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::boundedBatch(gateway, lock, 1, onePair(), defaultCapture(), eligible, budget,
+			[&](auto requests, uint64_t turn, unsigned draws, auto memo)
+			{
+				EXPECT_TRUE(budget.tryStartDraw());
+				// Intentionally broken adapter: omits the charged attempt from memo.
+				return PlanningRiskTable::build(std::move(requests), turn, draws, memo);
+			});
+		EXPECT_TRUE(lock.owns_lock());
+		ASSERT_TRUE(Access::memo(gateway));
+		EXPECT_EQ(Access::memo(gateway)->consumedScenarios, 1u);
+		EXPECT_FALSE(Access::publication(*gateway.nullkiller));
+	});
+}
+
+TEST(PlanningRiskScheduler, PresenceFastPathRejectsAnOtherwiseRetainedStalePublication)
+{
+	AIGateway gateway;
+	EXPECT_FALSE(gateway.nullkiller->hasPlanningRisk()); // No callback is installed.
+	Access::locked(gateway, [&](auto & lock)
+	{
+		Access::batch(gateway, lock, 1, onePair(), defaultCapture(), eligible);
+		ASSERT_TRUE(gateway.nullkiller->hasPlanningRisk());
+		Access::advanceRiskEpochOnly(*gateway.nullkiller);
+		ASSERT_TRUE(Access::publication(*gateway.nullkiller)); // Deliberately retain it.
+		EXPECT_FALSE(gateway.nullkiller->hasPlanningRisk());
+		EXPECT_FALSE(gateway.nullkiller->findPlanningRisk(ObjectInstanceID(1), ObjectInstanceID(100), {true, 0, 0}));
+	});
+}
+
+namespace
+{
+// Install the actual canonical map through the public serialization boundary.
+// Visibility is controlled by the game-state override, not a replacement for
+// CGameInfoCallback::getAllVisitableObjs or the production discovery method.
+struct InstallRiskDiscoveryMap
+{
+	enum class Version { NO_RAW_POINTERS_IN_SERIALIZER, RANDOMIZATION_REWORK, SERVER_STATISTICS };
+	bool saving = true;
+	bool loadingGamestate = false;
+	std::unique_ptr<CMap> map;
+	bool hasFeature(Version) const { return true; }
+	template<typename T> void operator&(T &) {}
+	void operator&(std::unique_ptr<CMap> & target) { target = std::move(map); }
+};
+class RiskDiscoveryState final : public CGameState
+{
+public:
+	using CGameState::isVisibleFor;
+	std::set<ObjectInstanceID> hidden;
+	bool isVisibleFor(const CGObjectInstance * object, PlayerColor) const override
+	{
+		return hidden.count(object->id) == 0;
+	}
+};
+class RiskDiscoveryCallback final : public CCallback
+{
+	std::shared_ptr<RiskDiscoveryState> state;
+public:
+	const CGHeroInstance * hero = nullptr;
+	explicit RiskDiscoveryCallback(std::shared_ptr<RiskDiscoveryState> state)
+		: CCallback(state, PlayerColor(0), nullptr), state(std::move(state)) {}
+	std::vector<const CGHeroInstance *> getHeroesInfo() const override { return {hero}; }
+	const CGObjectInstance * getObj(ObjectInstanceID id, bool = true) const override
+	{
+		if(hero && hero->id == id) return hero;
+		for(const auto & object : state->getMap().objects)
+			if(object->id == id && !state->hidden.count(id)) return object.get();
+		return nullptr;
+	}
+};
+class DerivedRiskDiscoveryCreature final : public CGCreature
+{
+public:
+	using CGCreature::CGCreature;
+};
+}
+
+TEST(PlanningRiskScheduler, ActualDiscoveryAcceptsBothNativeNeutralOwnersAndRejectsOtherContexts)
+{
+	auto state = std::make_shared<RiskDiscoveryState>();
+	auto callback = std::make_shared<RiskDiscoveryCallback>(state);
+	InstallRiskDiscoveryMap install;
+	install.map = std::make_unique<CMap>(callback.get());
+	state->serialize(install);
+	AIGateway gateway;
+	gateway.cc = callback;
+	gateway.playerID = PlayerColor(0);
+	auto appearance = std::make_shared<ObjectTemplate>();
+	JsonNode geometry;
+	geometry["mask"].Vector().push_back(JsonNode("A"));
+	appearance->readJson(geometry, false);
+	CGHeroInstance hero(callback.get());
+	hero.id = ObjectInstanceID(1);
+	hero.tempOwner = gateway.playerID;
+	hero.appearance = appearance;
+	hero.setAnchorPos(int3(1, 0, 0));
+	hero.setHeroType(HeroTypeID(0));
+	hero.setMovementPoints(100);
+	callback->hero = &hero;
+	auto target = std::make_shared<CGCreature>(callback.get());
+	target->id = ObjectInstanceID(0);
+	target->ID = Obj::MONSTER;
+	target->subID = MapObjectSubID(0);
+	target->appearance = appearance;
+	target->setAnchorPos(int3(0, 0, 0));
+	state->getMap().objects = {target};
+	SchedulerDecisionClock clock;
+	auto budget = clock.makeBudget();
+	Access::locked(gateway, [&](auto & lock)
+	{
+		for(const auto owner : {PlayerColor::NEUTRAL, PlayerColor::UNFLAGGABLE})
+		{
+			target->tempOwner = owner;
+			const auto candidates = Access::discover(gateway, lock, budget);
+			ASSERT_EQ(candidates.size(), 1u);
+			EXPECT_EQ(candidates.front().hero, hero.id);
+			EXPECT_EQ(candidates.front().target, target->id);
+		}
+		target->tempOwner = PlayerColor(1);
+		EXPECT_TRUE(Access::discover(gateway, lock, budget).empty());
+		target->tempOwner = PlayerColor::UNFLAGGABLE;
+		state->hidden.insert(target->id);
+		EXPECT_TRUE(Access::discover(gateway, lock, budget).empty());
+		state->hidden.clear();
+		target->ID = Obj::EVENT;
+		EXPECT_TRUE(Access::discover(gateway, lock, budget).empty());
+		target->ID = Obj::MONSTER;
+		hero.appearance.reset();
+		EXPECT_TRUE(Access::discover(gateway, lock, budget).empty());
+		hero.appearance = appearance;
+		auto derived = std::make_shared<DerivedRiskDiscoveryCreature>(callback.get());
+		derived->id = target->id;
+		derived->ID = Obj::MONSTER;
+		derived->tempOwner = PlayerColor::UNFLAGGABLE;
+		derived->appearance = appearance;
+		derived->setAnchorPos(int3(0, 0, 0));
+		state->getMap().objects = {derived};
+		EXPECT_TRUE(Access::discover(gateway, lock, budget).empty());
+		state->getMap().objects = {target};
+		clock.milliseconds = 100;
+		EXPECT_TRUE(Access::discover(gateway, lock, budget).empty());
+		EXPECT_TRUE(lock.owns_lock());
+	});
 }

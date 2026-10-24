@@ -14,6 +14,7 @@
 #include "../Actions/WhirlpoolAction.h"
 #include "../../Goals/Invalid.h"
 #include "AIPreviousNodeRule.h"
+#include "../../Engine/Experimental/PlanningRiskDecision.h"
 #include "../../../../lib/mapObjects/CQuest.h"
 #include "../../../../lib/pathfinder/PathfinderOptions.h"
 #include "../../../../lib/pathfinder/CPathfinder.h"
@@ -328,6 +329,22 @@ namespace AIPathfinding
 		uint64_t danger = aiNk->dangerEvaluator->evaluateDanger(destination.coord, hero, true);
 		uint64_t actualArmyValue = AIPath::remainingArmy(srcNode->actor->armyValue, srcNode->armyLoss);
 		uint64_t loss = nodeStorage->evaluateArmyLoss(hero, actualArmyValue, danger);
+
+		// Admit favorable supported fights BEFORE the scalar loss pruner. A
+		// shared path expansion must not impose an ordinary-capture defeat veto
+		// on defence/escape callers; that contextual rejection occurs later.
+		if(srcNode->manaCost >= 0)
+		{
+			experimental::PlanningRiskRoute route;
+			route.earlierArmyLoss = srcNode->armyLoss;
+			route.spentMana = static_cast<uint32_t>(srcNode->manaCost);
+			route.earlierDanger = srcNode->danger;
+			route.knownEarlierDanger = true;
+			const auto decision = experimental::decideNeutralRisk(*aiNk, *hero,
+				srcNode->actor->creatureSet, destination.coord, route, false);
+			if(decision.recommendation == experimental::RiskRecommendation::FAVORABLE)
+				loss = static_cast<uint64_t>(std::ceil(decision.sampledLoss * actualArmyValue));
+		}
 
 		if(loss < actualArmyValue)
 		{

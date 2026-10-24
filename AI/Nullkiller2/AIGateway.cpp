@@ -14,6 +14,7 @@
 #include "../../lib/ScopeGuard.h"
 #include "../../lib/mapObjects/CGCreature.h"
 #include <stdexcept>
+#include <limits>
 #include <thread>
 #include "../../lib/StartInfo.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
@@ -38,6 +39,7 @@
 #include "../../lib/CPlayerState.h"
 
 #include "AIGateway.h"
+#include "Engine/Experimental/PlanningRiskDecision.h"
 #include "Goals/Goals.h"
 #include "Pathfinding/AINodeStorage.h"
 
@@ -274,6 +276,7 @@ void AIGateway::heroExchangeStarted(ObjectInstanceID hero1, ObjectInstanceID her
 			auto transferFrom2to1 = [this](const CGHeroInstance * h1, const CGHeroInstance * h2) -> void
 			{
 				this->pickBestCreatures(h1, h2);
+				nullkiller->invalidatePlanningRisk();
 				pickBestArtifacts(cc, h1, h2);
 			};
 
@@ -862,7 +865,7 @@ void AIGateway::withPlanningTurnLocks(
 	}
 	gameStateLock.lock();
 	checkPlanningGeneration(generation);
-	Nullkiller::PlanningTurnLocks capability{nullkiller.get(), storageLock, gameStateLock, generation, {}, {}};
+	Nullkiller::PlanningTurnLocks capability{nullkiller.get(), storageLock, gameStateLock, generation, {}, {}, {}};
 	Nullkiller::planningTurnLocks = &capability;
 	auto clearCapability = vstd::makeScopeGuard([this]
 	{
@@ -882,13 +885,33 @@ void AIGateway::withPlanningRiskPreparation(std::shared_lock<std::shared_mutex> 
 		|| capability->prepareRisk)
 		throw std::logic_error("Risk preparation requires the gateway's owned planning locks");
 
-	capability->prepareRisk = [this, &gameStateLock]
+	capability->prepareRisk = [this, &gameStateLock, capability]
 	{
-		runPlanningRiskBestEffort([this, &gameStateLock] { preparePlanningRisk(gameStateLock); });
+		runPlanningRiskBestEffort([this, &gameStateLock, capability]
+		{
+			if(!capability->riskDecision)
+			{
+				const auto generation = capability->generation;
+				const auto epoch = nullkiller->planningRiskEpoch.load(std::memory_order_acquire);
+				auto settings = planningRiskSettings;
+				settings.availableThreads = std::thread::hardware_concurrency();
+				capability->riskDecision.emplace(settings, [this, generation, epoch]
+				{
+					// Workers may read only these atomics, never callbacks, status,
+					// live objects or the consuming ThreadInterruption flag.
+					return planningTurnGeneration.load(std::memory_order_acquire) != generation
+						|| nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch;
+				});
+			}
+			preparePlanningRisk(gameStateLock, *capability->riskDecision);
+		});
 	};
 	auto clearPreparation = vstd::makeScopeGuard([this, capability]
 	{
 		capability->prepareRisk = {};
+		if(capability->riskDecision)
+			capability->riskDecision->cancel();
+		capability->riskDecision.reset();
 		nullkiller->preparedPlanningRisk.store(
 			std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
 	});
@@ -916,18 +939,16 @@ void AIGateway::runPlanningRiskBestEffort(const std::function<void()> & prepare)
 		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
 }
 
-void AIGateway::preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameStateLock)
+std::vector<experimental::PlanningRiskCandidate> AIGateway::discoverPlanningRiskCandidates(
+	std::shared_lock<std::shared_mutex> & gameStateLock, const experimental::DecisionRiskBudget & decisionBudget)
 {
-	if(!gameStateLock.owns_lock() || gameStateLock.mutex() != &CGameState::mutex)
-		throw std::logic_error("Risk capture requires the actual held game-state lock");
-
-	// Never use omniscient/open-map callbacks, hidden object lookup, or path
-	// actors already adjusted by hypothetical exchanges/losses. This capture
-	// producer considers only visible ordinary neutral fights by current heroes.
-	if(!cc || cc->getPlayerID() != std::optional<PlayerColor>(playerID)
-		|| nullkiller->isOpenMap() || !status.haveTurn() || !status.isIdle())
-		return;
-	const auto turn = static_cast<uint64_t>(cc->getDate(Date::DAY));
+	const auto * capability = Nullkiller::planningTurnLocks;
+	if(!capability || capability->planner != nullkiller.get()
+		|| &capability->gameState != &gameStateLock || !gameStateLock.owns_lock()
+		|| gameStateLock.mutex() != &CGameState::mutex)
+		throw std::logic_error("Risk discovery requires the actual owned game-state lock");
+	if(decisionBudget.shouldStop() || !cc || cc->getPlayerID() != std::optional<PlayerColor>(playerID))
+		return {};
 	// The client dispatches before/after notifications OUTSIDE the game writer.
 	// Their AIMemory updates are not protected by this shared lock. Enumerate
 	// canonical visible map objects instead: game-state application writes that
@@ -936,24 +957,50 @@ void AIGateway::preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameSt
 	std::vector<std::pair<ObjectInstanceID, int3>> visibleNeutrals;
 	for(const auto * object : cc->getAllVisitableObjs())
 	{
+		if(decisionBudget.shouldStop())
+			return {};
 		const auto * target = dynamic_cast<const CGCreature *>(object);
-		if(target && target->ID == Obj::MONSTER && target->getOwner() == PlayerColor::NEUTRAL)
+		if(target && typeid(*target) == typeid(CGCreature) && target->ID == Obj::MONSTER
+			&& target->appearance && cc->getObj(target->id, false) == target
+			&& (target->getOwner() == PlayerColor::NEUTRAL || target->getOwner() == PlayerColor::UNFLAGGABLE))
 			visibleNeutrals.emplace_back(target->id, target->visitablePos());
 	}
 	std::vector<experimental::PlanningRiskCandidate> candidates;
 	for(const auto * hero : cc->getHeroesInfo())
 	{
-		if(!hero || hero->getOwner() != playerID || !hero->movementPointsRemaining()
+		if(decisionBudget.shouldStop())
+			return {};
+		if(!hero || !hero->appearance || hero->getOwner() != playerID || !hero->movementPointsRemaining()
 			|| cc->getObj(hero->id, false) != hero)
 			continue;
 		for(const auto & [targetID, targetPosition] : visibleNeutrals)
 		{
+			if(decisionBudget.shouldStop())
+				return {};
 			if(targetPosition.z != hero->visitablePos().z)
 				continue;
 			candidates.push_back({hero->id, targetID,
 				hero->visitablePos().dist(targetPosition, int3::DIST_MANHATTAN)});
 		}
 	}
+
+	return candidates;
+}
+
+void AIGateway::preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameStateLock,
+	const experimental::DecisionRiskBudget & decisionBudget)
+{
+	if(!gameStateLock.owns_lock() || gameStateLock.mutex() != &CGameState::mutex)
+		throw std::logic_error("Risk capture requires the actual held game-state lock");
+
+	// Never use omniscient/open-map callbacks, hidden object lookup, or path
+	// actors already adjusted by hypothetical exchanges/losses. This capture
+	// producer considers only visible ordinary neutral fights by current heroes.
+	if(decisionBudget.shouldStop() || !cc || cc->getPlayerID() != std::optional<PlayerColor>(playerID)
+		|| nullkiller->isOpenMap() || !status.haveTurn() || !status.isIdle())
+		return;
+	const auto turn = static_cast<uint64_t>(cc->getDate(Date::DAY));
+	auto candidates = discoverPlanningRiskCandidates(gameStateLock, decisionBudget);
 
 	// No pointer obtained above survives into the unlocked build. The closures
 	// resolve IDs afresh and are invoked only while the explicit lock is held.
@@ -966,19 +1013,27 @@ void AIGateway::preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameSt
 			if(!hero || !target || !hero->movementPointsRemaining()
 				|| hero->visitablePos().z != target->visitablePos().z)
 				return std::nullopt;
-			return experimental::captureNeutralRisk(*cc, *hero, *target, epoch);
+			auto request = experimental::captureNeutralRisk(*cc, *hero, *target, epoch);
+			if(!request || !experimental::captureNeutralLossPolicy(*nullkiller, *hero, *request))
+				return std::nullopt;
+			return request;
 		},
 		[this, turn]
 		{
 			return cc->getPlayerID() == std::optional<PlayerColor>(playerID)
 				&& !nullkiller->isOpenMap() && status.haveTurn() && status.isIdle()
 				&& static_cast<uint64_t>(cc->getDate(Date::DAY)) == turn;
-		});
+		}, [&decisionBudget](auto requests, uint64_t turn, unsigned, auto memo)
+		{
+			return experimental::PlanningRiskTable::buildDecision(
+				std::move(requests), turn, decisionBudget, std::move(memo));
+		}, &decisionBudget);
 }
 
 void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & gameStateLock,
 	uint64_t turn, std::vector<experimental::PlanningRiskCandidate> candidates,
-	const RiskCapture & capture, const std::function<bool()> & stillEligible, const RiskBuild & build)
+	const RiskCapture & capture, const std::function<bool()> & stillEligible, const RiskBuild & build,
+	const experimental::DecisionRiskBudget * decisionBudget)
 {
 	auto * capability = Nullkiller::planningTurnLocks;
 	if(!capability || capability->planner != nullkiller.get()
@@ -989,7 +1044,8 @@ void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & g
 
 	nullkiller->preparedPlanningRisk.store(
 		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
-	if(!stillEligible())
+	const auto stopped = [&] { return decisionBudget && decisionBudget->shouldStop(); };
+	if(stopped() || !stillEligible())
 		return;
 
 	const auto epoch = nullkiller->planningRiskEpoch.load(std::memory_order_acquire);
@@ -999,7 +1055,11 @@ void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & g
 	std::vector<experimental::PlanningRiskKey> keys;
 	for(const auto & candidate : selected)
 	{
+		if(stopped())
+			return;
 		auto request = capture(candidate, epoch);
+		if(stopped())
+			return;
 		if(!request || request->key.epoch != epoch || request->key.hero != candidate.hero
 			|| request->key.target != candidate.target || request->key.capturedState.empty())
 			continue;
@@ -1007,19 +1067,21 @@ void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & g
 		capturedCandidates.push_back(candidate);
 		requests.push_back(std::move(*request));
 	}
-	if(requests.empty())
+	if(requests.empty() || stopped())
 		return;
 
-	// Reserve the remaining turn budget before running any detached work. If a
-	// builder throws without returning accounting, conservatively consume it;
-	// retries must not silently create another 42-scenario allowance.
+	// Legacy fixtures reserve the remaining turn allowance on failure. Adaptive
+	// builds instead debit the shared decision token before each attempted draw;
+	// preserve those debits even if the builder throws or publication is stale.
 	const auto previousMemo = planningRiskMemo;
 	auto exceptionMemo = std::make_shared<experimental::PlanningRiskMemo>();
 	if(previousMemo && previousMemo->turn == turn)
 		*exceptionMemo = *previousMemo;
 	exceptionMemo->turn = turn;
-	exceptionMemo->consumedScenarios = experimental::PlanningRiskTable::MAX_SCENARIOS_PER_TURN;
-	planningRiskMemo = std::move(exceptionMemo);
+	if(!decisionBudget)
+		exceptionMemo->consumedScenarios = experimental::PlanningRiskTable::MAX_SCENARIOS_PER_TURN;
+	planningRiskMemo = exceptionMemo;
+	const auto drawsBefore = decisionBudget ? decisionBudget->drawsStarted() : 0;
 
 	std::shared_ptr<const experimental::PlanningRiskTable> table;
 	gameStateLock.unlock();
@@ -1034,27 +1096,43 @@ void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & g
 	catch(...)
 	{
 		gameStateLock.lock();
+		if(decisionBudget)
+			exceptionMemo->consumedScenarios = static_cast<unsigned>(std::min<uint64_t>(
+				uint64_t(exceptionMemo->consumedScenarios) + decisionBudget->drawsStarted() - drawsBefore,
+				std::numeric_limits<unsigned>::max()));
 		throw;
 	}
 	gameStateLock.lock();
-	if(!table)
-		return;
+	if(decisionBudget)
+		exceptionMemo->consumedScenarios = static_cast<unsigned>(std::min<uint64_t>(
+			uint64_t(exceptionMemo->consumedScenarios) + decisionBudget->drawsStarted() - drawsBefore,
+			std::numeric_limits<unsigned>::max()));
 
 	// Spent scenarios count even when subsequent visibility/epoch/key checks
 	// reject the table. This is turn-thread-only; never launch concurrent builds.
-	planningRiskMemo = table->memo();
+	if(table)
+	{
+		const auto returnedMemo = table->memo();
+		if(decisionBudget && (!returnedMemo || returnedMemo->turn != turn
+			|| returnedMemo->consumedScenarios < exceptionMemo->consumedScenarios))
+			table.reset(); // Retain charged attempts, reject malformed accounting.
+		else
+			planningRiskMemo = returnedMemo;
+	}
 	if(capability->ensureReady)
 		capability->ensureReady();
 	nullkiller->makingTurnInterruption.interruptionPoint();
-	if(nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch || !stillEligible())
+	if(!table || stopped() || nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch || !stillEligible())
 		return;
 	for(size_t index = 0; index < keys.size(); ++index)
 	{
+		if(stopped())
+			return;
 		auto current = capture(capturedCandidates[index], epoch);
-		if(!current || !(current->key == keys[index]))
+		if(stopped() || !current || !(current->key == keys[index]))
 			return; // All-or-nothing publication; unknown is not a penalty.
 	}
-	if(nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch || !stillEligible())
+	if(stopped() || nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch || !stillEligible())
 		return;
 
 	auto publication = std::make_shared<Nullkiller::PreparedPlanningRisk>();
@@ -1065,7 +1143,7 @@ void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & g
 		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>(std::move(publication)), std::memory_order_release);
 	// Client notifications run outside the game-state writer. Close their
 	// invalidate-before-store race using the independently atomic risk epoch.
-	if(nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch)
+	if(stopped() || nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch)
 		nullkiller->preparedPlanningRisk.store(
 			std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
 }
@@ -1173,6 +1251,7 @@ void AIGateway::pickBestCreatures(const CArmedInstance * destinationArmy, const 
 {
 	if(source->stacksCount() == 0)
 		return;
+	nullkiller->invalidatePlanningRisk();
 
 	const CArmedInstance * armies[] = {destinationArmy, source};
 

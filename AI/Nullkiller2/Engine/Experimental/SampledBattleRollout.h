@@ -1,5 +1,6 @@
 /* GPL-2.0-or-later; see license.txt. Experimental, not production-wired. */
 #pragma once
+#include <functional>
 #include "../../../../lib/battle/BattleSide.h"
 #include "../../../../lib/constants/EntityIdentifiers.h"
 VCMI_LIB_NAMESPACE_BEGIN
@@ -34,5 +35,5 @@ struct SampledBattleOutcome
 // Samples use fresh independent bias history, not authoritative game RNG state.
 // A small collection of policy outcomes is NOT a calibrated win probability.
 SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
-	const IGameInfoCallback & frozenSettings, int seed, std::vector<std::string> * trace = nullptr);
+	const IGameInfoCallback & frozenSettings, int seed, std::vector<std::string> * trace = nullptr, const std::function<bool()> * shouldStop = nullptr);
 }

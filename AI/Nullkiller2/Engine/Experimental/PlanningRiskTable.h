@@ -2,11 +2,14 @@
 #pragma once
 #include "PlanningBattleSnapshot.h"
 #include "SampledBattleRollout.h"
+#include "PlanningRiskEvidence.h"
+#include "DecisionRiskBudget.h"
 
 VCMI_LIB_NAMESPACE_BEGIN
 class CGameInfoCallback;
 VCMI_LIB_NAMESPACE_END
 
+namespace NK2AI { class PlanningRiskConsumerRegressionAccess; }
 namespace NK2AI::experimental
 {
 // Rebuilt for each planning epoch, never reused across a server-state update.
@@ -41,6 +44,7 @@ struct CapturedRiskRequest
 	PlanningRiskKey key;
 	std::string physicsState;
 	bool unmodelledOwnMagic = false;
+	double contextualLossTolerance = -1;
 	// Every compatible visible battlefield must be represented, not a random
 	// single field. More than the fixed variant budget produces no forecast.
 	std::vector<std::unique_ptr<PlanningBattleSnapshot>> variants;
@@ -56,16 +60,28 @@ struct PlanningRiskRoute
 	bool usesCurrentHeroArmy = false;
 	uint64_t earlierArmyLoss = 0;
 	uint32_t spentMana = 0;
+	uint64_t earlierDanger = 0;
+	bool knownEarlierDanger = false;
 };
 
 struct PlanningRiskRecord
 {
 	std::vector<SampledBattleOutcome> scenarios;
+	std::vector<std::vector<SampledBattleOutcome>> variantScenarios;
+	bool decisionEvidence = false;
+	RiskAssessment assess(double contextualLossTolerance, bool permitDefeatRecommendation) const;
+	double worstSampledLoss() const;
+	// Frozen once per publication, never recompute numerical bounds in path workers.
+	RiskAssessment contextualAssessment;
+	double contextualWorstLoss = 1;
+	bool contextualSummaryReady = false;
+	void finalizeDecisionSummary();
 	uint64_t elapsedMicroseconds = 0;
 	bool allScenariosFinished = false;
 	bool reused = false;
 	// A no-spell defeat/high loss cannot veto a plausible magic-assisted fight.
 	bool unmodelledOwnMagic = false;
+	double contextualLossTolerance = -1;
 };
 
 struct PlanningRiskMemo
@@ -77,24 +93,28 @@ struct PlanningRiskMemo
 
 // Immutable after construction; concurrent path readers require no mutex.
 // Capture and source revalidation/publication are caller responsibilities.
-// build() reads ONLY owned snapshots and must run without live game/AI locks.
+// Builders read ONLY owned snapshots and must run without live game/AI locks.
+// The deadline builder may run fewer than all admitted contexts to completion.
 // Scheduler serializes builds using the latest same-turn memo, including when
 // publication is rejected: spent computation cannot be refunded by a stale key.
 class PlanningRiskTable
 {
+	friend class NK2AI::PlanningRiskConsumerRegressionAccess;
 	std::map<PlanningRiskKey, PlanningRiskRecord> entries;
 	PlanningRiskTable() = default;
 	std::shared_ptr<const PlanningRiskMemo> memoState;
 	unsigned computedScenarios = 0;
 public:
 	static constexpr size_t MAX_REQUESTS = 7;
-	static constexpr size_t MAX_VARIANTS = 2;
+	static constexpr size_t MAX_VARIANTS = 3;
 	static constexpr size_t SAMPLES_PER_VARIANT = 3;
 	static constexpr size_t MAX_MEMO_ENTRIES = 32;
 	static constexpr unsigned MAX_SCENARIOS_PER_TURN = 42;
 	static std::shared_ptr<const PlanningRiskTable> build(std::vector<CapturedRiskRequest> requests,
 		uint64_t turn = 0, unsigned remainingTurnScenarios = MAX_SCENARIOS_PER_TURN,
 		std::shared_ptr<const PlanningRiskMemo> previousMemo = {});
+	static std::shared_ptr<const PlanningRiskTable> buildDecision(std::vector<CapturedRiskRequest> requests,
+		uint64_t turn, const DecisionRiskBudget & budget, std::shared_ptr<const PlanningRiskMemo> previousMemo = {});
 	unsigned scenariosUsed() const { return computedScenarios; }
 	std::shared_ptr<const PlanningRiskMemo> memo() const { return memoState; }
 	const PlanningRiskRecord * find(const PlanningRiskKey & exactCurrentKey,

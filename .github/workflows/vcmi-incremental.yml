@@ -53,6 +53,9 @@ jobs:
         python3 -m unittest discover -s CI -p "test_adventure_bridge_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_defend_qualification.py" -v
         python3 -m unittest discover -s CI -p "test_adventure_interaction_qualification.py" -v
+        python3 -m unittest discover -s CI -p "test_adventure_holdout_qualification.py" -v
+        python3 -m unittest discover -s CI -p "test_adventure_path_risk_qualification.py" -v
+        python3 -m unittest discover -s CI -p "test_decision_holdout_evidence.py" -v
         python3 -m unittest discover -s test/adventure -p "test_interaction_maps.py" -v
         python3 -m unittest discover -s CI -p "test_forced_battle_evidence.py" -v
         python3 -m unittest discover -s CI -p "test_compiler_recovery.py" -v
@@ -340,6 +343,11 @@ jobs:
       if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
       timeout-minutes: 2
       run: python3 CI/adventure_defend_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/forced-defend --reference-evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
+    - name: Record independent bounded decision holdouts with the verified reference binary
+      id: decision_holdouts
+      if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
+      timeout-minutes: 2
+      run: python3 CI/adventure_holdout_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/decision-holdouts --reference-evidence incremental-evidence/forced-battle --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
     - name: Qualify bounded real planner turns on public synthetic maps
       if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
       timeout-minutes: 15
@@ -357,6 +365,15 @@ jobs:
         export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
         python3 CI/adventure_interaction_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/adventure-interaction --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
         ccache --print-stats > incremental-evidence/adventure-interaction/ccache-after.tsv
+    - name: Qualify bounded actual-pathfinder publication protocol
+      id: path_risk_reference
+      if: ${{ !cancelled() && steps.ordinary_regressions.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') }}
+      timeout-minutes: 11
+      run: |
+        export CCACHE_DIR="$HOME/.cache/vcmi-incremental/linux-gcc-test"
+        export CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+        python3 CI/adventure_path_risk_qualification.py --build out/build/linux-gcc-test --evidence incremental-evidence/path-risk --cache-validation incremental-evidence/cache-validation.json --data-archive .ci/test-data/heroes3.7z
+        ccache --print-stats > incremental-evidence/path-risk/ccache-after.tsv
     - name: Snapshot only successful build outputs, with bounded upload size
       run: |
         python3 CI/incremental_cache.py snapshot --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/linux-gcc-test" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/cache-toolchain-identity.json

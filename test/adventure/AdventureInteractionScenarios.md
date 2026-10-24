@@ -101,3 +101,21 @@ urgency horizon, so the draft explicitly uses three red turns. If actual path
 costs do not produce the declared day2/day3 transition, reject fixture validity
 rather than changing an expectation to match the candidate. Early mine capture
 is likewise not poor play; it means this fixture cannot demonstrate later recovery.
+
+## Native transaction evidence and neutral-owner correction
+
+The corrected-budget run executed real urgent recruitment, garrison exchange and
+resource/stock accounting successfully, then stopped at the day1 mine-neutrality
+assertion: owner was UNFLAGGABLE instead of NEUTRAL. The object was a genuine gold
+mine, not a resource. Explicit owner="neutral" is not registered by
+IdentifierStorage.cpp31-32, so JsonSerializeFormat.h321-328 did not replace the
+CGObjectInstance constructor's UNFLAGGABLE owner. The native serializer's neutral
+default is selected by omitting owner (CGObjectInstance::serializeJsonOwner and
+JsonSerializeFormat's empty-field branch).
+
+Qualification5 changes only this interaction objective's options to {}, asserts
+that exact omission in generation tests, and verifies actual CGMine type, gold
+production, empty army and NEUTRAL ownership before any planner turn. Owned town
+and observer preconditions are explicit too. Day1/day2 NEUTRAL and day3 RED
+assertions remain unchanged. Prior failed evidence is retained; later retreat,
+threat-transition and recovery behavior remains unexecuted.

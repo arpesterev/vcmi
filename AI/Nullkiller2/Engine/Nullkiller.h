@@ -15,6 +15,7 @@
 #include "AIMemory.h"
 #include "DeepDecomposer.h"
 #include "Experimental/PlanningRiskTable.h"
+#include "Experimental/DecisionRiskBudget.h"
 #include "../Analyzers/DangerHitMapAnalyzer.h"
 #include "../Analyzers/BuildAnalyzer.h"
 #include "../Analyzers/ArmyManager.h"
@@ -84,6 +85,7 @@ class Nullkiller
 {
 	friend class PlannerRegressionAccess;
 	friend class PlanningRiskSchedulerRegressionAccess;
+	friend class PlanningRiskConsumerRegressionAccess;
 	friend class AIGateway;
 private:
 	const CGHeroInstance * activeHero;
@@ -122,6 +124,7 @@ private:
 		uint64_t generation;
 		std::function<void()> ensureReady;
 		std::function<void()> prepareRisk;
+		std::optional<experimental::DecisionRiskBudget> riskDecision;
 	};
 	// The capability and callbacks never cross thread boundaries. Other threads
 	// see their own null capability, including while the owning scope tears down.
@@ -138,6 +141,7 @@ private:
 	std::atomic<std::shared_ptr<const PreparedPlanningRisk>> preparedPlanningRisk;
 	void invalidatePlanningRisk();
 	void preparePlanningRiskForStateUpdate();
+	void finishPlanningRiskDecision();
 	PathfinderSettings getPathfinderSettings() const;
 	void beginPlanningTurn();
 	bool expandSearch();
@@ -146,6 +150,11 @@ private:
 
 public:
 	static std::unique_ptr<ObjectGraph> baseGraph;
+	// Immutable aliasing ownership keeps a record alive across parallel readers.
+	// Current game-lock ownership and route provenance remain caller obligations.
+	bool hasPlanningRisk() const;
+	std::shared_ptr<const experimental::PlanningRiskRecord> findPlanningRisk(
+		ObjectInstanceID hero, ObjectInstanceID target, const experimental::PlanningRiskRoute & route) const;
 
 	std::unique_ptr<DangerHitMapAnalyzer> dangerHitMap;
 	std::unique_ptr<BuildAnalyzer> buildAnalyzer;

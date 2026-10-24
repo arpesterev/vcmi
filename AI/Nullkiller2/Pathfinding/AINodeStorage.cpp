@@ -869,6 +869,7 @@ void HeroChainCalculationTask::addHeroChain(const std::vector<ExchangeCandidate>
 		exchangeNode->chainOther = other;
 		exchangeNode->armyLoss = chainInfo.armyLoss;
 		exchangeNode->arrivalArmyLoss = chainInfo.armyLoss;
+		exchangeNode->arrivalDanger = chainInfo.danger;
 
 #if NK2AI_PATHFINDER_TRACE_LEVEL >= 2
 		logAi->trace(
@@ -1539,6 +1540,7 @@ uint64_t AIPath::remainingArmy(uint64_t strength, uint64_t loss)
 
 void AIPath::setDangerProvenance(uint64_t destinationDanger, uint64_t routeDanger)
 {
+	hasEarlierDangerProvenance = false;
 	destinationObjectDanger = destinationDanger;
 	targetObjectDanger = std::max(destinationDanger, routeDanger);
 	hasDestinationRiskProvenance = true;
@@ -1548,6 +1550,8 @@ void AIPath::setRiskProvenance(const AIPathNode & destination, uint64_t destinat
 {
 	setDangerProvenance(destinationDanger, routeDanger);
 	armyLoss = destinationDanger > 0 ? destination.arrivalArmyLoss : destination.armyLoss;
+	beforeDestinationDanger = destinationDanger > 0 ? destination.arrivalDanger : destination.danger;
+	hasEarlierDangerProvenance = true;
 	destinationHeroManaCost = destination.actor && destination.actor->hero == targetHero
 		? std::max<int32_t>(0, destination.manaCost) : 0;
 }

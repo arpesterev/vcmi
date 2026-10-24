@@ -16,6 +16,23 @@ import xml.etree.ElementTree as ET
 
 OBJECT = re.compile(r'Building (?:CXX|C|ASM) (?:object|precompiled header)\s+(.+\.(?:o|obj|gch|pch))\s*$')
 ALLOWED = re.compile(r'^(?:server/CMakeFiles/vcmiservercommon(?:_battles|_queries|_processors)?\.dir/|test/CMakeFiles/vcmi_forced_battle_reference\.dir/)')
+# Required even before the decision model is eligible for production activation.
+# Independent holdouts must bind the exact linked producer and deadline policy.
+RISK_BUILD_SOURCES = (
+    'AI/Nullkiller2/Engine/Experimental/PlanningRiskDecision.cpp',
+    'AI/Nullkiller2/Engine/Experimental/PlanningRiskDecision.h',
+    'AI/Nullkiller2/Engine/Experimental/DecisionRiskBudget.h',
+    'AI/Nullkiller2/Engine/Experimental/PlanningRiskEvidence.h',
+    'AI/Nullkiller2/Engine/Experimental/PlanningRiskTable.cpp',
+    'AI/Nullkiller2/Engine/Experimental/PlanningRiskTable.h',
+    'AI/Nullkiller2/Engine/Experimental/PlanningBattleSnapshot.h',
+    'AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.h',
+    'AI/Nullkiller2/AIGateway.cpp', 'AI/Nullkiller2/AIGateway.h',
+    'AI/Nullkiller2/Engine/Nullkiller.cpp', 'AI/Nullkiller2/Engine/Nullkiller.h',
+    'AI/Nullkiller2/Engine/ArmyLossPolicy.h',
+    'AI/Nullkiller2/Engine/Settings.cpp', 'AI/Nullkiller2/Engine/Settings.h',
+    'config/ai/nk2ai/nk2ai-settings.json',
+)
 
 
 def validate_plan(text, limit):
@@ -137,7 +154,7 @@ def main():
                      'AI/Nullkiller2/Engine/Experimental/PlanningBattleSnapshot.cpp',
                      'AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.cpp',
                      'test/testdata/MiniTest/header.json', 'test/testdata/MiniTest/objects.json',
-                     'test/testdata/MiniTest/surface_terrain.json']
+                     'test/testdata/MiniTest/surface_terrain.json', *RISK_BUILD_SOURCES]
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True, timeout=10).strip()
     result = {'status': 'incomplete', 'target': target, 'cold_fallback': False,
               'source_commit': commit, 'baseline_commit': '8fda7bdc69887e8c86d27a149681fc598c3cd8d1',

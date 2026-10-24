@@ -1,4 +1,5 @@
 set(Nullkiller2_SRCS
+		Engine/Experimental/PlanningRiskDecision.cpp
 		Engine/Experimental/PlanningBattleSnapshot.cpp
 		Engine/Experimental/SampledBattleRollout.cpp
 		Engine/Experimental/PlanningRiskTable.cpp
@@ -73,6 +74,10 @@ set(Nullkiller2_SRCS
 )
 
 set(Nullkiller2_HEADERS
+		Engine/ArmyLossPolicy.h
+		Engine/Experimental/PlanningRiskDecision.h
+		Engine/Experimental/DecisionRiskBudget.h
+		Engine/Experimental/PlanningRiskEvidence.h
 		Engine/Experimental/PlanningBattleSnapshot.h
 		Engine/Experimental/SampledBattleRollout.h
 		Engine/Experimental/PlanningRiskTable.h

@@ -45,7 +45,7 @@
   "files": [
     {
       "path": "test/battle/ForcedBattleReference.cpp",
-      "sha256": "c7dc69c938bf6621448ba32ffa0d12f338682c7485fc9c23e018a5c6d3f19423"
+      "sha256": "8c104cfd9c5bd1dc1ae8723f1d404797aa925ef1dd84a5666dcfdb25675def1e"
     },
     {
       "path": "test/battle/ForcedBattleStage3.md",
@@ -61,7 +61,7 @@
     },
     {
       "path": "AI/Nullkiller2/Engine/Experimental/SampledBattleRollout.h",
-      "sha256": "e6a9490997954fff318cc862d4b0370ed8cae1f0d3750bba201571075d223d25"
+      "sha256": "44b3badb396bf582db6910ce0b16d89fcdc2b2e9d84207226df5374ba0abca3b"
     }
   ]
 }

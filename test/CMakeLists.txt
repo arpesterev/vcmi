@@ -169,6 +169,9 @@ if(ENABLE_NULLKILLER2_AI AND ENABLE_STATIC_LIBS)
 		nullkiller2/PlanningRiskTableTest.cpp
 		nullkiller2/PlanningRiskEvidenceTest.cpp
 		nullkiller2/PlanningRiskSchedulerRegression.cpp
+		nullkiller2/DecisionRiskBudgetTest.cpp
+		nullkiller2/PlanningRiskDecisionTest.cpp
+		nullkiller2/PlanningRiskConsumerRegression.cpp
 		nullkiller2/AdventureBattleRiskRegression.cpp
 		nullkiller2/TownDefenceRegression.cpp
 		nullkiller2/JointTownDefenceRegression.cpp
@@ -308,6 +311,9 @@ endforeach()
 
 # Asset-free actual planner-turn evidence, explicitly built only.
 include(adventure/AdventureScenarioReference.cmake)
+
+# Injected-publication protocol through the real pathfinder, explicitly built only.
+include(adventure/AdventurePathRiskReference.cmake)
 
 # Independent, explicitly built three-turn defence/transaction evidence.
 include(adventure/AdventureInteractionReference.cmake)

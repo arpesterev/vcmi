@@ -11,6 +11,7 @@
 #include <limits>
 
 #include "Nullkiller.h"
+#include "ArmyLossPolicy.h"
 #include "../../../lib/entities/artifact/CArtifact.h"
 #include "../../../lib/entities/ResourceTypeHandler.h"
 #include "../../../lib/mapObjects/CGResource.h"
@@ -1424,10 +1425,8 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 		float score = 0;
 
 		// TODO: Mircea: Shouldn't it default to 0 instead of 1.0 in the end?
-		const float maxWillingToLose = amIWithoutCastle ? 1
-									 : aiNk->settings->getMaxArmyLossTarget() * evaluationContext.powerRatio > 0
-										 ? aiNk->settings->getMaxArmyLossTarget() * evaluationContext.powerRatio
-										 : 1.0;
+		const float maxWillingToLose = maxWillingArmyLoss(aiNk->settings->getMaxArmyLossTarget(),
+			evaluationContext.powerRatio, amIWithoutCastle);
 		const float maxEnemyDangerRatio = evaluationContext.powerRatio > 0 ? evaluationContext.powerRatio : 1.0;
 		const bool arriveNextWeek = aiNk->cc->getDate(Date::DAY_OF_WEEK) + evaluationContext.turn > LIBRARY->engineSettings()->getInteger(EGameSettings::GENERAL_DAYS_PER_WEEK);
 

@@ -88,7 +88,7 @@ public:
 		RiskAssessment result;
 		result.samples = static_cast<unsigned>(outcomes.size());
 		if(unsupported || !std::isfinite(contextualLossTolerance) || contextualLossTolerance < 0.0
-			|| contextualLossTolerance > 1.0 || visibleVariants < 1 || visibleVariants > 2
+			|| contextualLossTolerance > 1.0 || visibleVariants < 1 || visibleVariants > 3
 			|| !std::isfinite(maxAdverseFrequency) || maxAdverseFrequency < 0.0 || maxAdverseFrequency > 1.0
 			|| std::find(CHECKPOINTS.begin(), CHECKPOINTS.end(), result.samples) == CHECKPOINTS.end())
 			return result;

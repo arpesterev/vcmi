@@ -44,6 +44,7 @@ struct AIPathNode : public CGPathNode
 	// Loss accumulated before entering this tile; unlike the compressed predecessor.
 	uint64_t armyLoss;
 	uint64_t arrivalArmyLoss = 0;
+	uint64_t arrivalDanger = 0;
 	uint32_t version;
 
 	int32_t manaCost;
@@ -55,6 +56,7 @@ struct AIPathNode : public CGPathNode
 	{
 		armyLoss = source.armyLoss;
 		arrivalArmyLoss = source.armyLoss;
+		arrivalDanger = source.danger;
 		manaCost = source.manaCost;
 		danger = source.danger;
 	}
@@ -69,6 +71,7 @@ struct AIPathNode : public CGPathNode
 		specialAction.reset();
 		armyLoss = 0;
 		arrivalArmyLoss = 0;
+		arrivalDanger = 0;
 		chainOther = nullptr;
 		dayFlags = DayFlags::NONE;
 		this->layer = layer;
@@ -98,6 +101,8 @@ struct AIPath
 	// Legacy maximum including route guards. Do not use as destination-only danger.
 	uint64_t targetObjectDanger = 0;
 	uint64_t destinationObjectDanger = 0;
+	uint64_t beforeDestinationDanger = 0;
+	bool hasEarlierDangerProvenance = false;
 	int32_t destinationHeroManaCost = 0;
 	bool hasDestinationRiskProvenance = false;
 	uint64_t armyLoss = 0;

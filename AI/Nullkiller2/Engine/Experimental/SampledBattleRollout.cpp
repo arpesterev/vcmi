@@ -223,7 +223,7 @@ public:
 }
 
 SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
-	const IGameInfoCallback & frozenSettings, int seed, std::vector<std::string> * trace)
+	const IGameInfoCallback & frozenSettings, int seed, std::vector<std::string> * trace, const std::function<bool()> * shouldStop)
 {
 	SampledBattleOutcome result;
 	if(!initial.getBattle() || initial.battleGetDefendedTown() || initial.battleTacticDist() || initial.battleGetRound() > 1
@@ -263,6 +263,12 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 		for(auto & unit : battle.units) unit->afterNewRound();
 		while(!battle.finished() && result.actions < MAX_ACTIONS)
 		{
+			if(shouldStop && (*shouldStop)())
+			{
+				result.status = SampledBattleStatus::BUDGET_EXHAUSTED;
+				result.unsupportedReason = "decision cancelled or deadline reached";
+				return result;
+			}
 			// Recompute after every action: a killed equal-speed stack must not
 			// influence later side-alternation ties in a stale round queue.
 			std::vector<battle::Units> queue;

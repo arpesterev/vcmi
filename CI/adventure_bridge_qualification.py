@@ -84,12 +84,14 @@ def map_hashes(build):
     return hashes, provenance
 
 
-def execute_cases(executable, evidence, cwd, run_case=run, clock=time.monotonic, cases=CASES):
-    """Collect independent failures without extending the shared 600-second cap."""
+def execute_cases(executable, evidence, cwd, run_case=run, clock=time.monotonic, cases=CASES, total_seconds=600):
+    """Collect independent failures within the selected shared cap, never over 600s."""
+    if type(total_seconds) is not int or not 0 < total_seconds <= 600:
+        raise ValueError('Execution budget must be a positive integer no greater than 600 seconds')
     started = clock()
     results = []
     for index, case in enumerate(cases):
-        remaining = 600 - (clock() - started)
+        remaining = total_seconds - (clock() - started)
         record = {'test': case, 'status': 'incomplete', 'attempted': False}
         results.append(record)
         if remaining <= 0:

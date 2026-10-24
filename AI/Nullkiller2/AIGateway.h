@@ -208,6 +208,7 @@ private:
 	// Source invalidation removes publications, not exact-physics memo entries.
 	std::shared_ptr<const experimental::PlanningRiskMemo> planningRiskMemo;
 	std::atomic<uint64_t> planningTurnGeneration{0};
+	experimental::DecisionRiskBudget::Settings planningRiskSettings;
 	void makeTurn(uint64_t generation);
 	void checkPlanningGeneration(uint64_t generation) const;
 	void ensurePlanningTurnReady(std::shared_lock<std::shared_mutex> & gameStateLock, uint64_t generation);
@@ -216,12 +217,16 @@ private:
 		const std::function<void(bool)> & onStorageContention = {});
 	void withPlanningRiskPreparation(std::shared_lock<std::shared_mutex> & gameStateLock,
 		const std::function<void()> & runTurn);
-	void preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameStateLock);
+	std::vector<experimental::PlanningRiskCandidate> discoverPlanningRiskCandidates(
+		std::shared_lock<std::shared_mutex> & gameStateLock, const experimental::DecisionRiskBudget & decisionBudget);
+	void preparePlanningRisk(std::shared_lock<std::shared_mutex> & gameStateLock,
+		const experimental::DecisionRiskBudget & decisionBudget);
 	void runPlanningRiskBestEffort(const std::function<void()> & prepare);
 	void preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & gameStateLock,
 		uint64_t turn, std::vector<experimental::PlanningRiskCandidate> candidates,
 		const RiskCapture & capture, const std::function<bool()> & stillEligible,
-		const RiskBuild & build = experimental::PlanningRiskTable::build);
+		const RiskBuild & build = experimental::PlanningRiskTable::build,
+		const experimental::DecisionRiskBudget * decisionBudget = nullptr);
 	void invalidatePlanningData();
 };
 
