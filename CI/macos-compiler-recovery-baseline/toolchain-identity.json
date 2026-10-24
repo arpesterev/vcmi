@@ -1,0 +1,29 @@
+{
+  "arch": "arm64",
+  "bootstrap_compiler": "Apple clang version 17.0.0 (clang-1700.6.3.2)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_26.2.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+  "build_contract_sha256": "0176e47377624539d2ceed3edb01d4025231b9229ac6f3ff8959b0e21e1cc656",
+  "cache_protocol_sha256": "17a4da5ced00401387fbc02e681340b12ed62b5ab4a08bad87cd4bf432e63b06",
+  "ccache": "ccache version 4.14\nFeatures: crsh-storage file-storage http-storage redis+unix-storage redis-storage remote-storage\n\nCopyright (C) 2002-2007 Andrew Tridgell\nCopyright (C) 2009-2026 Joel Rosdahl and other contributors\n\nSee <https://ccache.dev/credits.html> for a complete list of contributors.\n\nThis program is free software; you can redistribute it and/or modify it under\nthe terms of the GNU General Public License as published by the Free Software\nFoundation; either version 3 of the License, or (at your option) any later\nversion.",
+  "ccache_sha256": "20a5a62f4ae58fd530a64a837bf58212ddb9d339f90f8f8098bb4451a2b22adc",
+  "cmake": "cmake version 4.4.3\n\nCMake suite maintained and supported by Kitware (kitware.com/cmake).",
+  "compiler_sha256": "be5518e9c6736cda8dfc3486ce11e8112a2e08045084260691cf41f57a653f59",
+  "conan_generated_sha256": "c2db6e04a52ab81c4257a460342610ec159fbffe08f5b47f1b9c3898207a77b7",
+  "conan_packages_sha256": "62e573deed368866aeb844145af5268420592ec49783afb934d81e99e19be3d4",
+  "conan_version": "2.33.0",
+  "conanfile_sha256": {
+    "/Users/runner/work/vcmi/vcmi/conanfile.py": "d3f8228d0bad0ebc5ad4d9b8519ee032d3d778bdcd76af1dd50588118bb95475"
+  },
+  "dependency_archive_sha256": "88c0a27d137ae27cc86da5762d9f50c9080be13380afd2b416de3335a4ac8dd0",
+  "dependency_commit": "2e1924490c80547a8f85ed88aca29223057e832b",
+  "home": "/Users/runner",
+  "ninja": "1.13.2",
+  "os": "Darwin",
+  "presets_sha256": "36a767b1818e854f5634055067fe63a9c602939a3bcd6b8d545da05efa8c0cd1",
+  "profile": "macos-arm-conan-ninja-release",
+  "runner_image": "20260907.0337.1",
+  "schema": 1,
+  "sdk": "26.2",
+  "sdk_path": "/Applications/Xcode_26.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+  "workspace": "/Users/runner/work/vcmi/vcmi",
+  "xcode": "Xcode 26.2\nBuild version 17C52"
+}

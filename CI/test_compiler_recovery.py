@@ -580,8 +580,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('key: ${{ steps.cache.outputs.cache-primary-key }}', full_save)
 
     def test_recovery_is_linux_only_and_is_tested_in_preflight(self):
-        self.assertNotIn('compiler_recovery.py', self.macos)
-        self.assertNotIn('vcmi-compiler-v1', self.macos)
+        self.assertNotIn('python3 CI/compiler_recovery.py ', self.macos)
+        self.assertNotIn('vcmi-compiler-v1-linux-', self.macos)
         self.assertIn('python3 -m unittest discover -s CI -p "test_compiler_recovery.py" -v',
                       self.workflow.split('  linux:\n', 1)[0])
 

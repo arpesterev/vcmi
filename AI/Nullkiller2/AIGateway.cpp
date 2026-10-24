@@ -867,7 +867,7 @@ void AIGateway::withPlanningTurnLocks(
 	checkPlanningGeneration(generation);
 	Nullkiller::PlanningTurnLocks capability{nullkiller.get(), storageLock, gameStateLock, generation, {}, {}, {}};
 	Nullkiller::planningTurnLocks = &capability;
-	auto clearCapability = vstd::makeScopeGuard([this]
+	auto clearCapability = vstd::makeScopeGuard([]
 	{
 		Nullkiller::planningTurnLocks = nullptr;
 	});

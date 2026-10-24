@@ -60,6 +60,7 @@ jobs:
         python3 -m unittest discover -s test/adventure -p "test_interaction_maps.py" -v
         python3 -m unittest discover -s CI -p "test_forced_battle_evidence.py" -v
         python3 -m unittest discover -s CI -p "test_compiler_recovery.py" -v
+        python3 -m unittest discover -s CI -p "test_macos_compiler_recovery.py" -v
         python3 -m unittest discover -s CI -p "test_linux_cache_compatibility.py" -v
         bash -n CI/incremental-build.sh
         python3 -m py_compile CI/incremental*.py
@@ -537,6 +538,7 @@ jobs:
           .ci/conan-tool
         key: ${{ steps.deps.outputs.cache-primary-key }}
     - name: Verify cached state and restore timestamps by content, never by pathname alone
+      id: verified_cache
       run: |
         start=$(date +%s)
         python3 CI/incremental_identity.py macos-arm-conan-ninja-release --installed --output incremental-evidence/toolchain-identity.json
@@ -545,6 +547,32 @@ jobs:
           python3 CI/incremental_cache.py restore --source-root "$GITHUB_WORKSPACE" --build-dir "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release" --state "$GITHUB_WORKSPACE/.ci/incremental-state.json" --fingerprint incremental-evidence/toolchain-identity.json --external-root "$HOME/.conan2/p" --external-root "$GITHUB_WORKSPACE/conan-generated" | tee incremental-evidence/cache-validation.json
         fi
         printf '%s\n' "$(( $(date +%s)-start ))" > incremental-evidence/cache-verification-seconds.txt
+    - name: Prepare exact installed Mac identity and prove native compiler recovery
+      id: mac_compiler_scope
+      if: steps.verified_cache.outcome == 'success' && startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]')
+      timeout-minutes: 2
+      run: |
+        command -v ccache >/dev/null
+        xcrun --find clang++ >/dev/null
+        python3 -c 'import sys; assert sys.platform == "darwin"'
+        python3 CI/macos_compiler_recovery.py prepare --identity incremental-evidence/toolchain-identity.json --validation incremental-evidence/cache-validation.json --report incremental-evidence/mac-compiler-recovery-scope.json --github-output "$GITHUB_OUTPUT"
+        python3 -m unittest discover -s CI -p 'test_macos_compiler_recovery.py' -v > incremental-evidence/mac-compiler-recovery-tests.log 2>&1
+    - name: Restore optional exact-identity Mac compiler entries only
+      id: mac_compiler_cache
+      if: steps.mac_compiler_scope.outcome == 'success'
+      timeout-minutes: 3
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      env:
+        TAR_OPTIONS: --same-permissions
+      with:
+        path: ~/.cache/vcmi-incremental/macos-arm-conan-ninja-release
+        key: vcmi-compiler-v1-macos-${{ steps.mac_compiler_scope.outputs.fingerprint }}-${{ hashFiles('CI/macos_compiler_recovery.py', 'CI/compiler_recovery.py') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: vcmi-compiler-v1-macos-${{ steps.mac_compiler_scope.outputs.fingerprint }}-${{ hashFiles('CI/macos_compiler_recovery.py', 'CI/compiler_recovery.py') }}-
+    - name: Validate Mac compiler recovery content before use
+      id: mac_compiler_ready
+      if: steps.mac_compiler_scope.outcome == 'success'
+      timeout-minutes: 3
+      run: python3 CI/macos_compiler_recovery.py check --identity incremental-evidence/toolchain-identity.json --validation incremental-evidence/cache-validation.json --report incremental-evidence/mac-compiler-recovery-restored.json
     - name: Build affected Ninja targets and prove immediate no-op
       id: build
       timeout-minutes: ${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') && 65 || 20 }}
@@ -579,6 +607,18 @@ jobs:
           .ci/incremental-state.json
           ~/.cache/vcmi-incremental/macos-arm-conan-ninja-release
         key: ${{ steps.cache.outputs.cache-primary-key }}
+    - name: Bound and validate completed Mac compiler entries even after build failure
+      id: mac_compiler_save_ready
+      if: always() && !cancelled() && steps.verified_cache.outcome == 'success' && steps.mac_compiler_ready.outcome == 'success' && (steps.build.outcome == 'success' || steps.build.outcome == 'failure')
+      timeout-minutes: 4
+      run: python3 CI/macos_compiler_recovery.py bound --identity incremental-evidence/toolchain-identity.json --validation incremental-evidence/cache-validation.json --baseline incremental-evidence/mac-compiler-recovery-restored.json --report incremental-evidence/mac-compiler-recovery-save.json --github-output "$GITHUB_OUTPUT"
+    - name: Retain successful Mac compiler entries without promoting incomplete build state
+      if: always() && !cancelled() && steps.mac_compiler_save_ready.outcome == 'success' && steps.mac_compiler_save_ready.outputs.save-needed == 'true'
+      timeout-minutes: 3
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: ~/.cache/vcmi-incremental/macos-arm-conan-ninja-release
+        key: ${{ steps.mac_compiler_cache.outputs.cache-primary-key }}
     - name: Package app without DMG/XProtect workaround
       working-directory: out/build/macos-arm-conan-ninja-release
       run: |
