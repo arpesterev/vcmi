@@ -99,3 +99,29 @@ RemoveObject now sends visible-object removal notifications before actual state
 delete, then after-removal notification and path invalidation. Boat removal remains
 unsupported. The bridge does not reproduce the graphical client's hidden enemy
 hero deletion notification exception, so it grants no extra map knowledge.
+
+## Known guardian versus surprise resource guards
+
+The next executed run passed callback movement, mine capture and the multi-turn
+mine case. The original blocked-alternative fixture entered a guarded resource
+battle and remained unsupported, not passed. Its main hero (ID 1, Christian,
+20 pikemen) moved anchors (5,5) -> (6,5) -> (7,5), then request 3 visited the
+resource at (7,5). The fixture encoded 999 pikemen but omitted guardMessage.
+FuzzyHelper intentionally returns zero danger for unvisited resources/artifacts;
+CGResource immediately starts its guarded battle when no message is present.
+Visibility of a resource therefore did not establish knowledge of its guard.
+The log did not print loaded stack strength; no numerical engine-strength claim
+is inferred from that failed run.
+
+The corrected known-danger fixture uses an exposed neutral monster of the same
+999 pikemen at (7,5), with the 600-crystal resource at (8,5) behind its guard area.
+Both red armies remain 20 pikemen; mine/deadline/survival assertions are unchanged.
+Before planning, real engine assertions require the exact visible monster stack,
+nonzero production danger, unsafe attacks for both heroes, and a safe helper
+path reaching the mine within the deadline with no battle actions or danger.
+The engine prints actual guard/hero scalar strengths and route turns. This is a
+fixture correction, NOT a production AI bug fix or permission to reveal guards.
+
+The old composition remains generator-accessible as `surprise_guarded_resource`,
+marked unsupported and excluded from the acceptance target. The original failed
+evidence remains in the qualification artifacts for commit a44df12f73773033176f42304ab035abb25e79dd; it is not overwritten or reclassified as passed.

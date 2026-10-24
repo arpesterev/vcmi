@@ -2,7 +2,7 @@
 import copy
 import json
 
-NAMES = ('productive_move', 'stable_goal_progress', 'blocked_goal_alternative', 'urgent_two_town_defence')
+NAMES = ('productive_move', 'stable_goal_progress', 'blocked_goal_alternative', 'surprise_guarded_resource', 'urgent_two_town_defence')
 
 
 def control_object(objects, key, kind):
@@ -85,19 +85,28 @@ def configure(repo, parts, name):
         manifest.update(objectives=['objective_north', 'objective_south'],
                         acceptance='Own both mines by day 6; compare movement reversals and completion day.',
                         qualification_gate='Both mines initially visible, no boat/spell bypass, each initial route exceeds one turn; verify real pathfinder costs before interpreting oscillation.')
-    elif name == 'blocked_goal_alternative':
+    elif name in ('blocked_goal_alternative', 'surprise_guarded_resource'):
         hero('hero_0', 'red', 'christian', 5, 5, 20)
         hero('hero_helper', 'red', 'catherine', 13, 5, 20)
         header['players']['red']['heroes']['hero_helper'] = {'type': 'catherine'}
-        clone('guarded_reward', 'resource_145', 7, 5,
-              {'amount': 600, 'guards': [{'type': 'core:pikeman', 'amount': 999}]})
+        if name == 'surprise_guarded_resource':
+            # Preserve the original hidden-guard composition as an unsupported
+            # surprise-encounter draft, not a known-danger acceptance case.
+            clone('guarded_reward', 'resource_145', 7, 5,
+                  {'amount': 600, 'guards': [{'type': 'core:pikeman', 'amount': 999}]})
+        else:
+            clone('guarded_reward', 'monster_214', 7, 5,
+                  {'amount': 999, 'character': 'savage', 'noGrowing': True, 'neverFlees': True})
+            clone('blocked_reward', 'resource_145', 8, 5, {'amount': 600})
         clone('safe_objective', 'mine_3', 17, 5, {'owner': 'neutral'})
         victory = ['allOf', control('safe_objective', 'mine'), control('hero_0', 'hero'),
                    control('hero_helper', 'hero')]
         deadline = 2
         manifest.update(objectives=['safe_objective'], blocked_objective='guarded_reward',
                         acceptance='Capture safe mine by day 2 with both red heroes alive; guarded reward remains uncollected; record safe progress versus total refusal.',
-                        qualification_gate='Confirm both targets visible to red and safe mine reachable by helper; guarded reward must be evaluated as unsafe. This is NOT an injected executeTask failure test.')
+                        qualification_gate='Assert exposed monster has exactly999pikemen, is visible, actual production danger is nonzero and unsafe for both20pikeman heroes; helper has a nonbattle path to safe mine within deadline. This is NOT an injected executeTask failure test.')
+        if name == 'surprise_guarded_resource':
+            manifest.update(status='unsupported_surprise_encounter', acceptance='Not a known-danger gate; preserved hidden-resource-guard encounter requires a separately qualified battle bridge.', qualification_gate='Unvisited resource guards are intentionally unknown to the production evaluator. No omniscient pre-visit danger assertion.')
     elif name == 'urgent_two_town_defence':
         terrain = [['dt40_' for _ in range(width)] for _ in range(height)]
         # Castle anchor has visitable offset (-2,0); hero anchor has (-1,0).

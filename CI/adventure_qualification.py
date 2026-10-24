@@ -100,6 +100,14 @@ def capture_first_case_backtrace(executable, evidence, cwd, selected_case='Force
     return result
 
 
+def record_battle_evidence(result, log):
+    from forced_battle_evidence import summarize_evidence
+    summary = summarize_evidence(log, require_smokes=False)
+    result['battle_evidence'] = summary
+    if summary['supported_smoke_failures']:
+        raise RuntimeError('Predeclared supported smoke incomplete: ' + ', '.join(summary['supported_smoke_failures']))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', type=Path, required=True)
@@ -170,9 +178,9 @@ def main():
                 case.find('failure') is not None or case.find('skipped') is not None
                 or case.attrib.get('status') != 'run' for case in cases):
             raise RuntimeError('Reference suite missing, skipped, or failed')
-        from forced_battle_evidence import summarize_evidence
-        result.update(status='completed', executed_tests=sorted(names),
-                      battle_evidence=summarize_evidence((evidence / 'tests.log').read_text()),
+        result['executed_tests'] = sorted(names)
+        record_battle_evidence(result, (evidence / 'tests.log').read_text())
+        result.update(status='completed',
                       qualification_scope='Fixed-policy server references, not calibrated adventure strength or production integration')
 
     except Exception as error:

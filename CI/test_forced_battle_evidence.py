@@ -97,6 +97,19 @@ class EvidenceTest(unittest.TestCase):
         text=make_log().replace('case=ordinary_melee oracle_seed=17041 sample_index=0 status=2 winner=0 reason=none bonus=-1 a_survivors=10 d_survivors=0 a_lost_value=60 d_lost_value=100 agrees=1',
           'case=ordinary_melee oracle_seed=17041 sample_index=0 status=1 winner=-1 reason=budget exhausted bonus=-1')
         self.assert_bad(text)
+    def test_descriptive_summary_retains_failed_smoke_without_accepting_it(self):
+        text=make_log().replace('FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=2 winner=1 reason=none',
+          'FORCED_NEUTRAL_SAMPLE upgrade=0 specialty=0 sample_seed=17041 status=1 winner=-1 reason=budget exhausted')
+        summary=summarize_evidence(text, require_smokes=False)
+        self.assertEqual(summary['counts']['actual_terminal'],58)
+        self.assertEqual(len(summary['supported_smoke_failures']),1)
+        self.assertIn('neutral_0_0',summary['supported_smoke_failures'][0])
+        self.assert_bad(text)
+
+    def test_descriptive_mode_still_rejects_malformed_evidence(self):
+        with self.assertRaises(ValueError):
+            summarize_evidence(make_log().replace('status=2 winner=0','status=7 winner=0'), require_smokes=False)
+
     def test_neutral_specialty_is_required(self):
         self.assert_bad(make_log().replace('FORCED_NEUTRAL_REFERENCE upgrade=0 specialty=1','FORCED_NEUTRAL_REFERENCE upgrade=0'))
     def test_wrong_neutral_field(self):

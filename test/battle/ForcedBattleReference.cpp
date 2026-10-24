@@ -14,10 +14,12 @@
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/StartInfo.h"
 #include "../../lib/CCreatureHandler.h"
+#include "../../lib/CBonusTypeHandler.h"
 #include "../../lib/battle/BattleAction.h"
 #include "../../lib/battle/BattleInfo.h"
 #include "../../lib/battle/BattleLayout.h"
 #include "../../lib/battle/Unit.h"
+#include "../../lib/battle/CUnitState.h"
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/filesystem/ResourcePath.h"
@@ -31,6 +33,29 @@
 
 namespace
 {
+// Read-only diagnostics: state copies do not draw or reseed the oracle RNG.
+void traceNeutralState(const CBattleInfoCallback & battle, const std::string & identity,
+    const char * source, int step, bool obstacles)
+{
+    for(const auto * unit : battle.battleAliveUnits())
+        std::cout << "FORCED_NEUTRAL_STATE case=" << identity << " source=" << source << " step=" << step
+            << " unit=" << unit->unitId() << " side=" << static_cast<int>(unit->unitSide())
+            << " slot=" << unit->unitSlot().getNum() << " creature=" << unit->creatureId().getNum()
+            << " count=" << unit->getCount() << " health=" << unit->getAvailableHealth()
+            << " hex=" << unit->getPosition().toInt() << " luck=" << unit->luckVal()
+            << " morale=" << unit->moraleVal() << " ammo=" << unit->acquireState()->shots.available() << std::endl;
+    if(obstacles)
+        for(const auto & obstacle : battle.battleGetAllObstacles())
+        {
+            std::cout << "FORCED_NEUTRAL_OBSTACLE case=" << identity << " source=" << source
+                << " id=" << obstacle->ID << " unique=" << obstacle->uniqueID
+                << " type=" << static_cast<int>(obstacle->obstacleType) << " hex=" << obstacle->pos.toInt()
+                << " blocked=";
+            for(const auto hex : obstacle->getBlockedTiles()) std::cout << hex.toInt() << ',';
+            std::cout << std::endl;
+        }
+}
+
 class ReferenceServer final : public IGameServer
 {
 public:
@@ -353,6 +378,7 @@ protected:
 		const auto * real = server.state->getBattle(id);
 		ASSERT_NE(real, nullptr);
 		EXPECT_EQ(monster->CArmedInstance::stacksCount(), split);
+		traceNeutralState(*real, identity, "actual_initial", 0, true);
 		auto selected = std::find_if(variants.begin(), variants.end(), [real](const auto & item) { return item.first == real->getBattlefieldType(); });
 		EXPECT_NE(selected, variants.end());
 		if(selected != variants.end() && selected->second)
@@ -360,6 +386,7 @@ protected:
 			std::string error;
 			inspectForecast("neutral_comparison", identity, error, [&]
 			{
+				traceNeutralState(selected->second->battle(), identity, "snapshot_initial", 0, true);
 				const auto predicted = selected->second->battle().battleAliveUnits();
 				const auto actual = real->battleAliveUnits();
 				EXPECT_EQ(predicted.size(), actual.size());
@@ -403,14 +430,27 @@ protected:
 			for(const int sampleSeed : {17041, 17047, 17053})
 			{
 				std::string error;
+				std::vector<std::string> trace;
 				auto outcome = inspectForecast("neutral_sample", identity, error, [&]
 				{
-					return NK2AI::experimental::runSampledBattle(selected->second->battle(), selected->second->frozenGameInfo(), sampleSeed);
+					return NK2AI::experimental::runSampledBattle(selected->second->battle(), selected->second->frozenGameInfo(), sampleSeed, &trace);
 				});
 				if(!error.empty()) outcome.unsupportedReason = error.c_str();
 				std::cout << "FORCED_NEUTRAL_SAMPLE upgrade=" << upgrade << " specialty=" << specialty << " sample_seed=" << sampleSeed
 					<< " status=" << static_cast<int>(outcome.status) << " winner=" << static_cast<int>(outcome.winner)
-					<< " reason=" << outcome.unsupportedReason << std::endl;
+					<< " actions=" << outcome.actions << " bonus=" << outcome.unsupportedBonusType
+                    << " bonus_name=" << (outcome.unsupportedBonusType < 0 ? "none" : LIBRARY->bth->bonusToString(static_cast<BonusType>(outcome.unsupportedBonusType)))
+                    << " a_survivors=" << outcome.remainingCreatures[0] << " d_survivors=" << outcome.remainingCreatures[1]
+                    << " a_lost_value=" << outcome.initialArmyValue[0] - outcome.remainingArmyValue[0]
+                    << " d_lost_value=" << outcome.initialArmyValue[1] - outcome.remainingArmyValue[1]
+                    << " reason=" << outcome.unsupportedReason << std::endl;
+                for(const auto & line : trace)
+                    std::cout << "FORCED_NEUTRAL_SAMPLE_TRACE case=" << identity << " seed=" << sampleSeed << ' ' << line << std::endl;
+                for(const auto & stack : outcome.stacks)
+                    std::cout << "FORCED_NEUTRAL_SAMPLE_STACK case=" << identity << " seed=" << sampleSeed
+                        << " unit=" << stack.unit << " creature=" << stack.creature.getNum()
+                        << " side=" << static_cast<int>(stack.side) << " initial=" << stack.initialCount
+                        << " survivors=" << stack.survivors << std::endl;
 			}
 		variants.clear();
 		EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), oracleRandomAfterPreparation);
@@ -422,8 +462,14 @@ protected:
 			ASSERT_NE(battle, nullptr);
 			const auto * unit = battle->battleActiveUnit();
 			ASSERT_NE(unit, nullptr);
-			const auto action = chooseAction(*battle, unit);
-			ASSERT_TRUE(handler->battles->makePlayerBattleAction(id, battle->battleGetOwner(unit), action));
+            const auto action = chooseAction(*battle, unit);
+            traceNeutralState(*battle, identity, "actual_pre", actions, false);
+            std::cout << "FORCED_NEUTRAL_ACTION case=" << identity << " step=" << actions
+                << " actor=" << unit->unitId() << " action=" << action.toString() << std::endl;
+            ASSERT_TRUE(handler->battles->makePlayerBattleAction(id, battle->battleGetOwner(unit), action));
+            // The final action can erase BattleInfo. Never reuse battle/unit here.
+            if(const auto * after = server.state->getBattle(id))
+                traceNeutralState(*after, identity, "actual_post", actions, false);
 			++actions;
 		}
 		ASSERT_TRUE(server.result.has_value());

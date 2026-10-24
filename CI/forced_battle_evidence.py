@@ -69,7 +69,7 @@ def _nonnegative(value, key):
         raise ValueError(f'invalid {key}={value}')
     return number
 
-def summarize_evidence(log):
+def summarize_evidence(log, *, require_smokes=True):
     specs = {row['id']: row for row in expected_cases()}
     references = {}; captures = defaultdict(dict); samples = defaultdict(dict)
     tags = {'FORCED_BATTLE_REFERENCE':'reference', 'FORCED_NEUTRAL_REFERENCE':'reference',
@@ -136,7 +136,7 @@ def summarize_evidence(log):
             samples[identity][index] = row
     missing = set(specs)-set(references)
     if missing: raise ValueError(f'missing terminal references: {sorted(missing)}')
-    counts = Counter(); capture_reasons = Counter(); sample_reasons = Counter(); results = []
+    counts = Counter(); capture_reasons = Counter(); sample_reasons = Counter(); results = []; smoke_failures = []
     for identity, spec in specs.items():
         reference = references[identity]
         field = int(reference['battlefield']) if spec['kind']=='neutral' else 'direct'
@@ -164,12 +164,14 @@ def summarize_evidence(log):
             else: sample_reasons[row['reason']] += 1
             rows.append(result)
         if identity in REQUIRED_SMOKES and (not admitted or len(rows)!=3 or any(int(row['status'])!=2 for row in rows)):
-            raise ValueError(f'predeclared supported smoke did not execute three terminal samples: {identity}')
+            smoke_failures.append(f'predeclared supported smoke did not execute three terminal samples: {identity}')
         results.append(dict(id=identity,test=spec['test'],actual=reference,selected_capture=selected,samples=rows))
     for key in ('actual_terminal','capture_opportunities','captures_admitted','captures_rejected','selected_capture_admitted',
                 'selected_capture_rejected','sample_executions','samples_unsupported','samples_budget_exhausted','samples_finished',
                 'finished_winner_agrees','finished_winner_disagrees'):
         counts.setdefault(key,0)
-    return dict(expected_cases=58, counts=dict(counts),required_supported_smokes=list(REQUIRED_SMOKES),
+    if require_smokes and smoke_failures:
+        raise ValueError("; ".join(smoke_failures))
+    return dict(supported_smoke_failures=smoke_failures, expected_cases=58, counts=dict(counts),required_supported_smokes=list(REQUIRED_SMOKES),
                 rejected_capture_reasons=dict(capture_reasons),nonterminal_sample_reasons=dict(sample_reasons),cases=results,
                 interpretation='Fixed-policy outcome comparisons only. Unsupported and budget outcomes are not losses; endpoint straddles are not accuracy; no calibrated probability or safety claim.')

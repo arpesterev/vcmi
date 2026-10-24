@@ -96,3 +96,26 @@ class InterruptedReferenceDiagnosticTest(unittest.TestCase):
             result = capture_first_case_backtrace(Path('/bin/reference'), Path('/evidence'), Path('/bin'), None)
             run.assert_not_called()
             self.assertFalse(result['attempted'])
+
+
+class RetainedBattleEvidenceTest(unittest.TestCase):
+    def test_failed_smoke_retains_counts_without_promoting_status(self):
+        from unittest.mock import patch
+        from adventure_qualification import record_battle_evidence
+        summary = {'counts': {'actual_terminal': 58}, 'supported_smoke_failures': ['neutral_0_0']}
+        result = {'status': 'incomplete'}
+        with patch('forced_battle_evidence.summarize_evidence', return_value=summary) as parser:
+            with self.assertRaisesRegex(RuntimeError, 'neutral_0_0'):
+                record_battle_evidence(result, 'raw')
+            parser.assert_called_once_with('raw', require_smokes=False)
+        self.assertEqual(result['battle_evidence'], summary)
+        self.assertEqual(result['status'], 'incomplete')
+
+    def test_malformed_evidence_still_fails_and_no_summary_is_fabricated(self):
+        from unittest.mock import patch
+        from adventure_qualification import record_battle_evidence
+        result = {'status': 'incomplete'}
+        with patch('forced_battle_evidence.summarize_evidence', side_effect=ValueError('invalid evidence')):
+            with self.assertRaises(ValueError):
+                record_battle_evidence(result, 'bad')
+        self.assertNotIn('battle_evidence', result)

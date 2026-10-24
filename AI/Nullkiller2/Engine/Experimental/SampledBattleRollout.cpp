@@ -95,9 +95,11 @@ public:
 	GameRandomizer randomizer;
 	int roundNumber = 0;
 	bool requiresDefend = false;
+	std::vector<std::string> * trace;
+	void record(const std::string & message) { if(trace) trace->push_back(message); }
 	SampledBattle(const CBattleInfoCallback & initial, const IGameInfoCallback & settings,
-		const battle::Units & source, int seed)
-		: BattleInfo(nullptr, initial.getBattle()->getLayout()), randomizer(settings)
+		const battle::Units & source, int seed, std::vector<std::string> * trace)
+		: BattleInfo(nullptr, initial.getBattle()->getLayout()), randomizer(settings), trace(trace)
 	{
 		randomizer.setSeed(seed);
 		activeStack = initial.battleActiveUnit() ? initial.battleActiveUnit()->unitId() : -1;
@@ -156,6 +158,9 @@ public:
 		(void)randomizer.rollCombatAbility(armyID(attacker), 0);
 		const auto range = calculateDmgRange(info).damage;
 		int64_t damage = getActualDamage(range, attacker.getCount(), randomizer.getDefault());
+		if(trace) record("hit actor=" + std::to_string(attacker.unitId()) + " target=" + std::to_string(defender.unitId())
+			+ " ranged=" + std::to_string(ranged) + " counter=" + std::to_string(counter)
+			+ " damage=" + std::to_string(damage) + " before_health=" + std::to_string(defender.getAvailableHealth()));
 		defender.damage(damage);
 		attacker.afterAttack(ranged, counter);
 	}
@@ -166,6 +171,7 @@ public:
 		for(auto & enemy : units)
 			if(enemy->alive() && enemy->unitSide() != actor.unitSide() && battleCanShoot(&actor, enemy->position))
 			{
+				if(trace) record("shot actor=" + std::to_string(actor.unitId()) + " target=" + std::to_string(enemy->unitId()));
 				const int attacks = actor.getTotalAttacks(true);
 				for(int strike = 0; strike < attacks && actor.alive() && enemy->alive() && actor.shots.canUse(); ++strike)
 					hit(actor, *enemy, true, false);
@@ -177,6 +183,7 @@ public:
 				for(const auto hex : enemy->getAttackableHexes(&actor))
 					if(available.contains(hex) && battleCanAttackUnit(&actor, enemy.get()))
 					{
+						if(trace) record("melee actor=" + std::to_string(actor.unitId()) + " target=" + std::to_string(enemy->unitId()) + " hex=" + std::to_string(hex.toInt()));
 						actor.position = hex;
 						const int attacks = actor.getTotalAttacks(false);
 						for(int strike = 0; strike < attacks && actor.alive() && enemy->alive(); ++strike)
@@ -201,6 +208,7 @@ public:
 		BattleHex best = actor.position;
 		for(const auto hex : available)
 			if(distance(hex) < distance(best) || (distance(hex) == distance(best) && hex.toInt() < best.toInt())) best = hex;
+		if(trace) record(std::string(best == actor.position ? "defend actor=" : "move actor=") + std::to_string(actor.unitId()) + " hex=" + std::to_string(best.toInt()));
 		if(best == actor.position)
 			requiresDefend = true; // Dynamic defensive stance is outside this initial subset.
 		actor.position = best;
@@ -209,7 +217,7 @@ public:
 }
 
 SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
-	const IGameInfoCallback & frozenSettings, int seed)
+	const IGameInfoCallback & frozenSettings, int seed, std::vector<std::string> * trace)
 {
 	SampledBattleOutcome result;
 	if(!initial.getBattle() || initial.battleGetDefendedTown() || initial.battleTacticDist() || initial.battleGetRound() > 1
@@ -242,7 +250,7 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 		result.unsupportedReason = "army size";
 		return result;
 	}
-	SampledBattle battle(initial, frozenSettings, source, seed);
+	SampledBattle battle(initial, frozenSettings, source, seed, trace);
 	for(unsigned round = 0; round < MAX_ROUNDS && result.actions < MAX_ACTIONS && !battle.finished(); ++round)
 	{
 		battle.roundNumber = round + 1;
@@ -256,8 +264,10 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 			if(queue.empty() || queue.front().empty()) break;
 			auto * actor = battle.find(queue.front().front()->unitId());
 			if(!actor || !actor->alive()) break;
+			if(trace) battle.record("activation round=" + std::to_string(round + 1) + " actor=" + std::to_string(actor->unitId()) + " health=" + std::to_string(actor->getAvailableHealth()) + " hex=" + std::to_string(actor->position.toInt()));
 			const int morale = actor->moraleVal();
 			const bool badMorale = morale < 0 && battle.randomizer.rollBadMorale(battle.armyID(*actor), -morale);
+			if(badMorale && trace) battle.record("bad_morale actor=" + std::to_string(actor->unitId()));
 			if(!badMorale) battle.act(*actor);
 			if(battle.requiresDefend)
 			{
@@ -270,6 +280,7 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 			if(!badMorale && actor->alive() && actor->canMove() && morale > 0 && !battle.finished()
 				&& result.actions < MAX_ACTIONS && battle.randomizer.rollGoodMorale(battle.armyID(*actor), morale))
 			{
+				if(trace) battle.record("good_morale actor=" + std::to_string(actor->unitId()));
 				actor->hadMorale = true;
 				battle.act(*actor);
 				if(battle.requiresDefend)

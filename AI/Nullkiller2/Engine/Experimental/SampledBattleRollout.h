@@ -34,5 +34,5 @@ struct SampledBattleOutcome
 // Samples use fresh independent bias history, not authoritative game RNG state.
 // A small collection of policy outcomes is NOT a calibrated win probability.
 SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
-	const IGameInfoCallback & frozenSettings, int seed);
+	const IGameInfoCallback & frozenSettings, int seed, std::vector<std::string> * trace = nullptr);
 }

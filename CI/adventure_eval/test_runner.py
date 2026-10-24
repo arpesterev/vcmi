@@ -37,7 +37,7 @@ class DraftHarnessTests(unittest.TestCase):
                 evidence = runner.generate(repo, a, name)
                 runner.generate(repo, b, name)
                 self.assertEqual(a.read_bytes(), b.read_bytes())
-                self.assertEqual(evidence['gameplay_manifest']['status'], 'draft_unexecuted')
+                self.assertEqual(evidence['gameplay_manifest']['status'], 'unsupported_surprise_encounter' if name == 'surprise_guarded_resource' else 'draft_unexecuted')
                 with zipfile.ZipFile(a) as archive:
                     header = json.loads(archive.read('header.json'))
                     self.assertEqual(header['mapLevels']['surface']['width'], 30)
@@ -53,6 +53,14 @@ class DraftHarnessTests(unittest.TestCase):
                                 verify_controls(child)
                     verify_controls(header['triggeredEvents']['objectiveVictory']['condition'])
                     self.assertTrue(all(0 <= obj['x'] < 30 and 0 <= obj['y'] < 20 for obj in objects.values()))
+                    if name == 'blocked_goal_alternative':
+                        self.assertEqual(objects['guarded_reward']['type'], 'monster')
+                        self.assertEqual(objects['guarded_reward']['options']['amount'], 999)
+                        self.assertEqual(objects['guarded_reward']['subtype'], 'pikeman')
+                        self.assertNotIn('guards', objects['blocked_reward']['options'])
+                    if name == 'surprise_guarded_resource':
+                        self.assertEqual(objects['guarded_reward']['type'], 'resource')
+                        self.assertEqual(objects['guarded_reward']['options']['guards'], [{'type': 'core:pikeman', 'amount': 999}])
                     if name == 'urgent_two_town_defence':
                         self.assertEqual(header['events'][0]['firstOccurrence'], 0)
                         self.assertEqual(header['events'][0]['resources']['gold'], -8800)

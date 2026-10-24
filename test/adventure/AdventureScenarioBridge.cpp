@@ -4,6 +4,10 @@
  */
 #include "StdInc.h"
 #include "../../AI/Nullkiller2/AIGateway.h"
+#include "../../AI/Nullkiller2/AIUtility.h"
+#include "../../lib/CCreatureHandler.h"
+#include "../../lib/mapObjects/CGCreature.h"
+#include "../../lib/pathfinder/CGPathNode.h"
 #include "../../AI/Nullkiller2/Engine/Nullkiller.h"
 #include "../../lib/CConfigHandler.h"
 #include "../../lib/CPlayerState.h"
@@ -436,9 +440,41 @@ TEST_F(AdventureScenarioBridge, GuardedObjectiveDoesNotPreventSafeAlternative)
 	const auto * guarded = object("guarded_reward");
 	ASSERT_NE(safe, nullptr); ASSERT_NE(guarded, nullptr);
 	ASSERT_TRUE(bridge.callback->isVisible(safe)); ASSERT_TRUE(bridge.callback->isVisible(guarded));
+	const auto * monster = dynamic_cast<const CGCreature *>(guarded);
+	ASSERT_NE(monster, nullptr) << "Known-danger fixture requires exposed monster, not hidden resource guards";
+	ASSERT_EQ(monster->stacksCount(), 1);
+	ASSERT_EQ(monster->getStackCount(SlotID(0)), 999);
+	ASSERT_EQ(monster->getCreature(SlotID(0))->getId(), CreatureID(0)); // core pikeman
+	const auto danger = gateway->nullkiller->dangerEvaluator->evaluateDanger(guarded);
+	ASSERT_GT(danger, 0u);
+	for(const auto * hero : bridge.callback->getHeroesInfo())
+	{
+		ASSERT_EQ(hero->getStackCount(SlotID(0)), 20);
+		ASSERT_EQ(hero->getCreature(SlotID(0))->getId(), CreatureID(0));
+		ASSERT_FALSE(NK2AI::isSafeToVisit(hero, danger, gateway->nullkiller->settings->getSafeAttackRatio()));
+		std::cout << "ADVENTURE_BRIDGE known_guard=" << guarded->id.getNum()
+			<< " guard_count=" << monster->getStackCount(SlotID(0)) << " guard_strength=" << monster->getArmyStrength()
+			<< " evaluated_danger=" << danger << " hero=" << hero->id.getNum()
+			<< " hero_strength=" << hero->getArmyStrength() << std::endl;
+	}
+	const auto * helper = dynamic_cast<const CGHeroInstance *>(object("hero_helper"));
+	ASSERT_NE(helper, nullptr);
+	CGPath safePath;
+	ASSERT_TRUE(gateway->nullkiller->getPathsInfo(helper)->getPath(safePath, safe->visitablePos()));
+	ASSERT_GT(safePath.nodes.size(), 1u);
+	ASSERT_LE(safePath.lastNode().turns, 1);
+	for(const auto & node : safePath.nodes)
+	{
+		ASSERT_NE(node.action, EPathNodeAction::BATTLE);
+		ASSERT_NE(node.action, EPathNodeAction::TELEPORT_BATTLE);
+		ASSERT_EQ(gateway->nullkiller->dangerEvaluator->evaluateDanger(node.coord, helper, true), 0u);
+	}
+	std::cout << "ADVENTURE_BRIDGE safe_mine=" << safe->id.getNum()
+		<< " helper=" << helper->id.getNum() << " route_turns=" << int(safePath.lastNode().turns) << std::endl;
 	plannerTurnsUntil(2);
 	EXPECT_EQ(safe->getOwner(), PlayerColor(0));
 	EXPECT_NE(object("guarded_reward"), nullptr);
+	EXPECT_NE(object("blocked_reward"), nullptr);
 	EXPECT_EQ(bridge.callback->getHeroesInfo().size(), 2u);
 	EXPECT_GT(bridge.productiveMoves, 0);
 	EXPECT_TRUE(bridge.redWon);
