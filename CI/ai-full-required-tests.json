@@ -229,6 +229,7 @@
     "PlanningRiskScheduler.MalformedAdaptiveAccountingCannotRefundSpentAttempts",
     "PlanningRiskScheduler.NestedScopesRejectButConcurrentSameGatewayWorkersQueue",
     "PlanningRiskScheduler.PresenceFastPathRejectsAnOtherwiseRetainedStalePublication",
+    "PlanningRiskScheduler.PublicationRetiresOwnershipOutsideItsMutex",
     "PlanningRiskScheduler.RecaptureTimeCannotPublishAnExpiredDecision",
     "PlanningRiskScheduler.RemainsInactiveAndStandaloneCallsDoNotInventLockOwnership",
     "PlanningRiskScheduler.ReplanningSharesDecisionUntilAnActionAttemptClosesIt",

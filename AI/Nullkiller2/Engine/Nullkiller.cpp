@@ -403,23 +403,38 @@ void Nullkiller::resetState()
 	}
 }
 
+std::shared_ptr<const Nullkiller::PreparedPlanningRisk> Nullkiller::loadPlanningRiskPublication() const
+{
+	std::lock_guard lock(planningRiskPublicationMutex);
+	return preparedPlanningRisk;
+}
+
+void Nullkiller::storePlanningRiskPublication(std::shared_ptr<const PreparedPlanningRisk> publication)
+{
+	{
+		std::lock_guard lock(planningRiskPublicationMutex);
+		preparedPlanningRisk.swap(publication);
+	}
+	// The replaced ownership is released after unlocking, so destruction never
+	// extends this critical section or introduces a publication-to-other-lock edge.
+}
+
 void Nullkiller::invalidatePlanningRisk()
 {
 	planningRiskEpoch.fetch_add(1, std::memory_order_acq_rel);
-	preparedPlanningRisk.store(
-		std::shared_ptr<const PreparedPlanningRisk>{}, std::memory_order_release);
+	storePlanningRiskPublication({});
 }
 
 bool Nullkiller::hasPlanningRisk() const
 {
-	const auto publication = preparedPlanningRisk.load(std::memory_order_acquire);
+	const auto publication = loadPlanningRiskPublication();
 	return publication && planningRiskEpoch.load(std::memory_order_acquire) == publication->epoch;
 }
 
 std::shared_ptr<const experimental::PlanningRiskRecord> Nullkiller::findPlanningRisk(
 	ObjectInstanceID hero, ObjectInstanceID target, const experimental::PlanningRiskRoute & route) const
 {
-	const auto publication = preparedPlanningRisk.load(std::memory_order_acquire);
+	const auto publication = loadPlanningRiskPublication();
 	if(!publication || planningRiskEpoch.load(std::memory_order_acquire) != publication->epoch)
 		return {};
 	for(const auto & key : publication->keys)
@@ -454,8 +469,7 @@ void Nullkiller::preparePlanningRiskForStateUpdate()
 	const auto * capability = planningTurnLocks;
 	if(!capability || capability->planner != this)
 		return;
-	preparedPlanningRisk.store(
-		std::shared_ptr<const PreparedPlanningRisk>{}, std::memory_order_release);
+	storePlanningRiskPublication({});
 	if(capability->ensureReady)
 		capability->ensureReady();
 	if(capability->prepareRisk)

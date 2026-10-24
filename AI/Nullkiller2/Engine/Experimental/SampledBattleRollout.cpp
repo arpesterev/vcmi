@@ -227,13 +227,16 @@ SampledBattleOutcome runSampledBattle(const CBattleInfoCallback & initial,
 		result.unsupportedReason = "requires detached no-hero snapshot without siege/tactics";
 		return result;
 	}
-	for(const auto & obstacle : initial.battleGetAllObstacles())
+	for(const auto & obstacleOwner : initial.battleGetAllObstacles())
+	{
+		const auto * obstacle = obstacleOwner.get();
 		if(!obstacle || typeid(*obstacle) != typeid(CObstacleInstance)
 			|| (obstacle->obstacleType != CObstacleInstance::USUAL && obstacle->obstacleType != CObstacleInstance::ABSOLUTE_OBSTACLE))
 		{
 			result.unsupportedReason = "dynamic or subclassed obstacle";
 			return result;
 		}
+	}
 	const auto source = initial.battleAliveUnits();
 	std::array<unsigned, 2> counts{};
 	for(const auto * unit : source)

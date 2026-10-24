@@ -16,7 +16,7 @@ public:
 		publication->keys.push_back(key);
 		publication->table = table;
 		ai.planningRiskEpoch.store(key.epoch);
-		ai.preparedPlanningRisk.store(publication);
+		ai.storePlanningRiskPublication(std::move(publication));
 	}
 };
 }

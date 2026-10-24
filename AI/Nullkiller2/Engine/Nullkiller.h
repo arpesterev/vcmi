@@ -25,6 +25,7 @@
 
 #include "../../../lib/ConditionalWait.h"
 #include <atomic>
+#include <mutex>
 #include <shared_mutex>
 #include <thread>
 
@@ -136,9 +137,13 @@ private:
 		std::vector<experimental::PlanningRiskKey> keys;
 		std::shared_ptr<const experimental::PlanningRiskTable> table;
 	};
-	// Use the C++20 atomic shared_ptr member API for publication. No decision
-	// consumer is enabled: calibration and producer-path tests are still gates.
-	std::atomic<std::shared_ptr<const PreparedPlanningRisk>> preparedPlanningRisk;
+	// A short-held mutex is portable to libc++ versions without atomic<shared_ptr>.
+	// Access ownership only through the helpers; never call game/AI code or
+	// destroy a retired publication while this mutex is held.
+	mutable std::mutex planningRiskPublicationMutex;
+	std::shared_ptr<const PreparedPlanningRisk> preparedPlanningRisk;
+	std::shared_ptr<const PreparedPlanningRisk> loadPlanningRiskPublication() const;
+	void storePlanningRiskPublication(std::shared_ptr<const PreparedPlanningRisk> publication);
 	void invalidatePlanningRisk();
 	void preparePlanningRiskForStateUpdate();
 	void finishPlanningRiskDecision();

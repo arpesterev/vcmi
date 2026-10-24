@@ -912,8 +912,7 @@ void AIGateway::withPlanningRiskPreparation(std::shared_lock<std::shared_mutex> 
 		if(capability->riskDecision)
 			capability->riskDecision->cancel();
 		capability->riskDecision.reset();
-		nullkiller->preparedPlanningRisk.store(
-			std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+		nullkiller->storePlanningRiskPublication({});
 	});
 	runTurn();
 }
@@ -935,8 +934,7 @@ void AIGateway::runPlanningRiskBestEffort(const std::function<void()> & prepare)
 	{
 		logAi->warn("Planning risk unavailable; using existing policy after an unknown forecast error");
 	}
-	nullkiller->preparedPlanningRisk.store(
-		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+	nullkiller->storePlanningRiskPublication({});
 }
 
 std::vector<experimental::PlanningRiskCandidate> AIGateway::discoverPlanningRiskCandidates(
@@ -1042,8 +1040,7 @@ void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & g
 		|| capability->sharedStorage.mutex() != &AISharedStorage::locker)
 		throw std::logic_error("Risk batch requires scoped gateway planning locks");
 
-	nullkiller->preparedPlanningRisk.store(
-		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+	nullkiller->storePlanningRiskPublication({});
 	const auto stopped = [&] { return decisionBudget && decisionBudget->shouldStop(); };
 	if(stopped() || !stillEligible())
 		return;
@@ -1139,13 +1136,11 @@ void AIGateway::preparePlanningRiskBatch(std::shared_lock<std::shared_mutex> & g
 	publication->epoch = epoch;
 	publication->keys = std::move(keys);
 	publication->table = std::move(table);
-	nullkiller->preparedPlanningRisk.store(
-		std::shared_ptr<const Nullkiller::PreparedPlanningRisk>(std::move(publication)), std::memory_order_release);
+	nullkiller->storePlanningRiskPublication(std::move(publication));
 	// Client notifications run outside the game-state writer. Close their
 	// invalidate-before-store race using the independently atomic risk epoch.
 	if(stopped() || nullkiller->planningRiskEpoch.load(std::memory_order_acquire) != epoch)
-		nullkiller->preparedPlanningRisk.store(
-			std::shared_ptr<const Nullkiller::PreparedPlanningRisk>{}, std::memory_order_release);
+		nullkiller->storePlanningRiskPublication({});
 }
 
 void AIGateway::makeTurn()

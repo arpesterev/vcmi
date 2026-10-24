@@ -111,11 +111,13 @@ struct PlanningBattleSnapshot::Impl
 				// Do not freeze size/position/army-dependent or propagated effects.
 				const bool ownSpecialty = side == 0 && dynamic_cast<const CGHeroInstance *>(&source)
 					&& bonus->source == BonusSource::HERO_SPECIAL;
-				const bool staticLimiter = ownSpecialty && bonus->limiter
-					&& typeid(*bonus->limiter) == typeid(CCreatureTypeLimiter);
-				const bool staticUpdater = ownSpecialty && bonus->updater
-					&& (typeid(*bonus->updater) == typeid(TimesHeroLevelUpdater)
-						|| typeid(*bonus->updater) == typeid(GrowsWithLevelUpdater));
+				const auto * limiter = bonus->limiter.get();
+				const auto * updater = bonus->updater.get();
+				const bool staticLimiter = ownSpecialty && limiter
+					&& typeid(*limiter) == typeid(CCreatureTypeLimiter);
+				const bool staticUpdater = ownSpecialty && updater
+					&& (typeid(*updater) == typeid(TimesHeroLevelUpdater)
+						|| typeid(*updater) == typeid(GrowsWithLevelUpdater));
 				if((bonus->limiter && !staticLimiter) || (bonus->updater && !staticUpdater)
 					|| bonus->propagator || bonus->propagationUpdater)
 				{

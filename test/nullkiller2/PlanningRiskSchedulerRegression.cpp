@@ -53,7 +53,24 @@ public:
 	}
 	static auto publication(const Nullkiller & ai)
 	{
-		return ai.preparedPlanningRisk.load(std::memory_order_acquire);
+		return ai.loadPlanningRiskPublication();
+	}
+	static bool retirementRunsOutsidePublicationMutex(Nullkiller & ai)
+	{
+		bool retiredOutsideLock = false;
+		auto value = std::shared_ptr<const Nullkiller::PreparedPlanningRisk>(
+			new Nullkiller::PreparedPlanningRisk{}, [&](const auto * retired)
+			{
+				retiredOutsideLock = std::async(std::launch::async, [&ai]
+				{
+					std::unique_lock lock(ai.planningRiskPublicationMutex, std::try_to_lock);
+					return lock.owns_lock();
+				}).get();
+				delete retired;
+			});
+		ai.storePlanningRiskPublication(std::move(value));
+		ai.storePlanningRiskPublication({});
+		return retiredOutsideLock;
 	}
 	static auto memo(const AIGateway & gateway) { return gateway.planningRiskMemo; }
 	static void boundedBatch(AIGateway & gateway, std::shared_lock<std::shared_mutex> & lock,
@@ -172,6 +189,13 @@ TEST(PlanningRiskScheduler, RemainsInactiveAndStandaloneCallsDoNotInventLockOwne
 	EXPECT_FALSE(ai.hasPlanningRisk());
 	// Real makeTurn cannot acquire global storage under an unknown caller lock.
 	EXPECT_THROW(ai.makeTurn(), std::logic_error);
+}
+
+TEST(PlanningRiskScheduler, PublicationRetiresOwnershipOutsideItsMutex)
+{
+	Nullkiller ai;
+	EXPECT_TRUE(Access::retirementRunsOutsidePublicationMutex(ai));
+	EXPECT_FALSE(Access::publication(ai));
 }
 
 TEST(PlanningRiskScheduler, ActualUpdateStatePreparesBeforeTakingAiStateMutex)
