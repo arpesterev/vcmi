@@ -2,6 +2,7 @@
 #include "../StdInc.h"
 #include "../../AI/Nullkiller2/AIGateway.h"
 #include "../../lib/gameState/CGameState.h"
+#include "../../lib/CPlayerState.h"
 #include "../../lib/ScopeGuard.h"
 #include "../../lib/ResourceSet.h"
 #include "../../lib/callback/CCallback.h"
