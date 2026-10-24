@@ -15,6 +15,7 @@
 #include "../../Goals/Invalid.h"
 #include "AIPreviousNodeRule.h"
 #include "../../Engine/Experimental/PlanningRiskDecision.h"
+#include "../../../../lib/mapObjects/CGCreature.h"
 #include "../../../../lib/mapObjects/CQuest.h"
 #include "../../../../lib/pathfinder/PathfinderOptions.h"
 #include "../../../../lib/pathfinder/CPathfinder.h"
