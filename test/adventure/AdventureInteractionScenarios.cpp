@@ -58,6 +58,48 @@ protected:
 		return earliestTownArrival;
 	}
 
+	void traceDefensiveCoverage(const CGTownInstance * town, const CGHeroInstance * enemy)
+	{
+		NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway, false, [&](NK2AI::Nullkiller & ai)
+		{
+			const auto printArmy = [](const char * kind, const CArmedInstance * army)
+			{
+				std::cout << "DEFENCE_COVERAGE kind=" << kind << " id=" << army->id.getNum()
+					<< " owner=" << army->getOwner().getNum() << " strength=" << army->getArmyStrength();
+				for(const auto & slot : army->Slots())
+					std::cout << " creature=" << slot.second->getCreatureID().getNum() << " count=" << slot.second->getCount();
+				std::cout << std::endl;
+			};
+			printArmy("town_upper", town->getUpperArmy());
+			std::cout << "DEFENCE_COVERAGE town=" << town->id.getNum()
+				<< " garrison=" << (town->getGarrisonHero() ? town->getGarrisonHero()->id.getNum() : -1)
+				<< " visitor=" << (town->getVisitingHero() ? town->getVisitingHero()->id.getNum() : -1)
+				<< " local_strength=" << uniqueLocalStrength(town) << std::endl;
+			NK2AI::PathfinderSettings config;
+			config.useHeroChain = false;
+			config.mainTurnDistanceLimit = config.scoutTurnDistanceLimit = ai.settings->getThreatTurnDistanceLimit();
+			ai.pathfinder->updatePaths({{enemy, NK2AI::HeroRole::MAIN}}, config);
+			for(const auto & path : ai.pathfinder->getPathInfo(town->visitablePos()))
+				std::cout << "DEFENCE_COVERAGE enemy=" << enemy->id.getNum() << " arrival=" << static_cast<int>(path.turn())
+					<< " strength=" << path.getHeroStrength() << " blocked=" << static_cast<bool>(path.getFirstBlockedAction()) << std::endl;
+			for(const auto * hero : bridge.callback->getHeroesInfo())
+			{
+				printArmy("own_hero", hero);
+				std::cout << "DEFENCE_COVERAGE hero=" << hero->id.getNum() << " pos=" << hero->visitablePos().toString()
+					<< " movement=" << hero->movementPointsRemaining() << " lock=" << static_cast<int>(ai.getHeroLockedReason(hero)) << std::endl;
+				ai.pathfinder->updatePaths({{hero, NK2AI::HeroRole::MAIN}}, config);
+				const auto paths = ai.pathfinder->getPathInfo(town->visitablePos());
+				std::cout << "DEFENCE_COVERAGE return_paths=" << paths.size() << std::endl;
+				for(const auto & path : paths)
+					std::cout << "DEFENCE_COVERAGE return_arrival=" << static_cast<int>(path.turn())
+						<< " strength=" << path.getHeroStrength() << " blocked=" << static_cast<bool>(path.getFirstBlockedAction())
+						<< " locked=" << ai.arePathHeroesLocked(path) << " current_army=" << (path.heroArmy == hero)
+						<< " exchanges=" << static_cast<int>(path.exchangeCount) << " loss=" << path.getTotalArmyLoss() << std::endl;
+			}
+			gateway->invalidatePaths();
+		});
+	}
+
 	static uint64_t uniqueLocalStrength(const CGTownInstance * town)
 	{
 		const auto * upper = town->getUpperArmy();
@@ -153,6 +195,7 @@ TEST_F(AdventureInteractionScenarios, UrgentTownPurchaseThenThreeTurnRecovery)
 	ASSERT_LE(gateway->nullkiller->dangerHitMap->getObjectThreat(threatened).fastestDanger.turn, 1)
 		<< "Day2 is deliberately still inside the two-turn threat horizon";
 	NK2AI::PlanningRiskSchedulerRegressionAccess::plannerTurn(*gateway);
+	traceDefensiveCoverage(threatened, enemy);
 	ASSERT_EQ(objective->getOwner(), PlayerColor::NEUTRAL)
 		<< "Do not count earlier mine capture as post-withdrawal recovery";
 	finishActiveTurn();

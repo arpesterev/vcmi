@@ -1,5 +1,5 @@
 import unittest
-from decision_holdout_evidence import CASES, summarize_holdouts
+from decision_holdout_evidence import CASES, EXPECTED_TEST_NAMES, summarize_holdouts
 
 def log():
     lines=[]
@@ -10,11 +10,20 @@ def log():
     return '\n'.join(lines)
 
 class HoldoutEvidenceTest(unittest.TestCase):
+    def test_exact_expansion_preserves_original_and_all_six_new(self):
+        self.assertEqual(len(CASES),19)
+        self.assertEqual(len(set(CASES)),19)
+        self.assertEqual(len(EXPECTED_TEST_NAMES),19)
+        self.assertEqual(CASES[12],('neutral_known_regression',17041))
+        self.assertEqual(CASES[13:],[(family,seed) for seed in (29009,29017,29021) for family in ('grandelf_archer60','grandelf_archer70')])
+        old_only='\n'.join(row for row in log().splitlines() if 'family=grandelf_archer' not in row)
+        with self.assertRaises(ValueError): summarize_holdouts(old_only)
+
     def test_all_unknown_kept_descriptively_not_promoted(self):
         result=summarize_holdouts(log())
-        self.assertEqual(result['counts']['actual_terminal'],13)
+        self.assertEqual(result['counts']['actual_terminal'],19)
         self.assertEqual(result['counts']['captured'],0)
-        self.assertEqual(result['counts']['unknown'],13)
+        self.assertEqual(result['counts']['unknown'],19)
     def test_three_variants_preserved_and_four_rejected(self):
         text=log(); family,seed=CASES[0]; first=text.splitlines()[0]
         text=text.replace(first, first.replace('variants=0','variants=3'))
@@ -49,7 +58,7 @@ class HoldoutEvidenceTest(unittest.TestCase):
         data=summarize_holdouts(text)
         self.assertEqual(data['counts']['rollout_limit_samples'],1)
         self.assertEqual(data['counts']['finished_samples'],0)
-        self.assertEqual(data['counts']['unknown'],13)
+        self.assertEqual(data['counts']['unknown'],19)
         for bad in (sample.replace('winner=-1','winner=0'),sample.replace('intrinsic action limit reached','none'),sample.replace('status=3','status=4'),sample+' agrees=1'):
             with self.assertRaises(ValueError): summarize_holdouts(text.replace(sample,bad))
         with self.assertRaises(ValueError): summarize_holdouts(text.replace('recommendation=0','recommendation=1'))

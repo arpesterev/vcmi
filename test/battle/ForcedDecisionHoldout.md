@@ -1,6 +1,6 @@
 # Production-builder / independent server holdouts (unexecuted stage)
 
-Separate suite `IndependentServer/ForcedDecisionHoldout.*` contains 13 cases.
+Separate suite `IndependentServer/ForcedDecisionHoldout.*` contains 19 cases.
 The existing 58-case oracle matrix, its support gate, and the separate three
 DEFEND controls are unchanged. DEFEND must pass before any activation decision.
 
@@ -40,6 +40,23 @@ wall time must be reviewed rather than pretending a hard OS scheduling guarantee
 Full server/model outcomes, including false-favorable and false-dangerous cases,
 are retained. This tiny correlated matrix cannot establish calibrated win odds.
 
-Bounds: 13 decisions, at most 4992 started sampled scenarios, 2000 real-action cap
+Bounds: 19 decisions, at most 7296 started sampled scenarios, 2000 real-action cap
 per forced fight. No extra CI job is launched by this staging work. Source needs
 the reviewed active-builder/decision-policy/budget overlay before compiling.
+
+## Post-original-case ranged hypothesis expansion
+
+The original 13 indices and every outcome remain mandatory. Six cases appended
+at indices 13–18 are 20 grand elves versus ordinary archers 60 and 70, each at
+server seeds 29009, 29017, 29021. Both counts are predeclared and retained regardless
+of outcome. These are candidates selected after inspecting the original family's
+failure, not unseen general calibration or an already demonstrated improvement.
+
+Existing scalar diagnostics establish Catherine attack2/defense2, fighting1.1,
+magic1/no spellbook, safe ratio1.1. Baseline own strength is 6620*1.1=7282;
+required strengths are 60*126*1.1=8316 and 70*126*1.1=9702. Both are rejected.
+The new tests assert that actual production predicate remains false, but still
+force the real battle even if the precondition fails. A faster native double-shot
+ranged army against slower low-HP shooters provides a mechanical hypothesis, not
+a guaranteed win. Real neutral splitting, ordinary ranged penalties and all three
+compatible fields remain authoritative. No army/stat/threshold/budget alteration.

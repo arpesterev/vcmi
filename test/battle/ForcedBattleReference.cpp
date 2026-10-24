@@ -528,6 +528,13 @@ protected:
         // Exact current hero-specific baseline, not the raw creature-value ratio.
         // Log the production predicate; getMagicStrength alone may count magic
         // the adventure predicate correctly excludes as unavailable.
+        const bool scalarSafe = NK2AI::isSafeToVisit(hero, hero, monster->getArmyStrength(), ai.settings->getSafeAttackRatio());
+        if(ownCreature == 19 && ownCount == 20 && enemyCreature == 2)
+        {
+            // If fixture context changes, retain the fight but fail the declared
+            // baseline-rejection precondition rather than claiming a rescue.
+            EXPECT_FALSE(scalarSafe);
+        }
         std::cout << "FORCED_DECISION_SCALAR family=" << family << " oracle_seed=" << seed
             << " hero_type=" << hero->getHeroTypeID().getNum()
             << " attack=" << hero->getPrimSkillLevel(PrimarySkill::ATTACK)
@@ -539,7 +546,7 @@ protected:
             << " spellbook=" << hero->hasSpellbook() << " mana=" << hero->mana
             << " own_army=" << hero->getArmyStrength() << " neutral_army=" << monster->getArmyStrength()
             << " safe_ratio=" << ai.settings->getSafeAttackRatio()
-            << " scalar_safe=" << NK2AI::isSafeToVisit(hero, hero, monster->getArmyStrength(), ai.settings->getSafeAttackRatio())
+            << " scalar_safe=" << scalarSafe
             << " difficulty=" << static_cast<int>(ai.cc->getStartInfo()->difficulty) << std::endl;
         EXPECT_EQ(RandomizerCapture::capture(*handler->randomizer), oracleBefore);
 		DecisionRiskBudget::Settings settings;
@@ -1054,6 +1061,12 @@ std::vector<DecisionHoldoutCase> decisionHoldouts()
     }
     // Known regression is explicit, not mislabeled as a new holdout.
     cases.push_back({"neutral_known_regression", -1, 0, 58, 47, 17041});
+    // Post-original-case hypothesis expansion, fixed before these outcomes.
+    for(const int seed : {29009, 29017, 29021})
+    {
+        cases.push_back({"grandelf_archer60", 19, 20, 2, 60, seed});
+        cases.push_back({"grandelf_archer70", 19, 20, 2, 70, seed});
+    }
     return cases;
 }
 INSTANTIATE_TEST_SUITE_P(IndependentServer, ForcedDecisionHoldout, ::testing::ValuesIn(decisionHoldouts()));

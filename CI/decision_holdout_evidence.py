@@ -6,7 +6,9 @@ from forced_battle_evidence import _fields
 FAMILIES = ('neutral_challenge', 'grandelf_70', 'grandelf_80', 'sprite_skeleton')
 CASES = [(family, seed) for seed in (29009, 29017, 29021) for family in FAMILIES]
 CASES.append(('neutral_known_regression', 17041))
-EXPECTED_TEST_NAMES = [f'IndependentServer/ForcedDecisionHoldout.ProducerThenIndependentServer/{i}' for i in range(13)]
+# Post-original-case hypothesis expansion: preserve all original indices.
+CASES.extend((family,seed) for seed in (29009,29017,29021) for family in ('grandelf_archer60','grandelf_archer70'))
+EXPECTED_TEST_NAMES = [f'IndependentServer/ForcedDecisionHoldout.ProducerThenIndependentServer/{i}' for i in range(19)]
 
 def summarize_holdouts(log):
     rows = defaultdict(dict); samples = defaultdict(dict); variants = defaultdict(dict)

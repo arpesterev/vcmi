@@ -18,9 +18,11 @@ def suite_xml(names=qualification.CASES):
 
 
 class HoldoutQualificationTest(unittest.TestCase):
-    def test_exact_thirteen_names_filter_and_original_suites_are_separate(self):
-        expected = tuple(f'IndependentServer/ForcedDecisionHoldout.ProducerThenIndependentServer/{index}' for index in range(13))
+    def test_exact_nineteen_names_filter_and_original_suites_are_separate(self):
+        expected = tuple(f'IndependentServer/ForcedDecisionHoldout.ProducerThenIndependentServer/{index}' for index in range(19))
         self.assertEqual(qualification.CASES, expected)
+        self.assertEqual(qualification.CASES[:13], expected[:13])
+        self.assertEqual(len(qualification.CASES[13:]), 6)
         self.assertEqual(qualification.FILTER, 'IndependentServer/ForcedDecisionHoldout.*')
         self.assertEqual(qualification.EXECUTION_SECONDS, 60)
         old = json.loads((ROOT / 'CI/adventure-qualification.json').read_text())
@@ -34,7 +36,8 @@ class HoldoutQualificationTest(unittest.TestCase):
             valid = suite_xml()
             path.write_text(valid)
             self.assertEqual(qualification.validate_xml(path), sorted(qualification.CASES))
-            for malformed in (suite_xml(qualification.CASES[:-1]),
+            for malformed in (suite_xml(qualification.CASES[:13]),
+                    suite_xml(qualification.CASES[:-1]),
                     suite_xml(qualification.CASES + qualification.CASES[:1]),
                     suite_xml(qualification.CASES[:-1] + ('ForcedBattleReference.OrdinaryMelee',)),
                     valid.replace('status="run"', 'status="notrun"', 1),
@@ -125,9 +128,12 @@ class HoldoutRunnerTest(unittest.TestCase):
                 self.assertEqual(command[0], str(binary))
                 self.assertIn('--gtest_filter=' + qualification.FILTER, command)
                 self.assertEqual(seconds, 60)
-                logfile.write_text('invalid' if mode == 'invalid-evidence' else unknown_holdout_log())
+                log = unknown_holdout_log()
+                if mode == 'old-only-evidence':
+                    log = '\n'.join(line for line in log.splitlines() if 'family=grandelf_archer' not in line)
+                logfile.write_text('invalid' if mode == 'invalid-evidence' else log)
                 if mode != 'missing-xml':
-                    (evidence / 'tests.xml').write_text(suite_xml())
+                    (evidence / 'tests.xml').write_text(suite_xml(qualification.CASES[:13]) if mode == 'old-only-xml' else suite_xml())
                 if mode == 'timeout': raise RuntimeError('timeout=True')
                 return 0.1
 
@@ -151,10 +157,10 @@ class HoldoutRunnerTest(unittest.TestCase):
             self.assertFalse(result['build_attempted'])
             self.assertFalse(result['activation_approved'])
             self.assertEqual(reference_file.read_bytes(), original_reference)
-            if mode in ('success', 'missing-xml', 'timeout'):
-                self.assertEqual(result['holdout_evidence']['counts']['unknown'], 13)
+            if mode in ('success', 'missing-xml', 'old-only-xml', 'timeout'):
+                self.assertEqual(result['holdout_evidence']['counts']['unknown'], 19)
                 self.assertEqual(result['model_reference_status'], 'incomplete')
-            if mode not in ('success', 'missing-xml', 'timeout', 'invalid-evidence'):
+            if mode not in ('success', 'missing-xml', 'old-only-xml', 'old-only-evidence', 'timeout', 'invalid-evidence'):
                 self.assertEqual(calls, [])
 
     def test_all_unknowns_retained_without_activating_or_replacing_model_failure(self):
@@ -162,7 +168,7 @@ class HoldoutRunnerTest(unittest.TestCase):
 
     def test_every_failed_stage_stays_failed_and_diagnostics_survive(self):
         for mode in ('partial-build', 'wrong-commit', 'wrong-restore', 'wrong-binary', 'invalid-restore',
-                     'wrong-data', 'missing-xml', 'invalid-evidence', 'timeout'):
+                     'wrong-data', 'missing-xml', 'old-only-xml', 'old-only-evidence', 'invalid-evidence', 'timeout'):
             with self.subTest(mode=mode): self.exercise(mode)
 
 
