@@ -68,6 +68,7 @@ protected:
 	std::unique_ptr<CGameHandler> handler;
 	CMap * map = nullptr;
 	int3 battleTile;
+	std::shared_ptr<const ObjectTemplate> armyAppearance;
 	void mapLoaded(CMap * loaded) override { map = loaded; }
 
 	void initialize(int seed)
@@ -104,6 +105,8 @@ protected:
 		ASSERT_FALSE(map->getHeroesOnMap().empty());
 		const auto * contextHero = dynamic_cast<const CGHeroInstance *>(map->getObject(*map->getHeroesOnMap().begin()));
 		ASSERT_NE(contextHero, nullptr);
+		armyAppearance = contextHero->appearance;
+		ASSERT_NE(armyAppearance, nullptr);
 		battleTile = contextHero->visitablePos();
 		// Production battlefield selection requires a visitable object. Reuse
 		// a real public-map tile, not an unplaced synthetic army's empty tile.
@@ -124,7 +127,12 @@ protected:
 	{
 		auto result = std::make_shared<CArmedInstance>(server.state.get());
 		result->tempOwner = owner;
-		result->pos = battleTile;
+		// Reuse only the immutable geometry from the initialized public-map
+		// template. Native-terrain limiters call visitablePos() on the army;
+		// a non-null appearance and its correct anchor offset are required.
+		// This does not make the army a hero or copy any hero bonuses.
+		result->appearance = armyAppearance;
+		result->setAnchorPos(battleTile + result->getVisitableOffset());
 		result->id = ObjectInstanceID(map->objects.size());
 		// Register identity for BattleStart's getSideArmy lookup. No adventure
 		// placement, visits, policy, hero bonuses or private map are involved.
@@ -169,6 +177,15 @@ protected:
 		ASSERT_FALSE(HasFatalFailure());
 		auto attacker = army(PlayerColor(0), duel.attackerCreature, duel.attackerCount);
 		auto defender = army(PlayerColor::NEUTRAL, duel.defenderCreature, duel.defenderCount);
+		for(const auto & current : {attacker, defender})
+		{
+			ASSERT_NE(current->appearance, nullptr);
+			ASSERT_TRUE(current->isVisitable());
+			ASSERT_EQ(current->visitablePos(), battleTile);
+			// Regression for the crash in TerrainLimiter -> getCurrentTerrain
+			// during BattleInfo::localInit. Exercise the exact lookup first.
+			ASSERT_EQ(current->getCurrentTerrain(), map->getTile(battleTile).getTerrainID());
+		}
 		auto layout = BattleLayout::createDefaultLayout(*server.state, attacker.get(), defender.get());
 		layout.obstaclesAllowed = false;
 		layout.tacticsAllowed = false;

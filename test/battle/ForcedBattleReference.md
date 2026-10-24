@@ -29,6 +29,12 @@ selector's nonempty-visitable-tile precondition without changing battle rules.
 Terrain and battlefield are selected by normal engine rules and logged in
 `FORCED_BATTLE_CONTEXT`; no synthetic army is inserted into the tile's visitable
 list. Its identity registration remains solely for battle army lookup.
+Each synthetic army receives the same already-initialized immutable public-map
+ObjectTemplate geometry; its anchor is battlefield tile plus that template's
+visitable offset. No hero identity, army, skills or bonuses are copied. This is
+required because native-terrain limiters query the army's visitable position.
+Before battle start the fixture asserts a non-null visitable appearance, exact
+visitable position and successful getCurrentTerrain matching the battle tile.
 
 Both the map-initialization randomizer and the new authoritative server
 randomizer are explicitly seeded. The latter is fresh, so its per-army
