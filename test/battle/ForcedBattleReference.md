@@ -21,6 +21,24 @@ used; the explicit layout disables obstacles and tactics. There are no heroes,
 spells, siege, equipment, artificial stat boosts or removed ranged penalties.
 Normal army/creature morale and luck remain intact.
 
+Battlefield context comes from the first public MiniTest hero's actual visitable
+tile. The fixture asserts a registered hero is the tile's top visitable object
+and that its object-specific battlefield is NONE. The hero is neither moved nor
+passed as a participating army/hero. This avoids the production battlefield
+selector's nonempty-visitable-tile precondition without changing battle rules.
+Terrain and battlefield are selected by normal engine rules and logged in
+`FORCED_BATTLE_CONTEXT`; no synthetic army is inserted into the tile's visitable
+list. Its identity registration remains solely for battle army lookup.
+
+Both the map-initialization randomizer and the new authoritative server
+randomizer are explicitly seeded. The latter is fresh, so its per-army
+morale/luck substreams are empty and derive from the seeded authoritative stream.
+The legacy thread-local CRandomGenerator fallback is seeded before map loading
+and again before battle start. Context inspection does not consume battlefield
+random draws (CGHeroInstance::getBattlefield always returns NONE). Engine damage,
+morale/luck and terrain battlefield selection still use their normal RNG paths.
+The obstacle layout is disabled; no RNG/stat replacement affects combat.
+
 `BattleProcessor::startBattle` starts the fight unconditionally. The small
 `IGameServer` adapter applies every engine pack to `CGameState` and records the
 real `BattleResult`. `makePlayerBattleAction` validates and executes every unit

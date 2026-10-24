@@ -5,6 +5,8 @@
 #include "StdInc.h"
 #include "mock/mock_MapService.h"
 #include "../../lib/GameLibrary.h"
+#include "../../lib/CRandomGenerator.h"
+#include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/StartInfo.h"
 #include "../../lib/CCreatureHandler.h"
 #include "../../lib/battle/BattleAction.h"
@@ -65,10 +67,12 @@ protected:
 	ReferenceServer server;
 	std::unique_ptr<CGameHandler> handler;
 	CMap * map = nullptr;
+	int3 battleTile;
 	void mapLoaded(CMap * loaded) override { map = loaded; }
 
 	void initialize(int seed)
 	{
+		CRandomGenerator::getDefault().setSeed(seed);
 		server.state = std::make_shared<CGameState>();
 		server.state->preInit(LIBRARY);
 		MapServiceMock mapService("test/MiniTest/", this);
@@ -97,15 +101,30 @@ protected:
 		Load::ProgressAccumulator progress;
 		server.state->init(&mapService, &start, randomizer, progress, false);
 		ASSERT_NE(map, nullptr);
+		ASSERT_FALSE(map->getHeroesOnMap().empty());
+		const auto * contextHero = dynamic_cast<const CGHeroInstance *>(map->getObject(*map->getHeroesOnMap().begin()));
+		ASSERT_NE(contextHero, nullptr);
+		battleTile = contextHero->visitablePos();
+		// Production battlefield selection requires a visitable object. Reuse
+		// a real public-map tile, not an unplaced synthetic army's empty tile.
+		// The map hero supplies context only: never a battle participant.
+		const auto & contextTile = map->getTile(battleTile);
+		ASSERT_FALSE(contextTile.visitableObjects.empty());
+		const auto * topObject = map->getObject(contextTile.visitableObjects.front());
+		ASSERT_NE(dynamic_cast<const CGHeroInstance *>(topObject), nullptr);
+		ASSERT_EQ(topObject->getBattlefield(), BattleField::NONE);
 		handler = std::make_unique<CGameHandler>(server, server.state);
 		handler->randomizer->setSeed(seed);
+		// Fresh authoritative RNG also has empty per-army morale/luck streams.
+		// Seed legacy thread-local fallback independently, without consuming it.
+		CRandomGenerator::getDefault().setSeed(seed);
 	}
 
 	std::shared_ptr<CArmedInstance> army(PlayerColor owner, int creature, int count)
 	{
 		auto result = std::make_shared<CArmedInstance>(server.state.get());
 		result->tempOwner = owner;
-		result->pos = int3(4, 4, 0);
+		result->pos = battleTile;
 		result->id = ObjectInstanceID(map->objects.size());
 		// Register identity for BattleStart's getSideArmy lookup. No adventure
 		// placement, visits, policy, hero bonuses or private map are involved.
@@ -154,9 +173,13 @@ protected:
 		layout.obstaclesAllowed = false;
 		layout.tacticsAllowed = false;
 		const BattleID id = server.state->nextBattleID;
-		handler->battles->startBattle(attacker.get(), defender.get(), int3(4, 4, 0), nullptr, nullptr, layout, nullptr);
+		handler->battles->startBattle(attacker.get(), defender.get(), battleTile, nullptr, nullptr, layout, nullptr);
 		const auto * initial = server.state->getBattle(id);
 		ASSERT_NE(initial, nullptr);
+		std::cout << "FORCED_BATTLE_CONTEXT case=" << duel.name << " seed=" << seed
+			<< " tile=" << battleTile.x << ',' << battleTile.y << ',' << battleTile.z
+			<< " terrain=" << initial->getTerrainType().getNum()
+			<< " battlefield=" << initial->getBattlefieldType().getNum() << std::endl;
 		// Both forecasts consume the same live snapshot read-only. Neither can
 		// veto the forced battle or select its real damage rolls/actions.
 		for(const auto * unit : initial->battleGetUnitsIf([](const battle::Unit *) { return true; }))

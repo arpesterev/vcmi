@@ -82,6 +82,16 @@ jobs:
         echo "prefix=vcmi-modular-v1-linux-$key-" >> "$GITHUB_OUTPUT"
         depkey=$(python3 CI/incremental_identity.py linux-gcc-test --scope dependencies --output incremental-evidence/dependency-identity.json)
         echo "deps=vcmi-deps-v1-linux-$depkey" >> "$GITHUB_OUTPUT"
+        python3 - <<'PY_PROVENANCE'
+        import json, os, pathlib
+        keys = ('ImageVersion', 'ImageOS', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_SHA')
+        value = {key: os.environ.get(key, 'missing') for key in keys}
+        value['note'] = 'Actual job environment; compare independently with runner setup metadata.'
+        encoded = json.dumps(value, sort_keys=True, indent=2) + '\n'
+        pathlib.Path('incremental-evidence/runner-environment.json').write_text(encoded)
+        print(encoded)
+        print(pathlib.Path('incremental-evidence/runner-identity.json').read_text())
+        PY_PROVENANCE
     - name: Restore previous compatible build, compiler and dependency caches
       id: cache
       timeout-minutes: 5
@@ -102,6 +112,95 @@ jobs:
           .ci/test-data
           .ci/apt-cache
         key: ${{ steps.identity.outputs.deps }}
+    - name: Authorize evidence-only inspection on a known-image cache miss
+      id: miss_diagnostic
+      if: startsWith(github.event.head_commit.message, '[vcmi-warm] ') && contains(github.event.head_commit.message, '[adventure-qualify]') && steps.cache.outputs.cache-matched-key == ''
+      timeout-minutes: 2
+      run: |
+        mkdir -p incremental-evidence/installed-diagnostic
+        printf '%s\n' "${ImageVersion:-unknown}" > incremental-evidence/installed-diagnostic/observed-image.txt
+        case "${ImageVersion:-unknown}" in
+          20261012.334.1|20261023.334.3) ;;
+          *) echo '::error::Unreviewed image; no diagnostic installation permitted'; exit 1 ;;
+        esac
+        echo 'e5f3db8a3395709a5a60c47b55d56a59910fca4ad7b24500a0ca18f13bf6dcb1  CI/linux-diagnostic-baseline/runner-identity.json' | sha256sum --check
+        echo 'e923c33704e900860b291feb4ad31b5d3049137100f6511e561f74809d233b8d  CI/linux-diagnostic-baseline/toolchain-identity.json' | sha256sum --check
+        echo 'aeb32a29af25fe67dfefd742c9cee60e32a493abb60c71d9d74705db61d9b132  CI/linux-diagnostic-baseline/dependency-identity.json' | sha256sum --check
+        python3 CI/linux_identity_diagnostic.py compare --baseline CI/linux-diagnostic-baseline/runner-identity.json --current incremental-evidence/runner-identity.json --expected-image "$ImageVersion" --output incremental-evidence/installed-diagnostic/preinstall-comparison.json
+        echo 'enabled=true' >> "$GITHUB_OUTPUT"
+    - name: Restore only the verified exact prior downloads and test archive
+      if: steps.miss_diagnostic.outputs.enabled == 'true'
+      id: diagnostic_deps
+      timeout-minutes: 5
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+      with:
+        path: |-
+          .ci/test-data
+          .ci/apt-cache
+        key: vcmi-deps-v1-linux-aeb32a29af25fe67dfefd742c9cee60e32a493abb60c71d9d74705db61d9b132
+        fail-on-cache-miss: true
+    - name: Refuse fallback, unsafe paths, missing archives, or oversized downloads
+      if: steps.miss_diagnostic.outputs.enabled == 'true'
+      timeout-minutes: 2
+      env:
+        CACHE_HIT: ${{ steps.diagnostic_deps.outputs.cache-hit }}
+        MATCHED_KEY: ${{ steps.diagnostic_deps.outputs.cache-matched-key }}
+      run: |
+        test "$CACHE_HIT" = true
+        test "$MATCHED_KEY" = "vcmi-deps-v1-linux-aeb32a29af25fe67dfefd742c9cee60e32a493abb60c71d9d74705db61d9b132"
+        printf '%s\n' "$MATCHED_KEY" > incremental-evidence/installed-diagnostic/restored-dependency-cache-key.txt
+        python3 - <<'PY'
+        import pathlib
+        assert not pathlib.Path('.ci').is_symlink()
+        total = 0
+        for root in map(pathlib.Path, ['.ci/test-data', '.ci/apt-cache']):
+            assert root.is_dir() and not root.is_symlink(), root
+            for path in root.rglob('*'):
+                assert not path.is_symlink(), path
+                if path.is_file(): total += path.stat().st_size
+        assert total <= 3 * 1024**3, 'Dependency cache exceeds 3 GiB'
+        print('Restored dependency logical bytes:', total)
+        PY
+        test -f .ci/apt-cache/onnxruntime/onnxruntime-1.18.1-x86_64.tgz
+        test -f .ci/apt-cache/onnxruntime/onnxruntime-1.18.1-x86_64.tgz.sha256
+        echo '64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  .ci/test-data/heroes3.7z' | sha256sum --check
+    - name: Install the normal distribution dependencies, without compiling anything
+      if: steps.miss_diagnostic.outputs.enabled == 'true'
+      timeout-minutes: 12
+      env:
+        APT_CACHE: ${{ github.workspace }}/.ci/apt-cache
+        ONNXRUNTIME_ARCHIVE_CACHE: ${{ github.workspace }}/.ci/apt-cache/onnxruntime
+      run: |
+        start=$(date +%s)
+        trap 'status=$?; printf "%s\n" "$(( $(date +%s)-start ))" > incremental-evidence/installed-diagnostic/dependency-install-seconds.txt; printf "%s\n" "$status" > incremental-evidence/installed-diagnostic/dependency-install-exit-status.txt' EXIT
+        source CI/before_install/linux_qt6.sh
+        sudo apt-get -o Dir::Cache::archives="$APT_CACHE" -o APT::Keep-Downloaded-Packages=true -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full ccache
+        test "$APT_CACHE" = "$GITHUB_WORKSPACE/.ci/apt-cache"
+        test ! -L "$APT_CACHE"
+        sudo rm -f "$APT_CACHE/lock"
+        sudo rm -rf "$APT_CACHE/partial"
+        sudo chown -R "$USER:$USER" "$APT_CACHE"
+    - name: Capture installed identity
+      if: steps.miss_diagnostic.outputs.enabled == 'true'
+      id: diagnostic_installed
+      timeout-minutes: 2
+      run: |
+        python3 CI/incremental_identity.py linux-gcc-test --installed --output incremental-evidence/installed-diagnostic/toolchain-identity.json
+    - name: Report every non-image mismatch without approving or migrating any cache
+      if: steps.miss_diagnostic.outputs.enabled == 'true'
+      timeout-minutes: 1
+      run: |
+        python3 CI/linux_identity_diagnostic.py compare --baseline CI/linux-diagnostic-baseline/toolchain-identity.json --current incremental-evidence/installed-diagnostic/toolchain-identity.json --expected-image "${ImageVersion}" --output incremental-evidence/installed-diagnostic/installed-comparison.json
+    - name: Capture additional binary and package hashes even on identity mismatch
+      if: always() && !cancelled() && steps.miss_diagnostic.outputs.enabled == 'true' && steps.diagnostic_installed.outcome == 'success'
+      timeout-minutes: 3
+      run: |
+        python3 CI/linux_identity_diagnostic.py inventory --output incremental-evidence/installed-diagnostic/binary-and-package-hashes.json
+    - name: Stop after cache-miss diagnostic without compiling or saving caches
+      if: always() && !cancelled() && steps.miss_diagnostic.outputs.enabled == 'true'
+      run: |
+        echo '::error::Diagnostic only: compatible build cache was absent. No object reuse, compilation or cache migration is authorized.'
+        exit 1
     - name: Fail fast rather than silently rebuilding cold
       run: |
         if [[ ( -z '${{ steps.cache.outputs.cache-matched-key }}' || -z '${{ steps.deps.outputs.cache-matched-key }}' ) && '${{ startsWith(github.event.head_commit.message, '[vcmi-bootstrap] ') }}' != true ]]; then
