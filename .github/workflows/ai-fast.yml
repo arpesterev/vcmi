@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [develop]
   push:
-    branches: [develop, ai-strategy-develop-20261026]
+    branches: [develop]
 
 concurrency:
   group: fast-ai-${{ github.event.pull_request.number || github.ref }}
