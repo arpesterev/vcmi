@@ -45,7 +45,8 @@ void ExploreNeighbourTile::accept(AIGateway * aiGw)
 				if(pathInfo->accessible == EPathAccessibility::ACCESSIBLE)
 				{
 					float newValue = h.howManyTilesWillBeDiscovered(tile);
-					newValue /= std::min(0.1f, pathInfo->getCost());
+					// Avoid favoring expensive detours: cap only near-zero movement costs.
+					newValue /= std::max(0.1f, pathInfo->getCost());
 
 					if(newValue > value)
 					{
