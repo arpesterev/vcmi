@@ -13,6 +13,7 @@
 #include "AI/Nullkiller2/Engine/Nullkiller.h"
 #include "AI/Nullkiller2/Goals/CompleteQuest.h"
 #include "AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.h"
+#include "AI/Nullkiller2/Goals/Composition.h"
 #include "AI/Nullkiller2/AIUtility.h"
 #include "AI/Nullkiller2/Pathfinding/AIPathfinder.h"
 
@@ -37,6 +38,21 @@ using B = TinyH3M::TinyH3MBuilder;
 class Nullkiller2_Goals_CompleteQuest : public NullkillerTest
 {
 };
+
+bool includesObjectVisit(const NK2AI::Goals::TSubgoal & goal, ObjectInstanceID target)
+{
+	if(!goal || goal->invalid())
+		return false;
+	if(goal->objid == target.getNum())
+		return true;
+	if(goal->goalType != NK2AI::Goals::COMPOSITION)
+		return false;
+	const auto subgoals = goal->decompose(nullptr);
+	return std::ranges::any_of(subgoals, [target](const auto & subgoal)
+	{
+		return includesObjectVisit(subgoal, target);
+	});
+}
 }
 
 TEST_F(Nullkiller2_Goals_CompleteQuest, levelMissionVisitsObjectGrantingExperience)
@@ -84,11 +100,11 @@ TEST_F(Nullkiller2_Goals_CompleteQuest, levelMissionVisitsObjectGrantingExperien
 		candidatePaths, gateway->nullkiller.get(), seer);
 	ASSERT_TRUE(std::ranges::any_of(directGoals, [seer](const NK2AI::Goals::TSubgoal & goal)
 	{
-		return goal->objid == seer->id.getNum();
+		return includesObjectVisit(goal, seer->id);
 	})) << "The reachable seer must produce an executable visit goal.";
 
 	const auto goals = NK2AI::Goals::CompleteQuest(QuestInfo(guard->id), *gateway->cc).decompose(gateway->nullkiller.get());
-	EXPECT_TRUE(std::ranges::any_of(goals, [seer](const NK2AI::Goals::TSubgoal & goal){ return goal->objid == seer->id.getNum(); }))
+	EXPECT_TRUE(std::ranges::any_of(goals, [seer](const NK2AI::Goals::TSubgoal & goal){ return includesObjectVisit(goal, seer->id); }))
 		<< "a hero below the required level is sent to the seer hut that grants experience";
 }
 
@@ -132,6 +148,6 @@ TEST_F(Nullkiller2_Goals_CompleteQuest, levelMissionSkipsKnownSeerAskingForAnoth
 	gateway->nullkiller->pathfinder->updatePaths(heroes, NK2AI::PathfinderSettings());
 
 	const auto goals = NK2AI::Goals::CompleteQuest(QuestInfo(guard->id), *gateway->cc).decompose(gateway->nullkiller.get());
-	EXPECT_FALSE(std::ranges::any_of(goals, [seer](const NK2AI::Goals::TSubgoal & goal){ return goal->objid == seer->id.getNum(); }))
+	EXPECT_FALSE(std::ranges::any_of(goals, [seer](const NK2AI::Goals::TSubgoal & goal){ return includesObjectVisit(goal, seer->id); }))
 		<< "a seer that grants experience only to another hero must not be revisited";
 }

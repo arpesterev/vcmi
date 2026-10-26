@@ -76,9 +76,9 @@ jobs:
       - name: Run all Nullkiller2 regressions in one process
         run: |
           cd out/build/linux-gcc-test/bin
-          ./vcmitest --gtest_filter='Nullkiller2_*' --gtest_list_tests > ai-test-names.txt
+          ./vcmitest --gtest_filter='Nullkiller2_*:ResourceTradingTurnTest.*' --gtest_list_tests > ai-test-names.txt
           grep -q '^Nullkiller2_' ai-test-names.txt
-          timeout 900 ./vcmitest --gtest_filter='Nullkiller2_*' \
+          timeout 900 ./vcmitest --gtest_filter='Nullkiller2_*:ResourceTradingTurnTest.*' \
             --gtest_output=xml:fast-ai-tests.xml
 
       - name: Check headless server startup
