@@ -80,7 +80,7 @@ public:
 	std::vector<JsonNode> loadLegacyData() override;
 
 	// Nullopt means an unmodelled native subclass/override, not no override.
-	static std::optional<std::vector<BattleField>> objectBattlefieldCandidates(const CGObjectInstance & object, MapLayerId layer);
+	static DLL_LINKAGE std::optional<std::vector<BattleField>> objectBattlefieldCandidates(const CGObjectInstance & object, MapLayerId layer);
 	static std::vector<BattleField> compatibleBattlefields(const std::vector<BattleField> & battleFields, MapLayerId currentLayer);
 	static BattleField selectRandomBattlefield(const std::vector<BattleField> & battleFields, MapLayerId currentLayer, vstd::RNG & randomGenerator);
 };
