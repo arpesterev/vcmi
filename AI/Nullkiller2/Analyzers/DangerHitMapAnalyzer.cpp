@@ -150,7 +150,8 @@ void DangerHitMapAnalyzer::updateHitMap()
 
 				newThreat.heroPtr = HeroPtr(path.targetHero, aiNk->cc.get());
 				newThreat.turn = path.turn();
-				newThreat.threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0);
+				// Distance lowers urgency, but never creates a negative threat.
+				newThreat.threat = static_cast<float>(path.getHeroStrength()) / (1.0f + std::max(0.0f, path.movementCost()));
 				// TODO: Mircea: Why is this danger calculated so differently than FuzzyHelper::evaluateDanger?
 				// shouldn't it use the path danger instead of hero strength?
 				newThreat.danger = path.getHeroStrength();
