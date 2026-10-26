@@ -208,8 +208,7 @@ void HeroManager::update()
 
 		movableHeroes.push_back(hero);
 		float score = scores.at(hero);
-		const auto prior = heroToRoleMap.find(HeroPtr(hero, aiNk->cc.get()));
-		if(prior != heroToRoleMap.end() && prior->second == MAIN)
+		if(lastMainHeroIds.contains(hero->id))
 			score += std::max(0.0f, score) * 0.05f; // Avoid needless role churn on near ties.
 		candidateScores.push_back(score);
 
@@ -247,13 +246,17 @@ void HeroManager::update()
 		mainHeroes.insert(movableHeroes.at(index));
 
 	heroToRoleMap.clear();
+	std::set<ObjectInstanceID> nextMainHeroIds;
 	for(const auto * hero : myHeroes)
 	{
 		HeroPtr heroPtr(hero, aiNk->cc.get());
 		HeroRole role = hero->patrol.patrolling || mainHeroes.contains(hero) ? MAIN : SCOUT;
 		heroToRoleMap[heroPtr] = role;
+		if(role == MAIN)
+			nextMainHeroIds.insert(hero->id);
 		logAi->trace("HeroManager::update Hero %s has role %s", heroPtr.nameOrDefault(), role == MAIN ? "main" : "scout");
 	}
+	lastMainHeroIds = std::move(nextMainHeroIds);
 }
 
 HeroRole HeroManager::getHeroRoleOrDefaultInefficient(const  CGHeroInstance * hero) const

@@ -52,6 +52,7 @@ private:
 	CCallback * cc; //this is enough, but we downcast from CCallback
 	const Nullkiller * aiNk;
 	std::map<HeroPtr, HeroRole> heroToRoleMap; // can get out of sync with cc->getHeroesInfo() and include lost heroes
+	std::set<ObjectInstanceID> lastMainHeroIds; // Stable IDs avoid dereferencing stale HeroPtr keys.
 	std::map<ObjectInstanceID, float> knownFightingStrength;
 
 public:
