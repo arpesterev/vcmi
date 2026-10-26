@@ -369,7 +369,6 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 		}
 
 		std::vector<int> pathsToDefend;
-		std::map<const CGHeroInstance *, std::vector<int>> defferedPaths;
 		AIPath * closestWay = nullptr;
 
 		for(int i = 0; i < paths.size(); i++)
@@ -414,7 +413,6 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 				);
 #endif
 
-				defferedPaths[path.targetHero].push_back(i);
 				continue;
 			}
 
@@ -488,14 +486,21 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 		for(int i : pathsToDefend)
 		{
 			AIPath & path = paths[i];
-			for(int j : defferedPaths[path.targetHero])
+			// Compare only actual scheduled alternatives. Deferred routes do not
+			// represent committed defence, and the old inner 'continue' was inert.
+			const bool hasBetterScheduledPath = std::any_of(pathsToDefend.begin(), pathsToDefend.end(), [&](int j)
 			{
-				AIPath & defferedPath = paths[j];
-				if(defferedPath.getHeroStrength() >= path.getHeroStrength() && defferedPath.turn() <= path.turn())
-				{
-					continue; // TODO: Mircea: Should it be break instead? Or continue for the outside loop?
-				}
-			}
+				if(i == j || paths[j].targetHero != path.targetHero)
+					return false;
+				const auto & alternate = paths[j];
+				return alternate.getHeroStrength() >= path.getHeroStrength()
+					&& alternate.turn() <= path.turn()
+					&& (alternate.getHeroStrength() > path.getHeroStrength()
+						|| alternate.movementCost() < path.movementCost()
+						|| (alternate.movementCost() == path.movementCost() && j < i));
+			});
+			if(hasBetterScheduledPath)
+				continue;
 
 			Composition composition;
 			composition.addNext(DefendTown(town, threat, path));
