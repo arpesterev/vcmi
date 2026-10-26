@@ -51,9 +51,16 @@ struct HitMapNode
 	}
 };
 
+// The last accessible tile before each planned change of turn.
+std::vector<std::pair<int3, uint8_t>> collectPlannedOvernightStops(const CGPathNode * destination);
+
 // Evaluates only already observed threats. Never predicts hidden enemy armies.
 bool isKnownUnsafeAtEndOfTurn(const HitMapNode & tile, const CGHeroInstance * hero,
 	const CCreatureSet * army, uint8_t arrivalTurn, float safeAttackRatio);
+
+// Never blocks special-action or multi-carrier paths whose physical itinerary
+// cannot be reproduced by the single-hero pathfinder.
+bool hasUnsafeKnownOvernightStop(const AIPath & path, const Nullkiller * aiNk);
 
 struct EnemyHeroAccessibleObject
 {

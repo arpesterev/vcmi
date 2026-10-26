@@ -24,3 +24,27 @@ TEST(Nullkiller2_Analyzers_DangerHitMap, checksBothKnownEnemiesAtEndOfTurn)
 	map.maximumDanger.turn = 2;
 	EXPECT_FALSE(NK2AI::isKnownUnsafeAtEndOfTurn(map, &hero, &hero, 0, 1.1f));
 }
+
+TEST(Nullkiller2_Analyzers_DangerHitMap, findsPhysicalOvernightStopBeforeTurnChange)
+{
+	CGPathNode origin;
+	origin.coord = int3(1, 1, 0);
+	origin.turns = 0;
+	CGPathNode dayZeroStop;
+	dayZeroStop.coord = int3(3, 1, 0);
+	dayZeroStop.turns = 0;
+	dayZeroStop.theNodeBefore = &origin;
+	CGPathNode followingMorning;
+	followingMorning.coord = int3(4, 1, 0);
+	followingMorning.turns = 1;
+	followingMorning.theNodeBefore = &dayZeroStop;
+	CGPathNode destination;
+	destination.coord = int3(6, 1, 0);
+	destination.turns = 1;
+	destination.theNodeBefore = &followingMorning;
+
+	const auto stops = NK2AI::collectPlannedOvernightStops(&destination);
+	ASSERT_EQ(stops.size(), 1u);
+	EXPECT_EQ(stops.front().first, dayZeroStop.coord);
+	EXPECT_EQ(stops.front().second, 0);
+}

@@ -167,7 +167,7 @@ std::vector<int3> boundedEscapeCandidateTiles(const int3 & origin,
 {
 	std::set<int3> candidates;
 	const int radius = std::clamp(movementPoints / 100 + 2, 6, 24);
-	const int stride = std::max(1, radius / 8);
+	const int stride = std::max(1, (radius + 7) / 8);
 	for(int dx = -radius; dx <= radius; ++dx)
 		for(int dy = -radius; dy <= radius; ++dy)
 		{

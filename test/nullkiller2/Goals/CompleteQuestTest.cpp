@@ -12,6 +12,8 @@
 #include "AI/Nullkiller2/AIGateway.h"
 #include "AI/Nullkiller2/Engine/Nullkiller.h"
 #include "AI/Nullkiller2/Goals/CompleteQuest.h"
+#include "AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.h"
+#include "AI/Nullkiller2/AIUtility.h"
 #include "AI/Nullkiller2/Pathfinding/AIPathfinder.h"
 
 #include "mock/TinyH3MBuilder.h"
@@ -20,6 +22,7 @@
 #include "lib/callback/CCallback.h"
 #include "lib/mapObjects/CGHeroInstance.h"
 #include "lib/networkPacks/PacksForClient.h"
+#include "lib/rewardable/Interface.h"
 
 namespace
 {
@@ -64,6 +67,25 @@ TEST_F(Nullkiller2_Goals_CompleteQuest, levelMissionVisitsObjectGrantingExperien
 	NK2AI::HeroMap<NK2AI::HeroRole> heroes;
 	heroes[hero] = NK2AI::HeroRole::MAIN;
 	gateway->nullkiller->pathfinder->updatePaths(heroes, NK2AI::PathfinderSettings());
+
+	// Keep fixture failures distinguishable from quest-planning failures.
+	const auto * rewardable = dynamic_cast<const Rewardable::Interface *>(seer);
+	ASSERT_NE(rewardable, nullptr);
+	ASSERT_FALSE(rewardable->configuration.info.empty());
+	ASSERT_TRUE(std::ranges::any_of(rewardable->configuration.info, [](const Rewardable::VisitInfo & info)
+	{
+		return info.reward.heroExperience > 0;
+	}));
+	const auto candidatePaths = gateway->nullkiller->pathfinder->getPathInfo(SEER_POS);
+	ASSERT_FALSE(candidatePaths.empty());
+	ASSERT_TRUE(NK2AI::shouldVisit(gateway->nullkiller.get(), hero, seer))
+		<< "The known XP seer must accept this hero.";
+	const auto directGoals = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals(
+		candidatePaths, gateway->nullkiller.get(), seer);
+	ASSERT_TRUE(std::ranges::any_of(directGoals, [seer](const NK2AI::Goals::TSubgoal & goal)
+	{
+		return goal->objid == seer->id.getNum();
+	})) << "The reachable seer must produce an executable visit goal.";
 
 	const auto goals = NK2AI::Goals::CompleteQuest(QuestInfo(guard->id), *gateway->cc).decompose(gateway->nullkiller.get());
 	EXPECT_TRUE(std::ranges::any_of(goals, [seer](const NK2AI::Goals::TSubgoal & goal){ return goal->objid == seer->id.getNum(); }))

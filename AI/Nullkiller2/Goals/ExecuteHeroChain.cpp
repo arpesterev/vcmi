@@ -13,6 +13,7 @@
 #include "../Engine/Nullkiller.h"
 #include "../Pathfinding/Actions/DimensionDoorAction.h"
 #include "../Pathfinding/Actions/QuestAction.h"
+#include "../Analyzers/DangerHitMapAnalyzer.h"
 
 namespace NK2AI
 {
@@ -153,6 +154,14 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 	aiGw->nullkiller->objectClusterizer->reset();
 
 	auto targetObject = aiGw->cc->tryGetObj(static_cast<ObjectInstanceID>(objid));
+	const bool enemyTarget = targetObject && targetObject->getOwner().isValidPlayer()
+		&& aiGw->cc->getPlayerRelations(aiGw->playerID, targetObject->getOwner()) == PlayerRelations::ENEMIES
+		&& (targetObject->ID == Obj::TOWN || targetObject->ID == Obj::HERO);
+	if(!enemyTarget && hasUnsafeKnownOvernightStop(chainPath, aiGw->nullkiller.get()))
+	{
+		throw cannotFulfillGoalException(
+			"Route ends a planned day inside the known reach of a stronger enemy.");
+	}
 	// Never march toward an enemy's obsolete location after a refreshed turn.
 	// Legal visibility and target identity are rechecked at execution time.
 	if(targetObject && targetObject->ID == Obj::HERO

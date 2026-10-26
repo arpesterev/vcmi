@@ -861,12 +861,13 @@ public:
 		// TODO: Mircea: See how we can get some kind of balance between MAINs in terms of army delivery
 		// See: GatherArmyBehavior::deliverArmyToHero
 		const uint64_t additionalArmyStrength = heroExchange.getReinforcementArmyStrength(evaluationContext.evaluator.aiNk);
+		const int64_t artifactValue = heroExchange.getReinforcementArtifactValue(evaluationContext.evaluator.aiNk);
 		// hero with no army would divide by zero, so treat its value as 1
 		const float additionalArmyRatio = static_cast<float>(additionalArmyStrength)
 			/ std::max<uint64_t>(1, heroExchange.hero->estimateCombatValue());
 
-		evaluationContext.addNonCriticalStrategicalValue(additionalArmyRatio);
-		evaluationContext.armyGrowth = additionalArmyStrength;
+		evaluationContext.addNonCriticalStrategicalValue(additionalArmyRatio + artifactValue / 10000.0f);
+		evaluationContext.armyGrowth = additionalArmyStrength + artifactValue * 0.5f;
 		evaluationContext.movementCost = heroExchange.exchangePath.movementCost();
 		evaluationContext.danger = heroExchange.exchangePath.getTotalDanger();
 		evaluationContext.heroRole = giverHeroRole;

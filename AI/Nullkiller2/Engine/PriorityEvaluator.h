@@ -85,6 +85,9 @@ struct DLL_EXPORT EvaluationContext
 	bool isArmyUpgrade;
 	bool isHero;
 	bool isEnemy;
+	ObjectInstanceID pursuitTargetId = ObjectInstanceID::NONE;
+	ObjectInstanceID pursuitCarrierId = ObjectInstanceID::NONE;
+	int3 pursuitTargetPosition = int3(-1);
 	bool isOneWayPortalProbe;
 	int explorePriority; // 1 important, 2 medium, 3 lowest importance
 	float powerRatio; // Ratio of the committed army's strength to the total power of matching creatures available to the AI
