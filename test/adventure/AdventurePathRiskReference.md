@@ -5,6 +5,7 @@ This separate excluded target must be overlaid only after the risk-consumer impl
 Include AdventurePathRiskReference.cmake from test/CMakeLists.txt after AdventureScenarioReference.cmake. The core scenario generator and all its existing dependencies remain required. Compile vcmi_path_risk_reference incrementally with the same 180-second/12-new-object qualification guard; run from build/bin using public checksum-pinned test data. Two separate gtest-filter processes, each at most 180 seconds, aggregate at most 360 seconds. Require both successful exits and exact XML testcase completion; timeout or unsupported packets are incomplete, never passes.
 
 Tests:
+
 - ActualPathfinderRequiresEligibleFavorablePublication: the existing public visible 999-pikeman monster against a real 20-pikeman hero must first have NO real path. Unsafe evidence cannot rescue it; injected favorable evidence must produce a real path for that exact hero/current army; production invalidation must remove the rescue.
 - ActualEarlierCombatCannotUseDestinationOnlyPublication: a public one-tile dirt corridor bounded by water contains a weak one-pikeman guard before the 999-pikeman target. Actual intermediate paths must exist and all have positive encounter danger. A destination-only favorable publication cannot rescue the later target. Destination overlap/visibility checks reject invalid fixture premises.
 

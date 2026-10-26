@@ -11,7 +11,7 @@ The integrator may include `adventure/AdventureScenarioReference.cmake` from
 Nullkiller2/server/test configuration, public pinned test data and installed VCMI
 configuration files, just like `vcmitest` and `vcmi_forced_battle_reference`.
 
-```
+```bash
 cmake --build <existing-build> --target vcmi_adventure_scenario_reference
 cd <existing-build>/bin
 ./vcmi_adventure_scenario_reference --gtest_filter=AdventureScenarioBridge.RealCallbackMoveConsumesMovementAndChangesPosition --gtest_output=xml:adventure-move.xml

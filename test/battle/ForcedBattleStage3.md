@@ -73,7 +73,6 @@ blocked-edge double-wide movement, and obstacle-rich references still need
 explicit qualification; merely allowing these mechanics in the sampler is not
 passing them. The same actual server actions/results remain the oracle.
 
-
 ## Fatal failures and diagnostics
 
 Both run helpers wrap initialize in ASSERT_NO_FATAL_FAILURE and explicitly
@@ -86,7 +85,6 @@ caller. Independently initialized real battle state still supplies the forced
 reference even if an invariant fails; such failed-test outcomes cannot qualify
 as valid calibration rows. Captures and rollouts each log their own support
 status and reason, never combining unsupported with a modeled loss.
-
 
 ## Evidence acceptance contract
 
@@ -110,7 +108,6 @@ that all 174 possible samples are supported is made.
 The exact 58 gtest names and evidence identities are exported by
 CI/forced_battle_evidence.py (expected_cases / EXPECTED_TEST_NAMES), with
 CI/forced-battle-cases.json as a machine-readable copy.
-
 
 ## Forecast-failure isolation and eligibility controls
 

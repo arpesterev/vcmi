@@ -58,6 +58,20 @@ void ExploreNeighbourTile::accept(AIGateway * aiGw)
 
 					if(newValue > value)
 					{
+						// Reject a known guarded step before choosing a target,
+						// otherwise one risky high-value tile can suppress every
+						// safer second-best neighbour.
+						if(aiGw->nullkiller->dangerEvaluator->evaluateDanger(tile, hero, true) > 0)
+							return;
+						const auto & threats = aiGw->nullkiller->dangerHitMap->getTileThreat(tile);
+						const float safeRatio = aiGw->nullkiller->settings->getSafeAttackRatio();
+						const auto canKillNextMove = [&](const HitMapInfo & threat)
+						{
+							return threat.turn == 0 && threat.danger > 0
+								&& !isSafeToVisit(hero, threat.danger, safeRatio);
+						};
+						if(canKillNextMove(threats.fastestDanger) || canKillNextMove(threats.maximumDanger))
+							return;
 						value = newValue;
 						target = tile;
 					}
