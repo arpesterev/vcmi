@@ -117,7 +117,10 @@ void considerEscapePath(
 	const auto destination = path.targetTile();
 	const auto & currentThreat = threatenedHero->second;
 	const auto & destinationThreat = aiNk->dangerHitMap->getTileThreat(destination).fastestDanger;
-	const uint64_t immediateDestinationDanger = destinationThreat.turn < 1 ? destinationThreat.danger : 0;
+	const auto & destinationNode = aiNk->dangerHitMap->getTileThreat(destination);
+	uint64_t immediateDestinationDanger = destinationThreat.turn < 1 ? destinationThreat.danger : 0;
+	if(destinationNode.maximumDanger.turn == 0)
+		immediateDestinationDanger = std::max(immediateDestinationDanger, destinationNode.maximumDanger.danger);
 	const uint64_t destinationDanger = std::max(path.getTotalDanger(), immediateDestinationDanger);
 	const auto candidate = makeEscapePathCandidate(
 		path,
@@ -147,7 +150,9 @@ EscapePathEvaluation evaluateEscapePathCandidate(const EscapePathCandidate & can
 		|| candidate.blockedAction
 		|| !candidate.singleHeroPath
 		|| !candidate.destinationSafe
-		|| !candidate.destinationIsSafer)
+		|| !candidate.destinationIsSafer
+		|| !std::isfinite(candidate.threatReduction) || candidate.threatReduction <= 0
+		|| !std::isfinite(candidate.movementCost) || candidate.movementCost <= 0)
 	{
 		return result;
 	}
@@ -155,6 +160,31 @@ EscapePathEvaluation evaluateEscapePathCandidate(const EscapePathCandidate & can
 	result.accepted = true;
 	result.score = candidate.threatReduction / std::max(0.1f, candidate.movementCost);
 	return result;
+}
+
+std::vector<int3> boundedEscapeCandidateTiles(const int3 & origin,
+	const int3 & mapSize, int movementPoints, const std::vector<int3> & ownedTowns)
+{
+	std::set<int3> candidates;
+	const int radius = std::clamp(movementPoints / 100 + 2, 6, 24);
+	const int stride = std::max(1, radius / 8);
+	for(int dx = -radius; dx <= radius; ++dx)
+		for(int dy = -radius; dy <= radius; ++dy)
+		{
+			if(dx == 0 && dy == 0)
+				continue;
+			if(!(std::abs(dx) <= 2 && std::abs(dy) <= 2)
+				&& (dx % stride != 0 || dy % stride != 0))
+				continue;
+			const int3 tile(origin.x + dx, origin.y + dy, origin.z);
+			if(tile.x >= 0 && tile.y >= 0 && tile.x < mapSize.x && tile.y < mapSize.y)
+				candidates.insert(tile);
+		}
+	for(const auto & town : ownedTowns)
+		if(town.z == origin.z && town != origin && town.x >= 0 && town.y >= 0
+			&& town.x < mapSize.x && town.y < mapSize.y)
+			candidates.insert(town);
+	return {candidates.begin(), candidates.end()};
 }
 
 std::string EscapeBehavior::toString() const
@@ -173,9 +203,15 @@ Goals::TGoalVec EscapeBehavior::decompose(const Nullkiller * aiNk) const
 		if(aiNk->isHeroLocked(candidateHero))
 			continue;
 
-		const auto & threat = aiNk->dangerHitMap->getTileThreat(candidateHero->visitablePos()).fastestDanger;
-		if(isHeroImmediatelyThreatened(candidateHero, threat, safeAttackRatio))
-			threatenedHeroes[candidateHero] = threat;
+		if(candidateHero->movementPointsRemaining() <= 0)
+			continue;
+		const auto & node = aiNk->dangerHitMap->getTileThreat(candidateHero->visitablePos());
+		const auto & first = node.fastestDanger;
+		const auto & strongest = node.maximumDanger;
+		if(isHeroImmediatelyThreatened(candidateHero, first, safeAttackRatio))
+			threatenedHeroes[candidateHero] = first;
+		else if(isHeroImmediatelyThreatened(candidateHero, strongest, safeAttackRatio))
+			threatenedHeroes[candidateHero] = strongest;
 	}
 
 	if(threatenedHeroes.empty())
@@ -185,14 +221,39 @@ Goals::TGoalVec EscapeBehavior::decompose(const Nullkiller * aiNk) const
 	HeroMap<EscapePathChoice> bestPaths;
 	const int3 mapSize = aiNk->cc->getMapSize();
 
-	pforeachTilePaths(
-		mapSize,
-		aiNk,
-		[&threatenedHeroes, aiNk, safeAttackRatio, &sync, &bestPaths](const int3 &, const std::vector<AIPath> & paths)
+	// Start with local, already visible tiles plus owned towns (including
+	// remote Town Portal landings). This avoids a full-map path enumeration on
+	// most threatened turns. A fallback retains unusual Dimension Door escapes.
+	std::vector<int3> ownTownTiles;
+	for(const auto * town : aiNk->cc->getTownsInfo())
+		ownTownTiles.push_back(town->visitablePos());
+	for(const auto & [hero, threat] : threatenedHeroes)
 	{
-		for(const AIPath & path : paths)
-			considerEscapePath(path, threatenedHeroes, aiNk, safeAttackRatio, sync, bestPaths);
-	});
+		const auto candidates = boundedEscapeCandidateTiles(
+			hero->visitablePos(), mapSize, hero->movementPointsRemaining(), ownTownTiles);
+		for(const auto & tile : candidates)
+		{
+			if(!aiNk->cc->isVisible(tile))
+				continue;
+			for(const auto & path : aiNk->pathfinder->getPathInfo(tile))
+				considerEscapePath(path, threatenedHeroes, aiNk, safeAttackRatio, sync, bestPaths);
+		}
+	}
+
+	// The bounded fast path must not silently delete legal unusual escapes.
+	HeroMap<HitMapInfo> unresolved;
+	for(const auto & [hero, threat] : threatenedHeroes)
+		if(bestPaths.find(hero) == bestPaths.end())
+			unresolved.emplace(hero, threat);
+	if(!unresolved.empty())
+	{
+		pforeachTilePaths(mapSize, aiNk,
+			[&unresolved, aiNk, safeAttackRatio, &sync, &bestPaths](const int3 &, const std::vector<AIPath> & paths)
+		{
+			for(const auto & path : paths)
+				considerEscapePath(path, unresolved, aiNk, safeAttackRatio, sync, bestPaths);
+		});
+	}
 
 	for(const auto & bestPath : bestPaths)
 		tasks.push_back(sptr(ExecuteHeroChain(bestPath.second.path)));

@@ -121,6 +121,50 @@ float HeroManager::evaluateFightingStrength(const CGHeroInstance * hero) const
 		 + hero->getBasePrimarySkillValue(PrimarySkill::KNOWLEDGE);
 }
 
+std::vector<size_t> selectMainHeroIndicesByFront(
+	const std::vector<float> & scores, const std::vector<int> & frontIds, size_t mainCount)
+{
+	std::vector<size_t> ranked;
+	if(scores.size() != frontIds.size() || scores.empty() || !mainCount)
+		return ranked;
+
+	for(size_t i = 0; i < scores.size(); ++i)
+		ranked.push_back(i);
+	std::stable_sort(ranked.begin(), ranked.end(), [&](size_t a, size_t b)
+	{
+		return scores[a] > scores[b];
+	});
+
+	std::vector<size_t> selected;
+	std::vector<bool> used(scores.size(), false);
+	std::set<int> covered;
+	const auto add = [&](size_t i)
+	{
+		selected.push_back(i);
+		used[i] = true;
+		if(frontIds[i] >= 0)
+			covered.insert(frontIds[i]);
+	};
+
+	// Always retain the best combat carrier, even when its region is unknown.
+	add(ranked.front());
+	for(const size_t i : ranked)
+	{
+		if(selected.size() >= mainCount)
+			break;
+		if(!used[i] && frontIds[i] >= 0 && !covered.contains(frontIds[i]))
+			add(i);
+	}
+	for(const size_t i : ranked)
+	{
+		if(selected.size() >= mainCount)
+			break;
+		if(!used[i])
+			add(i);
+	}
+	return selected;
+}
+
 void HeroManager::update()
 {
 	logAi->trace("Start analysing our heroes");
@@ -147,28 +191,66 @@ void HeroManager::update()
 	// One per town + static bonus on bigger maps after some weeks
 	int globalMainCount = std::max(static_cast<int>(cc->getTownsInfo().size()) + biggerMapFactor, 1);
 	// If 1 town but big map, limit a bit to don't spread the army too much
-	globalMainCount = std::min(globalMainCount, static_cast<int>(cc->getTownsInfo().size() * 2));
+	globalMainCount = std::max(1, std::min(globalMainCount, std::max(1, static_cast<int>(cc->getTownsInfo().size() * 2))));
 
 	// TODO: Mircea: Should spread them on map min 1 per town, avoiding all within the same town and the other towns just with dummy scouts
 	logAi->trace("HeroManager::update Max number of main heroes (globalMainCount) is %d", globalMainCount);
 
 	std::sort(myHeroes.begin(), myHeroes.end(), scoreSort);
-	heroToRoleMap.clear();
+	const auto towns = cc->getTownsInfo();
+	std::vector<const CGHeroInstance *> movableHeroes;
+	std::vector<float> candidateScores;
+	std::vector<int> candidateFronts;
+	for(const auto * hero : myHeroes)
+	{
+		if(hero->patrol.patrolling)
+			continue; // Preserve mission-specific patrollers, outside the usual cap.
 
-	for(const auto hero : myHeroes)
+		movableHeroes.push_back(hero);
+		float score = scores.at(hero);
+		const auto prior = heroToRoleMap.find(HeroPtr(hero, aiNk->cc.get()));
+		if(prior != heroToRoleMap.end() && prior->second == MAIN)
+			score += std::max(0.0f, score) * 0.05f; // Avoid needless role churn on near ties.
+		candidateScores.push_back(score);
+
+		const CGTownInstance * nearest = nullptr;
+		if(aiNk->dangerHitMap && aiNk->dangerHitMap->isTileOwnersUpToDate())
+		{
+			const auto * territoryTown = aiNk->dangerHitMap->getClosestTown(hero->visitablePos());
+			if(territoryTown && territoryTown->getOwner() == aiNk->playerID)
+				nearest = territoryTown;
+		}
+		if(!nearest)
+		{
+			int closestDistance = std::numeric_limits<int>::max();
+			for(const auto * town : towns)
+			{
+				const auto pos = hero->visitablePos();
+				const auto townPos = town->visitablePos();
+				if(pos.z != townPos.z)
+					continue;
+				const int distance = std::abs(pos.x - townPos.x) + std::abs(pos.y - townPos.y);
+				if(distance < closestDistance)
+				{
+					closestDistance = distance;
+					nearest = town;
+				}
+			}
+		}
+		candidateFronts.push_back(nearest ? nearest->id.getNum() : -1);
+	}
+
+	const auto selected = selectMainHeroIndicesByFront(
+		candidateScores, candidateFronts, static_cast<size_t>(globalMainCount));
+	std::set<const CGHeroInstance *> mainHeroes;
+	for(const size_t index : selected)
+		mainHeroes.insert(movableHeroes.at(index));
+
+	heroToRoleMap.clear();
+	for(const auto * hero : myHeroes)
 	{
 		HeroPtr heroPtr(hero, aiNk->cc.get());
-		HeroRole role;
-		if(hero->patrol.patrolling)
-		{
-			// Patrolling seems to be a special feature on some maps
-			role = MAIN;
-		}
-		else
-		{
-			role = globalMainCount-- > 0 ? MAIN : SCOUT;
-		}
-
+		HeroRole role = hero->patrol.patrolling || mainHeroes.contains(hero) ? MAIN : SCOUT;
 		heroToRoleMap[heroPtr] = role;
 		logAi->trace("HeroManager::update Hero %s has role %s", heroPtr.nameOrDefault(), role == MAIN ? "main" : "scout");
 	}

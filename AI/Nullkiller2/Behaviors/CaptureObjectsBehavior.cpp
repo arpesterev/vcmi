@@ -121,6 +121,13 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 		if(nullkiller->arePathHeroesLocked(path, releasedDefender))
 			continue;
 
+		// Do not end an ordinary same-day pickup within killing reach
+		// of an already visible enemy. Forced defence and sieges decide separately.
+		if(!force && !isEnemyTown && path.turn() == 0
+			&& isKnownUnsafeAtEndOfTurn(nullkiller->dangerHitMap->getTileThreat(path.targetTile()),
+				hero, path.heroArmy, 0, nullkiller->settings->getSafeAttackRatio()))
+			continue;
+
 		auto firstBlockedAction = path.getFirstBlockedAction();
 		if(firstBlockedAction)
 		{

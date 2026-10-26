@@ -153,6 +153,13 @@ void ExecuteHeroChain::accept(AIGateway * aiGw)
 	aiGw->nullkiller->objectClusterizer->reset();
 
 	auto targetObject = aiGw->cc->tryGetObj(static_cast<ObjectInstanceID>(objid));
+	// Never march toward an enemy's obsolete location after a refreshed turn.
+	// Legal visibility and target identity are rechecked at execution time.
+	if(targetObject && targetObject->ID == Obj::HERO
+		&& targetObject->getOwner() != aiGw->playerID
+		&& aiGw->cc->getPlayerRelations(aiGw->playerID, targetObject->getOwner()) == PlayerRelations::ENEMIES
+		&& targetObject->visitablePos() != chainPath.targetTile())
+		throw cannotFulfillGoalException("Enemy hero moved from the planned interception tile.");
 	// entrances are terminal path nodes, so only the last tile can hold one
 	const auto * pathEntrance = findObjectOfType(
 		aiGw->cc->getVisitableObjs(chainPath.targetTile()),

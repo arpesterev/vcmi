@@ -34,6 +34,40 @@ using namespace Goals;
 
 namespace Goals
 {
+	uint64_t estimateSequentialTownAttackPressure(const std::vector<KnownTownAttack> & attacks)
+	{
+		std::map<int, KnownTownAttack> distinct;
+		for(const auto & attack : attacks)
+		{
+			if(attack.heroId < 0 || attack.danger == 0 || attack.arrivalTurn > 1)
+				continue;
+			auto & entry = distinct[attack.heroId];
+			if(entry.danger < attack.danger)
+				entry = attack;
+		}
+		std::vector<KnownTownAttack> ranked;
+		for(const auto & [id, attack] : distinct)
+			ranked.push_back(attack);
+		std::stable_sort(ranked.begin(), ranked.end(), [](const auto & a, const auto & b)
+		{
+			return a.danger > b.danger;
+		});
+		if(ranked.empty())
+			return 0;
+		double pressure = ranked.front().danger;
+		for(size_t i = 1; i < ranked.size() && i < 3; ++i)
+		{
+			// Repeated attacks weaken the garrison, but raw army strengths
+			// cannot be summed as if all stacks fight together.
+			const double followupWeight = i == 1 ? 0.35 : 0.15;
+			const double timingWeight = ranked[i].arrivalTurn == 0 ? 1.0 : 0.7;
+			pressure += ranked[i].danger * followupWeight * timingWeight;
+		}
+		if(pressure >= static_cast<double>(std::numeric_limits<uint64_t>::max()))
+			return std::numeric_limits<uint64_t>::max();
+		return static_cast<uint64_t>(std::ceil(pressure));
+	}
+
 	uint64_t estimateTownFortificationDefence(const CGTownInstance & town, bool hasDefenders)
 	{
 		if(!hasDefenders)
@@ -112,6 +146,14 @@ namespace Goals
 
 		if(defenceWithHero <= townDefence)
 			return false;
+
+		std::vector<KnownTownAttack> arrivals;
+		for(const auto & threat : threats)
+			if(threat.heroPtr.isVerified())
+				arrivals.push_back({threat.heroPtr.idOrNone().getNum(), threat.turn, threat.danger});
+		const auto sequentialDanger = estimateSequentialTownAttackPressure(arrivals);
+		if(sequentialDanger > townDefence && arrivals.size() >= 2)
+			return true; // Do not send a useful defender away before the second attacker.
 
 		for(const auto & threat : threats)
 		{
@@ -445,6 +487,28 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 		return;
 	}
 
+	// One individually survivable attack does not imply that two sequential
+	// attacks are survivable. Recruit a defender against the estimated follow-up
+	// reserve without pretending a synthetic hero actually exists on the map.
+	std::vector<KnownTownAttack> arrivals;
+	for(const auto & known : threats)
+		if(known.heroPtr.isVerified())
+			arrivals.push_back({known.heroPtr.idOrNone().getNum(), known.turn, known.danger});
+	const auto followupDemand = estimateSequentialTownAttackPressure(arrivals);
+	if(arrivals.size() > 1 && followupDemand > 0)
+	{
+		const auto strongest = std::max_element(threats.begin(), threats.end(), [](const auto & a, const auto & b)
+		{
+			return a.danger < b.danger;
+		});
+		if(strongest != threats.end() && followupDemand > strongest->danger)
+		{
+			HitMapInfo followup = *strongest;
+			followup.danger = followupDemand;
+			evaluateRecruitingHero(tasks, followup, town, aiNk);
+		}
+	}
+
 	const uint64_t reinforcement = aiNk->armyManager->howManyReinforcementsCanBuy(town->getUpperArmy(), town);
 	if(reinforcement)
 	{
@@ -485,7 +549,6 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 		}
 
 		std::vector<int> pathsToDefend;
-		HeroMap<std::vector<int>> defferedPaths;
 		AIPath * closestWay = nullptr;
 
 		for(int i = 0; i < paths.size(); i++)
@@ -551,7 +614,6 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 				);
 #endif
 
-				defferedPaths[path.targetHero].push_back(i);
 				continue;
 			}
 
@@ -618,14 +680,21 @@ void DefenceBehavior::evaluateDefence(Goals::TGoalVec & tasks, const CGTownInsta
 			AIPath & path = paths[i];
 			const bool lockDefenderNow = shouldLockPathDefender(town, threat, path, aiNk);
 
-			for(int j : defferedPaths[path.targetHero])
+			// Compare only scheduled routes for this hero. Deferred routes
+			// were not actionable now, and the old inner 'continue' did nothing.
+			const bool hasBetterScheduledPath = std::any_of(pathsToDefend.begin(), pathsToDefend.end(), [&](int j)
 			{
-				AIPath & defferedPath = paths[j];
-				if(defferedPath.getHeroStrength() >= path.getHeroStrength() && defferedPath.turn() <= path.turn())
-				{
-					continue; // TODO: Mircea: Should it be break instead? Or continue for the outside loop?
-				}
-			}
+				if(i == j || paths[j].targetHero != path.targetHero)
+					return false;
+				const auto & other = paths[j];
+				return other.getHeroStrength() >= path.getHeroStrength()
+					&& other.turn() <= path.turn()
+					&& (other.getHeroStrength() > path.getHeroStrength()
+						|| other.movementCost() < path.movementCost()
+						|| (other.movementCost() == path.movementCost() && j < i));
+			});
+			if(hasBetterScheduledPath)
+				continue;
 
 			Composition composition;
 			composition.addNext(DefendTown(town, threat, path));

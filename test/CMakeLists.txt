@@ -207,6 +207,7 @@ if(ENABLE_NULLKILLER2_AI)
 		nullkiller2/AIGatewayMovementTest.cpp
 		nullkiller2/AIUtilityTest.cpp
 		nullkiller2/Analyzers/ArmyManagerTest.cpp
+		nullkiller2/Analyzers/DangerHitMapAnalyzerTest.cpp
 		nullkiller2/Analyzers/HeroManagerTest.cpp
 		nullkiller2/Analyzers/ObjectClusterizerTest.cpp
 		nullkiller2/Behaviors/DefenceBehaviorTest.cpp

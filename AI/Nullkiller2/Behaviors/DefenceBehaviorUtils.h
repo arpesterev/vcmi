@@ -24,6 +24,14 @@ struct HitMapInfo;
 
 namespace Goals
 {
+	// The following is a reserve heuristic, not a simulated pair of real battles.
+	struct KnownTownAttack
+	{
+		int heroId = -1;
+		uint8_t arrivalTurn = 255;
+		uint64_t danger = 0;
+	};
+	uint64_t estimateSequentialTownAttackPressure(const std::vector<KnownTownAttack> & attacks);
 	uint64_t estimateTownFortificationDefence(const CGTownInstance & town, bool hasDefenders);
 	uint64_t estimateTownDefence(const CGTownInstance & town, const CGHeroInstance * committedDefender);
 	bool isTownDefenceSufficient(uint64_t defenceStrength, const HitMapInfo & threat, float safeAttackRatio);

@@ -20,6 +20,24 @@ namespace NK2AI
 
 const HitMapInfo HitMapInfo::NoThreat;
 
+float discountedEnemyThreat(uint64_t strength, float movementCost)
+{
+	const double cost = std::isfinite(movementCost) ? std::max(0.0, static_cast<double>(movementCost)) : 0.0;
+	return static_cast<float>(static_cast<double>(strength) / (1.0 + cost));
+}
+
+bool isKnownUnsafeAtEndOfTurn(const HitMapNode & tile, const CGHeroInstance * hero,
+	const CCreatureSet * army, uint8_t arrivalTurn, float safeAttackRatio)
+{
+	const auto unsafe = [&](const HitMapInfo & known)
+	{
+		return known.danger > 0 && known.turn <= arrivalTurn
+			&& !isSafeToVisit(hero, army, known.danger, safeAttackRatio);
+	};
+	return unsafe(tile.fastestDanger) || unsafe(tile.maximumDanger);
+}
+
+
 void logHitmap(PlayerColor playerID, DangerHitMapAnalyzer & data, const CCallback & cc)
 {
 #if NK2AI_TRACE_LEVEL >= 1
@@ -150,7 +168,7 @@ void DangerHitMapAnalyzer::updateHitMap()
 
 				newThreat.heroPtr = HeroPtr(path.targetHero, aiNk->cc.get());
 				newThreat.turn = path.turn();
-				newThreat.threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0);
+				newThreat.threat = discountedEnemyThreat(path.getHeroStrength(), path.movementCost());
 				// TODO: Mircea: Why is this danger calculated so differently than FuzzyHelper::evaluateDanger?
 				// shouldn't it use the path danger instead of hero strength?
 				newThreat.danger = path.getHeroStrength();

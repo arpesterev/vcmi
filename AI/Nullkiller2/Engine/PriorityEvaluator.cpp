@@ -60,6 +60,39 @@ float evaluateEnemyTownConquestValue(float baseValue, int visibleEnemyTownCount)
 	return std::max(baseValue * 3.0f, 4.0f);
 }
 
+float evaluateEnemyWeekCrossingDiscount(bool crossesWeek, bool enemyTown, bool enemyHero)
+{
+	if(!crossesWeek)
+		return 1.0f;
+	if(enemyTown)
+		return 0.75f; // Refresh of garrison stock is possible, not certain.
+	return enemyHero ? 0.50f : 0.70f;
+}
+
+float evaluateVisiblePursuitDiscount(uint8_t travelTurns, int ourMoveLimit, int enemyMoveLimit)
+{
+	if(travelTurns == 0)
+		return 1.0f;
+	if(travelTurns > 2 || ourMoveLimit <= enemyMoveLimit || enemyMoveLimit <= 0)
+		return 0.0f;
+	return travelTurns == 1 ? 0.45f : 0.20f;
+}
+
+float evaluateDefenceCoverageScore(float committedStrength, float enemyStrength, float safeAttackRatio)
+{
+	if(!std::isfinite(committedStrength) || !std::isfinite(enemyStrength)
+		|| !std::isfinite(safeAttackRatio) || committedStrength <= 0
+		|| enemyStrength <= 0 || safeAttackRatio <= 0)
+		return 0.0f;
+	const double required = double(enemyStrength) * safeAttackRatio;
+	if(required <= 0.0 || !std::isfinite(required))
+		return 0.0f;
+	const double coverage = committedStrength / required;
+	if(coverage < 1.0)
+		return static_cast<float>(coverage * 0.5); // Partial coverage is not a victory.
+	return static_cast<float>(1.0 / (1.0 + (coverage - 1.0) * 0.4));
+}
+
 float evaluateMaxArmyLossForConquest(float baseMaxArmyLoss, float conquestValue, bool isEnemyTownConquest)
 {
 	if(!isEnemyTownConquest || conquestValue <= MAX_CRITICAL_VALUE)
@@ -1052,6 +1085,8 @@ public:
 			evaluationContext.addNonCriticalStrategicalValue(1.7f * multiplier * strategicalValue);
 
 		evaluationContext.defenseValue = town->fortLevel();
+		evaluationContext.defenceMarkerStrength = static_cast<float>(defendTown.getDefenceStrength());
+		evaluationContext.defenceMarkerDanger = static_cast<float>(threat.danger);
 		evaluationContext.isDefend = true;
 		evaluationContext.threatTurns = threat.turn;
 
@@ -1580,14 +1615,19 @@ float PriorityEvaluator::evaluate(
 					// We need some kind of smart selection of who to go, not everyone qualified
 					// Probably apply normal fight calculation as in others + filter out unnecessary ones in makeTurn buildPlan
 
-					const float OPTIMAL_PERCENTAGE = 0.75f; // We want army to be 75% of the threat
-					float optimalStrength = evaluationContext.threat * OPTIMAL_PERCENTAGE;
-
-					// Calculate how far the army is from optimal strength
-					float deviation = std::abs(evaluationContext.armyInvolvement - optimalStrength);
-					float deviationPercentage = deviation / evaluationContext.threat;
-					// Calculate score: 1.0 is perfect, decreasing as deviation increases
-					score = 1.0f / (1.0f + deviationPercentage);
+					if(evaluationContext.defenceMarkerDanger > 0)
+					{
+						// Marked defence paths carry actual fighting strength, while
+						// armyInvolvement is an economic cost in other goal builders.
+						score = evaluateDefenceCoverageScore(evaluationContext.defenceMarkerStrength,
+							evaluationContext.defenceMarkerDanger, aiNk->settings->getSafeAttackRatio());
+					}
+					else if(evaluationContext.threat > 0)
+					{
+						const float optimalStrength = evaluationContext.threat * 0.75f;
+						const float deviation = std::abs(evaluationContext.armyInvolvement - optimalStrength);
+						score = 1.0f / (1.0f + deviation / evaluationContext.threat);
+					}
 
 					score *= evaluationContext.closestWayRatio;
 					score = evaluateMovement(score, evaluationContext.movementCost);
@@ -1601,10 +1641,22 @@ float PriorityEvaluator::evaluate(
 				// TODO: Mircea: Ensure defenseValue is taken into account. See AINodeStorage::evaluateArmyLoss and CCreatureSet::estimateCombatValue
 				// if (evaluationContext.defenseValue < 2 && evaluationContext.enemyHeroDangerRatio > involvedStrengthOutOfTotalRatio)
 					// return 0;
-				if (evaluationContext.turn > 0 && evaluationContext.isHero)
-					return 0;
-				if (arriveNextWeek && evaluationContext.isEnemy)
-					return 0;
+				float pursuitDiscount = 1.0f;
+				if(evaluationContext.turn > 0 && evaluationContext.isHero)
+				{
+					// A distant last-seen tile is not a reliable combat target.
+					// Permit only bounded, speed-advantaged pursuit of a hero who
+					// is still in our legally visible callback state.
+					const auto * object = task->objid >= 0
+						? aiNk->cc->tryGetObj(ObjectInstanceID(task->objid)) : nullptr;
+					const auto * enemy = dynamic_cast<const CGHeroInstance *>(object);
+					if(!enemy || !task->hero || !evaluationContext.isEnemy)
+						return 0;
+					pursuitDiscount = evaluateVisiblePursuitDiscount(evaluationContext.turn,
+						task->hero->movementPointsLimit(), enemy->movementPointsLimit());
+					if(pursuitDiscount <= 0)
+						return 0;
+				}
 				score = evaluateConquestValue(score, evaluationContext.conquestValue, evaluationContext.armyInvolvement);
 				// TODO: Mircea: Last part of the if looks strange, to revisit
 				if(vstd::isAlmostZero(score)
@@ -1616,6 +1668,11 @@ float PriorityEvaluator::evaluate(
 
 				score = evaluateArmyLossRatio(score, evaluationContext.armyLossRatio, evaluationContext.heroRole);
 
+				// The first week of a siege should not be rejected merely because
+				// the week counter crosses seven. Still discount unknown reinforcements.
+				score *= pursuitDiscount;
+				if(arriveNextWeek && evaluationContext.isEnemy)
+					score *= evaluateEnemyWeekCrossingDiscount(true, isEnemyTownConquest, evaluationContext.isHero);
 				score *= evaluationContext.closestWayRatio;
 				score = evaluateMovement(score, evaluationContext.movementCost);
 				break;

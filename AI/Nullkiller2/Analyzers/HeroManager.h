@@ -20,6 +20,11 @@ namespace NK2AI
 
 float evaluateMainHeroRoleScore(float heroProfileScore, uint64_t heroTotalStrength, uint64_t strongestHeroTotalStrength);
 
+// Select the strongest carrier, then prioritize uncovered owned-town fronts.
+// Negative front IDs mean that no reliable town assignment is available.
+std::vector<size_t> selectMainHeroIndicesByFront(
+	const std::vector<float> & scores, const std::vector<int> & frontIds, size_t mainCount);
+
 class DLL_EXPORT ISecondarySkillRule
 {
 public:

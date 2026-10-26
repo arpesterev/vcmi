@@ -36,6 +36,10 @@ struct EscapePathEvaluation
 };
 
 EscapePathEvaluation evaluateEscapePathCandidate(const EscapePathCandidate & candidate);
+// Small deterministic same-layer candidate set. Full-map fallback remains
+// possible only when a threatened hero has no safe local escape.
+std::vector<int3> boundedEscapeCandidateTiles(const int3 & origin,
+	const int3 & mapSize, int movementPoints, const std::vector<int3> & ownedTowns);
 
 namespace Goals
 {

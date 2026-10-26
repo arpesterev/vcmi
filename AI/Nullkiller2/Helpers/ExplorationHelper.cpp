@@ -22,6 +22,7 @@
 #include "../Behaviors/CaptureObjectsBehavior.h"
 #include "DimensionDoorUtils.h"
 #include "../Goals/ExploreNeighbourTile.h"
+#include "../Analyzers/DangerHitMapAnalyzer.h"
 #include "../../../lib/spells/CSpell.h"
 #include "../../../lib/spells/Problem.h"
 #include "../../../lib/mapping/TerrainTile.h"
@@ -519,7 +520,10 @@ bool ExplorationHelper::hasNormalSameDayPath(const int3 & tile) const
 		if(hasSpecialAction)
 			continue;
 
-		if(isSafeToVisit(hero, path.heroArmy, path.getTotalDanger(), aiNk->settings->getSafeAttackRatio()))
+		if(isSafeToVisit(hero, path.heroArmy, path.getTotalDanger(), aiNk->settings->getSafeAttackRatio())
+				&& (path.turn() != 0 || !isKnownUnsafeAtEndOfTurn(
+					aiNk->dangerHitMap->getTileThreat(path.targetTile()),
+					hero, path.heroArmy, 0, aiNk->settings->getSafeAttackRatio())))
 			return true;
 	}
 

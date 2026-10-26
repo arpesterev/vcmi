@@ -16,6 +16,12 @@ namespace NK2AI
 
 float evaluateEnemyTownConquestValue(float baseValue, int visibleEnemyTownCount);
 float evaluateMaxArmyLossForConquest(float baseMaxArmyLoss, float conquestValue, bool isEnemyTownConquest);
+// Avoid an unconditional week-boundary veto for valuable sieges.
+float evaluateEnemyWeekCrossingDiscount(bool crossesWeek, bool enemyTown, bool enemyHero);
+// Pursue a *currently visible* enemy only when our army can catch it.
+float evaluateVisiblePursuitDiscount(uint8_t travelTurns, int ourMoveLimit, int enemyMoveLimit);
+// Compare actual combat-strength units, not an army's recruitment price.
+float evaluateDefenceCoverageScore(float committedStrength, float enemyStrength, float safeAttackRatio);
 
 class BuildingInfo;
 class Nullkiller;
@@ -69,6 +75,8 @@ struct DLL_EXPORT EvaluationContext
 	float armyInvolvement;
 	int defenseValue; // 0-1: No fortifications (undefended), 2: Fort level (basic defensive structure), 3: Citadel level (stronger defenses), 4: Castle level (maximum defenses)
 	bool isDefend;
+	float defenceMarkerStrength = 0;
+	float defenceMarkerDanger = 0;
 	int threatTurns;
 	TResources buildingCost;
 	bool involvesSailing;
