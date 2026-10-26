@@ -60,6 +60,7 @@ EvaluationContext::EvaluationContext(const Nullkiller* aiNk)
 	armyInvolvement(0),
 	defenseValue(0),
 	isDefend(false),
+	isEmergencyEscape(false),
 	threatTurns(INT_MAX),
 	involvesSailing(false),
 	isTradeBuilding(false),
@@ -961,6 +962,7 @@ public:
 			return;
 
 		Goals::ExecuteHeroChain & chain = dynamic_cast<Goals::ExecuteHeroChain &>(*task);
+		evaluationContext.isEmergencyEscape = chain.isEmergencyEscape();
 		const AIPath & path = chain.getPath();
 
 		if (vstd::isAlmostZero(path.movementCost()))
@@ -1379,6 +1381,15 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 {
 	auto evaluationContext = buildEvaluationContext(task);
 
+	// Emergency retreat is an explicitly generated, safe same-turn path. Never
+	// promote an ordinary resource/attack task merely because it moves away
+	// from a threat. Keep this decision available even if fuzzy scoring is on.
+	if(priorityTier == ESCAPE)
+		return evaluationContext.isEmergencyEscape && evaluationContext.turn == 0
+			? 1.0f / (1.0f + std::max(0.0f, evaluationContext.movementCost)) : 0.0f;
+	if(evaluationContext.isEmergencyEscape)
+		return 0.0f;
+
 	int rewardType = (evaluationContext.goldReward > 0 ? 1 : 0)
 		+ (evaluationContext.armyReward > 0 ? 1 : 0)
 		+ (evaluationContext.skillReward > 0 ? 1 : 0)
@@ -1545,8 +1556,9 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 				score = evaluateMovement(score, evaluationContext.movementCost);
 				break;
 			}
-			case EXPLORE_AND_GATHER:
 			case ESCAPE:
+				return 0; // Handled before fuzzy/scalar evaluation above.
+			case EXPLORE_AND_GATHER:
 			// TODO: Mircea: Should not go to something that gives army if no slots available in the hero, but probably not in the evaluator, but in the finder
 			// task.get()->hero->getSlotFor(creature, 7) == false (not sure I get to know which creature is there in Orc Tower building)
 			// /// so I can't know for sure if it fits my stacks or not, but at least we can avoid going there with all 7 stacks occupied by other units
@@ -1564,24 +1576,6 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 
 				if(priorityTier == EXPLORE_AND_GATHER && evaluationContext.enemyHeroDangerRatio > maxEnemyDangerRatio)
 					return 0;
-				if(priorityTier == ESCAPE && task->hero)
-				{
-					const auto currentTileThreat = aiNk->dangerHitMap->getTileThreat(task->hero->visitablePos());
-					if(currentTileThreat.fastestDanger.turn < 1 && currentTileThreat.fastestDanger.danger > task->hero->getTotalStrength())
-					{
-						// Encourage routes which go away of the threat
-						const auto currentTileThreatVal = currentTileThreat.fastestDanger.threat;
-						const auto destTileThreatVal = aiNk->dangerHitMap->getTileThreat(task->tile).fastestDanger.threat;
-						const auto delta = currentTileThreatVal - destTileThreatVal;
-						if(delta > 0)
-						{
-							logAi->trace("priorityTier %d, Encouraging route with less threat delta: %f", priorityTier, delta);
-							score += delta;
-						}
-						else
-							logAi->trace("priorityTier %d, Cannot encourage route because it has a negative threat delta: %f. Hoping hero will live", priorityTier, delta);
-					}
-				}
 
 				// TODO: Mircea: Not sure this makes sense anymore, deactivating for now, to test more and delete in the end
 				// if(evaluationContext.enemyHeroDangerRatio > involvedStrengthOutOfTotalRatio && !evaluationContext.isDefend && priorityTier != FAR_HUNTER_GATHER)
