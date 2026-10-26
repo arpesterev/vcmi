@@ -1012,7 +1012,7 @@ public:
 		std::map<CreatureID, float> totalPowerByCreatureID;
 
 		// Calculate hero power and total power by CreatureID
-		for (const auto & slot : hero->Slots())
+		for (const auto & slot : army->Slots())
 		{
 			CreatureID creatureID = slot.second->getCreatureID();
 			float slotPower = slot.second->getPower();
@@ -1037,7 +1037,7 @@ public:
 		// Compute the power ratio if total power is greater than zero
 		if (totalPower > 0)
 		{
-			evaluationContext.powerRatio = heroPower / totalPower;
+			evaluationContext.powerRatio = std::clamp(heroPower / totalPower, 0.0f, 1.0f);
 		}
 
 		if (target)
@@ -1056,11 +1056,11 @@ public:
 				evaluationContext.defenseValue = dynamic_cast<const CGTownInstance*>(target)->fortLevel();
 			evaluationContext.goldCost += evaluationContext.evaluator.getGoldCost(target, hero, army);
 			if(evaluationContext.danger > 0)
-				evaluationContext.skillReward += (float)evaluationContext.danger / (float)hero->getArmyStrength();
+				evaluationContext.skillReward += (float)evaluationContext.danger / std::max(1.0f, static_cast<float>(army->getArmyStrength()));
 		}
 		evaluationContext.armyInvolvement += army->getArmyCost();
 
-		vstd::amax(evaluationContext.armyLossRatio, (float)path.getTotalArmyLoss() / (float)army->getArmyStrength());
+		vstd::amax(evaluationContext.armyLossRatio, (float)path.getTotalArmyLoss() / std::max(1.0f, static_cast<float>(army->getArmyStrength())));
 		addTileDanger(evaluationContext, path.targetTile(), path.turn(), path.getHeroStrength());
 		vstd::amax(evaluationContext.turn, path.turn());
 	}
