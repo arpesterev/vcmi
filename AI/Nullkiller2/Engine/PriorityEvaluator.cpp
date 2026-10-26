@@ -60,6 +60,8 @@ EvaluationContext::EvaluationContext(const Nullkiller* aiNk)
 	armyInvolvement(0),
 	defenseValue(0),
 	isDefend(false),
+	defenceCommittedStrength(0),
+	defenceThreatStrength(0),
 	isEmergencyEscape(false),
 	threatTurns(INT_MAX),
 	involvesSailing(false),
@@ -940,6 +942,8 @@ public:
 			evaluationContext.addNonCriticalStrategicalValue(1.7f * multiplier * strategicalValue);
 
 		evaluationContext.defenseValue = town->fortLevel();
+		evaluationContext.defenceCommittedStrength = static_cast<float>(defendTown.getDefenceStrength());
+		evaluationContext.defenceThreatStrength = static_cast<float>(threat.danger);
 		evaluationContext.isDefend = true;
 		evaluationContext.threatTurns = threat.turn;
 
@@ -1370,6 +1374,19 @@ float PriorityEvaluator::evaluateSkillReward(float score, const float skillRewar
 	return score + skillReward * armyInvolvement * (1 - armyLossRatio) * 0.05;
 }
 
+float evaluateDefenceCoveragePriority(float defenderStrength, float enemyStrength, float safeRatio)
+{
+	if(!std::isfinite(defenderStrength) || !std::isfinite(enemyStrength)
+		|| !std::isfinite(safeRatio) || defenderStrength <= 0
+		|| enemyStrength <= 0 || safeRatio <= 0)
+		return 0.0f;
+	const double required = std::max(1.0, double(enemyStrength) * safeRatio);
+	const double coverage = double(defenderStrength) / required;
+	if(coverage < 1.0)
+		return static_cast<float>(coverage * 0.5); // Undermanned: better than no defence, but not a safe guarantee.
+	return static_cast<float>(1.0 / (1.0 + (coverage - 1.0) * 0.5));
+}
+
 float PriorityEvaluator::evaluateConquestValue(float score, const float conquestValue, const float armyInvolvement)
 {
 	if(conquestValue > 0)
@@ -1516,14 +1533,21 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 					// We need some kind of smart selection of who to go, not everyone qualified
 					// Probably apply normal fight calculation as in others + filter out unnecessary ones in makeTurn buildPlan
 
-					const float OPTIMAL_PERCENTAGE = 0.75f; // We want army to be 75% of the threat
-					float optimalStrength = evaluationContext.threat * OPTIMAL_PERCENTAGE;
-
-					// Calculate how far the army is from optimal strength
-					float deviation = std::abs(evaluationContext.armyInvolvement - optimalStrength);
-					float deviationPercentage = deviation / evaluationContext.threat;
-					// Calculate score: 1.0 is perfect, decreasing as deviation increases
-					score = 1.0f / (1.0f + deviationPercentage);
+					if(evaluationContext.defenceThreatStrength > 0)
+					{
+						// Explicit DefendTown markers carry true strength. The older formula
+						// compared gold recruitment cost to enemy combat strength.
+						score = evaluateDefenceCoveragePriority(evaluationContext.defenceCommittedStrength,
+							evaluationContext.defenceThreatStrength, aiNk->settings->getSafeAttackRatio());
+					}
+					else if(evaluationContext.threat > 0)
+					{
+						// Other defensive tasks (such as a town hero swap) lack a
+						// dedicated DefendTown strength marker: preserve their prior ranking.
+						const float optimalStrength = evaluationContext.threat * 0.75f;
+						const float deviation = std::abs(evaluationContext.armyInvolvement - optimalStrength);
+						score = 1.0f / (1.0f + deviation / evaluationContext.threat);
+					}
 
 					score *= evaluationContext.closestWayRatio;
 					score = evaluateMovement(score, evaluationContext.movementCost);

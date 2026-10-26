@@ -39,3 +39,27 @@ TEST(Nullkiller2MapTacticsScoring, InvalidThreatMovementCostCannotHideDanger)
 		std::numeric_limits<float>::quiet_NaN()), 1000);
 }
 }
+
+namespace test
+{
+TEST(Nullkiller2MapTacticsScoring, DefenceCoverageRewardsSufficientStrength)
+{
+	const float enough = NK2AI::evaluateDefenceCoveragePriority(1100, 1000, 1.1f);
+	const float insufficient = NK2AI::evaluateDefenceCoveragePriority(900, 1000, 1.1f);
+	EXPECT_GT(enough, insufficient);
+	EXPECT_GT(enough, 0.9f);
+}
+
+TEST(Nullkiller2MapTacticsScoring, DefenceAvoidsUnnecessaryOvercommitment)
+{
+	EXPECT_GT(NK2AI::evaluateDefenceCoveragePriority(1200, 1000, 1.1f),
+		NK2AI::evaluateDefenceCoveragePriority(4000, 1000, 1.1f));
+}
+
+TEST(Nullkiller2MapTacticsScoring, InvalidThreatStrengthDoesNotProduceNaN)
+{
+	EXPECT_FLOAT_EQ(NK2AI::evaluateDefenceCoveragePriority(2000, 0, 1.1f), 0);
+	EXPECT_FLOAT_EQ(NK2AI::evaluateDefenceCoveragePriority(2000, 1000,
+		std::numeric_limits<float>::quiet_NaN()), 0);
+}
+}
