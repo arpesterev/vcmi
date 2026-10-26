@@ -12,12 +12,21 @@
 #include "../AIGateway.h"
 #include "../AIUtility.h"
 #include "../Helpers/ExplorationHelper.h"
+#include <cmath>
 
 
 namespace NK2AI
 {
 
 using namespace Goals;
+
+float scoreScoutExplorationStep(float discovered, float movementCost)
+{
+	if(!std::isfinite(discovered) || discovered <= 0.0f
+		|| !std::isfinite(movementCost) || movementCost < 0.0f)
+		return 0.0f;
+	return discovered / std::max(0.1f, movementCost);
+}
 
 bool ExploreNeighbourTile::operator==(const ExploreNeighbourTile & other) const
 {
@@ -44,9 +53,8 @@ void ExploreNeighbourTile::accept(AIGateway * aiGw)
 
 				if(pathInfo->accessible == EPathAccessibility::ACCESSIBLE)
 				{
-					float newValue = h.howManyTilesWillBeDiscovered(tile);
-					// Avoid favoring expensive detours: cap only near-zero movement costs.
-					newValue /= std::max(0.1f, pathInfo->getCost());
+					const float newValue = scoreScoutExplorationStep(
+						h.howManyTilesWillBeDiscovered(tile), pathInfo->getCost());
 
 					if(newValue > value)
 					{

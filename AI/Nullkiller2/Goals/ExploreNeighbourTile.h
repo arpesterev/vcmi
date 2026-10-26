@@ -17,6 +17,9 @@ namespace NK2AI
 class AIGateway;
 class FuzzyHelper;
 
+// Discovery gained per unit of travel. Nonfinite/negative inputs are rejected.
+float scoreScoutExplorationStep(float tilesDiscovered, float movementCost);
+
 namespace Goals
 {
 	class DLL_EXPORT ExploreNeighbourTile : public ElementarGoal<ExploreNeighbourTile>
