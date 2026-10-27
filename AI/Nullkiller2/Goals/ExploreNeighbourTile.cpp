@@ -12,6 +12,7 @@
 #include "../AIGateway.h"
 #include "../AIUtility.h"
 #include "../Engine/Nullkiller.h"
+#include "../Analyzers/DangerHitMapAnalyzer.h"
 #include "../Helpers/ExplorationHelper.h"
 #include "../../../lib/pathfinder/CGPathNode.h"
 
@@ -36,7 +37,9 @@ std::optional<NeighbourExplorationTarget> getNeighbourExplorationTarget(
 	NeighbourExplorationCandidate candidate;
 	candidate.sameDay = pathInfo->turns == 0;
 	candidate.accessible = pathInfo->accessible == EPathAccessibility::ACCESSIBLE;
-	candidate.safe = danger == 0;
+	candidate.safe = danger == 0 && aiNk->cc->isVisible(tile)
+		&& !isKnownUnsafeAtEndOfTurn(aiNk->dangerHitMap->getTileThreat(tile),
+			hero, hero, 0, aiNk->settings->getSafeAttackRatio());
 	candidate.tilesDiscovered = helper.howManyTilesWillBeDiscovered(tile);
 	candidate.movementCost = pathInfo->getCost();
 

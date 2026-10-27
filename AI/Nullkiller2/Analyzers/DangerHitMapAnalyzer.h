@@ -17,6 +17,9 @@ namespace NK2AI
 
 struct AIPath;
 
+// Relative enemy urgency is discounted by movement, never made negative.
+float discountedEnemyThreat(uint64_t strength, float movementCost);
+
 struct HitMapInfo
 {
 	static const HitMapInfo NoThreat;
@@ -34,9 +37,9 @@ struct HitMapInfo
 
 struct HitMapNode
 {
-	// threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0); danger = path.getHeroStrength()
+	// Nonnegative urgency; raw combat strength remains in danger.
 	HitMapInfo maximumDanger = HitMapInfo::NoThreat;
-	// threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0); danger = path.getHeroStrength()
+	// Nonnegative urgency; raw combat strength remains in danger.
 	HitMapInfo fastestDanger = HitMapInfo::NoThreat;
 	const CGTownInstance * closestTown = nullptr;
 
@@ -47,6 +50,17 @@ struct HitMapNode
 		closestTown = nullptr;
 	}
 };
+
+// The last accessible tile before each planned change of turn.
+std::vector<std::pair<int3, uint8_t>> collectPlannedOvernightStops(const CGPathNode * destination);
+
+// Evaluates only already observed threats. Never predicts hidden enemy armies.
+bool isKnownUnsafeAtEndOfTurn(const HitMapNode & tile, const CGHeroInstance * hero,
+	const CCreatureSet * army, uint8_t arrivalTurn, float safeAttackRatio);
+
+// Never blocks special-action or multi-carrier paths whose physical itinerary
+// cannot be reproduced by the single-hero pathfinder.
+bool hasUnsafeKnownOvernightStop(const AIPath & path, const Nullkiller * aiNk);
 
 struct EnemyHeroAccessibleObject
 {

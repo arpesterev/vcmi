@@ -100,12 +100,15 @@ Goals::TGoalVec GatherArmyBehavior::deliverArmyToHero(const Nullkiller * aiNk, c
 		}
 
 		HeroExchange heroExchange(receiverHero, path);
-		// TODO: Mircea: Artifacts (inventory things) aren't considered in this calculation, though they are properly changed in an army exchange, to revisit
 		const uint64_t additionalArmyStrength = heroExchange.getReinforcementArmyStrength(aiNk);
-		const float additionalArmyRatio = static_cast<float>(additionalArmyStrength) / receiverHero->estimateCombatValue();
+		const float additionalArmyRatio = static_cast<float>(additionalArmyStrength)
+			/ std::max<uint64_t>(1, receiverHero->estimateCombatValue());
+		const int64_t artifactValue = heroExchange.getReinforcementArtifactValue(aiNk);
+		const bool worthwhileArtifactCourier = artifactValue >= 3000 && path.turn() <= 1;
 
 		// avoid transferring very small amount of army
-		if((additionalArmyRatio < 0.1f && additionalArmyStrength < 20000) || additionalArmyStrength < 500)
+		if(!worthwhileArtifactCourier
+			&& ((additionalArmyRatio < 0.1f && additionalArmyStrength < 20000) || additionalArmyStrength < 500))
 		{
 #if NK2AI_TRACE_LEVEL >= 2
 			logAi->trace("GatherArmyBehavior::deliverArmyToHero Army value is too small.");

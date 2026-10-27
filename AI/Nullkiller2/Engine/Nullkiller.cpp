@@ -614,7 +614,7 @@ void Nullkiller::makeTurn()
 	resetState();
 	Goals::TGoalVec tasks;
 	tracePlayerStatus(true);
-	bool resourcesTradedThisTurn = false;
+	bool resourcesTradingAttemptedThisTurn = false;
 
 	for(int pass = 1; pass <= settings->getMaxPass() && cc->getPlayerStatus(playerID) == EPlayerStatus::INGAME; pass++)
 	{
@@ -774,10 +774,12 @@ void Nullkiller::makeTurn()
 			}
 		}
 
-		if(!resourcesTradedThisTurn)
+		if(!resourcesTradingAttemptedThisTurn)
 		{
-			resourcesTradedThisTurn = ResourceTrader::trade(*buildAnalyzer, *cc, getFreeResources());
-			hasAnySuccess |= resourcesTradedThisTurn;
+			// A rejected marketplace request does not change resources. Replanning
+			// must not send the same refused trade again this turn.
+			resourcesTradingAttemptedThisTurn = true;
+			hasAnySuccess |= ResourceTrader::trade(*buildAnalyzer, *cc, getFreeResources());
 		}
 
 		if(!hasAnySuccess)

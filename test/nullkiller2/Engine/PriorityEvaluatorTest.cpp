@@ -119,3 +119,28 @@ TEST(Nullkiller2_Engine_PriorityEvaluator, ordinaryTargetsKeepArmyLossLimit)
 		0.35f)
 		<< "the relaxed loss cap is only for enemy-town conquest";
 }
+
+TEST(Nullkiller2_Engine_PriorityEvaluator, crossingIntoNextWeekDiscountsRatherThanBansSiege)
+{
+	EXPECT_FLOAT_EQ(NK2AI::evaluateEnemyWeekCrossingDiscount(false, true, false), 1.0f);
+	EXPECT_GT(NK2AI::evaluateEnemyWeekCrossingDiscount(true, true, false), 0.0f);
+	EXPECT_LT(NK2AI::evaluateEnemyWeekCrossingDiscount(true, true, false), 1.0f);
+}
+
+TEST(Nullkiller2_Engine_PriorityEvaluator, futurePursuitRequiresSpeedAndVisibleRouteBudget)
+{
+	EXPECT_FLOAT_EQ(NK2AI::evaluateVisiblePursuitDiscount(1, 1800, 1500), 0.45f);
+	EXPECT_FLOAT_EQ(NK2AI::evaluateVisiblePursuitDiscount(2, 1800, 1500), 0.20f);
+	EXPECT_FLOAT_EQ(NK2AI::evaluateVisiblePursuitDiscount(3, 1800, 1500), 0.0f);
+	EXPECT_FLOAT_EQ(NK2AI::evaluateVisiblePursuitDiscount(1, 1500, 1500), 0.0f);
+}
+
+TEST(Nullkiller2_Engine_PriorityEvaluator, defenceScoresActualStrengthAndAvoidsOvercommitment)
+{
+	const float covered = NK2AI::evaluateDefenceCoverageScore(1200, 1000, 1.1f);
+	const float weak = NK2AI::evaluateDefenceCoverageScore(800, 1000, 1.1f);
+	const float excessive = NK2AI::evaluateDefenceCoverageScore(4000, 1000, 1.1f);
+	EXPECT_GT(covered, weak);
+	EXPECT_GT(covered, excessive);
+	EXPECT_EQ(NK2AI::evaluateDefenceCoverageScore(1000, 0, 1.1f), 0.0f);
+}

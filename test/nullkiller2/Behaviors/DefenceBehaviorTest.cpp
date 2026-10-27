@@ -404,3 +404,22 @@ TEST_F(Nullkiller2_Behaviors_DefenceBehaviorMap, alliedVisitingHeroIsNotUsedForT
 		EXPECT_FALSE(usesAllyHero) << task->toString();
 	}
 }
+
+TEST(Nullkiller2_Behaviors_DefenceBehavior, sequentialAttackReserveDeduplicatesSameEnemy)
+{
+	using NK2AI::Goals::KnownTownAttack;
+	const auto pressure = NK2AI::Goals::estimateSequentialTownAttackPressure(
+		{KnownTownAttack{1, 0, 2000}, KnownTownAttack{1, 1, 1800}});
+	EXPECT_EQ(pressure, 2000u);
+}
+
+TEST(Nullkiller2_Behaviors_DefenceBehavior, sequentialAttackReserveAccountsForTwoEnemies)
+{
+	using NK2AI::Goals::KnownTownAttack;
+	const auto pressure = NK2AI::Goals::estimateSequentialTownAttackPressure(
+		{KnownTownAttack{1, 0, 2000}, KnownTownAttack{2, 0, 1500}});
+	EXPECT_GT(pressure, 2000u);
+	EXPECT_LT(pressure, 3500u);
+	EXPECT_EQ(NK2AI::Goals::estimateSequentialTownAttackPressure(
+			{KnownTownAttack{1, 0, 2000}, KnownTownAttack{2, 2, 1500}}), 2000u);
+}

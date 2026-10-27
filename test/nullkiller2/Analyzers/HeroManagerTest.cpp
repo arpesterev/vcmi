@@ -29,3 +29,21 @@ TEST(Nullkiller2_Analyzers_HeroManager, heroProfileBreaksSimilarArmyTies)
 		NK2AI::evaluateMainHeroRoleScore(20.0f, strongestArmy, strongestArmy))
 		<< "normal hero profile scoring should still decide between comparable army carriers";
 }
+
+TEST(Nullkiller2_Analyzers_HeroManager, strongestCarrierAndDifferentFrontAreMains)
+{
+	const auto chosen = NK2AI::selectMainHeroIndicesByFront({100.f, 90.f, 85.f}, {1, 1, 2}, 2);
+	EXPECT_EQ(chosen, (std::vector<size_t>{0, 2}));
+}
+
+TEST(Nullkiller2_Analyzers_HeroManager, keepsStrongestHeroWithoutTowns)
+{
+	const auto chosen = NK2AI::selectMainHeroIndicesByFront({5.f, 20.f, 10.f}, {-1, -1, -1}, 1);
+	EXPECT_EQ(chosen, (std::vector<size_t>{1}));
+}
+
+TEST(Nullkiller2_Analyzers_HeroManager, fillsAvailableSlotsFromSameFrontWhenNecessary)
+{
+	const auto chosen = NK2AI::selectMainHeroIndicesByFront({100.f, 95.f, 90.f}, {3, 3, 3}, 2);
+	EXPECT_EQ(chosen, (std::vector<size_t>{0, 1}));
+}

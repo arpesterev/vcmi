@@ -20,6 +20,74 @@ namespace NK2AI
 
 const HitMapInfo HitMapInfo::NoThreat;
 
+float discountedEnemyThreat(uint64_t strength, float movementCost)
+{
+	const double cost = std::isfinite(movementCost) ? std::max(0.0, static_cast<double>(movementCost)) : 0.0;
+	return static_cast<float>(static_cast<double>(strength) / (1.0 + cost));
+}
+
+std::vector<std::pair<int3, uint8_t>> collectPlannedOvernightStops(const CGPathNode * destination)
+{
+	std::vector<std::pair<int3, uint8_t>> stops;
+	const CGPathNode * current = destination;
+	for(size_t depth = 0; current && current->theNodeBefore && depth < 1024; ++depth)
+	{
+		const CGPathNode * previous = current->theNodeBefore;
+		if(previous->turns < current->turns && previous->turns < 255)
+			stops.emplace_back(previous->coord, previous->turns);
+		current = previous;
+	}
+	return stops;
+}
+
+bool hasUnsafeKnownOvernightStop(const AIPath & path, const Nullkiller * aiNk)
+{
+	if(path.nodes.empty() || path.turn() == 0 || path.turn() >= 8
+		|| path.exchangeCount != 1 || !path.targetHero
+		|| path.heroArmy != path.targetHero)
+		return false;
+
+	// Dimension Door, town teleport and multi-carrier paths are not
+	// comparable to a single-hero walking route.
+	if(std::ranges::any_of(path.nodes, [](const AIPathNodeInfo & node)
+	{
+		return node.specialAction != nullptr || node.targetHero == nullptr;
+	}))
+		return false;
+
+	const auto info = aiNk->getPathsInfo(path.targetHero);
+	if(!info)
+		return false;
+
+	const CGPathNode * destination = info->getPathInfo(path.targetTile(), path.targetNode().layer);
+	if(!destination || !destination->reachable()
+		|| destination->turns != path.turn()
+		|| !vstd::isAlmostEqual(destination->getCost(), path.movementCost()))
+		return false;
+
+	for(const auto & [tile, plannedTurn] : collectPlannedOvernightStops(destination))
+	{
+		if(!aiNk->cc->isVisible(tile))
+			continue;
+		if(isKnownUnsafeAtEndOfTurn(aiNk->dangerHitMap->getTileThreat(tile),
+			path.targetHero, path.heroArmy, plannedTurn, aiNk->settings->getSafeAttackRatio()))
+			return true;
+	}
+	return false;
+}
+
+bool isKnownUnsafeAtEndOfTurn(const HitMapNode & tile, const CGHeroInstance * hero,
+	const CCreatureSet * army, uint8_t arrivalTurn, float safeAttackRatio)
+{
+	const auto unsafe = [&](const HitMapInfo & known)
+	{
+		return known.danger > 0 && known.turn <= arrivalTurn
+			&& !isSafeToVisit(hero, army, known.danger, safeAttackRatio);
+	};
+	return unsafe(tile.fastestDanger) || unsafe(tile.maximumDanger);
+}
+
+
 void logHitmap(PlayerColor playerID, DangerHitMapAnalyzer & data, const CCallback & cc)
 {
 #if NK2AI_TRACE_LEVEL >= 1
@@ -150,7 +218,7 @@ void DangerHitMapAnalyzer::updateHitMap()
 
 				newThreat.heroPtr = HeroPtr(path.targetHero, aiNk->cc.get());
 				newThreat.turn = path.turn();
-				newThreat.threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0);
+				newThreat.threat = discountedEnemyThreat(path.getHeroStrength(), path.movementCost());
 				// TODO: Mircea: Why is this danger calculated so differently than FuzzyHelper::evaluateDanger?
 				// shouldn't it use the path danger instead of hero strength?
 				newThreat.danger = path.getHeroStrength();

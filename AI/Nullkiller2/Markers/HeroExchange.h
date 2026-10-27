@@ -31,6 +31,7 @@ namespace Goals
 		std::string toString() const override;
 
 		uint64_t getReinforcementArmyStrength(const Nullkiller * aiNk) const;
+		int64_t getReinforcementArtifactValue(const Nullkiller * aiNk) const;
 	};
 }
 

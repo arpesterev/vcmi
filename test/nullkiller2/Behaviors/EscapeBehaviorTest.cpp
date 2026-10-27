@@ -104,3 +104,20 @@ TEST(Nullkiller2_Behaviors_EscapeBehavior, escapePriorityRunsBeforeExploration)
 		NK2AI::PriorityEvaluator::PriorityTier::ESCAPE,
 		NK2AI::PriorityEvaluator::PriorityTier::EXPLORE_AND_GATHER);
 }
+
+TEST(Nullkiller2_Behaviors_EscapeBehavior, boundedFastPathCoversLocalAndTownPortalLandings)
+{
+	const int3 origin(30, 30, 0);
+	const int3 farTown(70, 70, 0);
+	const auto tiles = NK2AI::boundedEscapeCandidateTiles(origin, int3(100, 100, 1), 2000, {farTown});
+	EXPECT_LE(tiles.size(), 512u);
+	EXPECT_NE(std::find(tiles.begin(), tiles.end(), int3(31, 30, 0)), tiles.end());
+	EXPECT_NE(std::find(tiles.begin(), tiles.end(), farTown), tiles.end());
+}
+
+TEST(Nullkiller2_Behaviors_EscapeBehavior, badMovementCostsCannotProduceEscapePriority)
+{
+	auto candidate = makeAcceptedCandidate();
+	candidate.movementCost = std::numeric_limits<float>::quiet_NaN();
+	EXPECT_FALSE(NK2AI::evaluateEscapePathCandidate(candidate).accepted);
+}
