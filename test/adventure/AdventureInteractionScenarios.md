@@ -55,6 +55,7 @@ controlled defensive-return requirements.
 ## Fixture corrections retained in the audit
 
 Earlier invalid premises were diagnosed rather than weakening acceptance:
+
 - First-turn income is skipped, so the one-shot event subtracts 7800 from normal
   Expert-AI 10000 gold to produce the declared 2200 budget.
 - Omitted mine owner uses the native NEUTRAL default; the invalid explicit

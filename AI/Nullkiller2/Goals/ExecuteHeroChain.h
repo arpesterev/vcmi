@@ -21,16 +21,18 @@ namespace Goals
 	private:
 		AIPath chainPath;
 		std::string targetName;
+		bool emergencyEscape = false;
 
 	public:
 		float closestWayRatio;
 
-		ExecuteHeroChain(const AIPath & path, const CGObjectInstance * obj = nullptr);
+		ExecuteHeroChain(const AIPath & path, const CGObjectInstance * obj = nullptr, bool emergencyEscape = false);
 
 		void accept(AIGateway * aiGw) override;
 		std::string toString() const override;
 		bool operator==(const ExecuteHeroChain & other) const override;
 		const AIPath & getPath() const { return chainPath; }
+		bool isEmergencyEscape() const { return emergencyEscape; }
 		void setClosestWayRatio(const AIPath & closestWay);
 
 		int getHeroExchangeCount() const override { return chainPath.exchangeCount; }

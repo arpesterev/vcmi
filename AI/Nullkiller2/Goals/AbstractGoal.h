@@ -76,7 +76,8 @@ namespace Goals
 		STAY_AT_TOWN,
 		EXPLORATION_BEHAVIOR,
 		EXPLORATION_POINT,
-		EXPLORE_NEIGHBOUR_TILE
+		EXPLORE_NEIGHBOUR_TILE,
+		ESCAPE_BEHAVIOR // Append only: existing goal identifiers stay stable.
 	};
 
 	class DLL_EXPORT TSubgoal : public std::shared_ptr<AbstractGoal>

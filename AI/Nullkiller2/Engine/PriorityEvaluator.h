@@ -27,6 +27,9 @@ class BuildingInfo;
 class Nullkiller;
 struct HitMapInfo;
 
+// Scores explicit town-defence coverage using the same combat-strength units.
+float evaluateDefenceCoveragePriority(float defenderStrength, float enemyStrength, float safeRatio);
+
 class RewardEvaluator
 {
 public:
@@ -75,6 +78,9 @@ struct DLL_EXPORT EvaluationContext
 	float armyInvolvement;
 	int defenseValue; // 0-1: No fortifications (undefended), 2: Fort level (basic defensive structure), 3: Citadel level (stronger defenses), 4: Castle level (maximum defenses)
 	bool isDefend;
+	float defenceCommittedStrength;
+	float defenceThreatStrength;
+	bool isEmergencyEscape;
 	int threatTurns;
 	TResources buildingCost;
 	bool involvesSailing;
@@ -114,9 +120,9 @@ public:
 		BUILDINGS = 0,
 		INSTAKILL,
 		INSTADEFEND,
+		ESCAPE, // Safely leave a threatened tile before ordinary hunting/gathering.
 		KILL,
 		EXPLORE_AND_GATHER, // Includes guarded resources/artifacts/portals
-		ESCAPE,
 		DEFEND,
 		MAX_PRIORITY_TIER = DEFEND
 	};

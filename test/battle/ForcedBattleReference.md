@@ -73,7 +73,7 @@ necromancy/hero-level-up effects.
 ## Initial matrix
 
 | Case | Attacker | Neutral defender | Seed |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | ordinary_melee | 40 pikemen (0) | 10 pikemen (0) | 17041 |
 | ranged_slow_melee | 20 archers (2) | 30 walking dead (58) | 17047 |
 | slow_melee_ranged | 30 walking dead (58) | 20 archers (2) | 17053 |

@@ -12,12 +12,21 @@
 #include "../AIGateway.h"
 #include "../AIUtility.h"
 #include "../Helpers/ExplorationHelper.h"
+#include <cmath>
 
 
 namespace NK2AI
 {
 
 using namespace Goals;
+
+float scoreScoutExplorationStep(float discovered, float movementCost)
+{
+	if(!std::isfinite(discovered) || discovered <= 0.0f
+		|| !std::isfinite(movementCost) || movementCost < 0.0f)
+		return 0.0f;
+	return discovered / std::max(0.1f, movementCost);
+}
 
 bool ExploreNeighbourTile::operator==(const ExploreNeighbourTile & other) const
 {
@@ -44,11 +53,25 @@ void ExploreNeighbourTile::accept(AIGateway * aiGw)
 
 				if(pathInfo->accessible == EPathAccessibility::ACCESSIBLE)
 				{
-					float newValue = h.howManyTilesWillBeDiscovered(tile);
-					newValue /= std::min(0.1f, pathInfo->getCost());
+					const float newValue = scoreScoutExplorationStep(
+						h.howManyTilesWillBeDiscovered(tile), pathInfo->getCost());
 
 					if(newValue > value)
 					{
+						// Reject a known guarded step before choosing a target,
+						// otherwise one risky high-value tile can suppress every
+						// safer second-best neighbour.
+						if(aiGw->nullkiller->dangerEvaluator->evaluateDanger(tile, hero, true) > 0)
+							return;
+						const auto & threats = aiGw->nullkiller->dangerHitMap->getTileThreat(tile);
+						const float safeRatio = aiGw->nullkiller->settings->getSafeAttackRatio();
+						const auto canKillNextMove = [&](const HitMapInfo & threat)
+						{
+							return threat.turn == 0 && threat.danger > 0
+								&& !isSafeToVisit(hero, threat.danger, safeRatio);
+						};
+						if(canKillNextMove(threats.fastestDanger) || canKillNextMove(threats.maximumDanger))
+							return;
 						value = newValue;
 						target = tile;
 					}

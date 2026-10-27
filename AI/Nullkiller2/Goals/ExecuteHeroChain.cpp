@@ -17,8 +17,8 @@ namespace NK2AI
 
 using namespace Goals;
 
-ExecuteHeroChain::ExecuteHeroChain(const AIPath & path, const CGObjectInstance * obj)
-	:ElementarGoal(Goals::EXECUTE_HERO_CHAIN), chainPath(path), closestWayRatio(1)
+ExecuteHeroChain::ExecuteHeroChain(const AIPath & path, const CGObjectInstance * obj, bool escape)
+	:ElementarGoal(Goals::EXECUTE_HERO_CHAIN), chainPath(path), emergencyEscape(escape), closestWayRatio(1)
 {
 	hero = path.targetHero;
 	tile = path.targetTile();

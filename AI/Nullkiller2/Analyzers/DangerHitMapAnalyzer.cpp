@@ -20,6 +20,13 @@ namespace NK2AI
 
 const HitMapInfo HitMapInfo::NoThreat;
 
+float distanceDiscountedThreat(uint64_t strength, float movementCost)
+{
+	// An invalid movement cost must not falsely mark a dangerous enemy safe.
+	const double safeCost = std::isfinite(movementCost) ? std::max(0.0, double(movementCost)) : 0.0;
+	return static_cast<float>(double(strength) / (1.0 + safeCost));
+}
+
 void logHitmap(PlayerColor playerID, DangerHitMapAnalyzer & data, const CCallback & cc)
 {
 #if NK2AI_TRACE_LEVEL >= 1
@@ -150,7 +157,7 @@ void DangerHitMapAnalyzer::updateHitMap()
 
 				newThreat.heroPtr = HeroPtr(path.targetHero, aiNk->cc.get());
 				newThreat.turn = path.turn();
-				newThreat.threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0);
+				newThreat.threat = distanceDiscountedThreat(path.getHeroStrength(), path.movementCost());
 				// TODO: Mircea: Why is this danger calculated so differently than FuzzyHelper::evaluateDanger?
 				// shouldn't it use the path danger instead of hero strength?
 				newThreat.danger = path.getHeroStrength();

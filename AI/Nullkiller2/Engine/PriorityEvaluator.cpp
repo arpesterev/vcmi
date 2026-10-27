@@ -60,6 +60,9 @@ EvaluationContext::EvaluationContext(const Nullkiller* aiNk)
 	armyInvolvement(0),
 	defenseValue(0),
 	isDefend(false),
+	defenceCommittedStrength(0),
+	defenceThreatStrength(0),
+	isEmergencyEscape(false),
 	threatTurns(INT_MAX),
 	involvesSailing(false),
 	isTradeBuilding(false),
@@ -939,6 +942,8 @@ public:
 			evaluationContext.addNonCriticalStrategicalValue(1.7f * multiplier * strategicalValue);
 
 		evaluationContext.defenseValue = town->fortLevel();
+		evaluationContext.defenceCommittedStrength = static_cast<float>(defendTown.getDefenceStrength());
+		evaluationContext.defenceThreatStrength = static_cast<float>(threat.danger);
 		evaluationContext.isDefend = true;
 		evaluationContext.threatTurns = threat.turn;
 
@@ -961,6 +966,7 @@ public:
 			return;
 
 		Goals::ExecuteHeroChain & chain = dynamic_cast<Goals::ExecuteHeroChain &>(*task);
+		evaluationContext.isEmergencyEscape = chain.isEmergencyEscape();
 		const AIPath & path = chain.getPath();
 
 		if (vstd::isAlmostZero(path.movementCost()))
@@ -1012,7 +1018,7 @@ public:
 		std::map<CreatureID, float> totalPowerByCreatureID;
 
 		// Calculate hero power and total power by CreatureID
-		for (const auto & slot : hero->Slots())
+		for (const auto & slot : army->Slots())
 		{
 			CreatureID creatureID = slot.second->getCreatureID();
 			float slotPower = slot.second->getPower();
@@ -1037,7 +1043,7 @@ public:
 		// Compute the power ratio if total power is greater than zero
 		if (totalPower > 0)
 		{
-			evaluationContext.powerRatio = heroPower / totalPower;
+			evaluationContext.powerRatio = std::clamp(heroPower / totalPower, 0.0f, 1.0f);
 		}
 
 		if (target)
@@ -1056,11 +1062,11 @@ public:
 				evaluationContext.defenseValue = dynamic_cast<const CGTownInstance*>(target)->fortLevel();
 			evaluationContext.goldCost += evaluationContext.evaluator.getGoldCost(target, hero, army);
 			if(evaluationContext.danger > 0)
-				evaluationContext.skillReward += (float)evaluationContext.danger / (float)hero->getArmyStrength();
+				evaluationContext.skillReward += (float)evaluationContext.danger / std::max(1.0f, static_cast<float>(army->getArmyStrength()));
 		}
 		evaluationContext.armyInvolvement += army->getArmyCost();
 
-		vstd::amax(evaluationContext.armyLossRatio, (float)path.getTotalArmyLoss() / (float)army->getArmyStrength());
+		vstd::amax(evaluationContext.armyLossRatio, (float)path.getTotalArmyLoss() / std::max(1.0f, static_cast<float>(army->getArmyStrength())));
 		addTileDanger(evaluationContext, path.targetTile(), path.turn(), path.getHeroStrength());
 		vstd::amax(evaluationContext.turn, path.turn());
 	}
@@ -1368,6 +1374,19 @@ float PriorityEvaluator::evaluateSkillReward(float score, const float skillRewar
 	return score + skillReward * armyInvolvement * (1 - armyLossRatio) * 0.05;
 }
 
+float evaluateDefenceCoveragePriority(float defenderStrength, float enemyStrength, float safeRatio)
+{
+	if(!std::isfinite(defenderStrength) || !std::isfinite(enemyStrength)
+		|| !std::isfinite(safeRatio) || defenderStrength <= 0
+		|| enemyStrength <= 0 || safeRatio <= 0)
+		return 0.0f;
+	const double required = std::max(1.0, double(enemyStrength) * safeRatio);
+	const double coverage = double(defenderStrength) / required;
+	if(coverage < 1.0)
+		return static_cast<float>(coverage * 0.5); // Undermanned: better than no defence, but not a safe guarantee.
+	return static_cast<float>(1.0 / (1.0 + (coverage - 1.0) * 0.5));
+}
+
 float PriorityEvaluator::evaluateConquestValue(float score, const float conquestValue, const float armyInvolvement)
 {
 	if(conquestValue > 0)
@@ -1378,6 +1397,15 @@ float PriorityEvaluator::evaluateConquestValue(float score, const float conquest
 float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 {
 	auto evaluationContext = buildEvaluationContext(task);
+
+	// Emergency retreat is an explicitly generated, safe same-turn path. Never
+	// promote an ordinary resource/attack task merely because it moves away
+	// from a threat. Keep this decision available even if fuzzy scoring is on.
+	if(priorityTier == ESCAPE)
+		return evaluationContext.isEmergencyEscape && evaluationContext.turn == 0
+			? 1.0f / (1.0f + std::max(0.0f, evaluationContext.movementCost)) : 0.0f;
+	if(evaluationContext.isEmergencyEscape)
+		return 0.0f;
 
 	int rewardType = (evaluationContext.goldReward > 0 ? 1 : 0)
 		+ (evaluationContext.armyReward > 0 ? 1 : 0)
@@ -1505,14 +1533,21 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 					// We need some kind of smart selection of who to go, not everyone qualified
 					// Probably apply normal fight calculation as in others + filter out unnecessary ones in makeTurn buildPlan
 
-					const float OPTIMAL_PERCENTAGE = 0.75f; // We want army to be 75% of the threat
-					float optimalStrength = evaluationContext.threat * OPTIMAL_PERCENTAGE;
-
-					// Calculate how far the army is from optimal strength
-					float deviation = std::abs(evaluationContext.armyInvolvement - optimalStrength);
-					float deviationPercentage = deviation / evaluationContext.threat;
-					// Calculate score: 1.0 is perfect, decreasing as deviation increases
-					score = 1.0f / (1.0f + deviationPercentage);
+					if(evaluationContext.defenceThreatStrength > 0)
+					{
+						// Explicit DefendTown markers carry true strength. The older formula
+						// compared gold recruitment cost to enemy combat strength.
+						score = evaluateDefenceCoveragePriority(evaluationContext.defenceCommittedStrength,
+							evaluationContext.defenceThreatStrength, aiNk->settings->getSafeAttackRatio());
+					}
+					else if(evaluationContext.threat > 0)
+					{
+						// Other defensive tasks (such as a town hero swap) lack a
+						// dedicated DefendTown strength marker: preserve their prior ranking.
+						const float optimalStrength = evaluationContext.threat * 0.75f;
+						const float deviation = std::abs(evaluationContext.armyInvolvement - optimalStrength);
+						score = 1.0f / (1.0f + deviation / evaluationContext.threat);
+					}
 
 					score *= evaluationContext.closestWayRatio;
 					score = evaluateMovement(score, evaluationContext.movementCost);
@@ -1545,8 +1580,9 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 				score = evaluateMovement(score, evaluationContext.movementCost);
 				break;
 			}
-			case EXPLORE_AND_GATHER:
 			case ESCAPE:
+				return 0; // Handled before fuzzy/scalar evaluation above.
+			case EXPLORE_AND_GATHER:
 			// TODO: Mircea: Should not go to something that gives army if no slots available in the hero, but probably not in the evaluator, but in the finder
 			// task.get()->hero->getSlotFor(creature, 7) == false (not sure I get to know which creature is there in Orc Tower building)
 			// /// so I can't know for sure if it fits my stacks or not, but at least we can avoid going there with all 7 stacks occupied by other units
@@ -1564,24 +1600,6 @@ float PriorityEvaluator::evaluate(Goals::TSubgoal task, int priorityTier)
 
 				if(priorityTier == EXPLORE_AND_GATHER && evaluationContext.enemyHeroDangerRatio > maxEnemyDangerRatio)
 					return 0;
-				if(priorityTier == ESCAPE && task->hero)
-				{
-					const auto currentTileThreat = aiNk->dangerHitMap->getTileThreat(task->hero->visitablePos());
-					if(currentTileThreat.fastestDanger.turn < 1 && currentTileThreat.fastestDanger.danger > task->hero->getTotalStrength())
-					{
-						// Encourage routes which go away of the threat
-						const auto currentTileThreatVal = currentTileThreat.fastestDanger.threat;
-						const auto destTileThreatVal = aiNk->dangerHitMap->getTileThreat(task->tile).fastestDanger.threat;
-						const auto delta = currentTileThreatVal - destTileThreatVal;
-						if(delta > 0)
-						{
-							logAi->trace("priorityTier %d, Encouraging route with less threat delta: %f", priorityTier, delta);
-							score += delta;
-						}
-						else
-							logAi->trace("priorityTier %d, Cannot encourage route because it has a negative threat delta: %f. Hoping hero will live", priorityTier, delta);
-					}
-				}
 
 				// TODO: Mircea: Not sure this makes sense anymore, deactivating for now, to test more and delete in the end
 				// if(evaluationContext.enemyHeroDangerRatio > involvedStrengthOutOfTotalRatio && !evaluationContext.isDefend && priorityTier != FAR_HUNTER_GATHER)

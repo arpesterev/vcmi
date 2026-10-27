@@ -17,6 +17,9 @@ namespace NK2AI
 
 struct AIPath;
 
+// Threat urgency, distinct from the raw enemy strength used for safety gates.
+float distanceDiscountedThreat(uint64_t strength, float movementCost);
+
 struct HitMapInfo
 {
 	static const HitMapInfo NoThreat;
@@ -34,9 +37,9 @@ struct HitMapInfo
 
 struct HitMapNode
 {
-	// threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0); danger = path.getHeroStrength()
+	// Urgency is distance-discounted, danger retains raw combat strength.
 	HitMapInfo maximumDanger = HitMapInfo::NoThreat;
-	// threat = path.getHeroStrength() * (1 - path.movementCost() / 2.0); danger = path.getHeroStrength()
+	// Urgency is distance-discounted, danger retains raw combat strength.
 	HitMapInfo fastestDanger = HitMapInfo::NoThreat;
 	const CGTownInstance * closestTown = nullptr;
 
