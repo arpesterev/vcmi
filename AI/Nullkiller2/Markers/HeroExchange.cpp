@@ -14,6 +14,7 @@
 #include "../AIUtility.h"
 #include "../Analyzers/ArmyManager.h"
 #include "../../../lib/mapping/TerrainTile.h"
+#include "../../../lib/entities/artifact/CArtifact.h"
 
 namespace NK2AI
 {
