@@ -15,21 +15,19 @@ on:
           - macos
           - android
           - ios
-      publish_release:
-        description: 'Publish packages (only from master)'
-        type: boolean
-        required: false
-        default: false
       enable_lto:
         description: 'Enable link-time optimization'
         type: boolean
         default: false
 
+permissions:
+  contents: read
+
 env:
   VCMI_ENABLE_LTO: ${{ (github.ref == 'refs/heads/master' || inputs.enable_lto) && 'ON' || 'OFF' }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -114,14 +112,6 @@ jobs:
           | awk -F = '{ gsub(/:/, "", $2); print $2 }')
         echo MACOS_CODE_SIGN_IDENTITY=$signingIdentitySHA >> $GITHUB_ENV
 
-    # Save only on cache miss, GitHub caches are immutable per key
-    - name: APT cache save
-      if: contains(matrix.os, 'ubuntu') && steps.aptcache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v6
-      with:
-        path: ${{ runner.temp }}/apt-cache
-        key: ${{ steps.aptcache.outputs.cache-primary-key }}
-
     - name: Detect Visual Studio version (Windows)
       if: ${{ startsWith(matrix.platform, 'msvc') }}
       shell: pwsh
@@ -154,37 +144,6 @@ jobs:
         arch: ${{ matrix.arch }}
         toolset: ${{ matrix.toolset }}
 
-    # ensure the cache for each PR is separate so they don't interfere with each other
-    # fall back to cache of the vcmi/vcmi repo if no PR-specific cache is found
-
-    - name: Setup compiler cache for PRs
-      uses: step-security/ccache-action@v1
-      if: ${{ github.event.number != '' }}
-      with:
-        variant: ${{ startsWith(matrix.platform, 'msvc') && 'sccache' || 'ccache' }}
-        key: ${{ matrix.platform }}-PR-${{ github.event.number }}
-        restore-keys: |
-          ${{ matrix.platform }}-PR-${{ github.event.number }}
-          ${{ matrix.platform }}-branch-${{ github.base_ref }}
-          ${{ matrix.platform }}-
-        create-symlink: ${{ !startsWith(matrix.platform, 'msvc') }}
-        max-size: '5G'
-        verbose: 2
-        job-summary: ""           # <-- disable built-in summary to avoid duplicate block
-
-    - name: Setup compiler cache for branch builds
-      uses: step-security/ccache-action@v1
-      if: ${{ github.event.number == '' }}
-      with:
-        variant: ${{ startsWith(matrix.platform, 'msvc') && 'sccache' || 'ccache' }}
-        key: ${{ matrix.platform }}-branch-${{ github.ref_name }}
-        restore-keys: |
-          ${{ matrix.platform }}-branch-${{ github.ref_name }}
-          ${{ matrix.platform }}-
-        create-symlink: ${{ !startsWith(matrix.platform, 'msvc') }}
-        max-size: '5G'
-        verbose: 2
-        job-summary: ""           # <-- disable built-in summary to avoid duplicate block
 
     - name: CCache tuning (Android)
       if: ${{ startsWith(matrix.platform, 'android') }}
@@ -238,14 +197,6 @@ jobs:
         df -h
 
     # a hack to build ID for x64 build in order for Google Play to allow upload of both 32 and 64 bit builds
-    - name: Bump Android x64 build ID
-      if: ${{ matrix.platform == 'android-64' }}
-      run: perl -i -pe 's/versionCode (\d+)/$x=$1+1; "versionCode $x"/e' android/vcmi-app/build.gradle
-
-    - name: Bump Android x86_64 build ID
-      if: ${{ matrix.platform == 'android-64-intel' }}
-      run: perl -i -pe 's/versionCode (\d+)/$x=$1+2; "versionCode $x"/e' android/vcmi-app/build.gradle
-
     - name: Build Number
       run: |
         source '${{github.workspace}}/CI/get_package_name.sh'
@@ -309,28 +260,6 @@ jobs:
           sleep 3; ((counter++))
         done
 
-    - name: Notarize macOS dmg
-      if: ${{ startsWith(matrix.platform, 'mac-') && matrix.pack == 1 }}
-      env: 
-        NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
-        NOTARIZATION_APPLE_ID_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID_PASSWORD }}
-        NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
-      run: |
-        if [[ -z "$NOTARIZATION_APPLE_ID" || -z "$NOTARIZATION_APPLE_ID_PASSWORD" || -z "$NOTARIZATION_TEAM_ID" ]]; then
-          echo "skip notarization"
-          exit 0
-        fi
-
-        dmg='${{ github.workspace }}/out/build/${{ matrix.preset }}/${{ env.VCMI_PACKAGE_FILE_NAME }}.${{ matrix.extension }}'
-        codesign --verbose=4 --force --sign "$MACOS_CODE_SIGN_IDENTITY" "$dmg"
-        xcrun notarytool submit \
-          --apple-id "$NOTARIZATION_APPLE_ID" \
-          --password "$NOTARIZATION_APPLE_ID_PASSWORD" \
-          --team-id "$NOTARIZATION_TEAM_ID" \
-          --wait \
-          "$dmg"
-        xcrun stapler staple "$dmg"
-
     - name: Find Android package
       if: ${{ startsWith(matrix.platform, 'android') }}
       run: |
@@ -338,135 +267,12 @@ jobs:
         mv "$OUTPUT_DIRECTORY/apk/release/vcmi-release.apk" "${{github.workspace}}/out/build/${{matrix.preset}}/${{ env.VCMI_PACKAGE_FILE_NAME }}.apk"
         mv "$OUTPUT_DIRECTORY/bundle/release/vcmi-release.aab" "${{github.workspace}}/out/build/${{matrix.preset}}/${{ env.VCMI_PACKAGE_FILE_NAME }}.aab"
 
-    - name: Upload Artifact
-      id: upload_artifact
+    - name: Keep downloadable package in GitHub Actions
       uses: actions/upload-artifact@v7
       with:
         archive: false
         path: |
           ${{github.workspace}}/out/build/${{matrix.preset}}/${{ env.VCMI_PACKAGE_FILE_NAME }}.${{ matrix.extension }}
-
-    - name: Upload AAB Artifact
-      id: upload_aab
-      if: ${{ startsWith(matrix.platform, 'android') }}
-      uses: actions/upload-artifact@v7
-      with:
-        archive: false
-        path: |
-          ${{github.workspace}}/out/build/${{matrix.preset}}/${{ env.VCMI_PACKAGE_FILE_NAME }}.aab
-
-    - name: Upload MSVC debug symbols
-      id: upload_symbols
-      if: ${{ startsWith(matrix.platform, 'msvc') }}
-      uses: actions/upload-artifact@v7
-      with:
-        name: ${{ env.VCMI_PACKAGE_FILE_NAME }}-${{ matrix.platform }}-symbols
-        compression-level: 9
-        path: |
-            ${{github.workspace}}/**/*.pdb
-
-    - name: Create iOS AppStore debug symbols
-      if: ${{ matrix.platform == 'ios' }}
-      run: |
-        IOS_APPSTORE_SYMBOLS_DIR='${{ github.workspace }}/Symbols'
-        mkdir "$IOS_APPSTORE_SYMBOLS_DIR"
-        dsyms=$(find '${{ github.workspace }}/out/build/${{ matrix.preset }}' -name '*.dSYM')
-        xcrun symbols -arch all -symbolsPackageDir "$IOS_APPSTORE_SYMBOLS_DIR" $dsyms
-        echo IOS_APPSTORE_SYMBOLS_DIR="$IOS_APPSTORE_SYMBOLS_DIR" >> $GITHUB_ENV
-    - name: Upload iOS AppStore debug symbols
-      if: ${{ matrix.platform == 'ios' }}
-      uses: actions/upload-artifact@v7
-      with:
-        name: ${{ env.VCMI_PACKAGE_FILE_NAME }}-${{ matrix.platform }}-symbols
-        compression-level: 9
-        path: |
-            ${{ env.IOS_APPSTORE_SYMBOLS_DIR }}
-
-    - name: Upload build to download.vcmi.eu
-      id: upload_build
-      if: ${{ matrix.upload == 1 && inputs.publish_release && github.ref == 'refs/heads/master' && env.BUILDS_UPLOADER_PRIVATE_KEY != '' }}
-      run: |
-        if [ -z '${{ env.ANDROID_APK_PATH }}' ] ; then
-          cd '${{github.workspace}}/out/build/${{matrix.preset}}'
-        fi
-        source '${{github.workspace}}/CI/upload_package.sh'
-      env:
-        BUILDS_UPLOADER_PRIVATE_KEY: ${{ secrets.BUILDS_UPLOADER_PRIVATE_KEY }}
-        PACKAGE_EXTENSION: ${{ matrix.extension }}
-
-    - name: Prepare update information
-      if: ${{ steps.upload_build.outcome == 'success' }}
-      run: |
-        python3 CI/build_manifest.py file '${{github.workspace}}/out/build/${{matrix.preset}}/${{ env.VCMI_PACKAGE_FILE_NAME }}.${{ matrix.extension }}' '${{ matrix.update_platform }}' package
-
-    - name: Upload update information
-      if: ${{ steps.upload_build.outcome == 'success' }}
-      uses: actions/upload-artifact@v7
-      with:
-        name: update-info-${{ matrix.update_platform }}-package
-        path: .update-info/${{ matrix.update_platform }}-package.json
-
-    - name: Prepare partial JSON with build informations
-      id: make_partial_json
-      env:
-        PLATFORM: ${{ matrix.platform }}
-        ARTIFACT_URL: ${{ steps.upload_artifact.outputs.artifact-url }}
-        DEBUG_SYMBOLS_URL: ${{ steps.upload_symbols.outputs.artifact-url }}
-        AAB_URL: ${{ steps.upload_aab.outputs.artifact-url }}
-      run: |
-        python3 CI/emit_partial.py
-
-    - name: Upload partial JSON with build informations
-      uses: actions/upload-artifact@v7
-      with:
-        name: partial-json-${{ matrix.platform }}
-        path: .summary/${{ matrix.platform }}.json
-
-  upload-source-package:
-    name: Upload Source Code Package
-    if: always() && inputs.platform == 'all' && inputs.publish_release && github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-        - uses: actions/checkout@v7
-          with:
-            submodules: recursive
-
-        - name: Build Number
-          run: |
-            source '${{github.workspace}}/CI/get_package_name.sh'
-            echo VCMI_PACKAGE_FILE_NAME="$VCMI_PACKAGE_FILE_NAME" >> $GITHUB_ENV
-
-        - name: Create source code archive (including submodules)
-          run: |
-            git archive HEAD -o "release.tar" --worktree-attributes -v
-            git submodule update --init --recursive
-            git submodule --quiet foreach 'cd "$toplevel"; tar -rvf "release.tar" "$sm_path"'
-            gzip release.tar
-
-        - name: Upload source code archive
-          id: upload_source
-          uses: actions/upload-artifact@v7
-          with:
-            archive: false
-            path: |
-              ./release.tar.gz
-
-        - name: Prepare partial JSON with source informations
-          shell: bash
-          run: |
-            mkdir -p .summary
-            cat > .summary/source.json <<JSON
-            {"source_url": "${{ steps.upload_source.outputs.artifact-url }}"}
-            JSON
-
-        - name: Upload partial JSON with source informations
-          uses: actions/upload-artifact@v7
-          with:
-            name: partial-json-source
-            path: .summary/source.json
 
   test:
     name: Build+Test (${{ matrix.platform }})
@@ -531,38 +337,6 @@ jobs:
     - name: Prepare CI
       run: source '${{ github.workspace }}/CI/before_install/${{ matrix.before_install }}'
 
-    - name: APT cache save
-      if: contains(matrix.os, 'ubuntu') && steps.aptcache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v6
-      with:
-        path: ${{ runner.temp }}/apt-cache
-        key: ${{ steps.aptcache.outputs.cache-primary-key }}
-
-    - name: Setup compiler cache for PRs
-      uses: step-security/ccache-action@v1
-      if: ${{ github.event.number != '' }}
-      with:
-        key: ${{ matrix.platform }}-PR-${{ github.event.number }}
-        restore-keys: |
-          ${{ matrix.platform }}-PR-${{ github.event.number }}
-          ${{ matrix.platform }}-branch-${{ github.base_ref }}
-          ${{ matrix.platform }}-
-        max-size: '5G'
-        verbose: 2
-        job-summary: ""
-
-    - name: Setup compiler cache for branch builds
-      uses: step-security/ccache-action@v1
-      if: ${{ github.event.number == '' }}
-      with:
-        key: ${{ matrix.platform }}-branch-${{ github.ref_name }}
-        restore-keys: |
-          ${{ matrix.platform }}-branch-${{ github.ref_name }}
-          ${{ matrix.platform }}-
-        max-size: '5G'
-        verbose: 2
-        job-summary: ""
-
     - name: Prepare Heroes 3 data
       run: |
         data_url="https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z"
@@ -593,104 +367,6 @@ jobs:
             echo "Validation failed!"
             exit 1
         fi
-
-    - name: Prepare partial JSON with test cache information
-      if: always()
-      env:
-        PLATFORM: ${{ matrix.platform }}
-        PYTHONPATH: ${{ github.workspace }}/CI
-      run: |
-        python3 CI/emit_test_partial.py
-
-    - name: Upload partial JSON with test cache information
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: partial-json-test-${{ matrix.platform }}
-        path: .summary/test-${{ matrix.platform }}.json
-
-  lobby:
-    name: Build VCMI Lobby
-    if: ${{ inputs.platform == 'all' || inputs.platform == 'linux' }}
-    # Warning: Lobby .deb must be build on the same Ubuntu version and arch as our server. Do not change to ubuntu-latest
-    runs-on: ubuntu-24.04
-    defaults:
-      run:
-        shell: bash
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v7
-
-    - name: Prepare CI
-      run: sudo apt update && sudo apt install devscripts debhelper build-essential cmake zlib1g-dev libboost-dev libboost-date-time-dev libboost-program-options-dev libboost-filesystem-dev libboost-iostreams-dev libminizip-dev libsqlite3-dev 
-
-    - name: Build Number
-      run: |
-        source '${{github.workspace}}/CI/get_package_name.sh'
-        VCMI_PACKAGE_FILE_NAME+="-x64"
-        echo VCMI_PACKAGE_FILE_NAME="$VCMI_PACKAGE_FILE_NAME" >> $GITHUB_ENV
-        echo VCMI_PACKAGE_BUILD="$VCMI_PACKAGE_BUILD" >> $GITHUB_ENV
-        echo VCMI_PACKAGE_NAME_SUFFIX="$VCMI_PACKAGE_NAME_SUFFIX" >> $GITHUB_ENV
-        echo VCMI_PACKAGE_GOLDMASTER="$VCMI_PACKAGE_GOLDMASTER" >> $GITHUB_ENV
-      env:
-        PULL_REQUEST: ${{ github.event.pull_request.number }}
-
-    - name: Prepare debian directory
-      run: cp -r packaging/ubuntu debian && cp -r packaging/ubuntu-lobby/. debian/
-
-    - name: Build .deb
-      run: debuild -us -uc -b
-
-    - name: Move .deb package
-      run: mv ../vcmi-lobby_*_amd64.deb "${{ env.VCMI_PACKAGE_FILE_NAME }}.deb"
-
-    - name: Upload Artifact
-      id: upload_artifact
-      uses: actions/upload-artifact@v7
-      with:
-        archive: false
-        path: ${{github.workspace}}/${{ env.VCMI_PACKAGE_FILE_NAME }}.deb
-
-  updates:
-    name: Build VCMI Update Service
-    if: ${{ inputs.platform == 'all' || inputs.platform == 'linux' }}
-    # Same Ubuntu version as the server that hosts updates.vcmi.eu
-    runs-on: ubuntu-26.04
-    defaults:
-      run:
-        shell: bash
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v7
-
-    - name: Prepare CI
-      run: sudo apt update && sudo apt install devscripts debhelper build-essential python3
-
-    - name: Build Number
-      run: |
-        source '${{github.workspace}}/CI/get_package_name.sh'
-        VCMI_PACKAGE_FILE_NAME+="-updates"
-        echo VCMI_PACKAGE_FILE_NAME="$VCMI_PACKAGE_FILE_NAME" >> $GITHUB_ENV
-      env:
-        PULL_REQUEST: ${{ github.event.pull_request.number }}
-
-    - name: Prepare debian directory
-      run: cp -r packaging/ubuntu-updates debian
-
-    # Also runs the unit tests in updates/tests
-    - name: Build .deb
-      run: debuild -us -uc -b
-
-    - name: Move .deb package
-      run: mv ../vcmi-updates_*_all.deb "${{ env.VCMI_PACKAGE_FILE_NAME }}.deb"
-
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v7
-      with:
-        archive: false
-        path: ${{github.workspace}}/${{ env.VCMI_PACKAGE_FILE_NAME }}.deb
 
   windows-installer:
     needs: build
@@ -778,52 +454,12 @@ jobs:
         "${{ github.workspace }}\ucrt"
       shell: cmd
 
-    - name: Upload VCMI Installer Artifacts
-      id: upload_installer
+    - name: Keep Windows installer in GitHub Actions
       uses: actions/upload-artifact@v7
       with:
         archive: false
         path: |
           ${{ github.workspace }}/CI/wininstaller/Output/*.exe
-
-    - name: Upload Installer
-      id: upload_installer_build
-      if: ${{ inputs.publish_release && github.ref == 'refs/heads/master' && env.BUILDS_UPLOADER_PRIVATE_KEY != '' }}
-      run: |
-        cd '${{github.workspace}}/CI/wininstaller/Output'
-        source '${{github.workspace}}/CI/upload_package.sh'
-      env:
-        BUILDS_UPLOADER_PRIVATE_KEY: ${{ secrets.BUILDS_UPLOADER_PRIVATE_KEY }}
-        PACKAGE_EXTENSION: exe
-
-    - name: Prepare update information
-      if: ${{ steps.upload_installer_build.outcome == 'success' }}
-      run: |
-        python3 CI/build_manifest.py file '${{github.workspace}}/CI/wininstaller/Output/${{ env.VCMI_PACKAGE_FILE_NAME }}.exe' '${{ matrix.update_platform }}' installer
-
-    - name: Upload update information
-      if: ${{ steps.upload_installer_build.outcome == 'success' }}
-      uses: actions/upload-artifact@v7
-      with:
-        name: update-info-${{ matrix.update_platform }}-installer
-        path: .update-info/${{ matrix.update_platform }}-installer.json
-
-    - name: Prepare partial JSON with installer informations
-      shell: bash
-      run: |
-        mkdir -p .summary
-        cat > .summary/installer-${{ matrix.platform }}.json <<JSON
-        {
-          "platform": "${{ matrix.platform }}",
-          "installer_url": "${{ steps.upload_installer.outputs.artifact-url }}"
-        }
-        JSON
-
-    - name: Upload partial JSON with installer informations
-      uses: actions/upload-artifact@v7
-      with:
-        name: partial-json-${{ matrix.platform }}-installer
-        path: .summary/installer-${{ matrix.platform }}.json
 
   validate-code:
     name: Validate Code
@@ -857,155 +493,3 @@ jobs:
             config: 'CI/example.markdownlint-cli2.jsonc'
             globs: '**/*.md'
 
-  build-manifest:
-    name: Upload Build Manifest
-    # Runs after all uploads of this run, so that every build listed in the manifest is already on the server
-    needs: [build, windows-installer]
-    if: ${{ always() && inputs.publish_release && github.ref == 'refs/heads/master' && needs.build.result == 'success' && (needs.windows-installer.result == 'success' || needs.windows-installer.result == 'skipped') }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
-    # Without the uploader key nothing was uploaded, so there is no update information and no manifest is created
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Download update information
-        uses: actions/download-artifact@v8
-        with:
-          pattern: update-info-*
-          merge-multiple: true
-          path: update-info
-
-      - name: Build Number
-        run: |
-          source '${{github.workspace}}/CI/get_package_name.sh'
-          echo VCMI_PACKAGE_FILE_NAME="$VCMI_PACKAGE_FILE_NAME" >> $GITHUB_ENV
-        env:
-          PULL_REQUEST: ${{ github.event.pull_request.number }}
-
-      - name: Create build manifest
-        run: python3 CI/build_manifest.py create update-info "${{ env.VCMI_PACKAGE_FILE_NAME }}.json"
-
-      - name: Upload build manifest to download.vcmi.eu
-        if: ${{ hashFiles(format('{0}.json', env.VCMI_PACKAGE_FILE_NAME)) != '' }}
-        run: source '${{github.workspace}}/CI/upload_package.sh'
-        env:
-          BUILDS_UPLOADER_PRIVATE_KEY: ${{ secrets.BUILDS_UPLOADER_PRIVATE_KEY }}
-          PACKAGE_EXTENSION: json
-
-  final-summary:
-    name: Build report
-    if: always()
-    needs: [build, windows-installer, validate-code, test, upload-source-package]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      actions: write                   # Partial JSON artifacts can't be deleted in PRs
-    steps:
-      - name: Checkout (for script path)
-        uses: actions/checkout@v7
-        with:
-          sparse-checkout: |
-            CI/final_summary.py
-
-      - name: Download all partial JSON artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          pattern: partial-json-*
-          merge-multiple: true
-          path: partials
-
-      - name: Run final summary
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python3 CI/final_summary.py
-
-  draft-release:
-    name: Create draft release
-    if: inputs.publish_release && inputs.platform == 'all' && github.ref == 'refs/heads/master'
-    needs: [build, windows-installer, upload-source-package]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Extract version
-        id: version
-        run: |
-          f=cmake_modules/VersionDefinition.cmake
-          major=$(grep -m1 VCMI_VERSION_MAJOR "$f" | tr -dc 0-9)
-          minor=$(grep -m1 VCMI_VERSION_MINOR "$f" | tr -dc 0-9)
-          patch=$(grep -m1 VCMI_VERSION_PATCH "$f" | tr -dc 0-9)
-          if [ "$patch" = "0" ]; then tag="${major}.${minor}"; else tag="${major}.${minor}.${patch}"; fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: dl
-
-      - name: Stage release assets
-        run: |
-          set -euo pipefail
-          mkdir release
-          for d in dl/*/; do
-            name=$(basename "$d")
-            case "$name" in
-              partial-json-*) continue ;;
-              *-msvc-x64-symbols)   (cd "$d" && zip -qr9 "$GITHUB_WORKSPACE/release/VCMI-Windows-x64-symbols.zip" .) ;;
-              *-msvc-x86-symbols)   (cd "$d" && zip -qr9 "$GITHUB_WORKSPACE/release/VCMI-Windows-x86-symbols.zip" .) ;;
-              *-msvc-arm64-symbols) (cd "$d" && zip -qr9 "$GITHUB_WORKSPACE/release/VCMI-Windows-arm64-symbols.zip" .) ;;
-              *)
-                for f in "$d"*; do
-                  [ -f "$f" ] || continue
-                  case "$(basename "$f")" in
-                    *-intel.dmg)       mv "$f" release/VCMI-macOS-intel.dmg ;;
-                    *-arm.dmg)         mv "$f" release/VCMI-macOS-arm.dmg ;;
-                    *.ipa)             mv "$f" release/VCMI-iOS.ipa ;;
-                    *-x64.zip)         mv "$f" release/VCMI-Windows.zip ;;
-                    *-x64.exe)         mv "$f" release/VCMI-Windows-x64.exe ;;
-                    *-x86.exe)         mv "$f" release/VCMI-Windows-x86.exe ;;
-                    *-arm64.exe)       mv "$f" release/VCMI-Windows-arm64.exe ;;
-                    *-armeabi-v7a.apk) mv "$f" release/VCMI-Android-armeabi-v7a.apk ;;
-                    *-arm64-v8a.apk)   mv "$f" release/VCMI-Android-arm64-v8a.apk ;;
-                    *-x64.apk)         mv "$f" release/VCMI-Android-x86_64.apk ;;
-                    *-armeabi-v7a.aab) mv "$f" release/VCMI-Android-armeabi-v7a.aab ;;
-                    *-arm64-v8a.aab)   mv "$f" release/VCMI-Android-arm64-v8a.aab ;;
-                    *-x64.aab)         mv "$f" release/VCMI-Android-x86_64.aab ;;
-                    *-x86_64.AppImage) mv "$f" release/VCMI-Linux-x64.AppImage ;;
-                    *-arm64.AppImage)  mv "$f" release/VCMI-Linux-arm64.AppImage ;;
-                    release.tar.gz)    mv "$f" release/VCMI-Sources.tar.gz ;;
-                  esac
-                done
-                ;;
-            esac
-          done
-          ls -la release
-
-      - name: Refresh draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          state=$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || echo missing)
-          if [ "$state" = "true" ]; then
-            gh release delete "$TAG" --yes
-          elif [ "$state" = "false" ]; then
-            echo "::error::Release $TAG already exists and is published; refusing to overwrite"
-            exit 1
-          fi
-          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          gh release create "$TAG" \
-            --draft \
-            --target "$GITHUB_SHA" \
-            --title "VCMI $TAG" \
-            --notes "$(cat .github/release_notes.md.template)$(printf '\n\nBuilt by [Actions run #%s](%s).\n' "$GITHUB_RUN_ID" "$RUN_URL")" \
-            release/*

@@ -32,13 +32,6 @@
     "group": "macos"
   },
   {
-    "platform": "mac-homebrew",
-    "os": "macos-latest",
-    "before_install": "macos-brew.sh",
-    "preset": "macos-ninja-release",
-    "group": "macos"
-  },
-  {
     "platform": "ios",
     "os": "macos-26",
     "pack": 1,

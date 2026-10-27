@@ -6,6 +6,9 @@ on:
   push:
     branches: [develop]
 
+permissions:
+  contents: read
+
 concurrency:
   group: fast-ai-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -36,24 +39,6 @@ jobs:
 
       - name: Install Linux build dependencies
         run: source CI/before_install/linux_qt6.sh
-
-      - name: Save Linux dependency packages
-        if: steps.aptcache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ runner.temp }}/apt-cache
-          key: ${{ steps.aptcache.outputs.cache-primary-key }}
-
-      - name: Restore compiler cache
-        uses: step-security/ccache-action@v1
-        with:
-          key: ai-gcc14-PR-${{ github.event.pull_request.number || github.ref_name }}
-          restore-keys: |
-            ai-gcc14-PR-${{ github.event.pull_request.number || github.ref_name }}
-            gcc-latest-release-PR-${{ github.event.pull_request.number || github.ref_name }}
-            gcc-latest-release-
-          max-size: '5G'
-          verbose: 2
 
       - name: Install public Heroes III regression data
         run: |
