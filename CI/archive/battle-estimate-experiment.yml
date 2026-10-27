@@ -1,0 +1,419 @@
+# Archived experiment probe from branch ai-battle-experiment-1.7.5.
+# Kept for historical reproducibility; not an active Actions workflow.
+# Isolated public-caller probe. Never packages or modifies the Mac delivery branch.
+name: VCMI battle caller integration and bounded cost probe
+on:
+  push:
+    branches:
+      - ai-battle-experiment-1.7.5
+permissions:
+  contents: read
+concurrency:
+  group: vcmi-battle-experiment-175
+  cancel-in-progress: false
+env:
+  VCMI_BASE: 6901839ae9760dfcd1d5ff2c4aa4ef6968fee752
+  PROBE_PARENT: 52232ada3f831abc68827c82b15f560706ea9bc9
+  OMP_NUM_THREADS: 1
+  OPENBLAS_NUM_THREADS: 1
+jobs:
+  integration:
+    if: github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref_name == 'ai-battle-experiment-1.7.5'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require hosted runner and reserve evidence-upload time
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          echo "PROBE_WORK_DEADLINE=$(($(date +%s) + 4800))" >> "$GITHUB_ENV"
+          cat > "$RUNNER_TEMP/probe-timeout" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          limit="$1"; shift
+          remaining=$((PROBE_WORK_DEADLINE - $(date +%s)))
+          if (( remaining <= 0 )); then
+            echo "INCOMPLETE: bounded work deadline reached; reserving time for evidence upload" >&2
+            exit 124
+          fi
+          if (( limit > remaining )); then limit="$remaining"; fi
+          exec timeout --kill-after=15s "${limit}s" "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/probe-timeout"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        timeout-minutes: 5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify ancestry and prepare logs
+        run: |
+          git merge-base --is-ancestor "$PROBE_PARENT" HEAD
+          mkdir -p probe-logs
+          git rev-parse HEAD > probe-logs/commit.txt
+      - name: Expose source data for target-only test binaries
+        timeout-minutes: 1
+        run: |
+          # vcmitest alone does not activate Linux developmentMode().
+          # Keep bin as cwd for copied test/testdata, and use the supported XDG lookup.
+          test -f "$GITHUB_WORKSPACE/config/filesystem.json"
+          test -d "$GITHUB_WORKSPACE/Mods"
+          test -d "$GITHUB_WORKSPACE/scripts"
+          data_parent="$(mktemp -d "$RUNNER_TEMP/battle-probe-data.XXXXXX")"
+          ln -s "$GITHUB_WORKSPACE" "$data_parent/vcmi"
+          test -f "$data_parent/vcmi/config/filesystem.json"
+          printf 'XDG_DATA_DIRS=%s\n' "$data_parent" >> "$GITHUB_ENV"
+          printf 'source=%s\nxdg_data_dirs=%s\n' "$GITHUB_WORKSPACE" "$data_parent" > probe-logs/runtime-data-path.txt
+      - name: Prefer existing official HTTPS Ubuntu archive
+        timeout-minutes: 1
+        run: |
+          sudo python3 - <<'PY'
+          import hashlib, json, pathlib
+          source = pathlib.Path('/etc/apt/sources.list.d/ubuntu.sources')
+          mirrors = pathlib.Path('/etc/apt/apt-mirrors.txt')
+          keyring = pathlib.Path('/usr/share/keyrings/ubuntu-archive-keyring.gpg')
+          assert all(path.is_file() and not path.is_symlink() for path in [source,mirrors,keyring])
+          original_source, original_keyring = source.read_bytes(), keyring.read_bytes()
+          text = original_source.decode()
+          uri_fields = [line for line in text.splitlines() if line.startswith('URIs:')]
+          assert 1 <= len(uri_fields) <= 2
+          assert all(line.split() == ['URIs:', 'mirror+file:/etc/apt/apt-mirrors.txt'] for line in uri_fields)
+          signed_by = [line for line in text.splitlines() if line.startswith('Signed-By:')]
+          assert len(signed_by) == len(uri_fields)
+          assert all(line.split() == ['Signed-By:', str(keyring)] for line in signed_by)
+          expected = ('http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
+                      'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+                      'https://security.ubuntu.com/ubuntu/\tpriority:3\n')
+          original = mirrors.read_text()
+          assert original == expected, 'Unexpected runner mirror layout: refuse broad replacement'
+          old, new = 'http://azure.archive.ubuntu.com/ubuntu/', 'https://archive.ubuntu.com/ubuntu/'
+          assert original.count(old) == 1
+          updated = original.replace(old, new, 1)
+          assert len(updated.splitlines()) == 3
+          assert all(line.split()[0] in [new, 'https://security.ubuntu.com/ubuntu/'] for line in updated.splitlines())
+          mirrors.write_text(updated)
+          assert mirrors.read_text() == updated
+          assert source.read_bytes() == original_source and keyring.read_bytes() == original_keyring
+          report = {'replaced_uri_count':1, 'mirror_entries':3, 'source_uri_fields':len(uri_fields), 'old_uri':old, 'new_uri':new, 'sources_sha256_unchanged':hashlib.sha256(original_source).hexdigest(), 'keyring_sha256_unchanged':hashlib.sha256(original_keyring).hexdigest(), 'mirror_before_sha256':hashlib.sha256(original.encode()).hexdigest(), 'mirror_after_sha256':hashlib.sha256(updated.encode()).hexdigest(), 'signature_checks':'unchanged; no trust or authentication bypass'}
+          pathlib.Path('probe-logs/ubuntu-mirror-change.json').write_text(json.dumps(report, indent=2)+'\n')
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Install bounded upstream dependencies
+        timeout-minutes: 12
+        run: |
+          "$RUNNER_TEMP/probe-timeout" 600 bash -euo pipefail -c '
+            curl() { command curl --connect-timeout 20 --max-time 180 --retry 2 --retry-max-time 240 "$@"; }
+            export -f curl
+            source CI/before_install/linux_qt6.sh
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full time
+          '
+      - name: Prepare bounded checksum-verified test data
+        timeout-minutes: 5
+        run: |
+          curl --fail --location --connect-timeout 20 --max-time 120 --retry 2 --retry-max-time 180 https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z -o "$RUNNER_TEMP/heroes3.7z"
+          echo "64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  $RUNNER_TEMP/heroes3.7z" | sha256sum --check
+          mkdir -p "$HOME/.local/share/vcmi"
+          "$RUNNER_TEMP/probe-timeout" 60 7za x -o"$HOME/.local/share/vcmi" "$RUNNER_TEMP/heroes3.7z"
+      - name: Configure opt-in trace integration and build vcmitest only
+        timeout-minutes: 68
+        run: |
+          "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=ON -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          "$RUNNER_TEMP/probe-timeout" 3720 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
+      - name: Require three public-caller and eight estimator regressions
+        timeout-minutes: 3
+        working-directory: out/build/linux-gcc-test/bin
+        run: |
+          "$RUNNER_TEMP/probe-timeout" 120 ./vcmitest --gtest_filter='BattleCallerIntegrationTest.*:BattleExchangeEstimateTest.*' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/fixed-integration.xml" > "$GITHUB_WORKSPACE/probe-logs/fixed-integration.log" 2>&1
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          root = ET.parse(os.environ['GITHUB_WORKSPACE']+'/probe-logs/fixed-integration.xml').getroot()
+          cases = root.findall('.//testcase')
+          assert len(cases) == 11
+          assert sum(c.get('classname') == 'BattleCallerIntegrationTest' for c in cases) == 3
+          assert sum(c.get('classname') == 'BattleExchangeEstimateTest' for c in cases) == 8
+          assert all(c.get('status') == 'run' and c.find('failure') is None and c.find('skipped') is None for c in cases)
+          print('COMPLETE integration: 3 caller + 8 estimator tests passed')
+          PY
+      - name: Kill each call-site mutant with intended assertion only
+        timeout-minutes: 10
+        run: |
+          source_file=AI/BattleAI/BattleExchangeVariant.cpp
+          trap 'git -C "$GITHUB_WORKSPACE" show "$GITHUB_SHA:$source_file" > "$GITHUB_WORKSPACE/$source_file"' EXIT
+          for mutant in mode state; do
+            git show "$GITHUB_SHA:$source_file" > "$source_file"
+            MUTANT="$mutant" python3 - <<'PY'
+          import os, pathlib
+          path = pathlib.Path('AI/BattleAI/BattleExchangeVariant.cpp')
+          text = path.read_text()
+          original = '\t\t\t\t\t\tshooting,\n\t\t\t\t\t\tisOur,\n\t\t\t\t\t\tdamageCache,\n\t\t\t\t\t\texchangeBattle,\n\t\t\t\t\t\ttrue);'
+          assert text.count(original) == 1
+          replacement = original.replace('shooting,', 'exchangeBattle->battleCanShoot(stackWithBonuses.get()),', 1) if os.environ['MUTANT'] == 'mode' else original.replace('exchangeBattle,', 'hb,', 1)
+          path.write_text(text.replace(original, replacement))
+          PY
+            "$RUNNER_TEMP/probe-timeout" 180 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
+            if [ "$mutant" = mode ]; then
+              case_name=PassesActingShootersModeIntoRealSelector
+            else
+              case_name=PassesPostStrikeExchangeStateIntoRealSelector
+            fi
+            cd out/build/linux-gcc-test/bin
+            set +e
+            "$RUNNER_TEMP/probe-timeout" 60 ./vcmitest --gtest_filter="BattleCallerIntegrationTest.$case_name" --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/mutant-$mutant.xml" > "$GITHUB_WORKSPACE/probe-logs/mutant-$mutant.log" 2>&1
+            status=$?
+            set -e
+            cd "$GITHUB_WORKSPACE"
+            test "$status" -eq 1
+            MUTANT="$mutant" CASE_NAME="$case_name" python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          root = ET.parse('probe-logs/mutant-'+os.environ['MUTANT']+'.xml').getroot()
+          cases = root.findall('.//testcase')
+          assert len(cases) == 1 and cases[0].get('name') == os.environ['CASE_NAME']
+          case = cases[0]
+          assert case.get('status') == 'run' and case.find('skipped') is None
+          failures = case.findall('failure')
+          allowed = ['MODE_ARGUMENT'] if os.environ['MUTANT'] == 'mode' else ['STATE_ARGUMENT', 'STATE_HEALTH_ARGUMENT']
+          assert failures and root.get('failures') == '1' and root.get('errors', '0') == '0'
+          for failure in failures:
+              message = failure.get('message', '')
+              assert 'PROBE_SETUP' not in message and any(marker in message for marker in allowed), message
+          print('COMPLETE mutant '+os.environ['MUTANT']+': intended argument assertion only')
+          PY
+          done
+      - name: Restore fixed build and run full enabled suite
+        timeout-minutes: 6
+        run: |
+          git show "$GITHUB_SHA:AI/BattleAI/BattleExchangeVariant.cpp" > AI/BattleAI/BattleExchangeVariant.cpp
+          "$RUNNER_TEMP/probe-timeout" 180 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
+          cd out/build/linux-gcc-test/bin
+          "$RUNNER_TEMP/probe-timeout" 120 ./vcmitest --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/fixed-full.xml" > "$GITHUB_WORKSPACE/probe-logs/fixed-full.log" 2>&1
+          python3 - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          root = ET.parse(os.environ['GITHUB_WORKSPACE']+'/probe-logs/fixed-full.xml').getroot()
+          cases = root.findall('.//testcase')
+          executed = [case for case in cases if case.get('status') == 'run']
+          assert executed and root.get('failures') == '0' and root.get('errors', '0') == '0'
+          assert all(case.find('failure') is None and case.find('skipped') is None for case in executed)
+          for suite, expected in [('BattleCallerIntegrationTest',3),('BattleExchangeEstimateTest',8),('Nullkiller2BuyArmyRegression',4),('Nullkiller2DwellingGrowthRegression',5)]:
+              assert sum(case.get('classname') == suite for case in executed) == expected
+          print('COMPLETE fixed full suite: '+str(len(executed))+' tests ran')
+          PY
+      - name: Collect separately bounded trace census
+        timeout-minutes: 4
+        working-directory: out/build/linux-gcc-test/bin
+        run: |
+          "$RUNNER_TEMP/probe-timeout" 180 ./vcmitest --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_TraceCensus' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/census.xml" > "$GITHUB_WORKSPACE/probe-logs/census.log" 2>&1
+          python3 - <<'PY'
+          import itertools, os, pathlib, xml.etree.ElementTree as ET
+          folder = pathlib.Path(os.environ['GITHUB_WORKSPACE'])/'probe-logs'
+          cases = ET.parse(folder/'census.xml').getroot().findall('.//testcase')
+          assert len(cases) == 1 and cases[0].get('name') == 'DISABLED_TraceCensus' and cases[0].get('status') == 'run' and cases[0].find('skipped') is None and cases[0].find('failure') is None
+          rows = [line.split('\t') for line in (folder/'census.log').read_text().splitlines() if line.startswith('CENSUS\t')]
+          expected = set(itertools.product(['6','14','28'], ['0','1'], ['1','2'], ['exchange','finder']))
+          assert len(rows) == 24 and {tuple(row[1:5]) for row in rows} == expected
+          assert all(len(row) == 10 and int(row[5]) > 0 and int(row[6]) > 0 and int(row[7]) > 0 and int(row[8]) > 0 and row[-1] == 'obstacle_entries=0' for row in rows)
+          print('COMPLETE census: 24 actual caller cells, not latency measurements')
+          PY
+      - name: Preserve integration evidence
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: battle-integration-${{ github.sha }}
+          path: probe-logs/
+          retention-days: 7
+          if-no-files-found: error
+  performance:
+    needs: integration
+    if: github.repository == 'arpesterev/vcmi' && github.event.repository.private == false && github.ref_name == 'ai-battle-experiment-1.7.5'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Require hosted runner and reserve evidence-upload time
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          echo "PROBE_WORK_DEADLINE=$(($(date +%s) + 4800))" >> "$GITHUB_ENV"
+          cat > "$RUNNER_TEMP/probe-timeout" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          limit="$1"; shift
+          remaining=$((PROBE_WORK_DEADLINE - $(date +%s)))
+          if (( remaining <= 0 )); then
+            echo "INCOMPLETE: bounded work deadline reached; reserving time for evidence upload" >&2
+            exit 124
+          fi
+          if (( limit > remaining )); then limit="$remaining"; fi
+          exec timeout --kill-after=15s "${limit}s" "$@"
+          SH
+          chmod +x "$RUNNER_TEMP/probe-timeout"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        timeout-minutes: 5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify ancestry and prepare logs
+        run: |
+          git merge-base --is-ancestor "$PROBE_PARENT" HEAD
+          mkdir -p probe-logs
+          git rev-parse HEAD > probe-logs/commit.txt
+      - name: Expose source data for target-only test binaries
+        timeout-minutes: 1
+        run: |
+          # vcmitest alone does not activate Linux developmentMode().
+          # Keep bin as cwd for copied test/testdata, and use the supported XDG lookup.
+          test -f "$GITHUB_WORKSPACE/config/filesystem.json"
+          test -d "$GITHUB_WORKSPACE/Mods"
+          test -d "$GITHUB_WORKSPACE/scripts"
+          data_parent="$(mktemp -d "$RUNNER_TEMP/battle-probe-data.XXXXXX")"
+          ln -s "$GITHUB_WORKSPACE" "$data_parent/vcmi"
+          test -f "$data_parent/vcmi/config/filesystem.json"
+          printf 'XDG_DATA_DIRS=%s\n' "$data_parent" >> "$GITHUB_ENV"
+          printf 'source=%s\nxdg_data_dirs=%s\n' "$GITHUB_WORKSPACE" "$data_parent" > probe-logs/runtime-data-path.txt
+      - name: Prefer existing official HTTPS Ubuntu archive
+        timeout-minutes: 1
+        run: |
+          sudo python3 - <<'PY'
+          import hashlib, json, pathlib
+          source = pathlib.Path('/etc/apt/sources.list.d/ubuntu.sources')
+          mirrors = pathlib.Path('/etc/apt/apt-mirrors.txt')
+          keyring = pathlib.Path('/usr/share/keyrings/ubuntu-archive-keyring.gpg')
+          assert all(path.is_file() and not path.is_symlink() for path in [source,mirrors,keyring])
+          original_source, original_keyring = source.read_bytes(), keyring.read_bytes()
+          text = original_source.decode()
+          uri_fields = [line for line in text.splitlines() if line.startswith('URIs:')]
+          assert 1 <= len(uri_fields) <= 2
+          assert all(line.split() == ['URIs:', 'mirror+file:/etc/apt/apt-mirrors.txt'] for line in uri_fields)
+          signed_by = [line for line in text.splitlines() if line.startswith('Signed-By:')]
+          assert len(signed_by) == len(uri_fields)
+          assert all(line.split() == ['Signed-By:', str(keyring)] for line in signed_by)
+          expected = ('http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
+                      'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+                      'https://security.ubuntu.com/ubuntu/\tpriority:3\n')
+          original = mirrors.read_text()
+          assert original == expected, 'Unexpected runner mirror layout: refuse broad replacement'
+          old, new = 'http://azure.archive.ubuntu.com/ubuntu/', 'https://archive.ubuntu.com/ubuntu/'
+          assert original.count(old) == 1
+          updated = original.replace(old, new, 1)
+          assert len(updated.splitlines()) == 3
+          assert all(line.split()[0] in [new, 'https://security.ubuntu.com/ubuntu/'] for line in updated.splitlines())
+          mirrors.write_text(updated)
+          assert mirrors.read_text() == updated
+          assert source.read_bytes() == original_source and keyring.read_bytes() == original_keyring
+          report = {'replaced_uri_count':1, 'mirror_entries':3, 'source_uri_fields':len(uri_fields), 'old_uri':old, 'new_uri':new, 'sources_sha256_unchanged':hashlib.sha256(original_source).hexdigest(), 'keyring_sha256_unchanged':hashlib.sha256(original_keyring).hexdigest(), 'mirror_before_sha256':hashlib.sha256(original.encode()).hexdigest(), 'mirror_after_sha256':hashlib.sha256(updated.encode()).hexdigest(), 'signature_checks':'unchanged; no trust or authentication bypass'}
+          pathlib.Path('probe-logs/ubuntu-mirror-change.json').write_text(json.dumps(report, indent=2)+'\n')
+          print(json.dumps(report, indent=2))
+          PY
+      - name: Install bounded upstream dependencies
+        timeout-minutes: 12
+        run: |
+          "$RUNNER_TEMP/probe-timeout" 600 bash -euo pipefail -c '
+            curl() { command curl --connect-timeout 20 --max-time 180 --retry 2 --retry-max-time 240 "$@"; }
+            export -f curl
+            source CI/before_install/linux_qt6.sh
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install --no-install-recommends -y gcc-14 g++-14 p7zip-full time
+          '
+      - name: Prepare bounded checksum-verified test data
+        timeout-minutes: 5
+        run: |
+          curl --fail --location --connect-timeout 20 --max-time 120 --retry 2 --retry-max-time 180 https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z -o "$RUNNER_TEMP/heroes3.7z"
+          echo "64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  $RUNNER_TEMP/heroes3.7z" | sha256sum --check
+          mkdir -p "$HOME/.local/share/vcmi"
+          "$RUNNER_TEMP/probe-timeout" 60 7za x -o"$HOME/.local/share/vcmi" "$RUNNER_TEMP/heroes3.7z"
+      - name: Build separate no-trace Release candidate
+        timeout-minutes: 68
+        run: |
+          "$RUNNER_TEMP/probe-timeout" 300 cmake --preset linux-gcc-test -DCMAKE_BUILD_TYPE=Release -DENABLE_BATTLE_AI=ON -DENABLE_CCACHE=OFF -DENABLE_NULLKILLER2_AI=ON -DENABLE_STATIC_LIBS=ON -DVCMI_BATTLE_AI_CALLER_PROBES=ON -DVCMI_BATTLE_AI_TEST_TRACE=OFF -DCMAKE_C_COMPILER=gcc-14 -DCMAKE_CXX_COMPILER=g++-14
+          "$RUNNER_TEMP/probe-timeout" 3720 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
+          cp out/build/linux-gcc-test/bin/vcmitest out/build/linux-gcc-test/bin/vcmitest-candidate
+          cp out/build/linux-gcc-test/CMakeCache.txt probe-logs/performance-CMakeCache.txt
+          grep -q '^CMAKE_BUILD_TYPE:STRING=Release$' probe-logs/performance-CMakeCache.txt
+          grep -q '^VCMI_BATTLE_AI_TEST_TRACE:BOOL=OFF$' probe-logs/performance-CMakeCache.txt
+      - name: Build baseline by replacing only estimator production file
+        timeout-minutes: 5
+        run: |
+          source_file=AI/BattleAI/BattleExchangeVariant.cpp
+          trap 'git -C "$GITHUB_WORKSPACE" show "$GITHUB_SHA:$source_file" > "$GITHUB_WORKSPACE/$source_file"' EXIT
+          git show "$VCMI_BASE:$source_file" > "$source_file"
+          "$RUNNER_TEMP/probe-timeout" 240 cmake --build --preset linux-gcc-test --target vcmitest --parallel 2
+          cp out/build/linux-gcc-test/bin/vcmitest out/build/linux-gcc-test/bin/vcmitest-baseline
+      - name: Record same-runner environment and executable hashes
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import os
+          print('PROBE_CPU='+str(min(os.sched_getaffinity(0))))
+          PY
+          { uname -a; lscpu; gcc-14 --version; cmake --version; } > probe-logs/environment.txt
+          sha256sum out/build/linux-gcc-test/bin/vcmitest-{candidate,baseline} > probe-logs/executables.sha256
+      - name: Run bounded ABBA comparisons without trace
+        timeout-minutes: 30
+        working-directory: out/build/linux-gcc-test/bin
+        run: |
+          for invocation in baseline-1 candidate-1 candidate-2 baseline-2; do
+            revision="${invocation%-*}"
+            "$RUNNER_TEMP/probe-timeout" 420 taskset --cpu-list "$PROBE_CPU" /usr/bin/time -v -o "$GITHUB_WORKSPACE/probe-logs/$invocation.rss.txt" "./vcmitest-$revision" --gtest_also_run_disabled_tests --gtest_filter='BattleCallerBenchmark.DISABLED_BoundedLatency' --gtest_output=xml:"$GITHUB_WORKSPACE/probe-logs/$invocation.xml" > "$GITHUB_WORKSPACE/probe-logs/$invocation.log" 2>&1
+          done
+      - name: Reject incomplete measurements and summarize exact samples
+        timeout-minutes: 2
+        run: |
+          python3 - <<'PY'
+          import itertools, json, math, pathlib, re, statistics, xml.etree.ElementTree as ET
+          folder = pathlib.Path('probe-logs')
+          expected = set(itertools.product(['6','14','28'], ['0','1'], ['1','2'], ['exchange','finder']))
+          results = {}
+          for invocation in ['baseline-1','candidate-1','candidate-2','baseline-2']:
+              root = ET.parse(folder/(invocation+'.xml')).getroot()
+              cases = root.findall('.//testcase')
+              assert len(cases) == 1 and cases[0].get('name') == 'DISABLED_BoundedLatency'
+              assert cases[0].get('status') == 'run' and cases[0].find('skipped') is None and cases[0].find('failure') is None
+              lines = (folder/(invocation+'.log')).read_text().splitlines()
+              assert not any('TOTAL_CAP' in line or '\tCAPPED' in line for line in lines)
+              config = 'BENCH_CONFIG\tai_level=error\tgmock_verbose=error\ttrace=off'
+              assert lines.count(config) == 1
+              assert not any(re.search(r'\b(error|fatal)\b|GMOCK WARNING|Unexpected mock', line, re.IGNORECASE) for line in lines if line != config), 'Unexpected diagnostics contaminate benchmark'
+              latency = [line.split('\t') for line in lines if line.startswith('LATENCY\t')]
+              samples = [line.split('\t') for line in lines if line.startswith('SAMPLE\t')]
+              assert len(latency) == 24 and {tuple(row[1:5]) for row in latency} == expected
+              assert len(samples) == 24*30
+              summary = {}
+              for row in latency:
+                  key = tuple(row[1:5])
+                  assert len(row) == 17 and row[5:7] == ['30','COMPLETE']
+                  assert int(row[7]) > 0 and int(row[8]) > 0
+                  assert row[15:17] == ['allocations=unmeasured','obstacle_entries=0']
+                  signature = row[14].removeprefix('signature=').split(',')
+                  assert row[14].startswith('signature=') and len(signature) == 3 and math.isfinite(float(signature[2]))
+                  assert all(math.isfinite(float(x)) and float(x) >= 0 for x in row[9:14])
+                  matching = [sample for sample in samples if tuple(sample[1:5]) == key]
+                  assert len(matching) == 30 and {int(sample[5]) for sample in matching} == set(range(30))
+                  assert all(len(sample) == 10 and all(math.isfinite(float(x)) and float(x) >= 0 for x in sample[6:10]) for sample in matching)
+                  durations = sorted(float(sample[6]) for sample in matching)
+                  summary['/'.join(key)] = dict(samples=30, median_ms=statistics.median(durations), p95_ms=durations[28], stdev_ms=statistics.stdev(durations), candidates=int(row[7]), populated_pairs=int(row[8]), signature=row[14], allocations='unmeasured', obstacle_entries=0)
+              results[invocation] = summary
+          comparisons = {}
+          for key in results['baseline-1']:
+              for revision in ['baseline','candidate']:
+                  first, second = results[revision+'-1'][key], results[revision+'-2'][key]
+                  assert first['signature'] == second['signature'] and first['candidates'] == second['candidates'] and first['populated_pairs'] == second['populated_pairs']
+              baseline = statistics.mean(results[v][key]['median_ms'] for v in ['baseline-1','baseline-2'])
+              candidate = statistics.mean(results[v][key]['median_ms'] for v in ['candidate-1','candidate-2'])
+              baseline_p95 = statistics.mean(results[v][key]['p95_ms'] for v in ['baseline-1','baseline-2'])
+              candidate_p95 = statistics.mean(results[v][key]['p95_ms'] for v in ['candidate-1','candidate-2'])
+              comparisons[key] = {'baseline_median_ms':baseline, 'candidate_median_ms':candidate, 'median_ratio':candidate/baseline if baseline > 0 else None, 'baseline_p95_ms':baseline_p95, 'candidate_p95_ms':candidate_p95, 'p95_ratio':candidate_p95/baseline_p95 if baseline_p95 > 0 else None}
+          output = {'status':'COMPLETE', 'cells_per_invocation':24, 'samples_per_cell':30, 'execution_order':['baseline-1','candidate-1','candidate-2','baseline-2'], 'runs':results, 'comparisons':comparisons, 'interpretation':'Measurement completeness only; no automatic performance acceptance or merge.'}
+          (folder/'performance-summary.json').write_text(json.dumps(output, indent=2, allow_nan=False)+'\n')
+          print(json.dumps(output, indent=2, allow_nan=False))
+          PY
+      - name: Preserve performance evidence
+        if: always()
+        timeout-minutes: 3
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: battle-performance-${{ github.sha }}
+          path: probe-logs/
+          retention-days: 7
+          if-no-files-found: error
