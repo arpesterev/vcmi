@@ -50,7 +50,7 @@ jobs:
 
       - name: Configure tests
         run: >-
-          cmake -DENABLE_CCACHE:BOOL=ON
+          cmake -DENABLE_CCACHE:BOOL=OFF
           -DCMAKE_C_COMPILER=gcc-14
           -DCMAKE_CXX_COMPILER=g++-14
           --preset linux-gcc-test

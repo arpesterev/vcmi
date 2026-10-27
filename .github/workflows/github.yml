@@ -145,15 +145,6 @@ jobs:
         toolset: ${{ matrix.toolset }}
 
 
-    - name: CCache tuning (Android)
-      if: ${{ startsWith(matrix.platform, 'android') }}
-      run: |
-        echo "/usr/lib/ccache" >> $GITHUB_PATH
-        ccache --set-config=compiler_check=content
-        ccache --set-config=base_dir="${GITHUB_WORKSPACE}"
-        ccache --set-config=hash_dir=true
-        ccache --set-config=sloppiness=time_macros
-
     - name: Install Conan profile
       if: "${{ matrix.conan_profile != '' }}"
       run: |
@@ -217,9 +208,8 @@ jobs:
           # key1=value1;key2=value2;...
           gradleProperties=$(python3 CI/android/gradle_daily_props.py)
           androidOptions=("-DANDROID_GRADLE_PROPERTIES=$gradleProperties")
-          androidOptions+=("-DCMAKE_C_COMPILER_LAUNCHER=ccache" "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
         fi
-        cmake -DENABLE_CCACHE:BOOL=ON "${androidOptions[@]}" --preset ${{ matrix.preset }}
+        cmake -DENABLE_CCACHE:BOOL=OFF "${androidOptions[@]}" --preset ${{ matrix.preset }}
 
     - name: Configure (MSVC)
       if: ${{ startsWith(matrix.platform, 'msvc') }}
@@ -346,7 +336,7 @@ jobs:
 
     - name: Configure
       run: |
-        cmake -DENABLE_CCACHE:BOOL=ON -DCMAKE_C_COMPILER=${{ matrix.compiler_cc }} -DCMAKE_CXX_COMPILER=${{ matrix.compiler_cxx }} --preset ${{ matrix.preset }}
+        cmake -DENABLE_CCACHE:BOOL=OFF -DCMAKE_C_COMPILER=${{ matrix.compiler_cc }} -DCMAKE_CXX_COMPILER=${{ matrix.compiler_cxx }} --preset ${{ matrix.preset }}
 
     - name: Build
       run: |
