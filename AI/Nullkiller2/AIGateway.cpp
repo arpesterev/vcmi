@@ -820,46 +820,47 @@ void AIGateway::showMapObjectSelectDialog(QuestionID questionID, const Component
 
 bool AIGateway::makePossibleUpgrades(const CArmedInstance * obj)
 {
-	if(!obj)
+	if(!obj || obj->getOwner() != playerID)
 		return false;
 
 	bool upgraded = false;
-
-	for(int i = 0; i < GameConstants::ARMY_SIZE; i++)
+	for(int i = 0; i < GameConstants::ARMY_SIZE; ++i)
 	{
-		if(const CStackInstance * s = obj->getStackPtr(SlotID(i)))
+		const SlotID slot(i);
+		while(const auto * stack = obj->getStackPtr(slot))
 		{
-			UpgradeInfo upgradeInfo(s->getId());
-			do
+			nullkiller->makingTurnInterruption.interruptionPoint();
+			UpgradeInfo upgradeInfo(stack->getId());
+			cc->fillUpgradeInfo(obj, slot, upgradeInfo);
+			if(!upgradeInfo.hasUpgrades())
+				break;
+
+			const CreatureID upgrade = *vstd::maxElementByFun(upgradeInfo.getAvailableUpgrades(), [](const CreatureID & id)
 			{
-				cc->fillUpgradeInfo(obj, SlotID(i), upgradeInfo);
+				return LIBRARY->creh->getCombatValue().getAIValue(id.toCreature());
+			});
+			const auto previousType = stack->getCreatureID();
+			const auto previousCount = stack->getCount();
+			const auto oldValue = LIBRARY->creh->getCombatValue().getAIValue(stack->getCreature());
+			const auto newValue = LIBRARY->creh->getCombatValue().getAIValue(upgrade.toCreature());
+			if(newValue <= oldValue || !nullkiller->getFreeResources().canAfford(upgradeInfo.getUpgradeCostsFor(upgrade) * previousCount))
+				break;
 
-				if(upgradeInfo.hasUpgrades())
-				{
-					// creature at given slot might have alternative upgrades, pick best one
-					CreatureID upgID = *vstd::maxElementByFun(upgradeInfo.getAvailableUpgrades(), [](const CreatureID & id)
-						{
-							return LIBRARY->creh->getCombatValue().getAIValue(id.toCreature());
-						});
-
-					auto oldValue = LIBRARY->creh->getCombatValue().getAIValue(s->getCreature());
-					auto newValue = LIBRARY->creh->getCombatValue().getAIValue(upgID.toCreature());
-
-					if(newValue > oldValue && nullkiller->getFreeResources().canAfford(upgradeInfo.getUpgradeCostsFor(upgID) * s->getCount()))
-					{
-						cc->upgradeCreature(obj, SlotID(i), upgID);
-						upgraded = true;
-						logAi->debug("Upgraded %d %s to %s", s->getCount(), upgradeInfo.oldID.toCreature()->getNamePluralTranslated(),
-							upgradeInfo.getUpgrade().toCreature()->getNamePluralTranslated());
-					}
-					else
-						break;
-				}
+			cc->upgradeCreature(obj, slot, upgrade);
+			// A request acknowledgement does not imply acceptance. Re-read the
+			// stack after applying the reply; never retry an unchanged upgrade.
+			const auto * updated = obj->getStackPtr(slot);
+			if(!updated || updated->getCreatureID() != upgrade)
+			{
+				logAi->warn("Upgrade in slot %d of %s was not applied; stopping this upgrade chain", i, obj->getObjectNameTextID());
+				break;
 			}
-			while(upgradeInfo.hasUpgrades());
+
+			upgraded = true;
+			logAi->debug("Upgraded %d %s to %s", previousCount,
+				previousType.toCreature()->getNamePluralTranslated(), upgrade.toCreature()->getNamePluralTranslated());
 		}
 	}
-
 	return upgraded;
 }
 
@@ -1701,10 +1702,20 @@ void AIStatus::madeTurn()
 void AIStatus::waitTillFree()
 {
 	std::unique_lock<std::mutex> lock(mx);
+	auto nextDiagnostic = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 	while(battle != NO_BATTLE || !remainingQuestions.empty() || !objectsBeingVisited.empty() || ongoingHeroMovement)
 	{
 		cv.wait_for(lock, std::chrono::milliseconds(10));
 		aiGw->nullkiller->makingTurnInterruption.interruptionPoint();
+		const auto now = std::chrono::steady_clock::now();
+		if(now >= nextDiagnostic)
+		{
+			logAi->warn("AI waiting for server: battle=%d, movement=%d, visits=%zu, questions=%zu, pending answers=%zu",
+				static_cast<int>(battle), ongoingHeroMovement, objectsBeingVisited.size(), remainingQuestions.size(), requestToQuestionID.size());
+			for(const auto & question : remainingQuestions)
+				logAi->warn("Pending AI question %d: %s", question.first.getNum(), question.second);
+			nextDiagnostic = now + std::chrono::seconds(5);
+		}
 	}
 }
 
@@ -1974,13 +1985,20 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
 					continue;
 				//FIXME: why are the above possible to be null?
 
+				const auto artifactID = artifact->getId();
 				bool emptySlotFound = false;
 				for(auto slot : artifact->getType()->getPossibleSlots().at(target->bearerType()))
 				{
 					if(target->isPositionFree(slot) && artifact->canBePutAt(target, slot, true)) //combined artifacts are not always allowed to move
 					{
 						ArtifactLocation destLocation(target->id, slot);
-						cc->swapArtifacts(location, destLocation); //just put into empty slot
+						cc->swapArtifacts(location, destLocation);
+						const auto * placed = target->getSlot(slot);
+						if(!placed || placed->artifactID != artifactID)
+						{
+							logAi->warn("Artifact placement for %s was not applied; not retrying an unchanged slot", target->getNameTextID());
+							continue;
+						}
 						emptySlotFound = true;
 						changeMade = true;
 						break;
@@ -2027,14 +2045,16 @@ void AIGateway::pickBestArtifacts(const std::shared_ptr<CCallback> & cc, const C
 									ArtifactLocation backpack(artHolder->id, ArtifactPosition::BACKPACK_START);
 
 									cc->swapArtifacts(destLocation, backpack);
-									cc->swapArtifacts(location, destLocation);
+									// Inserting into a backpack can shift the source slot.
+									cc->swapArtifacts(ArtifactLocation(artHolder->id, artHolder->getArtPos(artifact)), destLocation);
 								}
 								else
 								{
 									cc->swapArtifacts(location, ArtifactLocation(target->id, target->getArtPos(otherSlot->getArt())));
 								}
 
-								changeMade = true;
+								const auto * placed = target->getSlot(slot);
+								changeMade = placed && placed->artifactID == artifactID;
 								swappedSet.insert(swapPair);
 								break;
 							}
