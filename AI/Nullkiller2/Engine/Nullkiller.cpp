@@ -678,6 +678,8 @@ void Nullkiller::makeTurn()
 					pass);
 				scanDepth = ScanDepth::ALL_FULL;
 				useHeroChain = false;
+				// A wider search needs new paths and clusters, not the cached MAIN_FULL set.
+				invalidatePathfinderData();
 				hasAnySuccess = true;
 			}
 			else
@@ -731,6 +733,8 @@ void Nullkiller::makeTurn()
 
 					scanDepth = ScanDepth::ALL_FULL;
 					useHeroChain = false;
+					// Recompute paths using the expanded limits on the following pass.
+					invalidatePathfinderData();
 					hasAnySuccess = true;
 					break;
 				}
