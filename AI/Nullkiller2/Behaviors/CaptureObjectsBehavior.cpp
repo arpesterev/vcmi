@@ -24,10 +24,8 @@ using namespace Goals;
 template <typename T>
 bool vectorEquals(const std::vector<T> & v1, const std::vector<T> & v2)
 {
-	return vstd::contains_if(v1, [&](T o) -> bool
-	{
-		return vstd::contains(v2, o);
-	});
+	// Sharing one object/type does not make two capture goals identical.
+	return v1.size() == v2.size() && std::is_permutation(v1.begin(), v1.end(), v2.begin());
 }
 
 bool isBetterTownCapturePath(const AIPath & candidate, const AIPath & current)
@@ -87,6 +85,11 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 	for(const auto & path : paths)
 	{
 		tasks.push_back(sptr(Goals::Invalid()));
+		// Keep one placeholder per input route: defence and army gathering
+		// correlate the returned vector with their original path indices.
+		if(!path.targetHero || !path.heroArmy || path.nodes.empty()
+			|| !std::isfinite(path.movementCost()) || path.movementCost() < 0)
+			continue;
 
 #if NK2AI_TRACE_LEVEL >= 2
 		logAi->trace("Path found %s", path.toString());
@@ -210,7 +213,11 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 		if(closestWay)
 		{
-			way->closestWayRatio = closestWay->movementCost() / way->getPath().movementCost();
+			const float movementCost = way->getPath().movementCost();
+			// A visit at the current position must not turn into a NaN priority.
+			way->closestWayRatio = movementCost > 0
+				? std::min(1.0f, closestWay->movementCost() / movementCost)
+				: 1.0f;
 		}
 	}
 
@@ -253,6 +260,9 @@ void CaptureObjectsBehavior::decomposeObjects(
 				vstd::concatenate(tasksLocal, getVisitGoals(paths, nullkiller, objToVisit, forceVisit));
 			}
 
+			// Indexed placeholders are useful only to getVisitGoals callers.
+			// They must not hide the absence of nearby tasks from the far scan.
+			vstd::erase_if(tasksLocal, [](const TSubgoal & goal) { return goal->invalid(); });
 			std::lock_guard lock(sync); // FIXME: consider using tbb::parallel_reduce instead to avoid mutex overhead
 			vstd::concatenate(result, tasksLocal);
 		}
@@ -262,11 +272,6 @@ void CaptureObjectsBehavior::decomposeObjects(
 Goals::TGoalVec CaptureObjectsBehavior::decompose(const Nullkiller * aiNk) const
 {
 	Goals::TGoalVec tasks;
-
-	vstd::erase_if(tasks, [](TSubgoal task) -> bool
-	{
-		return task->invalid();
-	});
 
 	if(specificObjects)
 	{
