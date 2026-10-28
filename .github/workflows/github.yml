@@ -168,7 +168,7 @@ jobs:
       run: |
         conan profile detect
         outFolder=conan-generated
-        conan install . \
+        time conan install . \
           --output-folder="$outFolder" \
           --build=never \
           --profile=dependencies/conan_profiles/${{ matrix.conan_profile }} \
@@ -227,14 +227,14 @@ jobs:
           gradleProperties=$(python3 CI/android/gradle_daily_props.py)
           androidOptions=("-DANDROID_GRADLE_PROPERTIES=$gradleProperties")
         fi
-        cmake -DENABLE_CCACHE:BOOL=OFF "${androidOptions[@]}" --preset ${{ matrix.preset }}
+        time cmake -DENABLE_CCACHE:BOOL=OFF "${androidOptions[@]}" --preset ${{ matrix.preset }}
 
     - name: Configure (MSVC)
       if: ${{ startsWith(matrix.platform, 'msvc') }}
-      run: cmake --preset ${{ matrix.preset }}
+      run: time cmake --preset ${{ matrix.preset }}
 
     - name: Build
-      run: cmake --build --preset ${{matrix.preset}}
+      run: time cmake --build --preset ${{matrix.preset}}
       env:
         ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
