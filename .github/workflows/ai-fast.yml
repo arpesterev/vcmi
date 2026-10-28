@@ -22,6 +22,8 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: 'true'
     defaults:
       run:
         shell: bash
@@ -44,18 +46,24 @@ jobs:
       - name: Install Linux build dependencies
         run: source CI/before_install/linux_qt6.sh
 
-      # Restore older GitHub compiler cache entries, but never save or upload.
-      # Only the local build directory is written to during the current job.
+      # Shared compiler-object cache: changing sources or flags automatically
+      # invalidates individual entries. Only develop pushes publish a new cache.
+      # No releases, third-party uploads or repository writes.
       - name: Install local compiler cache
         run: sudo apt-get install -y --no-install-recommends ccache
 
-      - name: Restore old compiler cache (read-only from GitHub)
+      - name: Restore previously compiled C++ objects
         uses: actions/cache/restore@v6
         with:
           path: .ccache
-          key: ccache-ai-gcc14-PR-develop-${{ github.sha }}
+          key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ccache-ai-gcc14-PR-develop-
+            vcmi-ai-ubuntu2404-gcc14-v1-
+
+      - name: Configure local compiler cache limit
+        run: |
+          ccache --max-size=2G
+          ccache --show-config | grep -E 'max_size|compression|base_dir|compiler_check'
 
       - name: Install public Heroes III regression data
         run: |
@@ -84,6 +92,13 @@ jobs:
       - name: Report compiler cache efficiency
         if: always()
         run: ccache --show-stats || true
+
+      - name: Save compiled C++ objects for later develop builds
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run all Nullkiller2 regressions in one process
         run: |
