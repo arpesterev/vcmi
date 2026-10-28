@@ -17,9 +17,11 @@ jobs:
   ai-linux:
     name: Linux AI regression
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
     defaults:
       run:
         shell: bash
@@ -70,8 +72,18 @@ jobs:
           -DCMAKE_CXX_COMPILER=g++-14
           --preset linux-gcc-test
 
+      - name: Show restored compiler cache statistics
+        run: ccache --show-stats
+
+      - name: Build reusable engine and server objects
+        run: /usr/bin/time -f 'Core stage elapsed: %e seconds' cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
+
       - name: Build AI test suite and headless server only
-        run: cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
+        run: /usr/bin/time -f 'AI/test stage elapsed: %e seconds' cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
+
+      - name: Report compiler cache efficiency
+        if: always()
+        run: ccache --show-stats || true
 
       - name: Run all Nullkiller2 regressions in one process
         run: |
