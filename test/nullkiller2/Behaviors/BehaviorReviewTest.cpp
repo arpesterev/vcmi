@@ -10,7 +10,9 @@
 
 #include "AI/Nullkiller2/AIGateway.h"
 #include "AI/Nullkiller2/Behaviors/BuyArmyBehavior.h"
+#include "AI/Nullkiller2/Behaviors/CaptureObjectsBehavior.h"
 #include "AI/Nullkiller2/Goals/BuyArmy.h"
+#include "AI/Nullkiller2/Goals/ExecuteHeroChain.h"
 
 #include "mock/GameHandlerTestClient.h"
 #include "nullkiller2/NullkillerTest.h"
@@ -101,6 +103,14 @@ protected:
 		return nullptr;
 	}
 
+	CGTownInstance * mutableTown(ObjectInstanceID id) const
+	{
+		for(auto * town : findAll<CGTownInstance>())
+			if(town->id == id)
+				return town;
+		return nullptr;
+	}
+
 	void prepareUpgrades(CGTownInstance & town)
 	{
 		const CreatureID pikeman(CreatureID::decode("pikeman"));
@@ -125,7 +135,18 @@ protected:
 		occupants.visiting = hero.id;
 		occupants.garrison = ObjectInstanceID::NONE;
 		gameState()->apply(occupants);
-		hero.setMovementPoints(0);
+		SetMovePoints exhausted(hero.id, 0);
+		gameState()->apply(exhausted);
+	}
+
+	NK2AI::AIPath stationaryPath(const CGHeroInstance & hero)
+	{
+		NK2AI::AIPath path;
+		path.targetHero = &hero;
+		path.heroArmy = &hero;
+		path.exchangeCount = 1;
+		path.nodes.push_back(pathNode(hero, hero.visitablePos()));
+		return path;
 	}
 };
 }
@@ -184,7 +205,7 @@ TEST_F(Nullkiller2_BehaviorReview, visitingHeroUpgradesWithoutStockOrMovement)
 
 	const auto goals = NK2AI::Goals::BuyArmyBehavior().decompose(gateway->nullkiller.get());
 	ASSERT_EQ(goals.size(), 1u);
-	ASSERT_EQ(goals.front()->asTask()->town, town);
+	ASSERT_EQ(goals.front()->town, town);
 	EXPECT_NO_THROW(goals.front()->asTask()->accept(gateway.get()));
 	EXPECT_EQ(hero->getStackPtr(SlotID(0))->getCreatureID(), CreatureID(CreatureID::decode("halberdier")));
 	EXPECT_EQ(client.movementRequests, 0);
@@ -234,8 +255,8 @@ TEST_F(Nullkiller2_BehaviorReview, oneTownSavingForIncomeDoesNotSuppressAnotherT
 	auto gateway = makeGateway(PLAYER);
 	auto towns = gateway->cc->getTownsInfo();
 	ASSERT_EQ(towns.size(), 2u);
-	auto * first = gameState()->getTown(towns.front()->id);
-	auto * second = gameState()->getTown(towns.back()->id);
+	auto * first = mutableTown(towns.front()->id);
+	auto * second = mutableTown(towns.back()->id);
 	ASSERT_NE(first, nullptr);
 	ASSERT_NE(second, nullptr);
 	ASSERT_FALSE(first->hasBuilt(BuildingID::CITY_HALL));
@@ -249,7 +270,7 @@ TEST_F(Nullkiller2_BehaviorReview, oneTownSavingForIncomeDoesNotSuppressAnotherT
 
 	const auto goals = NK2AI::Goals::BuyArmyBehavior().decompose(gateway->nullkiller.get());
 	ASSERT_EQ(goals.size(), 1u);
-	EXPECT_EQ(goals.front()->asTask()->town, second);
+	EXPECT_EQ(goals.front()->town, second);
 }
 
 TEST_F(Nullkiller2_BehaviorReview, threatenedTownCanRecruitWithoutAnyHero)
@@ -276,7 +297,7 @@ TEST_F(Nullkiller2_BehaviorReview, threatenedTownCanRecruitWithoutAnyHero)
 
 	const auto goals = NK2AI::Goals::BuyArmyBehavior().decompose(gateway->nullkiller.get());
 	ASSERT_EQ(goals.size(), 1u);
-	EXPECT_EQ(goals.front()->asTask()->town, town);
+	EXPECT_EQ(goals.front()->town, town);
 	EXPECT_GE(goals.front()->asTask()->priority, 1000000.0f);
 }
 
@@ -312,4 +333,122 @@ TEST_F(Nullkiller2_BehaviorReview, acceptedArtifactPlacementStillEquipsTheArtifa
 	NK2AI::AIGateway::pickBestArtifacts(gateway->cc, hero);
 	EXPECT_EQ(client.artifactRequests, 1);
 	EXPECT_NE(hero->getArtPos(artifact), ArtifactPosition::BACKPACK_START);
+	EXPECT_EQ(map()->getArtifactInstance(artifact->getId()), artifact);
+}
+
+TEST_F(Nullkiller2_BehaviorReview, dailyConstructionCapKeepsTownAndUpgradeKnowledge)
+{
+	startEconomyMap();
+	auto * town = ourTown();
+	ASSERT_NE(town, nullptr);
+	prepareUpgrades(*town);
+	auto gateway = makeGateway(PLAYER);
+	town->built = gateway->cc->getSettings().getInteger(EGameSettings::TOWNS_BUILDINGS_PER_TURN_CAP);
+	gateway->nullkiller->buildAnalyzer->update();
+
+	const auto & development = gateway->nullkiller->buildAnalyzer->getDevelopmentInfo();
+	ASSERT_EQ(development.size(), 1u);
+	EXPECT_EQ(development.front().town, town);
+	EXPECT_FALSE(development.front().built.empty());
+	EXPECT_TRUE(gateway->nullkiller->buildAnalyzer->isBuilt(town->getFactionID(), BuildingID::DWELL_LVL_1_UP));
+	EXPECT_TRUE(development.front().toBuild.empty()) << "the construction cap still applies";
+}
+
+TEST(Nullkiller2_CaptureIdentity, emptyGoalsAreEqual)
+{
+	EXPECT_TRUE(NK2AI::Goals::CaptureObjectsBehavior() == NK2AI::Goals::CaptureObjectsBehavior());
+}
+
+TEST(Nullkiller2_CaptureIdentity, overlappingButDifferentFiltersAreNotEqual)
+{
+	NK2AI::Goals::CaptureObjectsBehavior first;
+	NK2AI::Goals::CaptureObjectsBehavior second;
+	first.ofType(Obj::RESOURCE).ofType(Obj::ARTIFACT);
+	second.ofType(Obj::RESOURCE).ofType(Obj::MINE);
+	EXPECT_FALSE(first == second);
+	EXPECT_FALSE(second == first);
+}
+
+TEST(Nullkiller2_CaptureIdentity, equivalentFilterOrderDoesNotMatter)
+{
+	NK2AI::Goals::CaptureObjectsBehavior first;
+	NK2AI::Goals::CaptureObjectsBehavior second;
+	first.ofType(Obj::RESOURCE).ofType(Obj::ARTIFACT);
+	second.ofType(Obj::ARTIFACT).ofType(Obj::RESOURCE);
+	EXPECT_TRUE(first == second);
+}
+
+TEST_F(Nullkiller2_BehaviorReview, stationaryVisitKeepsFiniteClosestWayRatio)
+{
+	startEconomyMap();
+	const auto * hero = findHeroByOwner(PLAYER);
+	ASSERT_NE(hero, nullptr);
+	auto gateway = makeGateway(PLAYER);
+	gateway->nullkiller->heroManager->update();
+	const auto goals = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals(
+		{stationaryPath(*hero)}, gateway->nullkiller.get());
+	ASSERT_EQ(goals.size(), 1u);
+	const auto * visit = dynamic_cast<const NK2AI::Goals::ExecuteHeroChain *>(goals.front().get());
+	ASSERT_NE(visit, nullptr);
+	EXPECT_TRUE(std::isfinite(visit->closestWayRatio));
+	EXPECT_FLOAT_EQ(visit->closestWayRatio, 1.0f);
+}
+
+TEST_F(Nullkiller2_BehaviorReview, invalidCostKeepsRouteIndexWithoutGeneratingATask)
+{
+	startEconomyMap();
+	const auto * hero = findHeroByOwner(PLAYER);
+	ASSERT_NE(hero, nullptr);
+	auto gateway = makeGateway(PLAYER);
+	gateway->nullkiller->heroManager->update();
+	auto invalid = stationaryPath(*hero);
+	invalid.nodes.front().cost = std::numeric_limits<float>::quiet_NaN();
+	const auto goals = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals(
+		{invalid, stationaryPath(*hero)}, gateway->nullkiller.get());
+	ASSERT_EQ(goals.size(), 2u);
+	EXPECT_TRUE(goals[0]->invalid());
+	EXPECT_FALSE(goals[1]->invalid());
+}
+
+TEST_F(Nullkiller2_BehaviorReview, unsafeFightRemainsRejected)
+{
+	startEconomyMap();
+	const auto * hero = findHeroByOwner(PLAYER);
+	ASSERT_NE(hero, nullptr);
+	auto gateway = makeGateway(PLAYER);
+	gateway->nullkiller->heroManager->update();
+	auto dangerous = stationaryPath(*hero);
+	dangerous.targetObjectDanger = std::numeric_limits<uint64_t>::max() / 4;
+	const auto goals = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals({dangerous}, gateway->nullkiller.get());
+	ASSERT_EQ(goals.size(), 1u);
+	EXPECT_TRUE(goals.front()->invalid());
+}
+
+TEST_F(Nullkiller2_BehaviorReview, reachableResourceProducesExecutablePickup)
+{
+	TinyH3M::TinyH3MBuilder builder(EMapFormat::SOD);
+	builder.size(36, false).name("NK2ResourcePickup")
+		.playerActive(PLAYER).playerActive(ENEMY)
+		.hero({5, 5, 0}, HeroTypeID(HeroTypeID::decode("orrin")), PLAYER)
+		.resource({7, 5, 0}, GameResID(GameResID::WOOD), 20)
+		.town({30, 30, 0}, FactionID::CASTLE, ENEMY);
+	startWithMap(std::move(builder));
+	revealMap(PLAYER);
+	const auto * resource = findObjectAt({7, 5, 0});
+	ASSERT_NE(resource, nullptr);
+	const auto resourceID = resource->id;
+	BoundedRejectingClient client(gameState(), PLAYER);
+	auto gateway = makeGateway(PLAYER, &client);
+	preparePlanning(*gateway);
+	const auto paths = gateway->nullkiller->pathfinder->getPathInfo(resource->visitablePos(), false);
+	const auto goals = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals(paths, gateway->nullkiller.get(), resource);
+	const auto visit = std::find_if(goals.begin(), goals.end(), [](const auto & goal)
+	{
+		return !goal->invalid() && goal->isElementar();
+	});
+	ASSERT_NE(visit, goals.end());
+	const auto woodBefore = gateway->cc->getResourceAmount(GameResID(GameResID::WOOD));
+	EXPECT_NO_THROW((*visit)->asTask()->accept(gateway.get()));
+	EXPECT_EQ(gateway->cc->tryGetObj(resourceID), nullptr);
+	EXPECT_GT(gateway->cc->getResourceAmount(GameResID(GameResID::WOOD)), woodBefore);
 }
