@@ -41,5 +41,5 @@ uploads and external deployment remain disabled.
 
 Apple documentation:
 
-- https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution
-- https://developer.apple.com/documentation/security/customizing-the-notarization-workflow
+- [Notarizing macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+- [Customizing the notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
