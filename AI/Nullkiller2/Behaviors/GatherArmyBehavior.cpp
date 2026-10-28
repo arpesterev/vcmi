@@ -25,6 +25,12 @@ namespace NK2AI
 
 using namespace Goals;
 
+bool isSafeArmyDeliveryPath(const AIPath & path, float safeAttackRatio)
+{
+	return path.targetHero && path.heroArmy && !path.nodes.empty()
+		&& isSafeToVisit(path.targetHero, path.heroArmy, path.getTotalDanger(), safeAttackRatio);
+}
+
 std::string GatherArmyBehavior::toString() const
 {
 	return "Gather army";
@@ -142,8 +148,8 @@ Goals::TGoalVec GatherArmyBehavior::deliverArmyToHero(const Nullkiller * aiNk, c
 			continue;
 		}
 
-		auto danger = path.getTotalDanger();
-		auto isSafe = isSafeToVisit(receiverHero, path.heroArmy, danger, aiNk->settings->getSafeAttackRatio());
+		// The recipient's skills cannot protect the carrier on the way there.
+		auto isSafe = isSafeArmyDeliveryPath(path, aiNk->settings->getSafeAttackRatio());
 
 #if NK2AI_TRACE_LEVEL >= 2
 		logAi->trace(
@@ -152,7 +158,7 @@ Goals::TGoalVec GatherArmyBehavior::deliverArmyToHero(const Nullkiller * aiNk, c
 			receiverHero->getNameTextID(),
 			path.targetHero->getNameTextID(),
 			path.getHeroStrength(),
-			danger,
+			path.getTotalDanger(),
 			path.getTotalArmyLoss()
 		);
 #endif
