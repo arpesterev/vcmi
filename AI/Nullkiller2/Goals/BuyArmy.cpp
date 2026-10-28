@@ -15,11 +15,22 @@
 #include "../AIGateway.h"
 #include "../Engine/Nullkiller.h"
 
-
 namespace NK2AI
 {
 
 using namespace Goals;
+
+namespace
+{
+int64_t creatureCount(const CCreatureSet * army, CreatureID creature)
+{
+	int64_t count = 0;
+	for(const auto & slot : army->Slots())
+		if(slot.second->getCreatureID() == creature)
+			count += slot.second->getCount();
+	return count;
+}
+}
 
 bool BuyArmy::operator==(const BuyArmy & other) const
 {
@@ -33,80 +44,82 @@ std::string BuyArmy::toString() const
 
 void BuyArmy::accept(AIGateway * aiGw)
 {
+	if(!town || town->getOwner() != aiGw->playerID)
+		throw cannotFulfillGoalException("The recruitment town is no longer ours.");
+
 	ui64 valueBought = 0;
-	//buy the stacks with largest AI value
+	const auto * upperArmy = town->getUpperArmy();
+	bool upgradeSuccessful = aiGw->makePossibleUpgrades(upperArmy);
+	const auto * visitor = town->getVisitingHero();
+	if(visitor && visitor->getOwner() == aiGw->playerID && visitor != upperArmy)
+		upgradeSuccessful = aiGw->makePossibleUpgrades(visitor) || upgradeSuccessful;
 
-	auto upgradeSuccessful = aiGw->makePossibleUpgrades(town);
+	auto armyToBuy = aiGw->nullkiller->armyManager->getArmyAvailableToBuy(
+		upperArmy, town, aiGw->nullkiller->getFreeResources());
 
-	auto armyToBuy = aiGw->nullkiller->armyManager->getArmyAvailableToBuy(town->getUpperArmy(), town);
-
-	if(armyToBuy.empty())
+	for(size_t i = 0; valueBought < value && i < armyToBuy.size(); ++i)
 	{
-		if(upgradeSuccessful)
-			return;
-
-		throw cannotFulfillGoalException("No creatures to buy.");
-	}
-
-	for(int i = 0; valueBought < value && i < armyToBuy.size(); i++)
-	{
-		auto res = aiGw->cc->getResourceAmount();
-		auto & ci = armyToBuy[i];
-
-		if(objid != CreatureID::NONE && ci.creID.getNum() != objid)
+		const auto resources = aiGw->nullkiller->getFreeResources();
+		auto & creature = armyToBuy[i];
+		if(objid != CreatureID::NONE && creature.creID.getNum() != objid)
 			continue;
 
-		vstd::amin(ci.count, res.affordableCount(ci.creID.toCreature()->getFullRecruitCost()));
+		vstd::amin(creature.count, resources.affordableCount(creature.creID.toCreature()->getFullRecruitCost()));
+		if(creature.count <= 0)
+			continue;
 
-		if(ci.count)
+		if(needsFreeSlotToRecruit(upperArmy, creature.creID))
 		{
-			if (needsFreeSlotToRecruit(town->getUpperArmy(), ci.creID))
+			SlotID lowestValueSlot;
+			int64_t lowestValue = std::numeric_limits<int64_t>::max();
+			for(const auto & slot : upperArmy->Slots())
 			{
-				SlotID lowestValueSlot;
-				int lowestValue = std::numeric_limits<int>::max();
-				for (const auto & slot : town->getUpperArmy()->Slots())
-				{
-					if (slot.second->getCreatureID() != CreatureID::NONE)
-					{
-						int currentStackMarketValue =
-							slot.second->getCreatureID().toCreature()->getFullRecruitCost().marketValue() * slot.second->getCount();
+				const auto * type = slot.second->getCreatureID().toCreature();
+				if(type->getFactionID() == town->getFactionID())
+					continue;
 
-						if (slot.second->getCreatureID().toCreature()->getFactionID() == town->getFactionID())
-							continue;
-
-						if (currentStackMarketValue < lowestValue)
-						{
-							lowestValue = currentStackMarketValue;
-							lowestValueSlot = slot.first;
-						}
-					}
-				}
-				if (lowestValueSlot.validSlot())
+				const int64_t stackValue = static_cast<int64_t>(type->getFullRecruitCost().marketValue()) * slot.second->getCount();
+				if(stackValue < lowestValue)
 				{
-					aiGw->cc->dismissCreature(town->getUpperArmy(), lowestValueSlot);
+					lowestValue = stackValue;
+					lowestValueSlot = slot.first;
 				}
 			}
-			if (town->getUpperArmy()->stacksCount() < GameConstants::ARMY_SIZE || town->getUpperArmy()->getSlotFor(ci.creID).validSlot()) //It is possible we don't scrap despite we wanted to due to not scrapping stacks that fit our faction
-			{
-				aiGw->cc->recruitCreatures(town, town->getUpperArmy(), ci.creID, ci.count, ci.level);
-			}
-			valueBought += ci.count * LIBRARY->creh->getCombatValue().getAIValue(ci.creID.toCreature());
+
+			const int64_t replacementValue = static_cast<int64_t>(creature.creID.toCreature()->getFullRecruitCost().marketValue()) * creature.count;
+			if(lowestValueSlot.validSlot() && replacementValue > lowestValue)
+				aiGw->cc->dismissCreature(upperArmy, lowestValueSlot);
 		}
+
+		if(needsFreeSlotToRecruit(upperArmy, creature.creID))
+			continue;
+
+		const auto countBefore = creatureCount(upperArmy, creature.creID);
+		aiGw->cc->recruitCreatures(town, upperArmy, creature.creID, creature.count, creature.level);
+		const auto countAfter = creatureCount(upperArmy, creature.creID);
+		if(countAfter <= countBefore)
+		{
+			logAi->warn("Recruitment in %s did not add creatures; not counting it as progress", town->getNameTextID());
+			continue;
+		}
+
+		valueBought += static_cast<ui64>(countAfter - countBefore)
+			* LIBRARY->creh->getCombatValue().getAIValue(creature.creID.toCreature());
 	}
 
 	if(!valueBought)
 	{
-		throw cannotFulfillGoalException("No creatures to buy.");
+		if(upgradeSuccessful)
+			return;
+		throw cannotFulfillGoalException("No creatures were bought or upgraded.");
 	}
 
-	// a visiting hero may belong to an ally
+	// A visiting hero may belong to an ally. Upgrades alone need no movement.
 	if(town->getVisitingHero() && town->getVisitingHero()->tempOwner == aiGw->playerID && !town->getGarrisonHero())
 	{
 		if(aiGw->moveHeroToTile(town->visitablePos(), HeroPtr(town->getVisitingHero(), aiGw->cc.get()))
 			!= HeroMovementResult::COMPLETE)
-		{
 			throw cannotFulfillGoalException("Unable to revisit town after buying army.");
-		}
 	}
 }
 
