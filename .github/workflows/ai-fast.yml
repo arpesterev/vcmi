@@ -84,10 +84,14 @@ jobs:
         run: ccache --show-stats
 
       - name: Build reusable engine and server objects
-        run: /usr/bin/time -f 'Core stage elapsed: %e seconds' cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
+        run: >-
+          /usr/bin/time -f 'Core stage elapsed: %e seconds'
+          cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
 
       - name: Build AI test suite and headless server only
-        run: /usr/bin/time -f 'AI/test stage elapsed: %e seconds' cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
+        run: >-
+          /usr/bin/time -f 'AI/test stage elapsed: %e seconds'
+          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
 
       - name: Report compiler cache efficiency
         if: always()
