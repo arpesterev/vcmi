@@ -146,10 +146,10 @@ set(test_SRCS
 		mock/BattleFake.cpp
 		mock/GameHandlerTestClient.cpp
 		mock/GameHandlerTestServer.cpp
-		mock/mock_IGameEventCallback.cpp
+		mock/mock_BonusBearer.cpp
+ 		mock/mock_IGameEventCallback.cpp
  		mock/mock_MapService.cpp
  		mock/mock_MapServiceTinyH3M.cpp
- 		mock/mock_BonusBearer.cpp
 		mock/mock_CPSICallback.cpp
 		mock/TinyMapGameTest.cpp
 		mock/TinyH3MWriter.cpp
@@ -180,7 +180,7 @@ set(test_HEADERS
  		mock/mock_MapService.h
  		mock/mock_MapServiceTinyH3M.h
 		mock/mock_BonusBearer.h
-		mock/mock_TownFake.h
+		mock/TownFake.h
 		mock/TinyMapGameTest.h
 		mock/TinyH3MWriter.h
 		mock/TinyH3MBuilder.h
