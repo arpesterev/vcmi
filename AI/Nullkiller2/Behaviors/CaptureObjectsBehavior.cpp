@@ -78,7 +78,7 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 	Goals::TGoalVec tasks;
 	tasks.reserve(paths.size());
 	std::unordered_map<HeroRole, const AIPath *> closestWaysByRole;
-	std::unordered_map<const CGHeroInstance *, const AIPath *> bestEnemyTownPathsByHero;
+	std::unordered_map<const CGHeroInstance *, size_t> bestEnemyTownPathsByHero;
 	std::vector<TSubgoal> waysToVisitObj;
 	const bool isEnemyTown = isEnemyTownCaptureTarget(objToVisit, nullkiller);
 
@@ -182,9 +182,10 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 			if(isEnemyTown)
 			{
-				auto & bestPath = bestEnemyTownPathsByHero[path.targetHero];
-				if(!bestPath || isBetterTownCapturePath(path, *bestPath))
-					bestPath = &path;
+				const size_t pathIndex = tasks.size() - 1;
+				const auto [bestPath, inserted] = bestEnemyTownPathsByHero.try_emplace(path.targetHero, pathIndex);
+				if(!inserted && isBetterTownCapturePath(path, paths[bestPath->second]))
+					bestPath->second = pathIndex;
 
 				continue;
 			}
@@ -198,11 +199,12 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 	for(const auto & heroPath : bestEnemyTownPathsByHero)
 	{
-		const auto * path = heroPath.second;
-		auto sharedPtr = sptr(ExecuteHeroChain(*path, objToVisit));
+		const size_t pathIndex = heroPath.second;
+		auto sharedPtr = sptr(ExecuteHeroChain(paths[pathIndex], objToVisit));
 
 		waysToVisitObj.push_back(sharedPtr);
-		tasks.push_back(sharedPtr);
+		// Selecting one route per hero must preserve the input/output mapping.
+		tasks[pathIndex] = sharedPtr;
 	}
 
 	for(const auto & wayGoal : waysToVisitObj)
