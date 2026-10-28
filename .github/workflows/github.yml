@@ -19,6 +19,10 @@ on:
         description: 'Enable link-time optimization'
         type: boolean
         default: false
+      notarize_macos:
+        description: 'Submit signed macOS DMGs to Apple (uses your own Developer ID secrets)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -87,9 +91,15 @@ jobs:
         KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         SIGNING_CERTIFICATE_BASE64: ${{ secrets.MACOS_SIGNING_CERTIFICATE_BASE64 }}
         SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PASSWORD }}
+        REQUIRE_NOTARIZATION: ${{ inputs.notarize_macos }}
       run: |
+        set -euo pipefail
         if [[ -z "$KEYCHAIN_PASSWORD" || -z "$SIGNING_CERTIFICATE_BASE64" || -z "$SIGNING_CERTIFICATE_PASSWORD" ]]; then
-          echo "skip codesigning"
+          if [[ "$REQUIRE_NOTARIZATION" == "true" ]]; then
+            echo "::error::Notarization requires MACOS_KEYCHAIN_PASSWORD, MACOS_SIGNING_CERTIFICATE_BASE64 and MACOS_SIGNING_CERTIFICATE_PASSWORD in this fork's Actions secrets."
+            exit 1
+          fi
+          echo "Skip macOS code signing: no certificate configured in this fork."
           exit 0
         fi
 
@@ -100,7 +110,15 @@ jobs:
         security set-keychain-settings -u -t 7200 "$keychainName"
 
         certPath="$RUNNER_TEMP/cert.p12"
-        printf "$SIGNING_CERTIFICATE_BASE64" | base64 -D -o "$certPath"
+        printf "%s" "$SIGNING_CERTIFICATE_BASE64" | base64 -D -o "$certPath"
+
+        if [[ "$REQUIRE_NOTARIZATION" == "true" ]]; then
+          certificateSubject=$(openssl pkcs12 -in "$certPath" -clcerts -nokeys -passin "pass:$SIGNING_CERTIFICATE_PASSWORD" -legacy 2>/dev/null | openssl x509 -noout -subject)
+          if [[ "$certificateSubject" != *"Developer ID Application:"* ]]; then
+            echo "::error::Apple notarization needs a Developer ID Application certificate from your Apple Developer team."
+            exit 1
+          fi
+        fi
 
         security import "$certPath" -f pkcs12 -P "$SIGNING_CERTIFICATE_PASSWORD" -T "$(which codesign)" -k "$keychainName"
         security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychainName" >/dev/null
@@ -249,6 +267,35 @@ jobs:
         until cpack -C ${{matrix.pack_type}} || ((counter > $maxCounter)); do
           sleep 3; ((counter++))
         done
+
+    - name: Notarize macOS DMG (manual opt-in)
+      if: ${{ startsWith(matrix.platform, 'mac-') && inputs.notarize_macos }}
+      timeout-minutes: 60
+      env:
+        NOTARIZATION_APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
+        NOTARIZATION_APPLE_ID_PASSWORD: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID_PASSWORD }}
+        NOTARIZATION_TEAM_ID: ${{ secrets.MACOS_NOTARIZATION_TEAM_ID }}
+      run: |
+        set -euo pipefail
+        if [[ -z "$NOTARIZATION_APPLE_ID" || -z "$NOTARIZATION_APPLE_ID_PASSWORD" || -z "$NOTARIZATION_TEAM_ID" ]]; then
+          echo "::error::Notarization requires MACOS_NOTARIZATION_APPLE_ID, MACOS_NOTARIZATION_APPLE_ID_PASSWORD and MACOS_NOTARIZATION_TEAM_ID in this fork's Actions secrets."
+          exit 1
+        fi
+        if [[ -z "${MACOS_CODE_SIGN_IDENTITY:-}" ]]; then
+          echo "::error::No Developer ID code-signing identity was configured."
+          exit 1
+        fi
+
+        dmg='${{ github.workspace }}/out/build/${{ matrix.preset }}/${{ env.VCMI_PACKAGE_FILE_NAME }}.${{ matrix.extension }}'
+        test -f "$dmg"
+        codesign --verbose=4 --force --sign "$MACOS_CODE_SIGN_IDENTITY" --timestamp "$dmg"
+        xcrun notarytool submit "$dmg" \
+          --apple-id "$NOTARIZATION_APPLE_ID" \
+          --password "$NOTARIZATION_APPLE_ID_PASSWORD" \
+          --team-id "$NOTARIZATION_TEAM_ID" \
+          --wait
+        xcrun stapler staple "$dmg"
+        xcrun stapler validate "$dmg"
 
     - name: Find Android package
       if: ${{ startsWith(matrix.platform, 'android') }}

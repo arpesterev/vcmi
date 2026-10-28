@@ -521,7 +521,8 @@ bool ExplorationHelper::hasNormalSameDayPath(const int3 & tile) const
 			continue;
 
 		if(isSafeToVisit(hero, path.heroArmy, path.getTotalDanger(), aiNk->settings->getSafeAttackRatio())
-				&& (path.turn() != 0 || !isKnownUnsafeAtEndOfTurn(
+				&& (path.turn() != 0 || !aiNk->dangerHitMap->isHitMapUpToDate()
+					|| !isKnownUnsafeAtEndOfTurn(
 					aiNk->dangerHitMap->getTileThreat(path.targetTile()),
 					hero, path.heroArmy, 0, aiNk->settings->getSafeAttackRatio())))
 			return true;

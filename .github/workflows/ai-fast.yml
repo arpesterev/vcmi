@@ -18,6 +18,8 @@ jobs:
     name: Linux AI regression
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
     defaults:
       run:
         shell: bash
@@ -40,6 +42,19 @@ jobs:
       - name: Install Linux build dependencies
         run: source CI/before_install/linux_qt6.sh
 
+      # Restore older GitHub compiler cache entries, but never save or upload.
+      # Only the local build directory is written to during the current job.
+      - name: Install local compiler cache
+        run: sudo apt-get install -y --no-install-recommends ccache
+
+      - name: Restore old compiler cache (read-only from GitHub)
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: ccache-ai-gcc14-PR-develop-${{ github.sha }}
+          restore-keys: |
+            ccache-ai-gcc14-PR-develop-
+
       - name: Install public Heroes III regression data
         run: |
           wget --progress=dot:giga \
@@ -50,7 +65,7 @@ jobs:
 
       - name: Configure tests
         run: >-
-          cmake -DENABLE_CCACHE:BOOL=OFF
+          cmake -DENABLE_CCACHE:BOOL=ON
           -DCMAKE_C_COMPILER=gcc-14
           -DCMAKE_CXX_COMPILER=g++-14
           --preset linux-gcc-test

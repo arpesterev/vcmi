@@ -123,7 +123,10 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 		// Do not end an ordinary same-day pickup within killing reach
 		// of an already visible enemy. Forced defence and sieges decide separately.
+		// When tests or a replanning pass have no current hitmap, never consult
+		// stale / unallocated threat tiles.
 		if(!force && !isEnemyTown && path.turn() == 0
+			&& nullkiller->dangerHitMap->isHitMapUpToDate()
 			&& isKnownUnsafeAtEndOfTurn(nullkiller->dangerHitMap->getTileThreat(path.targetTile()),
 				hero, path.heroArmy, 0, nullkiller->settings->getSafeAttackRatio()))
 			continue;

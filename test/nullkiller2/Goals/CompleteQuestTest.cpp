@@ -98,10 +98,23 @@ TEST_F(Nullkiller2_Goals_CompleteQuest, levelMissionVisitsObjectGrantingExperien
 		<< "The known XP seer must accept this hero.";
 	const auto directGoals = NK2AI::Goals::CaptureObjectsBehavior::getVisitGoals(
 		candidatePaths, gateway->nullkiller.get(), seer);
+	std::ostringstream diagnostic;
+	for(const auto & path : candidatePaths)
+	{
+		diagnostic << " [turn=" << static_cast<int>(path.turn())
+			<< ", army=" << path.getHeroStrength()
+			<< ", danger=" << path.getTotalDanger()
+			<< ", exchanges=" << static_cast<int>(path.exchangeCount)
+			<< ", locked=" << gateway->nullkiller->arePathHeroesLocked(path)
+			<< ", blockedAction=" << (path.getFirstBlockedAction() != nullptr)
+			<< "]";
+	}
 	ASSERT_TRUE(std::ranges::any_of(directGoals, [seer](const NK2AI::Goals::TSubgoal & goal)
 	{
 		return includesObjectVisit(goal, seer->id);
-	})) << "The reachable seer must produce an executable visit goal.";
+	})) << "The reachable seer must produce an executable visit goal."
+		<< " hitmapReady=" << gateway->nullkiller->dangerHitMap->isHitMapUpToDate()
+		<< " paths=" << diagnostic.str();
 
 	const auto goals = NK2AI::Goals::CompleteQuest(QuestInfo(guard->id), *gateway->cc).decompose(gateway->nullkiller.get());
 	EXPECT_TRUE(std::ranges::any_of(goals, [seer](const NK2AI::Goals::TSubgoal & goal){ return includesObjectVisit(goal, seer->id); }))
