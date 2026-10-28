@@ -239,6 +239,7 @@ public:
 	}
 
 	std::vector<CGPathNode *> getInitialNodes() override;
+
 	virtual void calculateNeighbours(
 		std::vector<CGPathNode *> & result,
 		const PathNodeInfo & source,
@@ -342,7 +343,7 @@ public:
 
 	// Reconstructs an AIPath by walking theNodeBefore / chainOther, appending branch nodes first and linking them via parentIndex
 	// Returns false when reconstruction would assign conflicting real-move chainMasks to the same hero
-	bool tryReconstructChainInfo(const AIPathNode * node, AIPath & path,	int & parentIndex, RealMoveMasksByHero & realMoveMasks) const;
+	bool tryReconstructChainInfo(const AIPathNode * node, AIPath & path, int & parentIndex, RealMoveMasksByHero & realMoveMasks) const;
 	bool calculatePathInfo(AIPath & path, const AIPathNode * node) const;
 
 	template<typename Fn>
@@ -394,6 +395,7 @@ private:
 	struct DimensionDoorSpellPlan
 	{
 		const CSpell * spell = nullptr;
+		const DimensionDoorEffect * effect = nullptr;
 		int manaCost = 0;
 		int plannedSourceTurn = 0;
 		int plannedSourceMoveLimit = 1;
