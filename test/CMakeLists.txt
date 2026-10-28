@@ -180,7 +180,7 @@ set(test_HEADERS
  		mock/mock_MapService.h
  		mock/mock_MapServiceTinyH3M.h
 		mock/mock_BonusBearer.h
-		mock/TownFake.h
+		mock/mock_TownFake.h
 		mock/TinyMapGameTest.h
 		mock/TinyH3MWriter.h
 		mock/TinyH3MBuilder.h
@@ -210,6 +210,7 @@ if(ENABLE_NULLKILLER2_AI)
 		nullkiller2/Analyzers/DangerHitMapAnalyzerTest.cpp
 		nullkiller2/Analyzers/HeroManagerTest.cpp
 		nullkiller2/Analyzers/ObjectClusterizerTest.cpp
+		nullkiller2/Behaviors/BehaviorReviewTest.cpp
 		nullkiller2/Behaviors/DefenceBehaviorTest.cpp
 		nullkiller2/Behaviors/EscapeBehaviorTest.cpp
 		nullkiller2/Behaviors/GatherArmyBehaviorTest.cpp
