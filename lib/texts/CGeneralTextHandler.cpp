@@ -71,7 +71,10 @@ void CGeneralTextHandler::detectInstallParameters()
 
 	std::array<size_t, 256> charCount{};
 	std::array<double, 16> footprint{};
-	std::array<double, 6> deviations{};
+	// Compare every known language, including Russian and Ukrainian.
+	// A shorter deviations array silently prevents the last languages from ever matching.
+	static_assert(knownFootprints.size() == knownLanguages.size());
+	std::array<double, knownFootprints.size()> deviations{};
 
 	auto data = resource->readAll();
 
