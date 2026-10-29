@@ -384,6 +384,12 @@ std::vector<creInfo> ArmyManager::getArmyAvailableToBuy(
 
 		if(!ci.count) continue;
 
+		// An unaffordable stack must not consume a slot needed by a cheaper
+		// purchase. Replacement decisions must use the affordable stack value.
+		vstd::amin(ci.count, availableRes.affordableCount(ci.creID.toCreature()->getFullRecruitCost()));
+		if(ci.count <= 0)
+			continue;
+
 		// Calculate the market value of the new stack
 		TResources newStackValue = ci.creID.toCreature()->getFullRecruitCost() * ci.count;
 
@@ -434,8 +440,6 @@ std::vector<creInfo> ArmyManager::getArmyAvailableToBuy(
 				freeHeroSlots--; //new slot will be occupied
 			}
 		}
-
-		vstd::amin(ci.count, availableRes.affordableCount(ci.creID.toCreature()->getFullRecruitCost())); //max count we can afford
 
 		int disbandMalus = 0;
 		

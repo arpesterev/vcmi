@@ -10,10 +10,14 @@
 
 #include "AI/Nullkiller2/Analyzers/ArmyManager.h"
 
+#include "mock/GameHandlerTestClient.h"
 #include "mock/TinyH3MBuilder.h"
 #include "nullkiller2/NullkillerTest.h"
 
+#include "lib/CPlayerState.h"
 #include "lib/mapObjects/CGHeroInstance.h"
+#include "lib/mapObjects/CGTownInstance.h"
+#include "lib/networkPacks/PacksForClient.h"
 
 TEST(Nullkiller2_Analyzers_ArmyManager, armyWithoutOneSourceCreatureDoesNotTakeWholeSource)
 {
@@ -55,4 +59,97 @@ TEST_F(Nullkiller2_Analyzers_ArmyManagerMap, targetKeepsOwnArmyWhenOnlyWantedUni
 
 	ASSERT_EQ(army.size(), 1) << "an empty army makes the AI move away the last unit of the target";
 	EXPECT_EQ(army.front().creature->getId(), CreatureID::SKELETON);
+}
+
+namespace
+{
+const PlayerColor PLAYER(0);
+const PlayerColor ENEMY(1);
+
+class Nullkiller2_RecruitmentPlanning : public NullkillerTest
+{
+protected:
+	void startRecruitmentMap()
+	{
+		TinyH3M::TinyH3MBuilder builder(EMapFormat::SOD);
+		builder.size(36, false).name("NK2AffordableRecruitment")
+			.playerActive(PLAYER).playerActive(ENEMY)
+			.town({9, 5, 0}, FactionID::CASTLE, PLAYER)
+			.hero({5, 5, 0}, HeroTypeID(0), PLAYER)
+			.town({30, 30, 0}, FactionID::CASTLE, ENEMY);
+		startWithMap(std::move(builder));
+		town = nullptr;
+		for(auto * candidate : findAll<CGTownInstance>())
+			if(candidate->getOwner() == PLAYER)
+				town = candidate;
+		ASSERT_NE(town, nullptr);
+
+		town->addBuilding(BuildingID::CITY_HALL);
+		town->addBuilding(BuildingID::DWELL_LVL_1);
+		town->clearSlots();
+		const std::array<std::string, 6> existing = {"archer", "griffin", "swordsman", "monk", "cavalier", "angel"};
+		for(size_t i = 0; i < existing.size(); ++i)
+			ASSERT_TRUE(town->setCreature(SlotID(static_cast<int>(i)), CreatureID(CreatureID::decode(existing[i])), 1));
+
+		for(auto & level : town->creatures)
+			level.first = 0;
+		town->creatures.at(0) = {10, {CreatureID(CreatureID::decode("pikeman"))}};
+		town->creatures.at(6) = {1, {CreatureID(CreatureID::decode("archangel"))}};
+		revealMap(PLAYER);
+	}
+
+	CGTownInstance * town = nullptr;
+};
+}
+
+TEST_F(Nullkiller2_RecruitmentPlanning, unaffordableGoldCostDoesNotConsumeTheLastSlot)
+{
+	ASSERT_NO_FATAL_FAILURE(startRecruitmentMap());
+	const CreatureID cheap(CreatureID::decode("pikeman"));
+	const auto budget = cheap.toCreature()->getFullRecruitCost() * 2;
+	ASSERT_FALSE(budget.canAfford(CreatureID(CreatureID::decode("archangel")).toCreature()->getFullRecruitCost()));
+	const auto gateway = makeGateway(PLAYER);
+
+	const auto purchases = gateway->nullkiller->armyManager->getArmyAvailableToBuy(town, town, budget);
+	ASSERT_EQ(purchases.size(), 1u);
+	EXPECT_EQ(purchases.front().creID, cheap);
+	EXPECT_EQ(purchases.front().count, 2);
+	EXPECT_EQ(town->stacksCount(), 6) << "planning must not mutate the army";
+}
+
+TEST_F(Nullkiller2_RecruitmentPlanning, missingRareResourceDoesNotSuppressCheapRecruitment)
+{
+	ASSERT_NO_FATAL_FAILURE(startRecruitmentMap());
+	TResources budget;
+	budget[GameResID::GOLD] = 100000;
+	ASSERT_FALSE(budget.canAfford(CreatureID(CreatureID::decode("archangel")).toCreature()->getFullRecruitCost()));
+	const auto gateway = makeGateway(PLAYER);
+
+	const auto purchases = gateway->nullkiller->armyManager->getArmyAvailableToBuy(town, town, budget);
+	ASSERT_EQ(purchases.size(), 1u);
+	EXPECT_EQ(purchases.front().creID, CreatureID(CreatureID::decode("pikeman")));
+	EXPECT_EQ(purchases.front().count, 10);
+}
+
+TEST_F(Nullkiller2_RecruitmentPlanning, completeTurnBuysAffordableTroopsWithOneSlotLeft)
+{
+	ASSERT_NO_FATAL_FAILURE(startRecruitmentMap());
+	const CreatureID cheap(CreatureID::decode("pikeman"));
+	gameState()->players.at(PLAYER).resources = cheap.toCreature()->getFullRecruitCost() * 2;
+	const auto * hero = findHeroByOwner(PLAYER);
+	ASSERT_NE(hero, nullptr);
+	SetMovePoints exhausted(hero->id, 0);
+	gameState()->apply(exhausted);
+	GameHandlerTestClient client(gameState(), PLAYER);
+	const auto gateway = makeGateway(PLAYER, &client);
+	town->built = gateway->cc->getSettings().getInteger(EGameSettings::TOWNS_BUILDINGS_PER_TURN_CAP);
+
+	// No manually chosen BuyArmy task: exercise the complete turn planner.
+	gateway->nullkiller->makeTurn();
+
+	const auto slot = town->getSlotFor(cheap);
+	ASSERT_TRUE(town->hasStackAtSlot(slot));
+	EXPECT_EQ(town->getStackCount(slot), 2);
+	EXPECT_EQ(town->creatures.at(0).first, 8);
+	EXPECT_EQ(town->creatures.at(6).first, 1);
 }

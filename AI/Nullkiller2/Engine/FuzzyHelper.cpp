@@ -30,12 +30,20 @@ ui64 FuzzyHelper::evaluateDanger(const int3 & tile, const CGHeroInstance * visit
 	ui64 guardDanger = 0;
 
 	auto visitableObjects = cb->getVisitableObjs(tile);
+	// The visitor is not a defender. Keeping it here hides the underlying
+	// object and its already known guards when evaluating a repeat visit.
+	if(visitor)
+		vstd::erase_if(visitableObjects, [visitor](const CGObjectInstance * object)
+		{
+			return object == visitor;
+		});
+
 	// in some scenarios hero happens to be "under" the object (eg town). Then we consider ONLY the hero.
 	if(vstd::contains_if(visitableObjects, objWithID<Obj::HERO>))
 	{
 		vstd::erase_if(visitableObjects, [](const CGObjectInstance * obj) -> bool
 		{
-				return !objWithID<Obj::HERO>(obj);
+			return !objWithID<Obj::HERO>(obj);
 		});
 	}
 
