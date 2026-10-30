@@ -134,6 +134,13 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 				hero, path.heroArmy, 0, nullkiller->settings->getSafeAttackRatio()))
 			continue;
 
+		// Apply the executor's overnight safety rule before choosing the best
+		// route. Otherwise an impossible exploration/capture plan repeatedly
+		// wins priority and prevents safe alternatives from being considered.
+		if(nullkiller->dangerHitMap->isHitMapUpToDate()
+			&& hasUnsafeKnownOvernightStop(path, nullkiller))
+			continue;
+
 		auto firstBlockedAction = path.getFirstBlockedAction();
 		if(firstBlockedAction)
 		{

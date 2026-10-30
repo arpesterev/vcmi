@@ -178,16 +178,25 @@ TEST_F(Nullkiller2_LocalPlanning, completeTurnChoosesAndCollectsReachableResourc
 	ASSERT_EQ(gateway->cc->tryGetObj(resourceID), resource);
 	ASSERT_TRUE(gateway->cc->getTownsInfo(false).empty());
 
-	// Populate knowledge through the normal visibility event, not a selected goal.
-	FowTilesType visibleTiles;
-	NK2AI::foreach_visible_tile_pos(*gateway->cc, [&](const int3 & tile)
+	const auto refreshVisibleState = [&]
 	{
-		visibleTiles.insert(tile);
-	});
-	gateway->tileRevealed(visibleTiles);
+		// Mirror the client-side invalidation and visibility notifications that
+		// are absent when CGameHandler applies packets directly to a shared state.
+		gateway->nullkiller->invalidatePaths();
+		gateway->nullkiller->invalidatePathfinderData();
+		FowTilesType visibleTiles;
+		NK2AI::foreach_visible_tile_pos(*gateway->cc, [&](const int3 & tile)
+		{
+			visibleTiles.insert(tile);
+		});
+		gateway->tileRevealed(visibleTiles);
+	};
+	client.onRequestApplied = refreshVisibleState;
+	refreshVisibleState();
 
 	// Do not feed a pickup goal to the AI: it must discover and choose it.
 	gateway->nullkiller->makeTurn();
+	client.onRequestApplied = {};
 
 	EXPECT_EQ(gateway->cc->tryGetObj(resourceID), nullptr);
 	EXPECT_GT(gateway->cc->getResourceAmount(GameResID(GameResID::WOOD)), before);

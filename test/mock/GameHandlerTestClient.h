@@ -13,6 +13,8 @@
 #include "../../server/CGameHandler.h"
 #include "../../lib/callback/IClient.h"
 
+#include <functional>
+
 /// Client that delivers requests of one acting player directly to an in-process CGameHandler
 class GameHandlerTestClient : public IClient
 {
@@ -25,6 +27,10 @@ public:
 		const BattleStateInfoForRetreat &) override;
 
 	int sendRequest(const CPackForServer & request, PlayerColor player, bool) override;
+
+	/// Notify test observers after the server has applied a synchronous request.
+	/// In-process tests do not run the real client's packet event dispatcher.
+	std::function<void()> onRequestApplied;
 
 private:
 	GameHandlerTestServer server;

@@ -35,5 +35,7 @@ int GameHandlerTestClient::sendRequest(const CPackForServer & request, PlayerCol
 	request.requestID = ++lastRequestID;
 	auto serverRequest = CMemorySerializer::deepCopy(request);
 	gameHandler.handleReceivedPack(GameConnectionID::FIRST_CONNECTION, *serverRequest);
+	if(onRequestApplied)
+		onRequestApplied();
 	return lastRequestID;
 }
