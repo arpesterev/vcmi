@@ -170,6 +170,8 @@ def run_case(client: Path, map_path: Path, data: Path, output: Path, ai: str,
         'server': {'useProcess': False},
         'general': {'lastDifficulty': 1, 'saveFrequency': 1},
         'session': {'headless': True, 'onlyai': True},
+        'logging': {'loggers': [{'domain': 'ai', 'level': 'debug'}],
+                    'console': {'threshold': 'debug', 'coloredOutputEnabled': False}},
     }), encoding='utf-8')
     trace = output / 'events.jsonl'
     log = output / 'client.log'
@@ -227,6 +229,11 @@ def run_case(client: Path, map_path: Path, data: Path, output: Path, ai: str,
     result = {'ai': ai, 'seed': seed, 'returncode': process.returncode,
               'stop_reason': reason, 'elapsed_seconds': round(time.monotonic() - start, 2),
               'failures': failures, **evidence.summary()}
+    if failures and ai != 'EmptyAI':
+        markers = ('lock', 'Reserv', 'hero.core.', 'No worthwhile', 'Scanning objects',
+                   'Found ', 'Cannot ', 'starting turn', 'Player status', 'Town ')
+        result['decision_trace'] = [line for line in log.read_text(errors='replace').splitlines()
+                                    if any(marker in line for marker in markers)][-140:]
     (output / 'result.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({k: v for k, v in result.items() if k != 'last_state'}, indent=2), flush=True)
     if failures:
