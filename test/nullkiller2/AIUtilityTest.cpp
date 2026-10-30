@@ -73,7 +73,8 @@ protected:
 			.resource({7, 5, 0}, GameResID(GameResID::WOOD), 20)
 			.town({30, 30, 0}, FactionID::CASTLE, PlayerColor(1));
 		startWithMap(std::move(builder));
-		revealMap(PLAYER);
+		// Keep normal hero visibility. Revealing the remote enemy town turns
+		// this pickup scenario into a townless player's conquest decision.
 	}
 
 	void placeVisitorOnResource(CGHeroInstance & hero, const CGResource & resource)
@@ -174,6 +175,8 @@ TEST_F(Nullkiller2_LocalPlanning, completeTurnChoosesAndCollectsReachableResourc
 	GameHandlerTestClient client(gameState(), PLAYER);
 	const auto gateway = makeGateway(PLAYER, &client);
 	const auto before = gateway->cc->getResourceAmount(GameResID(GameResID::WOOD));
+	ASSERT_EQ(gateway->cc->tryGetObj(resourceID), resource);
+	ASSERT_TRUE(gateway->cc->getTownsInfo(false).empty());
 
 	// Populate knowledge through the normal visibility event, not a selected goal.
 	FowTilesType visibleTiles;
