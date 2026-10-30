@@ -85,7 +85,7 @@ int main(int argc, char * argv[])
 	::testing::InitGoogleTest(&argc, argv);
 	auto logBuffer = std::make_shared<TestLogBuffer>();
 	CLogger::getGlobalLogger()->addTarget(std::make_unique<TestLogTarget>(logBuffer));
-	logAi->setLevel(ELogLevel::DEBUG);
+	CLogger::getLogger(CLoggerDomain("ai"))->setLevel(ELogLevel::DEBUG);
 	::testing::UnitTest::GetInstance()->listeners().Append(new FailedTestLogPrinter(logBuffer));
 	::testing::AddGlobalTestEnvironment(new CVcmiTestConfig());
 	return RUN_ALL_TESTS();
