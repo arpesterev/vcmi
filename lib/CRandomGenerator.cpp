@@ -12,6 +12,8 @@
 #include "CRandomGenerator.h"
 
 #include <boost/stacktrace.hpp>
+#include <charconv>
+#include <cstdlib>
 
 namespace
 {
@@ -45,6 +47,17 @@ void CRandomGenerator::setSeed(int seed)
 void CRandomGenerator::resetSeed()
 {
 	logRng->trace("CRandomGenerator::resetSeed");
+	// Explicitly opt in for reproducible subprocess integration tests.
+	if(const char * value = std::getenv("VCMI_TEST_RNG_SEED"))
+	{
+		int seed = 0;
+		const char * end = value + std::char_traits<char>::length(value);
+		const auto parsed = std::from_chars(value, end, seed);
+		if(parsed.ec != std::errc{} || parsed.ptr != end)
+			throw std::runtime_error("VCMI_TEST_RNG_SEED must be a signed integer");
+		setSeed(seed);
+		return;
+	}
 	std::hash<std::thread::id> hasher;
 	auto threadIdHash = hasher(std::this_thread::get_id());
 	setSeed(static_cast<int>(threadIdHash * std::time(nullptr)));
@@ -114,4 +127,3 @@ CRandomGenerator & CRandomGenerator::getDefault()
 	static thread_local CRandomGenerator defaultRand;
 	return defaultRand;
 }
-

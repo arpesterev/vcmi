@@ -10,6 +10,7 @@
 #pragma once
 
 #include "../lib/networkPacks/NetPackVisitor.h"
+#include "HeadlessMatchTrace.h"
 
 class CClient;
 
@@ -25,6 +26,11 @@ public:
 	ApplyClientNetPackVisitor(CClient & cl, const CGameState & gs)
 		:cl(cl), gs(gs)
 	{
+	}
+
+	void visitForClient(CPackForClient & pack) override
+	{
+		HeadlessMatchTrace::record(gs, pack);
 	}
 
 	void visitSetResources(SetResources & pack) override;
@@ -97,7 +103,7 @@ public:
 	void visitTurnTimeUpdate(TurnTimeUpdate & pack) override;
 	void visitPlayerMessageClient(PlayerMessageClient & pack) override;
 	void visitAdvmapSpellCast(AdvmapSpellCast & pack) override;
-	void visitShowWorldViewEx(ShowWorldViewEx & pack) override;	
+	void visitShowWorldViewEx(ShowWorldViewEx & pack) override;
 	void visitOpenWindow(OpenWindow & pack) override;
 	void visitCenterView(CenterView & pack) override;
 	void visitNewObject(NewObject & pack) override;

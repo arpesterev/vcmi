@@ -33,6 +33,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Test the full-match result checker
+        run: python3 -m unittest discover -s CI -p test_ai_match.py -v
+
       - name: Prepare APT staging directory
         run: mkdir -p "$RUNNER_TEMP/apt-cache"
 
@@ -88,10 +91,11 @@ jobs:
           /usr/bin/time -f 'Core stage elapsed: %e seconds'
           cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
 
-      - name: Build AI test suite and headless server only
+      - name: Build AI tests and real headless client
+        id: build_ai
         run: >-
-          /usr/bin/time -f 'AI/test stage elapsed: %e seconds'
-          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
+          /usr/bin/time -f 'AI and client stage elapsed: %e seconds'
+          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver vcmiclient --parallel 3
 
       - name: Report compiler cache efficiency
         if: always()
@@ -105,7 +109,25 @@ jobs:
           timeout 900 ./vcmitest --gtest_filter='Nullkiller2_*:ResourceTradingTurnTest.*' \
             --gtest_output=xml:fast-ai-tests.xml
 
+      - name: Run real full-map match and EmptyAI negative control
+        if: ${{ !cancelled() && steps.build_ai.outcome == 'success' }}
+        timeout-minutes: 15
+        run: |
+          bin="$GITHUB_WORKSPACE/out/build/linux-gcc-test/bin"
+          (
+            cd "$bin"
+            VCMI_TEST_RNG_SEED=1337 ./vcmitest --export-ai-match-map
+          ) | tee "$RUNNER_TEMP/ai-match-map.log"
+          map=$(sed -n 's/^AI_MATCH_MAP=//p' "$RUNNER_TEMP/ai-match-map.log")
+          test -f "$map"
+          python3 CI/run_ai_match.py \
+            --client "$bin/vcmiclient" --map "$map" \
+            --data "$HOME/.local/share/vcmi" \
+            --output "$RUNNER_TEMP/ai-match-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --max-days 28 --timeout 600 --seed 1337
+
       - name: Check headless server startup
+        if: ${{ !cancelled() && steps.build_ai.outcome == 'success' }}
         run: |
           cd out/build/linux-gcc-test/bin
           ./vcmiserver --dummy-run 2>server-errors.log
@@ -120,7 +142,6 @@ jobs:
         with:
           path: .ccache
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
-
 
   validate-code:
     name: Validate Code
