@@ -48,3 +48,34 @@ TEST(Nullkiller2_Analyzers_DangerHitMap, findsPhysicalOvernightStopBeforeTurnCha
 	EXPECT_EQ(stops.front().first, dayZeroStop.coord);
 	EXPECT_EQ(stops.front().second, 0);
 }
+
+TEST(Nullkiller2_Analyzers_DangerHitMap, laterNightsDoNotVetoTodaysSafeProgress)
+{
+	CGPathNode today;
+	today.coord = int3(3, 1, 0);
+	today.turns = 0;
+	CGPathNode tomorrow;
+	tomorrow.coord = int3(8, 1, 0);
+	tomorrow.turns = 1;
+	tomorrow.theNodeBefore = &today;
+	CGPathNode destination;
+	destination.coord = int3(12, 1, 0);
+	destination.turns = 2;
+	destination.theNodeBefore = &tomorrow;
+
+	const auto stops = NK2AI::collectPlannedOvernightStops(&destination);
+	ASSERT_EQ(stops.size(), 1u);
+	EXPECT_EQ(stops.front().first, today.coord);
+	EXPECT_EQ(stops.front().second, 0);
+}
+
+TEST(Nullkiller2_Analyzers_DangerHitMap, sameDayRouteHasNoIntermediateOvernightStop)
+{
+	CGPathNode origin;
+	origin.turns = 0;
+	CGPathNode destination;
+	destination.turns = 0;
+	destination.theNodeBefore = &origin;
+	EXPECT_TRUE(NK2AI::collectPlannedOvernightStops(&destination).empty());
+	EXPECT_TRUE(NK2AI::collectPlannedOvernightStops(nullptr).empty());
+}

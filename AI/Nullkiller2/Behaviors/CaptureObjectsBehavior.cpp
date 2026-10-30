@@ -81,6 +81,9 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 	std::unordered_map<const CGHeroInstance *, size_t> bestEnemyTownPathsByHero;
 	std::vector<TSubgoal> waysToVisitObj;
 	const bool isEnemyTown = isEnemyTownCaptureTarget(objToVisit, nullkiller);
+	const bool isEnemyTarget = isEnemyTown || (objToVisit && objToVisit->ID == Obj::HERO
+		&& objToVisit->getOwner().isValidPlayer()
+		&& nullkiller->cc->getPlayerRelations(nullkiller->playerID, objToVisit->getOwner()) == PlayerRelations::ENEMIES);
 
 	for(const auto & path : paths)
 	{
@@ -134,10 +137,9 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 				hero, path.heroArmy, 0, nullkiller->settings->getSafeAttackRatio()))
 			continue;
 
-		// Apply the executor's overnight safety rule before choosing the best
-		// route. Otherwise an impossible exploration/capture plan repeatedly
-		// wins priority and prevents safe alternatives from being considered.
-		if(nullkiller->dangerHitMap->isHitMapUpToDate()
+		// Match ExecuteHeroChain's safety rule, including its combat-target
+		// exception. An enemy town or hero is evaluated as a battle, not a pickup.
+		if(!isEnemyTarget && nullkiller->dangerHitMap->isHitMapUpToDate()
 			&& hasUnsafeKnownOvernightStop(path, nullkiller))
 			continue;
 

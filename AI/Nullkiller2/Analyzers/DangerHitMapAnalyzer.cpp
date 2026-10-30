@@ -33,7 +33,11 @@ std::vector<std::pair<int3, uint8_t>> collectPlannedOvernightStops(const CGPathN
 	for(size_t depth = 0; current && current->theNodeBefore && depth < 1024; ++depth)
 	{
 		const CGPathNode * previous = current->theNodeBefore;
-		if(previous->turns < current->turns && previous->turns < 255)
+		// Only today's movement is executed. Later nights will be replanned
+		// with fresh visibility, enemy positions and armies on the next turn.
+		// Vetoing a safe first leg because of a hypothetical later encounter
+		// can otherwise prevent heroes from ever returning for reinforcements.
+		if(previous->turns == 0 && current->turns > 0)
 			stops.emplace_back(previous->coord, previous->turns);
 		current = previous;
 	}

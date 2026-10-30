@@ -72,9 +72,15 @@ protected:
 			.hero(HERO_POS, HeroTypeID(0), PLAYER)
 			.resource({7, 5, 0}, GameResID(GameResID::WOOD), 20)
 			.town({30, 30, 0}, FactionID::CASTLE, PlayerColor(1));
+		// A small visible clearing isolates autonomous pickup from the much
+		// higher-priority search for a town by a townless player. No goal is
+		// injected, and the distant opponent stays outside normal visibility.
+		for(int x = 0; x < 36; ++x)
+			for(int y = 0; y < 36; ++y)
+				if(!(x >= 3 && x <= 9 && y >= 3 && y <= 7)
+					&& !(x >= 27 && x <= 32 && y >= 28 && y <= 32))
+					builder.terrain({x, y, 0}, TerrainId(ETerrainId::ROCK));
 		startWithMap(std::move(builder));
-		// Keep normal hero visibility. Revealing the remote enemy town turns
-		// this pickup scenario into a townless player's conquest decision.
 	}
 
 	void placeVisitorOnResource(CGHeroInstance & hero, const CGResource & resource)
