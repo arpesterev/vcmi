@@ -15,6 +15,7 @@
 #include "PlayerLocalState.h"
 #include "CServerHandler.h"
 #include "ClientNetPackVisitors.h"
+#include "HeadlessMatchTrace.h"
 #include "adventureMap/AdventureMapInterface.h"
 #include "battle/BattleInterface.h"
 #include "GameEngine.h"
@@ -342,6 +343,7 @@ void CClient::handlePack(CPackForClient & pack)
 	{
 		std::unique_lock lock(CGameState::mutex);
 		gameState().apply(pack);
+		HeadlessMatchTrace::record(gameState(), pack);
 	}
 	logNetwork->trace("\tApplied on gs: %s", typeid(pack).name());
 	pack.visit(afterVisitor);

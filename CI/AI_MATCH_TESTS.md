@@ -28,7 +28,7 @@ The Python unit tests validate this result checker, not the game itself.
 Build `vcmitest`, `vcmiserver` and `vcmiclient` with the test preset, then run from
 the repository root:
 
-```bash
+```sh
 bin="$PWD/out/build/linux-gcc-test/bin"
 (cd "$bin" && ./vcmitest --export-ai-match-map) | tee /tmp/ai-map-export.log
 map=$(sed -n 's/^AI_MATCH_MAP=//p' /tmp/ai-map-export.log)

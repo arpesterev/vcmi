@@ -22,7 +22,7 @@ class MatchOracleTest(unittest.TestCase):
         self.evidence.accept(dict(seq=self.evidence.last_seq + 1, event=name,
                                   day=2, objects=copy.deepcopy(self.objects), **fields))
 
-    def finish_valid_match(self, combat=True):
+    def finish_valid_match(self, combat=True, attacker_won=True):
         self.send('PlayerEndsTurn', player=0)
         self.send('PlayerEndsTurn', player=1)
         self.objects = [x for x in self.objects if x['id'] != 3]
@@ -34,7 +34,7 @@ class MatchOracleTest(unittest.TestCase):
         self.send('BattleStart', battle=7, defender=4)
         if combat:
             self.send('BattleAttack', battle=7, damage=100)
-        self.send('BattleResultAccepted', battle=7)
+        self.send('BattleResultAccepted', battle=7, attacker_won=attacker_won)
         self.objects = [x for x in self.objects if x['id'] != 4]
         self.send('RemoveObject', object=4)
         self.objects = [x for x in self.objects if x['id'] != 5]
@@ -66,8 +66,14 @@ class MatchOracleTest(unittest.TestCase):
         self.send('RemoveObject', object=5)
         self.send('BattleStart', battle=7, defender=4)
         self.send('BattleAttack', battle=7, damage=100)
-        self.send('BattleResultAccepted', battle=7)
+        self.send('BattleResultAccepted', battle=7, attacker_won=True)
         self.assertFalse(self.evidence.guarded_artifacts)
+
+    def test_losing_to_guard_does_not_prove_guard_clearance(self):
+        self.finish_valid_match(attacker_won=False)
+        self.assertFalse(self.evidence.guarded_artifacts)
+        self.assertIn('guarded artifact not collected after a real guard battle',
+                      self.evidence.failures(0, None))
 
     def test_stale_or_duplicate_records_are_rejected(self):
         with self.assertRaises(ValueError):

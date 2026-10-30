@@ -10,6 +10,7 @@
 #include "../lib/CConfigHandler.h"
 #include "../lib/CPlayerState.h"
 #include "../lib/gameState/CGameState.h"
+#include "../lib/mapObjects/CGHeroInstance.h"
 #include "../lib/mapObjects/CGTownInstance.h"
 #include "../lib/mapObjects/army/CStackInstance.h"
 #include "../lib/mapping/CMap.h"
@@ -18,10 +19,18 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <stdexcept>
 
 namespace HeadlessMatchTrace
 {
+/// Stable trace-local IDs avoid depending on the engine identifier representation.
+inline uint64_t battleNumber(const BattleID & id)
+{
+	static std::map<BattleID, uint64_t> numbers;
+	return numbers.try_emplace(id, numbers.size()).first->second;
+}
+
 /// Records applied client state without changing AI callbacks or map visibility.
 inline void record(const CGameState & state, const CPackForClient & pack)
 {
@@ -74,7 +83,7 @@ inline void record(const CGameState & state, const CPackForClient & pack)
 	if(const auto * value = dynamic_cast<const BattleStart *>(&pack))
 	{
 		const auto * battle = state.getBattle(value->battleID);
-		output << ",\"battle\":" << value->battleID.getNum();
+		output << ",\"battle\":" << battleNumber(value->battleID);
 		if(battle)
 			output << ",\"defender\":" << battle->getSideArmy(BattleSide::DEFENDER)->id.getNum();
 	}
@@ -83,10 +92,11 @@ inline void record(const CGameState & state, const CPackForClient & pack)
 		int64_t damage = 0;
 		for(const auto & attack : value->bsa)
 			damage += attack.damageAmount;
-		output << ",\"battle\":" << value->battleID.getNum() << ",\"damage\":" << damage;
+		output << ",\"battle\":" << battleNumber(value->battleID) << ",\"damage\":" << damage;
 	}
 	if(const auto * value = dynamic_cast<const BattleResultAccepted *>(&pack))
-		output << ",\"battle\":" << value->battleID.getNum();
+		output << ",\"battle\":" << battleNumber(value->battleID)
+			<< ",\"attacker_won\":" << (value->winnerSide == BattleSide::ATTACKER ? "true" : "false");
 	if(const auto * value = dynamic_cast<const PackageApplied *>(&pack))
 		output << ",\"request\":" << value->requestID
 			<< ",\"accepted\":" << (value->result ? "true" : "false");
@@ -117,6 +127,8 @@ inline void record(const CGameState & state, const CPackForClient & pack)
 				count += slot.second->getCount();
 			output << ",\"troops\":" << count;
 		}
+		if(const auto * hero = dynamic_cast<const CGHeroInstance *>(object.get()))
+			output << ",\"movement\":" << hero->movementPointsRemaining();
 		if(const auto * town = dynamic_cast<const CGTownInstance *>(object.get()))
 		{
 			uint64_t stock = 0;
@@ -125,6 +137,18 @@ inline void record(const CGameState & state, const CPackForClient & pack)
 			output << ",\"buildings\":" << town->getBuildings().size() << ",\"stock\":" << stock;
 		}
 		output << '}';
+	}
+	output << "],\"players\":[";
+	first = true;
+	for(const auto & entry : state.players)
+	{
+		if(!first)
+			output << ',';
+		first = false;
+		output << "{\"id\":" << static_cast<int>(entry.first.getNum())
+			<< ",\"gold\":" << entry.second.resources[GameResID::GOLD]
+			<< ",\"wood\":" << entry.second.resources[GameResID::WOOD]
+			<< ",\"ore\":" << entry.second.resources[GameResID::ORE] << '}';
 	}
 	output << "]}\n";
 	output.flush();

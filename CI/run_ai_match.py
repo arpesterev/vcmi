@@ -56,6 +56,7 @@ class MatchEvidence:
                     self.resources.add(object_id)
                 if old.get('kind') == 'artifact':
                     self.artifacts.add(object_id)
+                    # The fixture places its sole artifact beside the corridor guard.
                     if any(guard not in objects and
                            abs(self.initial[guard]['x'] - old['x']) <= 1 and
                            abs(self.initial[guard]['y'] - old['y']) <= 1 and
@@ -70,7 +71,8 @@ class MatchEvidence:
                 self.damaging_battles.add(event['battle'])
         if name == 'BattleResultAccepted':
             self.finished_battles.add(event['battle'])
-            if event['battle'] in self.guard_battles and event['battle'] in self.damaging_battles:
+            if (event['battle'] in self.guard_battles and event['battle'] in self.damaging_battles
+                    and event.get('attacker_won') is True):
                 self.fought_guards.add(self.guard_battles[event['battle']])
         if name == 'NewStructures':
             town_id = event['town']
@@ -94,6 +96,7 @@ class MatchEvidence:
             if event['victory']:
                 self.winners.add(event['player'])
         if name == 'PackageApplied' and not event['accepted']:
+            # Preserve diagnostics; an occasional rejected stale action is not a match failure.
             self.errors.append(f"day {event['day']}: rejected request {event['request']}")
         self.previous = objects
         self.last = event
@@ -132,11 +135,17 @@ class MatchEvidence:
 def stop_process_group(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
-    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         process.wait(timeout=5)
 
 
@@ -193,6 +202,7 @@ def run_case(client: Path, map_path: Path, data: Path, output: Path, ai: str,
                         if line:
                             evidence.accept(json.loads(line))
                 if process.poll() is not None:
+                    # Read any records flushed between the preceding read and process exit.
                     if trace.exists():
                         with trace.open('r', encoding='utf-8') as source:
                             source.seek(offset)
@@ -209,6 +219,8 @@ def run_case(client: Path, map_path: Path, data: Path, output: Path, ai: str,
                     reason = 'wall-timeout'
                     break
                 time.sleep(0.05)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            reason = f'invalid-trace: {error}'
         finally:
             stop_process_group(process)
     failures = evidence.failures(process.returncode, reason)
