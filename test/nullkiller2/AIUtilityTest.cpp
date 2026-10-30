@@ -175,6 +175,14 @@ TEST_F(Nullkiller2_LocalPlanning, completeTurnChoosesAndCollectsReachableResourc
 	const auto gateway = makeGateway(PLAYER, &client);
 	const auto before = gateway->cc->getResourceAmount(GameResID(GameResID::WOOD));
 
+	// Populate knowledge through the normal visibility event, not a selected goal.
+	FowTilesType visibleTiles;
+	NK2AI::foreach_visible_tile_pos(*gateway->cc, [&](const int3 & tile)
+	{
+		visibleTiles.insert(tile);
+	});
+	gateway->tileRevealed(visibleTiles);
+
 	// Do not feed a pickup goal to the AI: it must discover and choose it.
 	gateway->nullkiller->makeTurn();
 
