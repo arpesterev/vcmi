@@ -32,8 +32,9 @@ inline void exportFullMapFixture()
 		.heroPrimary(2, 2, 1, 1).heroSecondarySkills({}).heroSpells({})
 		.resource({27, 28, 0}, GameResID(GameResID::WOOD), 20)
 		.resource({27, 27, 0}, GameResID(GameResID::ORE), 20)
-		.monster({17, 18, 0}, pikeman, 25, 4)
-		.artifact({18, 18, 0}, ArtifactID(ArtifactID::decode("centaursAxe")));
+		// The public regression pack includes this creature's adventure-map template.
+		.monster({17, 18, 0}, CreatureID::ARCHER, 10, 4)
+		.artifact({18, 18, 0}, ArtifactID(7));
 
 	for(int y = 0; y < 36; ++y)
 		if(y != 18)
