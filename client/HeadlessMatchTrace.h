@@ -122,7 +122,7 @@ inline void record(const CGameState & state, const CPackForClient & pack)
 			uint64_t stock = 0;
 			for(const auto & dwelling : town->creatures)
 				stock += dwelling.first;
-			output << ",\"buildings\":" << town->builtBuildings.size() << ",\"stock\":" << stock;
+			output << ",\"buildings\":" << town->getBuildings().size() << ",\"stock\":" << stock;
 		}
 		output << '}';
 	}

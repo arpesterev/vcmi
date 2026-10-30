@@ -37,7 +37,10 @@ inline void exportFullMapFixture()
 
 	for(int y = 0; y < 36; ++y)
 		if(y != 18)
+		{
 			builder.terrain({17, y, 0}, TerrainId(ETerrainId::ROCK));
+			builder.terrain({18, y, 0}, TerrainId(ETerrainId::ROCK));
+		}
 
 	builder.buildAndDump("AI_FullMap_Regression");
 	const auto path = VCMIDirs::get().userCachePath() / "testMaps" / "AI_FullMap_Regression.h3m";

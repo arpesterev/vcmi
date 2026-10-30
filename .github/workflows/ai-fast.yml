@@ -49,8 +49,8 @@ jobs:
       - name: Install Linux build dependencies
         run: source CI/before_install/linux_qt6.sh
 
-      # Shared compiler-object cache: changing sources or flags automatically
-      # invalidates individual entries. Only develop pushes publish a new cache.
+      # Compiler entries are validated by source, compiler and command hashes.
+      # Trusted same-repository PRs also preserve completed compiler work.
       # No releases, third-party uploads or repository writes.
       - name: Install local compiler cache
         run: sudo apt-get install -y --no-install-recommends ccache
@@ -100,6 +100,13 @@ jobs:
       - name: Report compiler cache efficiency
         if: always()
         run: ccache --show-stats || true
+
+      - name: Preserve compiler progress for trusted PR reruns
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.build_ai.outcome != 'skipped' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run all Nullkiller2 regressions in one process
         run: |

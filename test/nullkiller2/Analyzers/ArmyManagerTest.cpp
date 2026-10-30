@@ -120,9 +120,18 @@ TEST_F(Nullkiller2_RecruitmentPlanning, unaffordableGoldCostDoesNotConsumeTheLas
 TEST_F(Nullkiller2_RecruitmentPlanning, missingRareResourceDoesNotSuppressCheapRecruitment)
 {
 	ASSERT_NO_FATAL_FAILURE(startRecruitmentMap());
+	const auto * expensive = CreatureID(CreatureID::decode("archangel")).toCreature();
+	// Public regression data do not guarantee the original creature's rare-resource cost.
+	struct RestoreCost
+	{
+		TResources & cost;
+		TResources original;
+		~RestoreCost() { cost = original; }
+	} restore{const_cast<TResources &>(expensive->getFullRecruitCost()), expensive->getFullRecruitCost()};
+	restore.cost[GameResID::GEMS] = 1;
 	TResources budget;
 	budget[GameResID::GOLD] = 100000;
-	ASSERT_FALSE(budget.canAfford(CreatureID(CreatureID::decode("archangel")).toCreature()->getFullRecruitCost()));
+	ASSERT_FALSE(budget.canAfford(expensive->getFullRecruitCost()));
 	const auto gateway = makeGateway(PLAYER);
 
 	const auto purchases = gateway->nullkiller->armyManager->getArmyAvailableToBuy(town, town, budget);

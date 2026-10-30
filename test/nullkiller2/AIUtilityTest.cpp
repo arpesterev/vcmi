@@ -80,7 +80,8 @@ protected:
 	{
 		ChangeObjPos move;
 		move.objid = hero.id;
-		move.nPos = hero.convertFromVisitablePos(resource.visitablePos());
+		// ChangeObjPos applies the object's visitable offset itself.
+		move.nPos = resource.visitablePos();
 		move.initiator = PLAYER;
 		gameState()->apply(move);
 		ASSERT_EQ(hero.visitablePos(), resource.visitablePos());
@@ -163,8 +164,13 @@ TEST_F(Nullkiller2_LocalPlanning, completeTurnChoosesAndCollectsReachableResourc
 {
 	ASSERT_NO_FATAL_FAILURE(startResourceMap());
 	const auto * resource = findFirst<CGResource>();
+	const auto * hero = findHeroByOwner(PLAYER);
 	ASSERT_NE(resource, nullptr);
+	ASSERT_NE(hero, nullptr);
 	const auto resourceID = resource->id;
+	// TinyMapGameTest initializes day zero, before the first movement refill.
+	SetMovePoints movement(hero->id, 2000);
+	gameState()->apply(movement);
 	GameHandlerTestClient client(gameState(), PLAYER);
 	const auto gateway = makeGateway(PLAYER, &client);
 	const auto before = gateway->cc->getResourceAmount(GameResID(GameResID::WOOD));
