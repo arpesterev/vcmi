@@ -14,12 +14,60 @@
 #include "../Goals/ExecuteHeroChain.h"
 #include "../Goals/Invalid.h"
 #include "CaptureObjectsBehavior.h"
+#include "DefenceBehaviorUtils.h"
 #include "../AIUtility.h"
 
 namespace NK2AI
 {
 
 using namespace Goals;
+
+namespace
+{
+bool canInterceptTownThreat(const AIPath & path, const CGObjectInstance * target, const Nullkiller * ai)
+{
+	const auto * defender = path.targetHero;
+	if(!target || target->ID != Obj::HERO || !target->getOwner().isValidPlayer()
+		|| ai->cc->getPlayerRelations(ai->playerID, target->getOwner()) != PlayerRelations::ENEMIES
+		|| ai->getHeroLockedReason(defender) != HeroLockedReason::DEFENCE
+		|| !ai->dangerHitMap->isHitMapUpToDate()
+		|| !ai->cc->isVisible(target->visitablePos())
+		|| path.targetTile() != target->visitablePos()
+		|| path.turn() != 0 || path.exchangeCount != 1 || path.heroArmy != defender
+		|| path.getFirstBlockedAction()
+		|| !isSafeToVisit(defender, path.heroArmy, path.getTotalDanger(), ai->settings->getSafeAttackRatio()))
+		return false;
+
+	for(const auto * town : ai->cc->getTownsInfo())
+	{
+		if(town->getOwner() != ai->playerID
+			|| (town->getVisitingHero() != defender && town->getGarrisonHero() != defender))
+			continue;
+
+		auto threats = ai->dangerHitMap->getTownThreats(town);
+		const auto & tileThreat = ai->dangerHitMap->getObjectThreat(town);
+		threats.push_back(tileThreat.fastestDanger);
+		threats.push_back(tileThreat.maximumDanger);
+		const auto remainingDefence = estimateTownDefence(*town, nullptr);
+		bool interceptsThreat = false;
+		for(const auto & threat : threats)
+		{
+			if(!threat.danger || threat.turn > 1)
+				continue;
+			if(threat.heroPtr.idOrNone() == target->id)
+				interceptsThreat = true;
+			else if(threat.turn == 0
+				&& !isTownDefenceSufficient(remainingDefence, threat, ai->settings->getSafeAttackRatio()))
+				return false;
+		}
+		// Defending includes removing an attacker today. Enemies that need
+		// another day are reconsidered after the battle and on the next turn;
+		// they must not permanently pin both armies in their home towns.
+		return interceptsThreat;
+	}
+	return false;
+}
+}
 
 template <typename T>
 bool vectorEquals(const std::vector<T> & v1, const std::vector<T> & v2)
@@ -121,9 +169,9 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			continue;
 		}
 
-		const CGHeroInstance * releasedDefender = nullkiller->canReleaseDefenderForTownCapture(hero, objToVisit, path)
-			? hero
-			: nullptr;
+		const CGHeroInstance * releasedDefender =
+			(nullkiller->canReleaseDefenderForTownCapture(hero, objToVisit, path)
+				|| canInterceptTownThreat(path, objToVisit, nullkiller)) ? hero : nullptr;
 		if(nullkiller->arePathHeroesLocked(path, releasedDefender))
 			continue;
 
