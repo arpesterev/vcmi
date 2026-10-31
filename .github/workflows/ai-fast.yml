@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ai-adapter-contracts:
+    name: AI adapter contracts (ASan and UBSan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure standalone adapter checks
+        run: >-
+          cmake -S AI/Integration -B out/ai-adapter-contracts
+          -DCMAKE_BUILD_TYPE=Debug -DAI_ADAPTER_SANITIZERS=ON
+      - name: Compile adapter and source tactical checks
+        run: cmake --build out/ai-adapter-contracts --parallel 2
+      - name: Run protocol, source tactical and evidence-checker tests
+        run: ctest --test-dir out/ai-adapter-contracts --output-on-failure
+
   ai-linux:
     name: Linux AI regression
     runs-on: ubuntu-24.04
@@ -46,9 +61,7 @@ jobs:
       - name: Install Linux build dependencies
         run: source CI/before_install/linux_qt6.sh
 
-      # Shared compiler-object cache: changing sources or flags automatically
-      # invalidates individual entries. Only develop pushes publish a new cache.
-      # No releases, third-party uploads or repository writes.
+      # Shared compiler-object cache. No releases or third-party uploads.
       - name: Install local compiler cache
         run: sudo apt-get install -y --no-install-recommends ccache
 
@@ -120,7 +133,6 @@ jobs:
         with:
           path: .ccache
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
-
 
   validate-code:
     name: Validate Code
