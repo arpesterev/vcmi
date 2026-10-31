@@ -79,16 +79,16 @@ struct AIPathNode : public CGPathNode
 
 struct AIPathNodeInfo
 {
-	float cost;
-	uint8_t turns;
-	int3 coord;
-	EPathfindingLayer layer;
-	uint64_t danger;
-	const CGHeroInstance * targetHero;
-	int parentIndex;
-	uint64_t chainMask;
+	float cost = 0;
+	uint8_t turns = 0;
+	int3 coord = int3(-1);
+	EPathfindingLayer layer = EPathfindingLayer::LAND;
+	uint64_t danger = 0;
+	const CGHeroInstance * targetHero = nullptr;
+	int parentIndex = -1;
+	uint64_t chainMask = 0;
 	std::shared_ptr<const SpecialAction> specialAction;
-	bool actionIsBlocked;
+	bool actionIsBlocked = false;
 };
 
 struct AIPath
@@ -96,13 +96,15 @@ struct AIPath
 	using NodesVector = boost::container::small_vector<AIPathNodeInfo, 16>;
 
 	NodesVector nodes;
-	uint64_t targetObjectDanger;
-	uint64_t armyLoss;
-	uint64_t targetObjectArmyLoss;
-	const CGHeroInstance * targetHero;
-	const CCreatureSet * heroArmy;
-	uint64_t chainMask;
-	uint8_t exchangeCount;
+	// Synthetic routes and partially reconstructed paths must not inherit
+	// indeterminate danger or losses from a previous allocation.
+	uint64_t targetObjectDanger = 0;
+	uint64_t armyLoss = 0;
+	uint64_t targetObjectArmyLoss = 0;
+	const CGHeroInstance * targetHero = nullptr;
+	const CCreatureSet * heroArmy = nullptr;
+	uint64_t chainMask = 0;
+	uint8_t exchangeCount = 0;
 
 	AIPath();
 

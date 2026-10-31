@@ -14,6 +14,7 @@
 #include "../Goals/ExecuteHeroChain.h"
 #include "../Goals/Invalid.h"
 #include "CaptureObjectsBehavior.h"
+#include "DefenceBehaviorUtils.h"
 #include "../AIUtility.h"
 
 namespace NK2AI
@@ -21,13 +22,58 @@ namespace NK2AI
 
 using namespace Goals;
 
+namespace
+{
+bool canInterceptTownThreat(const AIPath & path, const CGObjectInstance * target, const Nullkiller * ai)
+{
+	const auto * defender = path.targetHero;
+	if(!target || target->ID != Obj::HERO || !target->getOwner().isValidPlayer()
+		|| ai->cc->getPlayerRelations(ai->playerID, target->getOwner()) != PlayerRelations::ENEMIES
+		|| ai->getHeroLockedReason(defender) != HeroLockedReason::DEFENCE
+		|| !ai->dangerHitMap->isHitMapUpToDate()
+		|| !ai->cc->isVisible(target->visitablePos())
+		|| path.targetTile() != target->visitablePos()
+		|| path.turn() != 0 || path.exchangeCount != 1 || path.heroArmy != defender
+		|| path.getFirstBlockedAction()
+		|| !isSafeToVisit(defender, path.heroArmy, path.getTotalDanger(), ai->settings->getSafeAttackRatio()))
+		return false;
+
+	for(const auto * town : ai->cc->getTownsInfo())
+	{
+		if(town->getOwner() != ai->playerID
+			|| (town->getVisitingHero() != defender && town->getGarrisonHero() != defender))
+			continue;
+
+		auto threats = ai->dangerHitMap->getTownThreats(town);
+		const auto & tileThreat = ai->dangerHitMap->getObjectThreat(town);
+		threats.push_back(tileThreat.fastestDanger);
+		threats.push_back(tileThreat.maximumDanger);
+		const auto remainingDefence = estimateTownDefence(*town, nullptr);
+		bool interceptsThreat = false;
+		for(const auto & threat : threats)
+		{
+			if(!threat.danger || threat.turn > 1)
+				continue;
+			if(threat.heroPtr.idOrNone() == target->id)
+				interceptsThreat = true;
+			else if(threat.turn == 0
+				&& !isTownDefenceSufficient(remainingDefence, threat, ai->settings->getSafeAttackRatio()))
+				return false;
+		}
+		// Defending includes removing an attacker today. Enemies that need
+		// another day are reconsidered after the battle and on the next turn;
+		// they must not permanently pin both armies in their home towns.
+		return interceptsThreat;
+	}
+	return false;
+}
+}
+
 template <typename T>
 bool vectorEquals(const std::vector<T> & v1, const std::vector<T> & v2)
 {
-	return vstd::contains_if(v1, [&](T o) -> bool
-	{
-		return vstd::contains(v2, o);
-	});
+	// Sharing one object/type does not make two capture goals identical.
+	return v1.size() == v2.size() && std::is_permutation(v1.begin(), v1.end(), v2.begin());
 }
 
 bool isBetterTownCapturePath(const AIPath & candidate, const AIPath & current)
@@ -80,13 +126,21 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 	Goals::TGoalVec tasks;
 	tasks.reserve(paths.size());
 	std::unordered_map<HeroRole, const AIPath *> closestWaysByRole;
-	std::unordered_map<const CGHeroInstance *, const AIPath *> bestEnemyTownPathsByHero;
+	std::unordered_map<const CGHeroInstance *, size_t> bestEnemyTownPathsByHero;
 	std::vector<TSubgoal> waysToVisitObj;
 	const bool isEnemyTown = isEnemyTownCaptureTarget(objToVisit, nullkiller);
+	const bool isEnemyTarget = isEnemyTown || (objToVisit && objToVisit->ID == Obj::HERO
+		&& objToVisit->getOwner().isValidPlayer()
+		&& nullkiller->cc->getPlayerRelations(nullkiller->playerID, objToVisit->getOwner()) == PlayerRelations::ENEMIES);
 
 	for(const auto & path : paths)
 	{
 		tasks.push_back(sptr(Goals::Invalid()));
+		// Keep one placeholder per input route: defence and army gathering
+		// correlate the returned vector with their original path indices.
+		if(!path.targetHero || !path.heroArmy || path.nodes.empty()
+			|| !std::isfinite(path.movementCost()) || path.movementCost() < 0)
+			continue;
 
 #if NK2AI_TRACE_LEVEL >= 2
 		logAi->trace("Path found %s", path.toString());
@@ -115,9 +169,9 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			continue;
 		}
 
-		const CGHeroInstance * releasedDefender = nullkiller->canReleaseDefenderForTownCapture(hero, objToVisit, path)
-			? hero
-			: nullptr;
+		const CGHeroInstance * releasedDefender =
+			(nullkiller->canReleaseDefenderForTownCapture(hero, objToVisit, path)
+				|| canInterceptTownThreat(path, objToVisit, nullkiller)) ? hero : nullptr;
 		if(nullkiller->arePathHeroesLocked(path, releasedDefender))
 			continue;
 
@@ -129,6 +183,12 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 			&& nullkiller->dangerHitMap->isHitMapUpToDate()
 			&& isKnownUnsafeAtEndOfTurn(nullkiller->dangerHitMap->getTileThreat(path.targetTile()),
 				hero, path.heroArmy, 0, nullkiller->settings->getSafeAttackRatio()))
+			continue;
+
+		// Match ExecuteHeroChain's safety rule, including its combat-target
+		// exception. An enemy town or hero is evaluated as a battle, not a pickup.
+		if(!isEnemyTarget && nullkiller->dangerHitMap->isHitMapUpToDate()
+			&& hasUnsafeKnownOvernightStop(path, nullkiller))
 			continue;
 
 		auto firstBlockedAction = path.getFirstBlockedAction();
@@ -179,9 +239,10 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 			if(isEnemyTown)
 			{
-				auto & bestPath = bestEnemyTownPathsByHero[path.targetHero];
-				if(!bestPath || isBetterTownCapturePath(path, *bestPath))
-					bestPath = &path;
+				const size_t pathIndex = tasks.size() - 1;
+				const auto [bestPath, inserted] = bestEnemyTownPathsByHero.try_emplace(path.targetHero, pathIndex);
+				if(!inserted && isBetterTownCapturePath(path, paths[bestPath->second]))
+					bestPath->second = pathIndex;
 
 				continue;
 			}
@@ -195,11 +256,12 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 	for(const auto & heroPath : bestEnemyTownPathsByHero)
 	{
-		const auto * path = heroPath.second;
-		auto sharedPtr = sptr(ExecuteHeroChain(*path, objToVisit));
+		const size_t pathIndex = heroPath.second;
+		auto sharedPtr = sptr(ExecuteHeroChain(paths[pathIndex], objToVisit));
 
 		waysToVisitObj.push_back(sharedPtr);
-		tasks.push_back(sharedPtr);
+		// Selecting one route per hero must preserve the input/output mapping.
+		tasks[pathIndex] = sharedPtr;
 	}
 
 	for(const auto & wayGoal : waysToVisitObj)
@@ -210,7 +272,11 @@ Goals::TGoalVec CaptureObjectsBehavior::getVisitGoals(
 
 		if(closestWay)
 		{
-			way->closestWayRatio = closestWay->movementCost() / way->getPath().movementCost();
+			const float movementCost = way->getPath().movementCost();
+			// A visit at the current position must not turn into a NaN priority.
+			way->closestWayRatio = movementCost > 0
+				? std::min(1.0f, closestWay->movementCost() / movementCost)
+				: 1.0f;
 		}
 	}
 
@@ -253,6 +319,9 @@ void CaptureObjectsBehavior::decomposeObjects(
 				vstd::concatenate(tasksLocal, getVisitGoals(paths, nullkiller, objToVisit, forceVisit));
 			}
 
+			// Indexed placeholders are useful only to getVisitGoals callers.
+			// They must not hide the absence of nearby tasks from the far scan.
+			vstd::erase_if(tasksLocal, [](const TSubgoal & goal) { return goal->invalid(); });
 			std::lock_guard lock(sync); // FIXME: consider using tbb::parallel_reduce instead to avoid mutex overhead
 			vstd::concatenate(result, tasksLocal);
 		}
@@ -262,11 +331,6 @@ void CaptureObjectsBehavior::decomposeObjects(
 Goals::TGoalVec CaptureObjectsBehavior::decompose(const Nullkiller * aiNk) const
 {
 	Goals::TGoalVec tasks;
-
-	vstd::erase_if(tasks, [](TSubgoal task) -> bool
-	{
-		return task->invalid();
-	});
 
 	if(specificObjects)
 	{

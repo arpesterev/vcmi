@@ -28,44 +28,64 @@ Goals::TGoalVec BuyArmyBehavior::decompose(const Nullkiller * aiNk) const
 {
 	Goals::TGoalVec tasks;
 	const auto heroes = aiNk->cc->getHeroesInfo();
-	if(heroes.empty())
-		return tasks;
+	const auto availableResources = aiNk->getFreeResources();
 
-	// Simplification: Moved this call before getting into the decomposer
-	// aiNk->dangerHitMap->updateHitMap();
-
-	for(const auto town : aiNk->cc->getTownsInfo())
+	for(const auto * town : aiNk->cc->getTownsInfo())
 	{
-		uint8_t closestThreat = aiNk->dangerHitMap->getTileThreat(town->visitablePos()).fastestDanger.turn;
-		if(closestThreat >= 2 && aiNk->buildAnalyzer->isGoldPressureOverMax() && !town->hasBuilt(BuildingID::CITY_HALL) &&
-		   aiNk->cc->canBuildStructure(town, BuildingID::CITY_HALL) != EBuildingState::FORBIDDEN)
+		bool immediateThreat = false;
+		if(aiNk->dangerHitMap->isHitMapUpToDate())
 		{
-			return tasks;
+			const auto & threat = aiNk->dangerHitMap->getObjectThreat(town);
+			immediateThreat = (threat.fastestDanger.danger > 0 && threat.fastestDanger.turn <= 1)
+				|| (threat.maximumDanger.danger > 0 && threat.maximumDanger.turn <= 1);
 		}
 
-		auto townArmyAvailableToBuy = aiNk->armyManager->getArmyAvailableToBuyAsCCreatureSet(town, aiNk->getFreeResources());
-
-		for(const CGHeroInstance * targetHero : heroes)
+		if(!immediateThreat && aiNk->buildAnalyzer->isGoldPressureOverMax()
+			&& !town->hasBuilt(BuildingID::CITY_HALL)
+			&& aiNk->cc->canBuildStructure(town, BuildingID::CITY_HALL) != EBuildingState::FORBIDDEN)
 		{
-			if(aiNk->heroManager->getHeroRoleOrDefaultInefficient(targetHero) == HeroRole::MAIN)
+			// Saving for income in this town must not suppress all later towns.
+			continue;
+		}
+
+		const auto affordableReinforcement = aiNk->armyManager->howManyReinforcementsCanBuy(
+			town->getUpperArmy(), town, availableResources);
+		uint64_t reinforcement = immediateThreat ? affordableReinforcement : 0;
+
+		if(!immediateThreat && affordableReinforcement > 0)
+		{
+			const auto townArmy = aiNk->armyManager->getArmyAvailableToBuyAsCCreatureSet(town, availableResources);
+			for(const auto * hero : heroes)
 			{
-				auto reinforcement = aiNk->armyManager->howManyReinforcementsCanGet(
-					targetHero,
-					targetHero,
-					&*townArmyAvailableToBuy,
-					TerrainId::NONE);
+				if(aiNk->heroManager->getHeroRoleOrDefaultInefficient(hero) != HeroRole::MAIN)
+					continue;
 
-				// TODO: Mircea: Shouldn't matter if hero is MAIN when buying reinforcements if there's a threat around
-				// Evaluate the entire code with the outside towns loop too.
-				if(reinforcement)
-					vstd::amin(reinforcement, aiNk->armyManager->howManyReinforcementsCanBuy(town->getUpperArmy(), town));
-
-				if(reinforcement)
-				{
-					tasks.push_back(Goals::sptr(Goals::BuyArmy(town, reinforcement).setpriority(reinforcement)));
-				}
+				const auto useful = aiNk->armyManager->howManyReinforcementsCanGet(
+					hero, hero, townArmy.get(), TerrainId::NONE);
+				reinforcement = std::max<uint64_t>(reinforcement, std::min(useful, affordableReinforcement));
 			}
 		}
+
+		// Existing troops can be upgraded even when every dwelling is sold out.
+		// A visiting hero must not be forced to leave and re-enter its own town.
+		auto upgrade = aiNk->armyManager->calculateCreaturesUpgrade(town->getUpperArmy(), town, availableResources);
+		int64_t upgradeValue = std::max<int64_t>(0, upgrade.upgradeValue);
+		const auto * visitor = town->getVisitingHero();
+		if(visitor && visitor->getOwner() == aiNk->playerID && visitor != town->getUpperArmy())
+		{
+			auto remainingResources = availableResources - upgrade.upgradeCost;
+			remainingResources.removeNegative();
+			upgradeValue += std::max<int64_t>(0,
+				aiNk->armyManager->calculateCreaturesUpgrade(visitor, town, remainingResources).upgradeValue);
+		}
+
+		if(reinforcement == 0 && upgradeValue == 0)
+			continue;
+
+		// One goal per town; urgent defence is independent of MAIN hero assignment.
+		const float value = static_cast<float>(reinforcement) + static_cast<float>(upgradeValue);
+		const float priority = immediateThreat ? 1000000.0f + std::min(value, 99999.0f) : value;
+		tasks.push_back(sptr(BuyArmy(town, reinforcement).setpriority(priority)));
 	}
 
 	return tasks;

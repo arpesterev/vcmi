@@ -12,13 +12,16 @@
 #include "AI/Nullkiller2/AIGateway.h"
 #include "AI/Nullkiller2/AIUtility.h"
 
+#include "mock/GameHandlerTestClient.h"
 #include "nullkiller2/NullkillerTest.h"
 
 #include "lib/CPlayerState.h"
 #include "lib/gameState/CGameState.h"
 #include "lib/gameState/QuestInfo.h"
 #include "lib/mapObjects/CGHeroInstance.h"
+#include "lib/mapObjects/CGResource.h"
 #include "lib/mapObjects/Quest.h"
+#include "lib/networkPacks/PacksForClient.h"
 
 namespace
 {
@@ -57,6 +60,40 @@ TinyH3M::TinyH3MBuilder makeQuestGuardMap()
 }
 
 class Nullkiller2_AIUtility : public NullkillerTest {};
+
+class Nullkiller2_LocalPlanning : public NullkillerTest
+{
+protected:
+	void startResourceMap()
+	{
+		TinyH3M::TinyH3MBuilder builder(EMapFormat::SOD);
+		builder.size(36, false).name("NK2LocalResourcePlanning")
+			.playerActive(PLAYER).playerActive(PlayerColor(1))
+			.hero(HERO_POS, HeroTypeID(0), PLAYER)
+			.resource({7, 5, 0}, GameResID(GameResID::WOOD), 20)
+			.town({30, 30, 0}, FactionID::CASTLE, PlayerColor(1));
+		// A small visible clearing isolates autonomous pickup from the much
+		// higher-priority search for a town by a townless player. No goal is
+		// injected, and the distant opponent stays outside normal visibility.
+		for(int x = 0; x < 36; ++x)
+			for(int y = 0; y < 36; ++y)
+				if(!(x >= 3 && x <= 9 && y >= 3 && y <= 7)
+					&& !(x >= 27 && x <= 32 && y >= 28 && y <= 32))
+					builder.terrain({x, y, 0}, TerrainId(ETerrainId::ROCK));
+		startWithMap(std::move(builder));
+	}
+
+	void placeVisitorOnResource(CGHeroInstance & hero, const CGResource & resource)
+	{
+		ChangeObjPos move;
+		move.objid = hero.id;
+		// ChangeObjPos applies the object's visitable offset itself.
+		move.nPos = resource.visitablePos();
+		move.initiator = PLAYER;
+		gameState()->apply(move);
+		ASSERT_EQ(hero.visitablePos(), resource.visitablePos());
+	}
+};
 }
 
 TEST_F(Nullkiller2_AIUtility, trackedSeerWithoutActiveQuestIsNotVisitable)
@@ -95,4 +132,78 @@ TEST_F(Nullkiller2_AIUtility, knownUnmetQuestGuardIsNotVisitable)
 	gameState()->players.at(PLAYER).quests.push_back(guard->getQuestIdentity());
 
 	EXPECT_FALSE(NK2AI::shouldVisit(gateway->nullkiller.get(), hero, guard));
+}
+
+TEST_F(Nullkiller2_LocalPlanning, ownVisitorDoesNotHideKnownResourceGuards)
+{
+	ASSERT_NO_FATAL_FAILURE(startResourceMap());
+	auto * resource = findFirst<CGResource>();
+	auto * hero = findHeroByOwner(PLAYER);
+	ASSERT_NE(resource, nullptr);
+	ASSERT_NE(hero, nullptr);
+	ASSERT_TRUE(resource->setCreature(SlotID(0), CreatureID(CreatureID::decode("pikeman")), 5));
+	const auto gateway = makeGateway(PLAYER);
+	gateway->nullkiller->memory->markObjectVisited(resource);
+	const auto expected = resource->estimateCombatValue();
+	ASSERT_GT(expected, 0u);
+	ASSERT_EQ(gateway->nullkiller->dangerEvaluator->evaluateDanger(resource), expected);
+	ASSERT_NO_FATAL_FAILURE(placeVisitorOnResource(*hero, *resource));
+
+	EXPECT_EQ(gateway->nullkiller->dangerEvaluator->evaluateDanger(resource->visitablePos(), hero, false), expected);
+}
+
+TEST_F(Nullkiller2_LocalPlanning, unknownResourceGuardsAreNotRevealedByVisitorFiltering)
+{
+	ASSERT_NO_FATAL_FAILURE(startResourceMap());
+	auto * resource = findFirst<CGResource>();
+	auto * hero = findHeroByOwner(PLAYER);
+	ASSERT_NE(resource, nullptr);
+	ASSERT_NE(hero, nullptr);
+	ASSERT_TRUE(resource->setCreature(SlotID(0), CreatureID(CreatureID::decode("pikeman")), 5));
+	const auto gateway = makeGateway(PLAYER);
+	ASSERT_EQ(gateway->nullkiller->dangerEvaluator->evaluateDanger(resource), 0u);
+	ASSERT_NO_FATAL_FAILURE(placeVisitorOnResource(*hero, *resource));
+
+	EXPECT_EQ(gateway->nullkiller->dangerEvaluator->evaluateDanger(resource->visitablePos(), hero, false), 0u);
+}
+
+TEST_F(Nullkiller2_LocalPlanning, completeTurnChoosesAndCollectsReachableResource)
+{
+	ASSERT_NO_FATAL_FAILURE(startResourceMap());
+	const auto * resource = findFirst<CGResource>();
+	const auto * hero = findHeroByOwner(PLAYER);
+	ASSERT_NE(resource, nullptr);
+	ASSERT_NE(hero, nullptr);
+	const auto resourceID = resource->id;
+	// TinyMapGameTest initializes day zero, before the first movement refill.
+	SetMovePoints movement(hero->id, 2000);
+	gameState()->apply(movement);
+	GameHandlerTestClient client(gameState(), PLAYER);
+	const auto gateway = makeGateway(PLAYER, &client);
+	const auto before = gateway->cc->getResourceAmount(GameResID(GameResID::WOOD));
+	ASSERT_EQ(gateway->cc->tryGetObj(resourceID), resource);
+	ASSERT_TRUE(gateway->cc->getTownsInfo(false).empty());
+
+	const auto refreshVisibleState = [&]
+	{
+		// Mirror the client-side invalidation and visibility notifications that
+		// are absent when CGameHandler applies packets directly to a shared state.
+		gateway->nullkiller->invalidatePaths();
+		gateway->nullkiller->invalidatePathfinderData();
+		FowTilesType visibleTiles;
+		NK2AI::foreach_visible_tile_pos(*gateway->cc, [&](const int3 & tile)
+		{
+			visibleTiles.insert(tile);
+		});
+		gateway->tileRevealed(visibleTiles);
+	};
+	client.onRequestApplied = refreshVisibleState;
+	refreshVisibleState();
+
+	// Do not feed a pickup goal to the AI: it must discover and choose it.
+	gateway->nullkiller->makeTurn();
+	client.onRequestApplied = {};
+
+	EXPECT_EQ(gateway->cc->tryGetObj(resourceID), nullptr);
+	EXPECT_GT(gateway->cc->getResourceAmount(GameResID(GameResID::WOOD)), before);
 }

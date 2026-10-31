@@ -434,6 +434,25 @@ bool handleGarrisonHeroFromPreviousTurn(const CGTownInstance * town, Goals::TGoa
 		return true;
 	}
 
+	const auto * visitingHero = getOwnedTownHero(town, town->getVisitingHero());
+	if(visitingHero
+		&& !aiNk->isHeroLocked(visitingHero)
+		&& garrisonHero->movementPointsRemaining() > 0
+		&& garrisonHero->estimateHeroCombatValue() > visitingHero->estimateHeroCombatValue()
+		&& std::none_of(threats.begin(), threats.end(), [](const HitMapInfo & threat)
+		{
+			return threat.danger > 0 && threat.turn <= 1;
+		}))
+	{
+		// An occupied visitor slot permits a swap without adding a wandering
+		// hero. Otherwise a weak idle visitor can strand the main army forever.
+		// Strictly prefer the stronger army to avoid swapping back next pass.
+		logAi->debug("Releasing stronger garrison hero %s past visiting hero %s in %s",
+			garrisonHero->getNameTextID(), visitingHero->getNameTextID(), town->getNameTextID());
+		tasks.push_back(Goals::sptr(Goals::ExchangeSwapTownHeroes(town, nullptr).setpriority(5)));
+		return true;
+	}
+
 	if(!town->getVisitingHero())
 	{
 		if(aiNk->cc->getHeroCount(aiNk->playerID, false) < GameConstants::MAX_HEROES_PER_PLAYER)

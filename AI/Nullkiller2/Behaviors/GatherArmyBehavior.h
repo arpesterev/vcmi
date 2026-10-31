@@ -15,6 +15,11 @@
 
 namespace NK2AI
 {
+struct AIPath;
+
+/// Delivery fights are fought by the carrier, before meeting the recipient.
+bool isSafeArmyDeliveryPath(const AIPath & path, float safeAttackRatio);
+
 namespace Goals
 {
 	class GatherArmyBehavior : public CGoal<GatherArmyBehavior>

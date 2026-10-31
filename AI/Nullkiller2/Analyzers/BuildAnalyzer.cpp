@@ -62,9 +62,9 @@ void BuildAnalyzer::update()
 
 	for(const CGTownInstance * town : towns)
 	{
-		if(town->built >= aiNk->cc->getSettings().getInteger(EGameSettings::TOWNS_BUILDINGS_PER_TURN_CAP))
-			continue; // Not much point in trying anything - can't built in this town anymore today
-
+		// The daily construction limit does not remove a town's economy,
+		// existing dwellings or upgrade facilities. canBuildStructure below
+		// filters today's unavailable construction actions individually.
 #if NK2AI_TRACE_LEVEL >= 1
 		logAi->trace("Checking town %s", town->getNameTranslated());
 #endif
@@ -397,7 +397,7 @@ BuildingInfo BuildAnalyzer::getBuildingOrPrerequisite(
 				logAi->trace("Can't build %d. Needs other dwelling %d", b.getNum(), missingBuildings.front().getNum());
 #endif
 			}
-			else if(missingBuildings[0] != b)
+			else if(!missingBuildings.empty() && missingBuildings[0] != b)
 			{
 #if NK2AI_TRACE_LEVEL >= 1
 				logAi->trace("Can't build %d. Needs %d", b.getNum(), missingBuildings[0].num);
@@ -429,7 +429,7 @@ BuildingInfo BuildAnalyzer::getBuildingOrPrerequisite(
 			else
 			{
 #if NK2AI_TRACE_LEVEL >= 1
-				logAi->trace("Can't build. The building requires itself as prerequisite");
+				logAi->trace("Can't build. No usable prerequisite was found");
 #endif
 				return info;
 			}

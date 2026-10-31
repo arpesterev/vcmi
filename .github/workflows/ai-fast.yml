@@ -18,6 +18,9 @@ jobs:
     name: Linux AI regression
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      regressions: ${{ steps.regressions.outputs.diagnostics }}
+      fullmatch: ${{ steps.fullmatch.outputs.diagnostics }}
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -33,6 +36,9 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Test the full-match result checker
+        run: python3 -m unittest discover -s CI -p test_ai_match.py -v
+
       - name: Prepare APT staging directory
         run: mkdir -p "$RUNNER_TEMP/apt-cache"
 
@@ -46,8 +52,8 @@ jobs:
       - name: Install Linux build dependencies
         run: source CI/before_install/linux_qt6.sh
 
-      # Shared compiler-object cache: changing sources or flags automatically
-      # invalidates individual entries. Only develop pushes publish a new cache.
+      # Compiler entries are validated by source, compiler and command hashes.
+      # Trusted same-repository PRs also preserve completed compiler work.
       # No releases, third-party uploads or repository writes.
       - name: Install local compiler cache
         run: sudo apt-get install -y --no-install-recommends ccache
@@ -88,24 +94,94 @@ jobs:
           /usr/bin/time -f 'Core stage elapsed: %e seconds'
           cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
 
-      - name: Build AI test suite and headless server only
+      - name: Build AI tests and real headless client
+        id: build_ai
         run: >-
-          /usr/bin/time -f 'AI/test stage elapsed: %e seconds'
-          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
+          /usr/bin/time -f 'AI and client stage elapsed: %e seconds'
+          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver vcmiclient --parallel 3
 
       - name: Report compiler cache efficiency
         if: always()
         run: ccache --show-stats || true
 
+      - name: Preserve compiler progress for trusted PR reruns
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.build_ai.outcome != 'skipped' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Run all Nullkiller2 regressions in one process
+        id: regressions
         run: |
           cd out/build/linux-gcc-test/bin
           ./vcmitest --gtest_filter='Nullkiller2_*:ResourceTradingTurnTest.*' --gtest_list_tests > ai-test-names.txt
           grep -q '^Nullkiller2_' ai-test-names.txt
+          status=0
           timeout 900 ./vcmitest --gtest_filter='Nullkiller2_*:ResourceTradingTurnTest.*' \
-            --gtest_output=xml:fast-ai-tests.xml
+            --gtest_output=xml:fast-ai-tests.xml > "$RUNNER_TEMP/ai-regressions.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/ai-regressions.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          report = {}
+          xml = Path('fast-ai-tests.xml')
+          if xml.exists():
+              root = ET.parse(xml).getroot()
+              report['totals'] = root.attrib
+              report['failures'] = [dict(test=case.get('classname', '') + '.' + case.get('name', ''),
+                  errors=[(failure.text or '')[:3000] for failure in case.findall('failure')])
+                  for case in root.iter('testcase') if case.findall('failure')]
+          lines = (Path(os.environ['RUNNER_TEMP']) / 'ai-regressions.log').read_text(errors='replace').splitlines()
+          excerpts = []
+          for index, line in enumerate(lines):
+              if line.startswith('Last engine messages for '):
+                  end = next((i for i in range(index + 1, len(lines)) if lines[i].startswith('[ RUN')), len(lines))
+                  section = lines[index:end]
+                  excerpts.append(section[:15] + section[-70:])
+          report['engine_messages'] = excerpts[:3]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('diagnostics=' + json.dumps(report, separators=(',', ':')) + '\n')
+          PY
+          exit "$status"
+
+      - name: Run real full-map match and EmptyAI negative control
+        id: fullmatch
+        if: ${{ !cancelled() && steps.build_ai.outcome == 'success' }}
+        timeout-minutes: 15
+        run: |
+          bin="$GITHUB_WORKSPACE/out/build/linux-gcc-test/bin"
+          (
+            cd "$bin"
+            VCMI_TEST_RNG_SEED=1337 ./vcmitest --export-ai-match-map
+          ) | tee "$RUNNER_TEMP/ai-match-map.log"
+          map=$(sed -n 's/^AI_MATCH_MAP=//p' "$RUNNER_TEMP/ai-match-map.log")
+          test -f "$map"
+          export MATCH_OUTPUT="$RUNNER_TEMP/ai-match-${{ github.run_id }}-${{ github.run_attempt }}"
+          status=0
+          python3 CI/run_ai_match.py \
+            --client "$bin/vcmiclient" --map "$map" \
+            --data "$HOME/.local/share/vcmi" \
+            --output "$MATCH_OUTPUT" \
+            --max-days 28 --timeout 600 --seed 1337 || status=$?
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          reports = []
+          for result in sorted(Path(os.environ['MATCH_OUTPUT']).rglob('result.json')):
+              report = json.loads(result.read_text())
+              log = result.parent / 'client.log'
+              if report.get('failures') and log.exists():
+                  report['log_tail'] = log.read_text(errors='replace').splitlines()[-55:]
+              reports.append(report)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('diagnostics=' + json.dumps(reports, separators=(',', ':')) + '\n')
+          PY
+          exit "$status"
 
       - name: Check headless server startup
+        if: ${{ !cancelled() && steps.build_ai.outcome == 'success' }}
         run: |
           cd out/build/linux-gcc-test/bin
           ./vcmiserver --dummy-run 2>server-errors.log
@@ -121,6 +197,24 @@ jobs:
           path: .ccache
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
+  ai-diagnostics:
+    name: AI result summary
+    needs: ai-linux
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report regression and full-match evidence
+        env:
+          REGRESSIONS: ${{ needs.ai-linux.outputs.regressions }}
+          FULLMATCH: ${{ needs.ai-linux.outputs.fullmatch }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          for name in ('REGRESSIONS', 'FULLMATCH'):
+              print(name)
+              value = os.environ.get(name)
+              print(json.dumps(json.loads(value), indent=2) if value else 'No report: inspect preceding build/startup steps.')
+          PY
 
   validate-code:
     name: Validate Code

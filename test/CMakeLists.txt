@@ -135,8 +135,8 @@ set(test_SRCS
 		server/battles/SpellcastActionTest.cpp
 		server/battles/SpellTargetStepTest.cpp
 		server/battles/SummonGuardiansTest.cpp
-		server/battles/TurnOrderTest.cpp
 		server/battles/TransmutationTest.cpp
+		server/battles/TurnOrderTest.cpp
 		server/battles/WalkActionTest.cpp
 		server/activities/ActivityProcessorTest.cpp
 		server/ArmyManagementTest.cpp
@@ -146,10 +146,10 @@ set(test_SRCS
 		mock/BattleFake.cpp
 		mock/GameHandlerTestClient.cpp
 		mock/GameHandlerTestServer.cpp
-		mock/mock_IGameEventCallback.cpp
+		mock/mock_BonusBearer.cpp
+ 		mock/mock_IGameEventCallback.cpp
  		mock/mock_MapService.cpp
  		mock/mock_MapServiceTinyH3M.cpp
- 		mock/mock_BonusBearer.cpp
 		mock/mock_CPSICallback.cpp
 		mock/TinyMapGameTest.cpp
 		mock/TinyH3MWriter.cpp
@@ -210,10 +210,12 @@ if(ENABLE_NULLKILLER2_AI)
 		nullkiller2/Analyzers/DangerHitMapAnalyzerTest.cpp
 		nullkiller2/Analyzers/HeroManagerTest.cpp
 		nullkiller2/Analyzers/ObjectClusterizerTest.cpp
+		nullkiller2/Behaviors/BehaviorReviewTest.cpp
 		nullkiller2/Behaviors/DefenceBehaviorTest.cpp
 		nullkiller2/Behaviors/EscapeBehaviorTest.cpp
 		nullkiller2/Behaviors/GatherArmyBehaviorTest.cpp
 		nullkiller2/Behaviors/OneWayPortalBehaviorTest.cpp
+		nullkiller2/Behaviors/PathSelectionTest.cpp
 		nullkiller2/Behaviors/RecruitHeroBehaviorTest.cpp
 		nullkiller2/Behaviors/WaterExplorationBehaviorTest.cpp
 		nullkiller2/Engine/PriorityEvaluatorTest.cpp
