@@ -63,7 +63,7 @@ private:
 
 	static double lossValue(const CStack & stack, const DamageEstimation & estimate)
 	{
-		const double health = static_cast<double>(stack.getTotalHealth());
+		const double health = static_cast<double>(stack.getAvailableHealth());
 		if(health <= 0)
 			return 0;
 		const double damage = std::min(health,
@@ -74,15 +74,19 @@ private:
 	static double attackValue(CPlayerBattleCallback & battle, const CStack & attacker,
 		const CStack & defender, const BattleHex & from, bool shooting, int distance)
 	{
-		const auto before = std::make_tuple(attacker.getPosition().toInt(), defender.getPosition().toInt(),
-			attacker.getTotalHealth(), defender.getTotalHealth());
+		const int attackerPosition = attacker.getPosition().toInt();
+		const int defenderPosition = defender.getPosition().toInt();
+		const int64_t attackerHealth = attacker.getAvailableHealth();
+		const int64_t defenderHealth = defender.getAvailableHealth();
 		BattleAttackInfo info(&attacker, &defender, distance, shooting);
 		info.attackerPos = from;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
 		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
-		if(before != std::make_tuple(attacker.getPosition().toInt(), defender.getPosition().toInt(),
-			attacker.getTotalHealth(), defender.getTotalHealth()))
+		if(attackerPosition != attacker.getPosition().toInt()
+			|| defenderPosition != defender.getPosition().toInt()
+			|| attackerHealth != attacker.getAvailableHealth()
+			|| defenderHealth != defender.getAvailableHealth())
 			throw std::logic_error("Damage preview modified a live battle unit");
 		return value;
 	}
