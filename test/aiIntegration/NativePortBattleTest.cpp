@@ -96,7 +96,7 @@ protected:
 		{
 			int64_t total = 0;
 			for(const auto & unit : battle()->stacks)
-				total += unit->getTotalHealth();
+				total += unit->getAvailableHealth();
 			return total;
 		};
 		while(server.battleResults.empty() && decisions < 512)
