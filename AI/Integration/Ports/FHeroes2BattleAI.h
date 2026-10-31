@@ -74,14 +74,14 @@ private:
 	static double attackValue(CPlayerBattleCallback & battle, const CStack & attacker,
 		const CStack & defender, const BattleHex & from, bool shooting, int distance)
 	{
-		const auto before = std::make_tuple(attacker.getPosition(), defender.getPosition(),
+		const auto before = std::make_tuple(attacker.getPosition().toInt(), defender.getPosition().toInt(),
 			attacker.getTotalHealth(), defender.getTotalHealth());
 		BattleAttackInfo info(&attacker, &defender, distance, shooting);
 		info.attackerPos = from;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
 		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
-		if(before != std::make_tuple(attacker.getPosition(), defender.getPosition(),
+		if(before != std::make_tuple(attacker.getPosition().toInt(), defender.getPosition().toInt(),
 			attacker.getTotalHealth(), defender.getTotalHealth()))
 			throw std::logic_error("Damage preview modified a live battle unit");
 		return value;
