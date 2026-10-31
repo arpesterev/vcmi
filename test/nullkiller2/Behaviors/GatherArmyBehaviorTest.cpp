@@ -92,17 +92,21 @@ protected:
 		ASSERT_TRUE(visitor->setCreature(SlotID(0), CreatureID::ARCHER, visitorCount));
 		garrison->setMovementPoints(2000);
 		visitor->setMovementPoints(2000);
-		putHeroInGarrison(*garrison, *town);
-		ChangeObjPos move;
-		move.objid = visitor->id;
-		move.nPos = town->visitablePos();
-		move.initiator = PLAYER;
-		gameState()->apply(move);
+		for(const auto * hero : {garrison, visitor})
+		{
+			ChangeObjPos move;
+			move.objid = hero->id;
+			move.nPos = town->visitablePos();
+			move.initiator = PLAYER;
+			gameState()->apply(move);
+		}
 		SetHeroesInTown setHeroes;
 		setHeroes.tid = town->id;
 		setHeroes.garrison = garrison->id;
 		setHeroes.visiting = visitor->id;
 		gameState()->apply(setHeroes);
+		ASSERT_EQ(town->getGarrisonHero(), garrison);
+		ASSERT_EQ(town->getVisitingHero(), visitor);
 		revealMap(PLAYER);
 	}
 
