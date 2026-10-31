@@ -2,7 +2,7 @@ name: Fast AI checks
 
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, 'feature/ai-event-adapters-20261031']
   push:
     branches: [develop]
 
@@ -30,7 +30,7 @@ jobs:
         run: ctest --test-dir out/ai-adapter-contracts --output-on-failure
 
   ai-linux:
-    name: Linux AI regression
+    name: Linux AI regression and launcher
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -97,18 +97,26 @@ jobs:
         run: ccache --show-stats
 
       - name: Build reusable engine and server objects
+        id: build_core
         run: >-
           /usr/bin/time -f 'Core stage elapsed: %e seconds'
           cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
 
-      - name: Build AI test suite and headless server only
+      - name: Build native tests, headless server and settings launcher
         run: >-
-          /usr/bin/time -f 'AI/test stage elapsed: %e seconds'
-          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
+          /usr/bin/time -f 'AI and launcher stage elapsed: %e seconds'
+          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver vcmilauncher --parallel 3
 
       - name: Report compiler cache efficiency
         if: always()
         run: ccache --show-stats || true
+
+      - name: Preserve compiler progress for trusted PR reruns
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.build_core.outcome != 'skipped' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run source-port battles through the real engine
         run: |
