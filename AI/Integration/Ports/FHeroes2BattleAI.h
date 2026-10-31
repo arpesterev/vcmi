@@ -74,11 +74,17 @@ private:
 	static double attackValue(CPlayerBattleCallback & battle, const CStack & attacker,
 		const CStack & defender, const BattleHex & from, bool shooting, int distance)
 	{
+		const auto before = std::make_tuple(attacker.getPosition(), defender.getPosition(),
+			attacker.getTotalHealth(), defender.getTotalHealth());
 		BattleAttackInfo info(&attacker, &defender, distance, shooting);
 		info.attackerPos = from;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
-		return lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
+		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
+		if(before != std::make_tuple(attacker.getPosition(), defender.getPosition(),
+			attacker.getTotalHealth(), defender.getTotalHealth()))
+			throw std::logic_error("Damage preview modified a live battle unit");
+		return value;
 	}
 
 	static Ports::FHeroes2::Tactics tactics(CPlayerBattleCallback & battle, const CStack & stack,
@@ -221,10 +227,13 @@ private:
 		if(target)
 		{
 			const BattleHex from(best.fromIndex);
-			if(!available.contains(from) || battle.battleGetUnitByPos(targetHex) != target)
-				throw std::logic_error("FHeroes2Tactics melee candidate no longer matches the visible battle");
-			logAi->debug("AI_PORT_MELEE unit=%d target=%d from=%d destination=%d",
-				stack.unitId(), target->unitId(), from.toInt(), targetHex.toInt());
+			const auto * occupant = battle.battleGetUnitByPos(targetHex);
+			if(!available.contains(from) || occupant != target)
+				throw std::logic_error("FHeroes2Tactics invalid melee candidate: unit=" + std::to_string(stack.unitId())
+					+ " target=" + std::to_string(target->unitId()) + " targetPosition=" + std::to_string(target->getPosition().toInt())
+					+ " selectedHex=" + std::to_string(targetHex.toInt()) + " from=" + std::to_string(from.toInt())
+					+ " reachable=" + std::to_string(available.contains(from))
+					+ " occupant=" + (occupant ? std::to_string(occupant->unitId()) : "none"));
 			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
 		if(tactics(battle, stack, enemies).defensive)
