@@ -19,6 +19,7 @@
 #endif
 #ifdef ENABLE_BATTLE_AI
 #  include "../../AI/BattleAI/BattleAI.h"
+#  include "../../AI/Integration/Ports/FHeroes2BattleAI.h"
 #endif
 #ifdef ENABLE_STUPID_AI
 #  include "../../AI/StupidAI/StupidAI.h"
@@ -53,6 +54,13 @@ std::shared_ptr<CGlobalAI> AIFactory::createAdventureAI(const std::string & name
 std::shared_ptr<CBattleGameInterface> AIFactory::createBattleAI(const std::string & name)
 {
 	logGlobal->trace("Creating battle AI %s", name);
+
+	if(name == "FHeroes2Tactics")
+#ifdef ENABLE_BATTLE_AI
+		return std::make_shared<AIIntegration::BattleEventAdapter>(name, std::make_shared<AIIntegration::FHeroes2BattleAI>());
+#else
+		throw std::runtime_error("FHeroes2Tactics is not available in this build!");
+#endif
 
 	if(name == "BattleAI")
 #ifdef ENABLE_BATTLE_AI
