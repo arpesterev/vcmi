@@ -47,7 +47,10 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
-		cb->battleMakeUnitAction(battleID, chooseAction(*battle, *stack));
+		const auto action = chooseAction(*battle, *stack);
+		logAi->debug("AI_PORT_ACTION backend=FHeroes2Tactics battle=%d unit=%d action=%s",
+			battleID.getNum(), stack->unitId(), action.toString());
+		cb->battleMakeUnitAction(battleID, action);
 	}
 
 private:
@@ -164,7 +167,10 @@ private:
 			return BattleAction::makeHeal(&stack);
 
 		auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
-		vstd::erase_if(enemies, [](const CStack * enemy) { return enemy->isInvincible(); });
+		vstd::erase_if(enemies, [&](const CStack * enemy)
+		{
+			return !enemy->alive() || enemy->isInvincible() || !battle.battleCanAttackUnit(&stack, enemy);
+		});
 		std::sort(enemies.begin(), enemies.end(), [](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
 		if(enemies.empty())
 			return BattleAction::makeDefend(&stack);
@@ -191,24 +197,36 @@ private:
 		auto available = battle.battleGetAvailableHexes(reachability, &stack, false);
 		available.sort([](const BattleHex & left, const BattleHex & right) { return left.toInt() < right.toInt(); });
 		const CStack * target = nullptr;
+		BattleHex targetHex;
 		Ports::FHeroes2::MeleeOutcome best;
 		for(const auto * enemy : enemies)
 		{
 			for(const auto & hex : available)
 			{
-				if(!battle.isMeleeAttackPossible(&stack, enemy, hex))
+				if(!hex.isAvailable())
+					continue;
+				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
+				if(attackedHexes.empty())
 					continue;
 				const double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
 				const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
 				if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
 				{
 					target = enemy;
+					targetHex = attackedHexes.front();
 					best = candidate;
 				}
 			}
 		}
 		if(target)
-			return BattleAction::makeMeleeAttack(&stack, target->getPosition(), BattleHex(best.fromIndex));
+		{
+			const BattleHex from(best.fromIndex);
+			if(!available.contains(from) || battle.battleGetUnitByPos(targetHex) != target)
+				throw std::logic_error("FHeroes2Tactics melee candidate no longer matches the visible battle");
+			logAi->debug("AI_PORT_MELEE unit=%d target=%d from=%d destination=%d",
+				stack.unitId(), target->unitId(), from.toInt(), targetHex.toInt());
+			return BattleAction::makeMeleeAttack(&stack, target, from);
+		}
 		if(tactics(battle, stack, enemies).defensive)
 			return BattleAction::makeDefend(&stack);
 		return approach(battle, stack, reachability, available, enemies);
