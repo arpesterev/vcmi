@@ -99,11 +99,11 @@ protected:
 			.hero({5, 8, 0}, HeroTypeID(0), player)
 			.heroGarrison({{CreatureID::ARCHER, 200}})
 			.hero({10, 8, 0}, HeroTypeID(1), enemy)
-			.heroGarrison({{CreatureID::PIKEMAN, 10}})
+			.heroGarrison({{CreatureID::ARCHER, 10}})
 			.town({30, 30, 0}, FactionID::CASTLE, enemy);
 		if(otherImmediateAttacker)
 			builder.hero({8, 12, 0}, HeroTypeID(2), enemy)
-				.heroGarrison({{CreatureID::PIKEMAN, 10}});
+				.heroGarrison({{CreatureID::ARCHER, 10}});
 		ASSERT_NO_FATAL_FAILURE(startWithMap(std::move(builder)));
 		revealMap(player);
 		const auto * defender = findHeroByOwner(player);
