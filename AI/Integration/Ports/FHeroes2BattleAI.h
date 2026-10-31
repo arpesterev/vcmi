@@ -47,7 +47,10 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
-		cb->battleMakeUnitAction(battleID, chooseAction(*battle, *stack));
+		const auto action = chooseAction(*battle, *stack);
+		logAi->debug("AI_PORT_ACTION backend=FHeroes2Tactics battle=%d unit=%d action=%s",
+			battleID.getNum(), stack->unitId(), action.toString());
+		cb->battleMakeUnitAction(battleID, action);
 	}
 
 private:
@@ -60,7 +63,7 @@ private:
 
 	static double lossValue(const CStack & stack, const DamageEstimation & estimate)
 	{
-		const double health = static_cast<double>(stack.getTotalHealth());
+		const double health = static_cast<double>(stack.getAvailableHealth());
 		if(health <= 0)
 			return 0;
 		const double damage = std::min(health,
@@ -71,11 +74,21 @@ private:
 	static double attackValue(CPlayerBattleCallback & battle, const CStack & attacker,
 		const CStack & defender, const BattleHex & from, bool shooting, int distance)
 	{
+		const int attackerPosition = attacker.getPosition().toInt();
+		const int defenderPosition = defender.getPosition().toInt();
+		const int64_t attackerHealth = attacker.getAvailableHealth();
+		const int64_t defenderHealth = defender.getAvailableHealth();
 		BattleAttackInfo info(&attacker, &defender, distance, shooting);
 		info.attackerPos = from;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
-		return lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
+		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
+		if(attackerPosition != attacker.getPosition().toInt()
+			|| defenderPosition != defender.getPosition().toInt()
+			|| attackerHealth != attacker.getAvailableHealth()
+			|| defenderHealth != defender.getAvailableHealth())
+			throw std::logic_error("Damage preview modified a live battle unit");
+		return value;
 	}
 
 	static Ports::FHeroes2::Tactics tactics(CPlayerBattleCallback & battle, const CStack & stack,
@@ -164,7 +177,10 @@ private:
 			return BattleAction::makeHeal(&stack);
 
 		auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
-		vstd::erase_if(enemies, [](const CStack * enemy) { return enemy->isInvincible(); });
+		vstd::erase_if(enemies, [&](const CStack * enemy)
+		{
+			return !enemy->alive() || enemy->isInvincible() || !battle.battleCanAttackUnit(&stack, enemy);
+		});
 		std::sort(enemies.begin(), enemies.end(), [](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
 		if(enemies.empty())
 			return BattleAction::makeDefend(&stack);
@@ -191,24 +207,39 @@ private:
 		auto available = battle.battleGetAvailableHexes(reachability, &stack, false);
 		available.sort([](const BattleHex & left, const BattleHex & right) { return left.toInt() < right.toInt(); });
 		const CStack * target = nullptr;
+		BattleHex targetHex;
 		Ports::FHeroes2::MeleeOutcome best;
 		for(const auto * enemy : enemies)
 		{
 			for(const auto & hex : available)
 			{
-				if(!battle.isMeleeAttackPossible(&stack, enemy, hex))
+				if(!hex.isAvailable())
+					continue;
+				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
+				if(attackedHexes.empty())
 					continue;
 				const double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
 				const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
 				if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
 				{
 					target = enemy;
+					targetHex = attackedHexes.front();
 					best = candidate;
 				}
 			}
 		}
 		if(target)
-			return BattleAction::makeMeleeAttack(&stack, target->getPosition(), BattleHex(best.fromIndex));
+		{
+			const BattleHex from(best.fromIndex);
+			const auto * occupant = battle.battleGetUnitByPos(targetHex);
+			if(!available.contains(from) || occupant != target)
+				throw std::logic_error("FHeroes2Tactics invalid melee candidate: unit=" + std::to_string(stack.unitId())
+					+ " target=" + std::to_string(target->unitId()) + " targetPosition=" + std::to_string(target->getPosition().toInt())
+					+ " selectedHex=" + std::to_string(targetHex.toInt()) + " from=" + std::to_string(from.toInt())
+					+ " reachable=" + std::to_string(available.contains(from))
+					+ " occupant=" + (occupant ? std::to_string(occupant->unitId()) : "none"));
+			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
+		}
 		if(tactics(battle, stack, enemies).defensive)
 			return BattleAction::makeDefend(&stack);
 		return approach(battle, stack, reachability, available, enemies);
