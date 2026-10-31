@@ -225,7 +225,7 @@ private:
 				throw std::logic_error("FHeroes2Tactics melee candidate no longer matches the visible battle");
 			logAi->debug("AI_PORT_MELEE unit=%d target=%d from=%d destination=%d",
 				stack.unitId(), target->unitId(), from.toInt(), targetHex.toInt());
-			return BattleAction::makeMeleeAttack(&stack, target, from);
+			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
 		if(tactics(battle, stack, enemies).defensive)
 			return BattleAction::makeDefend(&stack);
