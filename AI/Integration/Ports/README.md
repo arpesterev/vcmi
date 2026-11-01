@@ -73,6 +73,13 @@ three independently implemented overrides derived from the documentation:
   in its next movement, the active friendly melee stack defends instead of
   rushing forward. Movement reach is evaluated with VCMI pathfinding. The
   documented exception for neutral-controlled armies outside siege applies.
+- **Fast-stack decoys:** when no immediate melee attack or ranged shot is
+  available, prefer an accessible slower enemy over a nearby enemy that is
+  at least two speed points faster than the acting melee stack. If no
+  movement toward the slower stack is possible, preserve the original HoMM3
+  route. The published TUM mod describes avoiding nearby high-speed
+  distractions but does not disclose the precise scoring. This is a bounded
+  movement-only approximation, not original-algorithm equivalence.
 - **Fortified siege defense:** melee defenders already inside castle walls
   hold while the gate remains closed or blocked and no enemy has breached
   the walls or reached melee. They resume normal actions after a breach
@@ -88,7 +95,7 @@ entry is `TUMEnchantedTactics`, **not** the reserved full-port ID
 
 Still unimplemented or not upstream-equivalent: the full TUM defensive spell
 aggregation rules, improved tower targeting, clone/antimagic/cure selection,
-distraction avoidance, full siege valuation, creature ability choices, buff/debuff
+distraction avoidance, full siege valuation, exact fast-stack pursuit scoring, creature ability choices, buff/debuff
 planning and the rest of the compiled ERA AI modifications. Native battle
 smoke tests do not establish those behaviors or a match win-rate improvement.
 
