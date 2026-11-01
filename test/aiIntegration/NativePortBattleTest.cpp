@@ -139,7 +139,7 @@ protected:
 		hero->mana = 100;
 	}
 
-	void prepareSiege()
+	void prepareSiege(bool includeDefenderShooter = false)
 	{
 		startRecordedGame();
 		ASSERT_FALSE(HasFatalFailure());
@@ -153,6 +153,8 @@ protected:
 		}
 		ASSERT_GT(town->fortificationsLevel().wallsHealth, 0);
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 30));
+		if(includeDefenderShooter)
+			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(1)), CreatureID(2).toCreature(), 1));
 		ASSERT_NE(attackerSideHero->getArt(ArtifactPosition::MACH4), nullptr);
 		const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
 		gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
@@ -329,6 +331,48 @@ TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(BattleSide::ATTACKER);
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2CastleGarrisonHoldsItsMeleeLineForShooters)
+{
+	// The original fheroes2 analyzeBattleState treats a defended castle as
+	// valuable shooting cover. The ratio here is deliberately tiny so the
+	// ranged-advantage branch alone would NOT justify defending.
+	prepareSiege(true);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * infantry = nullptr;
+	int shooters = 0;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			++shooters;
+	}
+	ASSERT_NE(infantry, nullptr);
+	ASSERT_EQ(shooters, 1);
+	ASSERT_NE(battle()->battleGetDefendedTown(), nullptr);
+	ASSERT_NE(battle()->battleGetWallState(EWallPart::GATE), EWallState::NONE);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "Defender must use intact fortifications as cover for its shooter";
+	runToCompletion(std::nullopt, false);
 }
 
 TEST_F(AIIntegrationNativeBattle, controlsBallistaAndCompletesBattle)
