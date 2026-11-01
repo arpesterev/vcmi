@@ -52,7 +52,8 @@ public:
 		if(stack->creatureId() == CreatureID::BALLISTA)
 			action = chooseBallistaShot(*battle, *stack);
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
-			&& !battle->battleCanShoot(stack) && shouldProtectShooters(*battle, *stack))
+			&& !battle->battleCanShoot(stack)
+			&& (shouldProtectShooters(*battle, *stack) || shouldHoldFortifiedSiege(*battle, *stack)))
 			action = BattleAction::makeDefend(stack);
 		else
 			action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack);
@@ -122,6 +123,31 @@ private:
 			}
 		}
 		return false;
+	}
+
+	static bool shouldHoldFortifiedSiege(CPlayerBattleCallback & battle, const CStack & active)
+	{
+		// TUM's published siege adjustment favors remaining behind intact
+		// fortifications. With no disclosed plugin source, model only the
+		// conservative case: a closed/blocked gate and no enemy inside the walls.
+		// Never prevent the defender from responding once the gate opens, an
+		// enemy breaches the walls, or a melee enemy is already adjacent.
+		if(active.unitSide() != BattleSide::DEFENDER
+			|| battle.battleGetDefendedTown() == nullptr
+			|| !battle.battleIsInsideWalls(active.getPosition()))
+			return false;
+		const auto gate = battle.battleGetGateState();
+		if(gate != EGateState::CLOSED && gate != EGateState::BLOCKED)
+			return false;
+		const auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		if(enemies.empty())
+			return false;
+		return std::none_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
+		{
+			return enemy->alive()
+				&& (battle.battleIsInsideWalls(enemy->getPosition())
+					|| battle.isMeleeAttackPossible(&active, enemy));
+		});
 	}
 
 	static bool shouldProtectShooters(CPlayerBattleCallback & battle, const CStack & active)
