@@ -179,7 +179,10 @@ private:
 		auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 		vstd::erase_if(enemies, [&](const CStack * enemy)
 		{
-			return !enemy->alive() || enemy->isInvincible() || !battle.battleCanAttackUnit(&stack, enemy);
+			// Ranged-only war machines cannot pass the melee eligibility check.
+			return !enemy->alive() || enemy->isInvincible()
+				|| (!battle.battleCanShoot(&stack, enemy->getPosition())
+					&& !battle.battleCanAttackUnit(&stack, enemy));
 		});
 		std::sort(enemies.begin(), enemies.end(), [](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
 		if(enemies.empty())
