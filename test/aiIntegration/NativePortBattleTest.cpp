@@ -162,7 +162,8 @@ protected:
 			[](const auto & unit) { return unit->isCatapult(); })) << "Siege setup did not create the attacking catapult";
 	}
 
-	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true)
+	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true,
+		const std::string & backendName = "FHeroes2Tactics")
 	{
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
@@ -174,9 +175,9 @@ protected:
 			const auto player = battle()->sideToPlayer(side);
 			auto callback = std::make_shared<DecisionCallback>(player);
 			callback->onBattleStarted(battle());
-			auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+			auto policy = AIFactory::createBattleAI(backendName);
 			ASSERT_NE(policy, nullptr);
-			EXPECT_EQ(policy->dllName, "FHeroes2Tactics");
+			EXPECT_EQ(policy->dllName, backendName);
 			policy->playerID = player;
 			auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
 			AutocombatPreferences prefs;
@@ -451,4 +452,34 @@ TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBatt
 	injure(injured, 300);
 	runToCompletion();
 	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3TacticsAppliesDefenderVictory)
+{
+	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(BattleSide::DEFENDER, false, "HoMM3OriginalTactics");
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3TacticsHandlesFlyingAndDoubleWideUnits)
+{
+	prepareBattle(CreatureID(10), 12, CreatureID(4), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 }
