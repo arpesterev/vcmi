@@ -75,7 +75,8 @@ three independently implemented overrides derived from the documentation:
   documented exception for neutral-controlled armies outside siege applies.
 - **Fast-stack decoys:** when no immediate melee attack or ranged shot is
   available, prefer an accessible slower enemy over a nearby enemy that is
-  at least two speed points faster than the acting melee stack. If no
+  at least two speed points faster than the acting melee stack and located
+  within roughly two of its movement turns. If no
   movement toward the slower stack is possible, preserve the original HoMM3
   route. The published TUM mod describes avoiding nearby high-speed
   distractions but does not disclose the precise scoring. This is a bounded
