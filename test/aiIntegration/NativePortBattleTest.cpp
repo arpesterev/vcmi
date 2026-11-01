@@ -489,3 +489,43 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsHandlesFlyingAndDoubleWideUnits)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 }
+
+TEST_F(AIIntegrationNativeBattle, tumTacticsCompletesRealMeleeBattle)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, tumTacticsCompletesRealRangedBattle)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
+{
+	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(BattleSide::DEFENDER, false, "TUMEnchantedTactics");
+}
+
+TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 40);
+	setArmy(defenderSideHero, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(ballistaDecisions, 0);
+	EXPECT_GT(ballistaShots, 0);
+}
