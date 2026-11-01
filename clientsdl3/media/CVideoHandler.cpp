@@ -225,13 +225,12 @@ void CVideoInstance::prepareOutput(float scaleFactor, bool useTextureOutput)
 			SDL_SetTextureScaleMode(textureRGB, SDL_SCALEMODE_LINEAR);
 	}
 
-	// without a texture the frames are drawn through a surface instead - a video with neither
-	// decodes fine but never shows anything
-	if (textureRGB == nullptr)
-		surface = CSDL_Ext::newSurface(dimensions);
-
-	// a surface is blitted as it is, so that path has no one to scale for it
+	// Keep a CPU copy of each frame even when rendering through a GPU texture.
+	// A redraw may use a software canvas (e.g. after changing the color scheme),
+	// and a failed GPU draw must also be able to fall back to the same frame.
+	// GPU frames are kept at native resolution; only software-only video is pre-scaled.
 	scaledSize = textureRGB ? nativeSize : dimensions;
+	surface = CSDL_Ext::newSurface(scaledSize);
 
 	sws = sws_getContext(getCodecContext()->width, getCodecContext()->height, getCodecContext()->pix_fmt,
 						 scaledSize.x, scaledSize.y, AV_PIX_FMT_RGB32,
@@ -312,7 +311,7 @@ bool CVideoInstance::loadNextFrame()
 
 	// Avoid buffer overflow caused by sws_scale():
 	// http://trac.ffmpeg.org/ticket/9254
-	const size_t pitch = surface ? surface->pitch : scaledSize.x * 4;
+	const size_t pitch = surface->pitch;
 	const size_t pic_bytes = pitch * scaledSize.y;
 	const size_t ffmpeg_pad = 1024; /* a few bytes of overflow will go here */
 
@@ -323,8 +322,7 @@ bool CVideoInstance::loadNextFrame()
 
 	if(textureRGB)
 		SDL_UpdateTexture(textureRGB, nullptr, data[0], linesize[0]);
-	if(surface)
-		memcpy(surface->pixels, data[0], pic_bytes);
+	memcpy(surface->pixels, data[0], pic_bytes);
 
 	av_free(data[0]);
 	return true;
@@ -396,7 +394,20 @@ void CVideoInstance::show(const Point & position, SDL_Surface * to)
 	if(sws == nullptr)
 		throw std::runtime_error("No video to show!");
 
-	CSDL_Ext::blitSurface(surface, to, position * ENGINE->screenHandler().getScalingFactor());
+	if(!surface || !to)
+		return;
+
+	const Point targetPosition = position * ENGINE->screenHandler().getScalingFactor();
+	if(textureRGB)
+	{
+		// GPU-backed videos decode at native resolution. Scale their CPU fallback
+		// to the display size when the canvas is temporarily software-backed.
+		SDL_Rect destination{ targetPosition.x, targetPosition.y, dimensions.x, dimensions.y };
+		if(!SDL_BlitSurfaceScaled(surface, nullptr, to, &destination, SDL_SCALEMODE_LINEAR))
+			logGlobal->warn("Failed to draw video software fallback: %s", SDL_GetError());
+	}
+	else
+		CSDL_Ext::blitSurface(surface, to, targetPosition);
 }
 
 double FFMpegStream::getCurrentFrameEndTime() const
