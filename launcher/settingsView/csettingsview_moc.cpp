@@ -145,7 +145,10 @@ void CSettingsView::fillValidCombatAILibraries(QComboBox * comboBox, QString act
 #endif
 
 #ifdef ENABLE_MMAI
-	comboBox->addItem(tr("MMAI (experimental)"), "MMAI");
+	comboBox->addItem(tr("MMAI (neural model required, experimental)"), "MMAI");
+	comboBox->setItemData(comboBox->count() - 1,
+		tr("Requires an installed, loadable MMAI neural model for the battle side. If unavailable, refuses the battle rather than silently executing BattleAI or StupidAI."),
+		Qt::ToolTipRole);
 #endif
 
 	fillValidAnyAILibraries(comboBox, activeAI);
