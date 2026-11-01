@@ -490,8 +490,26 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeTh
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
 	policy->activeStack(battleID, shooter);
 	ASSERT_TRUE(callback->action.has_value());
+	std::ostringstream retreatDiagnostics;
+	const auto inspected = callback->getBattle(battleID);
+	retreatDiagnostics << "archer pos=" << shooter->getPosition().toInt()
+		<< " speed=" << shooter->getMovementRange()
+		<< " canShoot=" << inspected->battleCanShoot(shooter)
+		<< " doubleWide=" << shooter->doubleWide();
+	for(const auto * enemy : inspected->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+	{
+		retreatDiagnostics << " enemy=" << enemy->unitId() << " pos=" << enemy->getPosition().toInt()
+			<< " speed=" << enemy->getMovementRange()
+			<< " distance=" << static_cast<int>(BattleHex::getDistance(shooter->getPosition(), enemy->getPosition()))
+			<< " flying=" << enemy->hasBonusOfType(BonusType::FLYING);
+	}
+	const auto inspectedReach = inspected->getReachability(shooter);
+	const auto inspectedAvailable = inspected->battleGetAvailableHexes(inspectedReach, shooter, false);
+	retreatDiagnostics << " available=" << inspectedAvailable.size()
+		<< " decision=" << callback->action->toString();
 	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
-		<< "The faster fheroes2 archer should first escape reachable slower melee stacks";
+		<< "The faster fheroes2 archer should first escape reachable slower melee stacks. "
+		<< retreatDiagnostics.str();
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_NE(callback->action->target.front().hexValue, attackerPosition);
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
