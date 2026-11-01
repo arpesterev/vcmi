@@ -542,4 +542,25 @@ TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, mmaiDefenderNeuralModelCompletesRealBattle)
+{
+	// The independent defender model must also handle a real battle with
+	// factory-selected strict-neural MMAI. Never accept scripted fallback.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Run separately with an installed MMAI neural model pack";
+
+	const auto modelConfig = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(modelConfig.isStruct()) << "MMAI neural config is not mounted in VCMI";
+	ASSERT_TRUE(modelConfig["models"]["defender"].isString())
+		<< "Missing MMAI defender model mapping: " << modelConfig.toCompactString();
+	const auto path = "MMAI/models/" + modelConfig["models"]["defender"].String();
+	ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
+		<< "MMAI defender neural model is not mounted: " << path;
+
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 45);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "MMAI");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 #endif
