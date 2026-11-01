@@ -232,6 +232,16 @@ jobs:
           VCMI_AI_MMAI_NEURAL_TEST=1 timeout 300 ./vcmitest \
             --gtest_filter='AIIntegrationNativeBattle.mmaiWithRealNeuralModelCompletesRealBattle' \
             --gtest_output=xml:mmai-real-neural-battle.xml
+          python3 - <<'PY'
+          from xml.etree import ElementTree as ET
+          root = ET.parse('mmai-real-neural-battle.xml').getroot()
+          cases = list(root.iter('testcase'))
+          if len(cases) != 1 or cases[0].get('name') != 'mmaiWithRealNeuralModelCompletesRealBattle':
+              raise RuntimeError('The real MMAI neural integration test did not execute')
+          if any(cases[0].find(tag) is not None for tag in ('failure', 'error', 'skipped')):
+              raise RuntimeError('MMAI model test failed or was skipped')
+          print('Verified: one real neural-backed native MMAI battle completed')
+          PY
 
       - name: Save compiled C++ objects for later develop builds
         if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
