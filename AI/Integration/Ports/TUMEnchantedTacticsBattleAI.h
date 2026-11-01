@@ -144,7 +144,7 @@ private:
 			return false;
 		return std::none_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
-			return enemy->alive()
+			return enemy->alive() && enemy->getPosition().isValid()
 				&& (battle.battleIsInsideWalls(enemy->getPosition())
 					|| battle.isMeleeAttackPossible(&active, enemy));
 		});
