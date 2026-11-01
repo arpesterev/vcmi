@@ -250,7 +250,7 @@ private:
 					safe = false;
 					break;
 				}
-				nearest = std::min(nearest, BattleHex::getDistance(hex, enemy->getPosition()));
+				nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(hex, enemy->getPosition())));
 			}
 			if(!safe)
 				continue;
