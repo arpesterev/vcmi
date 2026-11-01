@@ -140,6 +140,10 @@ void CSettingsView::fillValidCombatAILibraries(QComboBox * comboBox, QString act
 
 #ifdef ENABLE_BATTLE_AI
 	comboBox->addItem(tr("BattleAI (default, recommended)"), "BattleAI");
+	comboBox->addItem(tr("HoMM3 tactics (partial port, experimental)"), "HoMM3OriginalTactics");
+	comboBox->setItemData(comboBox->count() - 1,
+		tr("Independent HoMM3 ranged target weights with VCMI legality and damage estimates. Not the full original combat AI; spells, tactical retreat and original path valuation are not implemented."),
+		Qt::ToolTipRole);
 	comboBox->addItem(tr("FHeroes2 tactics (partial port, experimental)"), "FHeroes2Tactics");
 	comboBox->setItemData(comboBox->count() - 1, tr("Partial tactical port using VCMI strength and damage estimates. Hero spell AI, retreat AI and full upstream behavior are not implemented."), Qt::ToolTipRole);
 #endif
