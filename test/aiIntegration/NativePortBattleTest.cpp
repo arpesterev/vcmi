@@ -9,6 +9,7 @@
 #include "../../lib/GameLibrary.h"
 #include "../../lib/battle/BattleAction.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
+#include "../../lib/bonuses/BonusSelector.h"
 #include "../../lib/battle/BattleLayout.h"
 #include "../../lib/callback/AIFactory.h"
 #include "../../lib/callback/CBattleCallback.h"
@@ -100,6 +101,7 @@ protected:
 	NativeBattleRecorder recorder;
 	int ballistaDecisions = 0;
 	int ballistaShots = 0;
+	int ballistaDefendsWhileAllEnemiesBlind = 0;
 	int heroSpellDecisions = 0;
 
 	void startRecordedGame()
@@ -220,6 +222,22 @@ protected:
 				++ballistaDecisions;
 				if(action.actionType == EActionType::SHOOT)
 					++ballistaShots;
+				if(action.actionType == EActionType::DEFEND)
+				{
+					bool sawEnemy = false;
+					bool allEnemiesBlind = true;
+					for(const auto & unit : battle()->stacks)
+					{
+						if(unit->alive() && unit->unitSide() != active->unitSide())
+						{
+							sawEnemy = true;
+							allEnemiesBlind &= unit->hasBonus(Selector::source(
+								BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLIND))));
+						}
+					}
+					if(sawEnemy && allEnemiesBlind)
+						++ballistaDefendsWhileAllEnemiesBlind;
+				}
 			}
 			std::ostringstream trace;
 			trace << "activation=" << decisions << " active=" << active->unitId() << " " << action.toString();
@@ -528,4 +546,30 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(ballistaDecisions, 0);
 	EXPECT_GT(ballistaShots, 0);
+}
+TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 55);
+	setArmy(defenderSideHero, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * blinded = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			blinded = unit.get();
+	ASSERT_NE(blinded, nullptr);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blinded));
+	ASSERT_TRUE(blinded->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
+		BonusSourceID(SpellID(SpellID::BLIND)))));
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(ballistaDecisions, 0);
+	EXPECT_GT(ballistaDefendsWhileAllEnemiesBlind, 0)
+		<< "TUM ballista must not shoot the only remaining blinded target";
 }
