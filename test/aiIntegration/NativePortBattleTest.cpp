@@ -492,7 +492,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeTh
 	ASSERT_TRUE(callback->action.has_value());
 	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
 		<< "The faster fheroes2 archer should first escape reachable slower melee stacks";
-	EXPECT_NE(callback->action->destinationTile, attackerPosition);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_NE(callback->action->target.front().hexValue, attackerPosition);
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "The native game handler rejected the requested archer escape";
 	policy.reset();
