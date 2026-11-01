@@ -341,7 +341,7 @@ void Router::battleStart(
 			break;
 		case Schema::ModelType::NN:
 			// XXX: must not call initBattleInterface here
-			bai = CreateBAI(model, env, cb, autocombatPreferences.enableSpellsUsage, autocombatPreferences.enableTacticsUsage);
+			bai = CreateBAI(model, env, cb, autocombatPreferences.enableSpellsUsage, autocombatPreferences.enableTacticsUsage, neuralOnly);
 			break;
 
 		default:

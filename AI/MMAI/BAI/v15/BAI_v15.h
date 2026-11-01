@@ -29,7 +29,8 @@ public:
 		const std::shared_ptr<Environment> & env,
 		const std::shared_ptr<CBattleCallback> & cb,
 		bool enableSpells,
-		bool enableTactics);
+		bool enableTactics,
+		bool strictNeural);
 
 	void activeStack(const BattleID & bid, const CStack * stack) override;
 	void battleNewRound(const BattleID & bid) override;
@@ -70,6 +71,7 @@ public:
 
 	bool enableSpells = false;
 	bool enableTactics = false;
+	const bool strictNeural;
 
 	// consecutive invalid actions counter
 	int errcounter = 0;
