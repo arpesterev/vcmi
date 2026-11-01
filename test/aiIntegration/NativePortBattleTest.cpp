@@ -514,7 +514,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 	const auto originalHex = infantry->getPosition();
 	// A weak enemy is closer in the upper lane, while a ranged threat is
 	// further away in the lower lane. Both are beyond one-turn melee reach.
-	const BattleHex weakerHex(originalHex.toInt() + 5 - 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex weakerHex(originalHex.toInt() + 7 - 2 * GameConstants::BFIELD_WIDTH);
 	const BattleHex archerHex(originalHex.toInt() + 8 + 2 * GameConstants::BFIELD_WIDTH);
 	ASSERT_TRUE(weakerHex.isAvailable());
 	ASSERT_TRUE(archerHex.isAvailable());
@@ -522,8 +522,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
 	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), weakerHex, 1), nullptr);
 	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(2), archerHex, 65), nullptr);
-	ASSERT_GT(BattleHex::getDistance(originalHex, weakerHex), infantry->getMovementRange());
-	ASSERT_GT(BattleHex::getDistance(originalHex, archerHex), infantry->getMovementRange());
+	ASSERT_GT(BattleHex::getDistance(originalHex, weakerHex), infantry->getMovementRange() + 1);
+	ASSERT_GT(BattleHex::getDistance(originalHex, archerHex), infantry->getMovementRange() + 1);
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -543,7 +543,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 	policy->activeStack(battleID, infantry);
 	ASSERT_TRUE(callback->action.has_value());
 	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
-		<< "The fheroes2 offensive planner should move toward the eligible distant enemy";
+		<< "Unexpected immediate action: " << callback->action->toString();
 	ASSERT_FALSE(callback->action->target.empty());
 	const auto destination = callback->action->target.front().hexValue;
 	EXPECT_NE(destination, originalHex);
