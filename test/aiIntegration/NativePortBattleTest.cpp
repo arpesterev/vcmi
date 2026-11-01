@@ -154,7 +154,9 @@ protected:
 		ASSERT_GT(town->fortificationsLevel().wallsHealth, 0);
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 30));
 		if(includeDefenderShooter)
+		{
 			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(1)), CreatureID(2).toCreature(), 1));
+		}
 		ASSERT_NE(attackerSideHero->getArt(ArtifactPosition::MACH4), nullptr);
 		const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
 		gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
