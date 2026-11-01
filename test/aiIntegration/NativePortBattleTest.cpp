@@ -122,6 +122,8 @@ protected:
 	int ballistaDecisions = 0;
 	int ballistaShots = 0;
 	int heroSpellDecisions = 0;
+	int mmaiUnitDecisions = 0;
+	int mmaiNonpassiveDecisions = 0;
 
 	void startRecordedGame()
 	{
@@ -245,6 +247,15 @@ protected:
 			policies.at(player)->activeStack(battleID, active);
 			ASSERT_TRUE(callback->action.has_value()) << "Backend did not respond to the actual active-stack event";
 			const auto action = *callback->action;
+			// A completed battle alone does not prove the neural side made
+			// meaningful decisions; the scripted opponent could win unaided.
+			const auto & activePolicy = player == attackerPlayer ? attackerAI : defenderAI;
+			if(activePolicy == "MMAI" && !callback->spellAction)
+			{
+				++mmaiUnitDecisions;
+				if(action.actionType != EActionType::DEFEND && action.actionType != EActionType::WAIT)
+					++mmaiNonpassiveDecisions;
+			}
 			if(callback->spellAction)
 				++heroSpellDecisions;
 			else if(active->creatureId() == CreatureID::BALLISTA)
@@ -540,6 +551,8 @@ TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(std::nullopt, false, "MMAI", "FHeroes2Tactics");
 	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(mmaiUnitDecisions, 0) << "The neural attacker was never activated";
+	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural attacker never attempted a non-passive action";
 }
 
 TEST_F(AIIntegrationNativeBattle, mmaiDefenderNeuralModelCompletesRealBattle)
@@ -561,6 +574,8 @@ TEST_F(AIIntegrationNativeBattle, mmaiDefenderNeuralModelCompletesRealBattle)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "MMAI");
 	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(mmaiUnitDecisions, 0) << "The neural defender was never activated";
+	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural defender never attempted a non-passive action";
 }
 
 #endif
