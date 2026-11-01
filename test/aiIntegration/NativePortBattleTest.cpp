@@ -567,6 +567,40 @@ TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndComp
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 }
 
+TEST_F(AIIntegrationNativeBattle, tumTacticsFinishesMixedFastAndSlowEnemyBattle)
+{
+	// Mix one faster flyer with slower infantry so the movement-only
+	// anti-distraction policy has the information it needs. The source
+	// predicate is tested independently in CI/source_tactics_test.cpp.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 80);
+	setArmy(defenderSideHero, CreatureID(4), 15);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 25));
+	ASSERT_FALSE(HasFatalFailure());
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * fast = nullptr;
+	const CStack * slow = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() != BattleSide::DEFENDER)
+			continue;
+		if(unit->creatureId() == CreatureID(4))
+			fast = unit.get();
+		if(unit->creatureId() == CreatureID(0))
+			slow = unit.get();
+	}
+	ASSERT_NE(fast, nullptr);
+	ASSERT_NE(slow, nullptr);
+	EXPECT_GT(fast->getMovementRange(), slow->getMovementRange());
+	// A genuine server-controlled finish is required, not just an
+	// invocation of an isolated route-selection predicate.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
