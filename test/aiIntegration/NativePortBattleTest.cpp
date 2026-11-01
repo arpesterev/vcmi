@@ -266,6 +266,12 @@ protected:
 		}
 		EXPECT_TRUE(gameState()->currentBattles.empty()) << "The battle result was not applied to the adventure state";
 		EXPECT_EQ(recorder.acceptedResults, 1);
+		std::cout << "AI_NATIVE_BATTLE_RESULT backend=" << backendName
+			<< " activations=" << decisions << " damage=" << recorder.damage
+			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
+			<< " spells=" << heroSpellDecisions
+			<< " winner=" << (result.winner == BattleSide::ATTACKER ? "attacker" : "defender")
+			<< '\\n';
 		for(auto & entry : callbacks)
 			entry.second->onBattleEnded(battleID);
 	}
