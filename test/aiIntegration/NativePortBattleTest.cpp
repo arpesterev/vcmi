@@ -3,6 +3,7 @@
  * License: GNU General Public License v2.0 or later.
  */
 #include "StdInc.h"
+#include <cstdlib>
 
 #include "server/battles/BattleTestFixture.h"
 #include <vcmi/Environment.h>
@@ -162,7 +163,8 @@ protected:
 			[](const auto & unit) { return unit->isCatapult(); })) << "Siege setup did not create the attacking catapult";
 	}
 
-	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true)
+	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true,
+		const std::string & attackerAI = "FHeroes2Tactics", const std::string & defenderAI = "FHeroes2Tactics")
 	{
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
@@ -174,9 +176,10 @@ protected:
 			const auto player = battle()->sideToPlayer(side);
 			auto callback = std::make_shared<DecisionCallback>(player);
 			callback->onBattleStarted(battle());
-			auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+			const auto & name = side == BattleSide::ATTACKER ? attackerAI : defenderAI;
+			auto policy = AIFactory::createBattleAI(name);
 			ASSERT_NE(policy, nullptr);
-			EXPECT_EQ(policy->dllName, "FHeroes2Tactics");
+			EXPECT_EQ(policy->dllName, name);
 			policy->playerID = player;
 			auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
 			AutocombatPreferences prefs;
@@ -484,4 +487,19 @@ TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScript
 			<< "Missing MMAI model must be diagnosed rather than replaced";
 	}
 }
+
+TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
+{
+	// Separate CI invocation installs a published VCMI 1.7 MMAI model package.
+	// Its model selection must go through AIFactory and Router(true).
+	// Without a neural model Router(true) throws: this must NEVER fall back.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Run separately with a real installed MMAI model mod";
+
+	prepareBattle(CreatureID(0), 45, CreatureID(0), 40);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "FHeroes2Tactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 #endif
