@@ -499,6 +499,64 @@ TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBatt
 	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	}
+	ASSERT_NE(infantry, nullptr);
+	const auto originalHex = infantry->getPosition();
+	// A weak enemy is closer in the upper lane, while a ranged threat is
+	// further away in the lower lane. Both are beyond one-turn melee reach.
+	const BattleHex weakerHex(originalHex.toInt() + 5 - 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex archerHex(originalHex.toInt() + 8 + 2 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(weakerHex.isAvailable());
+	ASSERT_TRUE(archerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(weakerHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), weakerHex, 1), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(2), archerHex, 65), nullptr);
+	ASSERT_GT(BattleHex::getDistance(originalHex, weakerHex), infantry->getMovementRange());
+	ASSERT_GT(BattleHex::getDistance(originalHex, archerHex), infantry->getMovementRange());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "The fheroes2 offensive planner should move toward the eligible distant enemy";
+	ASSERT_FALSE(callback->action->target.empty());
+	const auto destination = callback->action->target.front().hexValue;
+	EXPECT_NE(destination, originalHex);
+	EXPECT_LT(BattleHex::getDistance(destination, archerHex),
+		BattleHex::getDistance(originalHex, archerHex))
+		<< "The initial move must close distance to the hostile archer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The engine rejected the planned distant-target movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeThreat)
 {
 	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
