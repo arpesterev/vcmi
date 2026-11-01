@@ -193,8 +193,21 @@ jobs:
               z.extractall(root / 'Mods')
 
           mod = root / 'Mods/mmai'
-          if not (mod / 'mod.json').exists():
+          manifest_file = mod / 'mod.json'
+          if not manifest_file.exists():
               raise RuntimeError('MMAI mod.json is missing from downloaded release')
+          # This develop branch builds VCMI 1.8.0, but the published MMAI
+          # 1.7 model pack declares max compatibility 1.7.9. Only for this
+          # isolated test runner, permit it to load and prove compatibility
+          # through a real battle. Never modify a user's installation or
+          # advertise 1.8 compatibility before the test actually passes.
+          manifest = json.loads(manifest_file.read_text())
+          compat = manifest.get('compatibility', {})
+          if compat.get('min') != '1.7.0' or compat.get('max') != '1.7.9':
+              raise RuntimeError('Unexpected MMAI release compatibility: ' + str(compat))
+          compat['max'] = '1.8.0'
+          manifest_file.write_text(json.dumps(manifest, indent=2) + '\n')
+          print('CI-only MMAI compatibility probe:', compat)
           settings_file = mod / 'config/mmai-settings.json'
           model_settings = json.loads(settings_file.read_text())
           if not {'attacker', 'defender'}.issubset(model_settings.get('models', {})):
