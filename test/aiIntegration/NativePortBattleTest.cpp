@@ -496,6 +496,60 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3RangedPrefersActiveTargetOverBlindAndCompletesBattle)
+{
+	// The decompiled HoMM3 scorer reduces shots into incapacitated targets.
+	// A strong but blinded stack must not distract from a weaker active enemy.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 200);
+	setArmy(defenderSideHero, CreatureID(0), 35);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 14));
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * shooter = nullptr;
+	const CStack * stronger = nullptr;
+	const CStack * active = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			shooter = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->getCount() == 35)
+				stronger = unit.get();
+			else if(unit->getCount() == 14)
+				active = unit.get();
+		}
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(stronger, nullptr);
+	ASSERT_NE(active, nullptr);
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto view = std::make_shared<DecisionCallback>(player);
+	view->onBattleStarted(battle());
+	const auto playerBattle = view->getBattle(battle()->getBattleID());
+	ASSERT_NE(playerBattle, nullptr);
+	const auto before = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerBattle, *shooter);
+	ASSERT_EQ(before.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(before.target.empty());
+	EXPECT_EQ(before.target.front().unitValue, stronger->unitId())
+		<< "The strong target must attract the ordinary HoMM3 ranged scorer";
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, stronger));
+	ASSERT_TRUE(stronger->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
+		BonusSourceID(SpellID(SpellID::BLIND)))));
+	const auto after = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerBattle, *shooter);
+	ASSERT_EQ(after.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(after.target.empty());
+	EXPECT_EQ(after.target.front().unitValue, active->unitId())
+		<< "The incapacitated stack should receive the original HoMM3 shot-value penalty";
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsAppliesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
