@@ -212,6 +212,73 @@ private:
 		return BattleAction::makeDefend(&stack);
 	}
 
+
+	// fheroes2 meleeUnitDefense prefers covering valuable friendly archers.
+	// This conservative VCMI projection moves a single-width melee stack into
+	// a reachable neighboring hex only when ground melee can threaten a shooter
+	// next turn. Never disrupt an available immediate attack; wide-unit cover,
+	// long-range deployment and spell/area-threat spacing remain unsupported.
+	static std::optional<BattleAction> coverThreatenedShooter(CPlayerBattleCallback & battle,
+		const CStack & stack, const ReachabilityInfo & reachability,
+		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
+	{
+		if(stack.doubleWide() || stack.hasBonusOfType(BonusType::SHOOTER))
+			return std::nullopt;
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		double totalShooterStrength = 0;
+		for(const auto * friendly : friends)
+		{
+			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
+				&& !friendly->doubleWide() && friendly->hasBonusOfType(BonusType::SHOOTER))
+				totalShooterStrength += strength(*friendly);
+		}
+		if(totalShooterStrength <= 0)
+			return std::nullopt;
+
+		BattleHex bestCoverHex;
+		double bestCoverValue = -std::numeric_limits<double>::infinity();
+		int bestTravel = GameConstants::BFIELD_SIZE;
+		for(const auto * friendly : friends)
+		{
+			if(friendly == &stack || !friendly->alive() || !friendly->getPosition().isValid()
+				|| friendly->doubleWide() || !friendly->hasBonusOfType(BonusType::SHOOTER))
+				continue;
+			const bool threatened = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
+			{
+				return enemy->getPosition().isValid() && !enemy->hasBonusOfType(BonusType::SHOOTER)
+					&& BattleHex::getDistance(friendly->getPosition(), enemy->getPosition())
+						<= static_cast<int>(enemy->getMovementRange()) + 1;
+			});
+			if(!threatened)
+				continue;
+			if(BattleHex::getDistance(stack.getPosition(), friendly->getPosition()) == 1)
+				return BattleAction::makeDefend(&stack);
+
+			for(const auto & hex : available)
+			{
+				if(!hex.isAvailable() || hex == stack.getPosition()
+					|| BattleHex::getDistance(hex, friendly->getPosition()) != 1)
+					continue;
+				const int travel = reachability.distances[hex.toInt()];
+				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))
+					continue;
+				// Source: archer strength minus the path-distance penalty equal
+				// to all friendly shooter strength / 15 per traveled hex.
+				const double value = strength(*friendly) - totalShooterStrength * travel / 15.0;
+				if(value > bestCoverValue || (value == bestCoverValue
+					&& (travel < bestTravel || (travel == bestTravel
+						&& (!bestCoverHex.isValid() || hex.toInt() < bestCoverHex.toInt())))))
+				{
+					bestCoverHex = hex;
+					bestCoverValue = value;
+					bestTravel = travel;
+				}
+			}
+		}
+		return bestCoverHex.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&stack, bestCoverHex))
+			: std::nullopt;
+	}
+
 	// fheroes2 ai_battle.cpp archerDecision, pinned at 0dbfe9f386f33c2500842f4a59cd284d7f03d541:
 	// only a sufficiently faster shooter attempts to escape an imminent melee
 	// threat, and only to a position safe from every visible enemy stack.
@@ -372,7 +439,11 @@ private:
 			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
 		if(tactics(battle, stack, enemies).defensive)
+		{
+			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, enemies))
+				return *cover;
 			return BattleAction::makeDefend(&stack);
+		}
 		return approach(battle, stack, reachability, available, enemies);
 	}
 };
