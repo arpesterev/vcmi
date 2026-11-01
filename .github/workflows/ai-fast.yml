@@ -242,9 +242,24 @@ jobs:
         run: |
           set -euo pipefail
           cd out/build/linux-gcc-test/bin
+          ulimit -c 0
+          result=0
           VCMI_AI_MMAI_NEURAL_TEST=1 timeout 300 ./vcmitest \
             --gtest_filter='AIIntegrationNativeBattle.mmaiWithRealNeuralModelCompletesRealBattle' \
-            --gtest_output=xml:mmai-real-neural-battle.xml
+            --gtest_output=xml:mmai-real-neural-battle.xml || result=$?
+          if [[ "$result" == 139 ]]; then
+            # A real-model crash is a hard test failure. Record a stack
+            # without uploading a memory dump or publishing model weights.
+            sudo apt-get install -y --no-install-recommends gdb
+            VCMI_AI_MMAI_NEURAL_TEST=1 timeout 180 gdb --quiet --batch \
+              -ex 'set pagination off' -ex 'set print thread-events off' \
+              -ex run -ex 'bt 35' -ex 'thread apply all bt 8' \
+              --args ./vcmitest \
+                --gtest_filter='AIIntegrationNativeBattle.mmaiWithRealNeuralModelCompletesRealBattle' || true
+          fi
+          if [[ "$result" != 0 ]]; then
+            exit "$result"
+          fi
           python3 - <<'PY'
           from xml.etree import ElementTree as ET
           root = ET.parse('mmai-real-neural-battle.xml').getroot()
