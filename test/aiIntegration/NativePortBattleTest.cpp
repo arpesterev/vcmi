@@ -246,6 +246,7 @@ protected:
 
 		int decisions = 0;
 		std::map<PlayerColor, int> decisionsByPlayer;
+		std::map<PlayerColor, std::map<EActionType, int>> acceptedActionTypesByPlayer;
 		std::vector<std::string> recentDecisions;
 		while(recorder.battleResults.empty() && decisions < 512)
 		{
@@ -309,6 +310,7 @@ protected:
 			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action)) << "The engine rejected the selected action";
 			++decisions;
 			++decisionsByPlayer[player];
+			++acceptedActionTypesByPlayer[player][action.actionType];
 			if(recorder.battleResults.empty())
 			{
 				for(auto & entry : policies)
@@ -324,6 +326,13 @@ protected:
 		ASSERT_EQ(recorder.battleResults.size(), 1u) << "No unique result after 512 actual activations\n" << diagnostics.str();
 		const auto result = recorder.battleResults.back();
 		EXPECT_GT(decisions, 0);
+		if(attackerAI != defenderAI)
+		{
+			// A completed mixed-policy battle is not evidence for both ports if
+			// one army dies before its backend is ever asked for a decision.
+			EXPECT_GT(decisionsByPlayer[attackerPlayer], 0) << "Mixed-policy attacker never acted";
+			EXPECT_GT(decisionsByPlayer[defenderPlayer], 0) << "Mixed-policy defender never acted";
+		}
 		EXPECT_GT(recorder.damage, 0) << "No damage was applied by the engine";
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
@@ -338,6 +347,22 @@ protected:
 		}
 		EXPECT_TRUE(gameState()->currentBattles.empty()) << "The battle result was not applied to the adventure state";
 		EXPECT_EQ(recorder.acceptedResults, 1);
+		// Compact per-side action-type frequencies allow actual policy behavior
+		// to be compared, not just wins and total activations. Counts include
+		// only actions accepted by the engine, not attempted commands.
+		const auto actionCounts = [&](PlayerColor player)
+		{
+			std::ostringstream out;
+			bool needsSeparator = false;
+			for(const auto & entry : acceptedActionTypesByPlayer[player])
+			{
+				if(needsSeparator)
+					out << ',';
+				out << static_cast<int>(entry.first) << ':' << entry.second;
+				needsSeparator = true;
+			}
+			return out.str();
+		};
 		std::cout << "AI_NATIVE_BATTLE_RESULT backend=" << backendName
 			<< " defender_backend=" << defenderAI
 			<< " attacker_decisions=" << decisionsByPlayer[attackerPlayer]
@@ -345,6 +370,8 @@ protected:
 			<< " activations=" << decisions << " damage=" << recorder.damage
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
+			<< " attacker_action_types=" << actionCounts(attackerPlayer)
+			<< " defender_action_types=" << actionCounts(defenderPlayer)
 			<< " winner=" << (result.winner == BattleSide::ATTACKER ? "attacker" : "defender")
 			<< '\n';
 		for(auto & entry : callbacks)
@@ -1193,7 +1220,7 @@ TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScript
 
 TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
 {
-	// Separate CI invocation installs a published VCMI 1.7 MMAI model package.
+	// Separate CI invocation installs the published, checksum-pinned VCMI 1.8 MMAI model package.
 	// Its model selection must go through AIFactory and Router(true).
 	// Without a neural model Router(true) throws: this must NEVER fall back.
 	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
