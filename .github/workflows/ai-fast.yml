@@ -167,16 +167,16 @@ jobs:
             exit 1
           fi
 
-      # Only the MMAI development PRs download public ONNX weights; no
+      # Only the MMAI development PRs download checksum-pinned 1.8 ONNX weights; no
       # binary weights enter this repository, Actions artifacts or release jobs.
       - name: Install verified public MMAI neural pack into isolated CI preset
         if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'feature/mmai-') }}
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 --silent --show-error \
-            'https://github.com/vcmi-mods/mmai/releases/download/vcmi-1.7-latest/mod.zip' \
+            'https://github.com/vcmi-mods/mmai/releases/download/vcmi-1.8-latest/mod.zip' \
             --output "$RUNNER_TEMP/mmai-mod.zip"
-          echo "59aef1bbd76a02131f31c7e997111f1736a22e1c39c99df48b26feb5bf8bdb84  $RUNNER_TEMP/mmai-mod.zip" | sha256sum -c -
+          echo "25c997888015386c59c74a426cd0368b5035048dd61b059854d5b7689acdb7d4  $RUNNER_TEMP/mmai-mod.zip" | sha256sum -c -
           python3 - <<'PY'
           import json
           import os
@@ -196,18 +196,13 @@ jobs:
           manifest_file = mod / 'mod.json'
           if not manifest_file.exists():
               raise RuntimeError('MMAI mod.json is missing from downloaded release')
-          # This develop branch builds VCMI 1.8.0, but the published MMAI
-          # 1.7 model pack declares max compatibility 1.7.9. Only for this
-          # isolated test runner, permit it to load and prove compatibility
-          # through a real battle. Never modify a user's installation or
-          # advertise 1.8 compatibility before the test actually passes.
+          # Use the official 1.8 release with its unmodified compatibility
+          # declaration. The release asset SHA-256 is pinned above.
           manifest = json.loads(manifest_file.read_text())
           compat = manifest.get('compatibility', {})
-          if compat.get('min') != '1.7.0' or compat.get('max') != '1.7.9':
-              raise RuntimeError('Unexpected MMAI release compatibility: ' + str(compat))
-          compat['max'] = '1.8.0'
-          manifest_file.write_text(json.dumps(manifest, indent=2) + '\n')
-          print('CI-only MMAI compatibility probe:', compat)
+          if compat.get('min') != '1.8.0' or compat.get('max') != '1.8.9':
+              raise RuntimeError('Unexpected MMAI 1.8 release compatibility: ' + str(compat))
+          print('Verified native MMAI compatibility:', compat)
           settings_file = mod / 'config/mmai-settings.json'
           model_settings = json.loads(settings_file.read_text())
           if not {'attacker', 'defender'}.issubset(model_settings.get('models', {})):
