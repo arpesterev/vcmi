@@ -146,7 +146,7 @@ inline bool ballistaMayTarget(bool blind, bool paralyzed, bool petrified)
 }
 
 /// AI Improvements.txt: avoid chasing a faster nearby decoy when a
-/// reachable slower opponent exists. No source-level TUM scoring is public;
+/// reachable slower opponent exists, within two movement turns. No source-level TUM scoring is public;
 /// this predicate is a conservative, explicitly approximate interpretation.
 /// The caller must not suppress legal immediate attacks or ranged shots.
 inline bool ignoreNearbyFastDecoyForMovement(int ownSpeed, int enemySpeed, int slowerEnemySpeed, int hexDistance)
@@ -156,7 +156,7 @@ inline bool ignoreNearbyFastDecoyForMovement(int ownSpeed, int enemySpeed, int s
 	return enemySpeed >= ownSpeed + 2
 		&& slowerEnemySpeed <= ownSpeed
 		&& slowerEnemySpeed < enemySpeed
-		&& hexDistance <= ownSpeed + 1;
+		&& static_cast<int64_t>(hexDistance) <= static_cast<int64_t>(ownSpeed) * 2 + 1;
 }
 
 /// AI Improvements.txt: do not repeat an already active creature buff or debuff.
