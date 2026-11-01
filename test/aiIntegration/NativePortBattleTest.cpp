@@ -161,6 +161,7 @@ protected:
 		}
 
 		int decisions = 0;
+		std::vector<std::string> recentDecisions;
 		while(recorder.battleResults.empty() && decisions < 512)
 		{
 			ASSERT_FALSE(gameState()->currentBattles.empty());
@@ -172,6 +173,18 @@ protected:
 			policies.at(player)->activeStack(battleID, active);
 			ASSERT_TRUE(callback->action.has_value()) << "Backend did not respond to the actual active-stack event";
 			const auto action = *callback->action;
+			std::ostringstream trace;
+			trace << "activation=" << decisions << " active=" << active->unitId() << " " << action.toString();
+			for(const auto & unit : battle()->stacks)
+			{
+				if(unit->alive())
+					trace << " [unit=" << unit->unitId() << " creature=" << unit->creatureIndex()
+						<< " side=" << static_cast<int>(unit->unitSide()) << " hex=" << unit->getPosition().toInt()
+						<< " hp=" << unit->getAvailableHealth() << "]";
+			}
+			recentDecisions.push_back(trace.str());
+			if(recentDecisions.size() > 20)
+				recentDecisions.erase(recentDecisions.begin());
 			for(auto & entry : policies)
 				entry.second->actionStarted(battleID, action);
 			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action)) << "The engine rejected the selected action";
@@ -182,7 +195,12 @@ protected:
 					entry.second->actionFinished(battleID, action);
 			}
 		}
-		ASSERT_EQ(recorder.battleResults.size(), 1u) << "No unique result after 512 actual stack activations";
+		std::ostringstream diagnostics;
+		diagnostics << "damage=" << recorder.damage << " shots=" << recorder.shots
+			<< " melee=" << recorder.meleeAttacks << " catapult=" << recorder.catapultAttacks.size();
+		for(const auto & decision : recentDecisions)
+			diagnostics << '\n' << decision;
+		ASSERT_EQ(recorder.battleResults.size(), 1u) << "No unique result after 512 actual stack activations\n" << diagnostics.str();
 		const auto result = recorder.battleResults.back();
 		EXPECT_GT(decisions, 0);
 		EXPECT_GT(recorder.damage, 0) << "No damage was applied by the engine";
