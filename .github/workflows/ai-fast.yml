@@ -240,7 +240,7 @@ jobs:
           ulimit -c 0
           result=0
           VCMI_AI_MMAI_NEURAL_TEST=1 timeout 300 ./vcmitest \
-            --gtest_filter='AIIntegrationNativeBattle.mmaiWithRealNeuralModelCompletesRealBattle' \
+            --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle' \
             --gtest_output=xml:mmai-real-neural-battle.xml || result=$?
           if [[ "$result" == 139 ]]; then
             # A real-model crash is a hard test failure. Record a stack
@@ -250,7 +250,7 @@ jobs:
               -ex 'set pagination off' -ex 'set print thread-events off' \
               -ex run -ex 'bt 35' -ex 'thread apply all bt 8' \
               --args ./vcmitest \
-                --gtest_filter='AIIntegrationNativeBattle.mmaiWithRealNeuralModelCompletesRealBattle' || true
+                --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle' || true
           fi
           if [[ "$result" != 0 ]]; then
             exit "$result"
@@ -259,11 +259,14 @@ jobs:
           from xml.etree import ElementTree as ET
           root = ET.parse('mmai-real-neural-battle.xml').getroot()
           cases = list(root.iter('testcase'))
-          if len(cases) != 1 or cases[0].get('name') != 'mmaiWithRealNeuralModelCompletesRealBattle':
-              raise RuntimeError('The real MMAI neural integration test did not execute')
-          if any(cases[0].find(tag) is not None for tag in ('failure', 'error', 'skipped')):
-              raise RuntimeError('MMAI model test failed or was skipped')
-          print('Verified: one real neural-backed native MMAI battle completed')
+          expected = {'mmaiWithRealNeuralModelCompletesRealBattle',
+                      'mmaiDefenderNeuralModelCompletesRealBattle'}
+          names = {case.get('name') for case in cases}
+          if len(cases) != 2 or names != expected:
+              raise RuntimeError('MMAI attacker/defender neural battles did not both execute: ' + str(names))
+          if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
+              raise RuntimeError('An MMAI neural integration test failed or was skipped')
+          print('Verified: two real neural-backed native MMAI battles completed, as attacker and defender')
           PY
 
       - name: Save compiled C++ objects for later develop builds
