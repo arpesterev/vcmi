@@ -138,27 +138,48 @@ private:
 		return Ports::FHeroes2::selectTactics(input);
 	}
 
+	// fheroes2 meleeUnitOffense first pursues targets that cannot evade,
+	// then maximizes threat divided by the path distance. Unlike the former
+	// nearest-stack policy, this can pursue a remote archer over nearby bait.
+	// The threat and legal routes are native VCMI projections.
 	static BattleAction approach(CPlayerBattleCallback & battle, const CStack & stack,
 		const ReachabilityInfo & reachability, const BattleHexArray & available,
 		const std::vector<const CStack *> & enemies)
 	{
 		BattleHex destination;
-		int shortest = GameConstants::BFIELD_SIZE;
+		std::optional<Ports::FHeroes2::DistantTarget> best;
+		const int ownSpeed = static_cast<int>(stack.getMovementRange());
 		for(const auto * enemy : enemies)
 		{
+			BattleHex goal;
+			int shortest = GameConstants::BFIELD_SIZE;
 			for(const auto & hex : enemy->getAttackableHexes(&stack))
 			{
 				if(!hex.isValid() || !battle.isMeleeAttackPossible(&stack, enemy, hex))
 					continue;
-				const auto distance = reachability.distances[hex.toInt()];
-				if(distance < shortest || (distance == shortest && destination.isValid() && hex.toInt() < destination.toInt()))
+				const int distance = reachability.distances[hex.toInt()];
+				if(distance < shortest || (distance == shortest && (!goal.isValid() || hex.toInt() < goal.toInt())))
 				{
 					shortest = distance;
-					destination = hex;
+					goal = hex;
 				}
 			}
+			if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
+				continue;
+
+			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
+				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
+			const Ports::FHeroes2::DistantTarget candidate{
+				std::max(0.0, strength(*enemy)), std::max(1, shortest), cannotEvade,
+				static_cast<int>(enemy->unitId())};
+			if(!best || Ports::FHeroes2::preferDistantTarget(candidate, *best))
+			{
+				best = candidate;
+				destination = goal;
+			}
 		}
-		if(!destination.isValid() || shortest >= GameConstants::BFIELD_SIZE)
+		if(!destination.isValid())
 			return BattleAction::makeDefend(&stack);
 
 		if(stack.hasBonusOfType(BonusType::FLYING))
@@ -168,7 +189,7 @@ private:
 			for(const auto & hex : available)
 			{
 				const int distance = BattleHex::getDistance(destination, hex);
-				if(distance < bestDistance || (distance == bestDistance && nearest.isValid() && hex.toInt() < nearest.toInt()))
+				if(distance < bestDistance || (distance == bestDistance && (!nearest.isValid() || hex.toInt() < nearest.toInt())))
 				{
 					nearest = hex;
 					bestDistance = distance;
