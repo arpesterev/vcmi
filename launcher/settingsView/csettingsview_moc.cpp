@@ -140,6 +140,8 @@ void CSettingsView::fillValidCombatAILibraries(QComboBox * comboBox, QString act
 
 #ifdef ENABLE_BATTLE_AI
 	comboBox->addItem(tr("BattleAI (default, recommended)"), "BattleAI");
+	comboBox->addItem(tr("FHeroes2 tactics (partial port, experimental)"), "FHeroes2Tactics");
+	comboBox->setItemData(comboBox->count() - 1, tr("Partial tactical port using VCMI strength and damage estimates. Hero spell AI, retreat AI and full upstream behavior are not implemented."), Qt::ToolTipRole);
 #endif
 
 #ifdef ENABLE_MMAI
@@ -396,7 +398,6 @@ static QStringList getAvailableRenderingDrivers()
 	result += QString(); // empty value for autoselection
 
 	int driversCount = SDL_GetNumRenderDrivers();
-
 	for(int it = 0; it < driversCount; it++)
 	{
 #ifdef VCMI_SDL3
