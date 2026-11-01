@@ -21,6 +21,7 @@
 #  include "../../AI/BattleAI/BattleAI.h"
 #  include "../../AI/Integration/Ports/FHeroes2BattleAI.h"
 #  include "../../AI/Integration/Ports/HoMM3TacticsBattleAI.h"
+#  include "../../AI/Integration/Ports/TUMEnchantedTacticsBattleAI.h"
 #endif
 #ifdef ENABLE_STUPID_AI
 #  include "../../AI/StupidAI/StupidAI.h"
@@ -68,6 +69,13 @@ std::shared_ptr<CBattleGameInterface> AIFactory::createBattleAI(const std::strin
 		return std::make_shared<AIIntegration::BattleEventAdapter>(name, std::make_shared<AIIntegration::FHeroes2BattleAI>());
 #else
 		throw std::runtime_error("FHeroes2Tactics is not available in this build!");
+#endif
+
+	if(name == "TUMEnchantedTactics")
+#ifdef ENABLE_BATTLE_AI
+		return std::make_shared<AIIntegration::BattleEventAdapter>(name, std::make_shared<AIIntegration::TUMEnchantedTacticsBattleAI>());
+#else
+		throw std::runtime_error("TUMEnchantedTactics is not available in this build!");
 #endif
 
 	if(name == "BattleAI")
