@@ -8,6 +8,8 @@
 #include "server/battles/BattleTestFixture.h"
 #include <vcmi/Environment.h>
 #include "../../lib/GameLibrary.h"
+#include "../../lib/filesystem/Filesystem.h"
+#include "../../lib/json/JsonUtils.h"
 #include "../../lib/battle/BattleAction.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/battle/BattleLayout.h"
@@ -496,6 +498,16 @@ TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
 	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
 		GTEST_SKIP() << "Run separately with a real installed MMAI model mod";
 
+	// Prove the actual model configuration and virtual filesystem resource
+	// are present before testing inference. This differentiates a missing mod
+	// from ONNX loading/schema failures without accepting a scripted fallback.
+	const auto modelConfig = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(modelConfig.isStruct()) << "MMAI neural config is not mounted in VCMI";
+	ASSERT_TRUE(modelConfig["models"]["attacker"].isString())
+		<< "Missing MMAI attacker model mapping: " << modelConfig.toCompactString();
+	const auto path = "MMAI/models/" + modelConfig["models"]["attacker"].String();
+	ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
+		<< "MMAI attacker model is not mounted: " << path;
 	prepareBattle(CreatureID(0), 45, CreatureID(0), 40);
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(std::nullopt, false, "MMAI", "FHeroes2Tactics");
