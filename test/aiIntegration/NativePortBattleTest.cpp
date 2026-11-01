@@ -10,6 +10,7 @@
 #include "../../lib/callback/CBattleCallback.h"
 #include "../../lib/callback/CBattleGameInterface.h"
 #include "../../lib/callback/GameRandomizer.h"
+#include "../../lib/entities/building/TownFortifications.h"
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/mapObjects/CGTownInstance.h"
