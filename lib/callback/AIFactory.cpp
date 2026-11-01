@@ -11,12 +11,15 @@
 #include "AIFactory.h"
 
 #include "CGlobalAI.h"
+#include "../../AI/Integration/BackendRegistry.h"
+#include "../../AI/Integration/BattleEventAdapter.h"
 
 #ifdef ENABLE_NULLKILLER2_AI
 #  include "../../AI/Nullkiller2/AIGateway.h"
 #endif
 #ifdef ENABLE_BATTLE_AI
 #  include "../../AI/BattleAI/BattleAI.h"
+#  include "../../AI/Integration/Ports/FHeroes2BattleAI.h"
 #endif
 #ifdef ENABLE_STUPID_AI
 #  include "../../AI/StupidAI/StupidAI.h"
@@ -41,6 +44,8 @@ std::shared_ptr<CGlobalAI> AIFactory::createAdventureAI(const std::string & name
 #endif
 	}
 
+	if(name != "EmptyAI")
+		throw std::runtime_error("Adventure AI is not implemented or linked: " + name);
 	auto ret = std::make_shared<CEmptyAI>();
 	ret->dllName = name;
 	return ret;
@@ -49,6 +54,13 @@ std::shared_ptr<CGlobalAI> AIFactory::createAdventureAI(const std::string & name
 std::shared_ptr<CBattleGameInterface> AIFactory::createBattleAI(const std::string & name)
 {
 	logGlobal->trace("Creating battle AI %s", name);
+
+	if(name == "FHeroes2Tactics")
+#ifdef ENABLE_BATTLE_AI
+		return std::make_shared<AIIntegration::BattleEventAdapter>(name, std::make_shared<AIIntegration::FHeroes2BattleAI>());
+#else
+		throw std::runtime_error("FHeroes2Tactics is not available in this build!");
+#endif
 
 	if(name == "BattleAI")
 #ifdef ENABLE_BATTLE_AI
@@ -66,11 +78,22 @@ std::shared_ptr<CBattleGameInterface> AIFactory::createBattleAI(const std::strin
 
 	if(name == "MMAI")
 #ifdef ENABLE_MMAI
-		return std::make_shared<MMAI::BAI::Router>();
+		return std::make_shared<AIIntegration::BattleEventAdapter>(
+			name, std::make_shared<MMAI::BAI::Router>(),
+			[](const AIIntegration::EventRecord & event)
+			{
+				logGlobal->trace("AI_BACKEND_EVENT backend=%s seq=%llu battle=%lld kind=%s phase=%d",
+					event.backend, static_cast<unsigned long long>(event.sequence),
+					static_cast<long long>(event.battle), event.kind, static_cast<int>(event.phase));
+			});
 #else
 		throw std::runtime_error("MMAI is not available in this build!");
 #endif
 
+	if(const auto * backend = AIIntegration::findBackend(name))
+		throw std::runtime_error(std::string(backend->name) + ": upstream port is not implemented or linked; no fallback will be substituted");
+	if(name != "EmptyAI")
+		throw std::runtime_error("Unknown battle AI: " + name);
 	return std::make_shared<CEmptyAI>();
 }
 

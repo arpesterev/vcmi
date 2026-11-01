@@ -198,6 +198,7 @@ if(ENABLE_BATTLE_AI)
 		${BATTLE_AI_TEST_SRCS}
 		battleAI/BattleEvaluatorTest.cpp
 		battleAI/SpellTargetsEvaluatorTest.cpp
+		aiIntegration/NativePortBattleTest.cpp
 	)
 endif()
 

@@ -2,7 +2,7 @@ name: Fast AI checks
 
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, 'feature/ai-event-adapters-20261031']
   push:
     branches: [develop]
 
@@ -14,10 +14,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ai-adapter-contracts:
+    name: AI adapter contracts (ASan and UBSan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure standalone adapter checks
+        run: >-
+          cmake -S AI/Integration -B out/ai-adapter-contracts
+          -DCMAKE_BUILD_TYPE=Debug -DAI_ADAPTER_SANITIZERS=ON
+      - name: Compile adapter and source tactical checks
+        run: cmake --build out/ai-adapter-contracts --parallel 2
+      - name: Run protocol, source tactical and evidence-checker tests
+        run: ctest --test-dir out/ai-adapter-contracts --output-on-failure
+
   ai-linux:
-    name: Linux AI regression
+    name: Linux AI regression and launcher
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      native_battles: ${{ steps.native_battles.outputs.diagnostics }}
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -46,9 +63,7 @@ jobs:
       - name: Install Linux build dependencies
         run: source CI/before_install/linux_qt6.sh
 
-      # Shared compiler-object cache: changing sources or flags automatically
-      # invalidates individual entries. Only develop pushes publish a new cache.
-      # No releases, third-party uploads or repository writes.
+      # Shared compiler-object cache. No releases or third-party uploads.
       - name: Install local compiler cache
         run: sudo apt-get install -y --no-install-recommends ccache
 
@@ -84,18 +99,56 @@ jobs:
         run: ccache --show-stats
 
       - name: Build reusable engine and server objects
+        id: build_core
         run: >-
           /usr/bin/time -f 'Core stage elapsed: %e seconds'
           cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
 
-      - name: Build AI test suite and headless server only
+      - name: Build native tests, headless server and settings launcher
         run: >-
-          /usr/bin/time -f 'AI/test stage elapsed: %e seconds'
-          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver --parallel 3
+          /usr/bin/time -f 'AI and launcher stage elapsed: %e seconds'
+          cmake --build --preset linux-gcc-test --target vcmitest vcmiserver vcmilauncher --parallel 3
 
       - name: Report compiler cache efficiency
         if: always()
         run: ccache --show-stats || true
+
+      - name: Preserve compiler progress for trusted PR reruns
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.build_core.outcome != 'skipped' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .ccache
+          key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Run source-port battles through the real engine
+        id: native_battles
+        run: |
+          cd out/build/linux-gcc-test/bin
+          ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*' --gtest_list_tests > native-port-names.txt
+          grep -q '^AIIntegrationNativeBattle\.' native-port-names.txt
+          status=0
+          timeout 180 ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*' \
+            --gtest_output=xml:native-port-battles.xml > "$RUNNER_TEMP/native-battles.log" 2>&1 || status=$?
+          tail -n 120 "$RUNNER_TEMP/native-battles.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          report = {}
+          xml = Path('native-port-battles.xml')
+          if xml.exists():
+              root = ET.parse(xml).getroot()
+              report['totals'] = root.attrib
+              report['failures'] = [dict(test=case.get('classname', '') + '.' + case.get('name', ''),
+                  errors=[(failure.text or '')[:14000] for failure in case.findall('failure')])
+                  for case in root.iter('testcase') if case.findall('failure')][:3]
+          else:
+              report['error'] = 'No native battle XML report was produced'
+              report['tail'] = (Path(os.environ['RUNNER_TEMP']) / 'native-battles.log').read_text(errors='replace').splitlines()[-30:]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('diagnostics=' + json.dumps(report, separators=(',', ':')) + '\n')
+          PY
+          exit "$status"
 
       - name: Run all Nullkiller2 regressions in one process
         run: |
@@ -121,6 +174,22 @@ jobs:
           path: .ccache
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
+  native-battle-summary:
+    name: Native battle evidence
+    needs: ai-linux
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Report actual native battle results
+        env:
+          NATIVE_BATTLES: ${{ needs.ai-linux.outputs.native_battles }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          report = os.environ.get('NATIVE_BATTLES')
+          print(json.dumps(json.loads(report), indent=2) if report else 'No report: native build or test setup failed.')
+          PY
 
   validate-code:
     name: Validate Code
