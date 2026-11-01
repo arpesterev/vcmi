@@ -5,6 +5,7 @@
 #include "StdInc.h"
 
 #include "server/battles/BattleTestFixture.h"
+#include "../../AI/Integration/Ports/HoMM3TacticsBattleAI.h"
 #include <vcmi/Environment.h>
 #include "../../lib/GameLibrary.h"
 #include "../../lib/battle/BattleAction.h"
@@ -568,6 +569,19 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
 	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blinded));
 	ASSERT_TRUE(blinded->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
 		BonusSourceID(SpellID(SpellID::BLIND)))));
+	const CStack * attackingBallista = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID::BALLISTA)
+			attackingBallista = unit.get();
+	ASSERT_NE(attackingBallista, nullptr);
+	const auto view = std::make_shared<DecisionCallback>(battle()->sideToPlayer(BattleSide::ATTACKER));
+	view->onBattleStarted(battle());
+	const auto viewedBattle = view->getBattle(battle()->getBattleID());
+	ASSERT_NE(viewedBattle, nullptr);
+	const auto baselineDecision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(
+		*viewedBattle, *attackingBallista);
+	EXPECT_EQ(baselineDecision.actionType, EActionType::SHOOT)
+		<< "The baseline must shoot so that the TUM target protection is a real behavioral override";
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(ballistaDecisions, 0);
 	EXPECT_GT(ballistaDefendsWhileAllEnemiesBlind, 0)
