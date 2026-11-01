@@ -271,7 +271,7 @@ protected:
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
 			<< " winner=" << (result.winner == BattleSide::ATTACKER ? "attacker" : "defender")
-			<< '\\n';
+			<< '\n';
 		for(auto & entry : callbacks)
 			entry.second->onBattleEnded(battleID);
 	}
