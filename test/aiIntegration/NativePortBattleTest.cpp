@@ -534,7 +534,7 @@ TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndComp
 	const CStack * defender = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
-		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && !unit->isWarMachine())
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
 		{
 			defender = unit.get();
 			break;
