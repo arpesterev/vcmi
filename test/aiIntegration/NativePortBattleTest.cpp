@@ -37,6 +37,15 @@ public:
 	std::optional<BattleAction> action;
 	bool spellAction = false;
 
+	// Headless native fixture has no IClient. Returning no surrender/retreat
+	// decision preserves the engine's legal combat path instead of calling
+	// CBattleCallback's UI-dependent default through a null client pointer.
+	std::optional<BattleAction> makeSurrenderRetreatDecision(const BattleID &,
+		const BattleStateInfoForRetreat &) override
+	{
+		return std::nullopt;
+	}
+
 	void battleMakeUnitAction(const BattleID &, const BattleAction & value) override
 	{
 		if(action)
