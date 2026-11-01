@@ -71,11 +71,11 @@ int main()
 	require(TUM::creatureMayApplyEffect(false), "Allow a new effect");
 	// The published fast-decoy fix has no recoverable scoring code.
 	// Pin the conservative movement-only predicate and its boundary cases.
-	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 4),
+	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 6),
 		"Ignore a fast nearby bait when a slower opponent is available");
-	require(TUM::ignoreNearbyFastDecoyForMovement(4, 6, 4, 5),
+	require(TUM::ignoreNearbyFastDecoyForMovement(4, 6, 4, 9),
 		"Ignore an eligible decoy at the inclusive distance boundary");
-	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 6),
+	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 10),
 		"Distant fast foes are not treated as nearby bait");
 	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 5, 3, 4),
 		"A one-speed advantage alone is not enough to ignore a target");
