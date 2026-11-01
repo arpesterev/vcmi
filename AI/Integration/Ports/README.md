@@ -62,7 +62,7 @@ documents combat behavior, but the released combat modifications are in
 compiled ERA/DLL components, not source suitable for direct porting.
 
 The TUM backend explicitly composes the experimental HoMM3 baseline with
-two independently implemented overrides derived from the documentation:
+three independently implemented overrides derived from the documentation:
 
 - **Ballista:** excludes targets affected by Blind, Paralyze or Stone Gaze;
   with no remaining legal target, it defends instead of waking a disabled
@@ -73,6 +73,12 @@ two independently implemented overrides derived from the documentation:
   in its next movement, the active friendly melee stack defends instead of
   rushing forward. Movement reach is evaluated with VCMI pathfinding. The
   documented exception for neutral-controlled armies outside siege applies.
+- **Fortified siege defense:** melee defenders already inside castle walls
+  hold while the gate remains closed or blocked and no enemy has breached
+  the walls or reached melee. They resume normal actions after a breach
+  or an opened/destroyed gate. This is a deliberately conservative VCMI
+  interpretation of TUM's documented increased preference for staying
+  within fortifications, not a reconstruction of its unpublished scoring.
 
 All remaining attacks, movement and siege-machine behavior explicitly uses
 the partial HoMM3 tactical policy, not an unannounced BattleAI/EmptyAI
@@ -82,7 +88,7 @@ entry is `TUMEnchantedTactics`, **not** the reserved full-port ID
 
 Still unimplemented or not upstream-equivalent: the full TUM defensive spell
 aggregation rules, improved tower targeting, clone/antimagic/cure selection,
-distraction avoidance, siege valuation, creature ability choices, buff/debuff
+distraction avoidance, full siege valuation, creature ability choices, buff/debuff
 planning and the rest of the compiled ERA AI modifications. Native battle
 smoke tests do not establish those behaviors or a match win-rate improvement.
 
