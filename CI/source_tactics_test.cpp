@@ -69,6 +69,24 @@ int main()
 		require(TUM::ballistaMayTarget(effects & 1, effects & 2, effects & 4) == (effects == 0), "Do not wake disabled targets with a ballista");
 	require(!TUM::creatureMayApplyEffect(true), "Do not recast existing effect");
 	require(TUM::creatureMayApplyEffect(false), "Allow a new effect");
+	// The published fast-decoy fix has no recoverable scoring code.
+	// Pin the conservative movement-only predicate and its boundary cases.
+	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 4),
+		"Ignore a fast nearby bait when a slower opponent is available");
+	require(TUM::ignoreNearbyFastDecoyForMovement(4, 6, 4, 5),
+		"Ignore an eligible decoy at the inclusive distance boundary");
+	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 6),
+		"Distant fast foes are not treated as nearby bait");
+	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 5, 3, 4),
+		"A one-speed advantage alone is not enough to ignore a target");
+	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 5, 4),
+		"Do not ignore the only enemy that can be caught by a slow force");
+	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 7, 4),
+		"Do not ignore equally fast targets without a slower alternative");
+	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, -1),
+		"Reject invalid distance rather than ignoring a target");
+	require(!TUM::ignoreNearbyFastDecoyForMovement(0, 7, 3, 1),
+		"No mobility implies no fast-decoy movement policy");
 
 	try { selectTactics({}); return 1; } catch(const std::invalid_argument &) { ++checks; }
 	try { rangedAttackValue({100, false, false, true, 0}, false); return 1; } catch(const std::invalid_argument &) { ++checks; }
