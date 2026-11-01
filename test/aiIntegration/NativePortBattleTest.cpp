@@ -201,6 +201,7 @@ protected:
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
 		const auto attackerPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
+		const auto defenderPlayer = battle()->sideToPlayer(BattleSide::DEFENDER);
 		std::map<PlayerColor, std::shared_ptr<DecisionCallback>> callbacks;
 		std::map<PlayerColor, std::shared_ptr<CBattleGameInterface>> policies;
 		for(auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
@@ -340,7 +341,7 @@ protected:
 		std::cout << "AI_NATIVE_BATTLE_RESULT backend=" << backendName
 			<< " defender_backend=" << defenderAI
 			<< " attacker_decisions=" << decisionsByPlayer[attackerPlayer]
-			<< " defender_decisions=" << decisionsByPlayer[battle()->sideToPlayer(BattleSide::DEFENDER)]
+			<< " defender_decisions=" << decisionsByPlayer[defenderPlayer]
 			<< " activations=" << decisions << " damage=" << recorder.damage
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
