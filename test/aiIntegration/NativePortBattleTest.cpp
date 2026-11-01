@@ -82,9 +82,18 @@ public:
 	int shots = 0;
 	int meleeAttacks = 0;
 	int acceptedResults = 0;
+	std::function<void(const BattleResult &)> onResultBeforeApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
+		// In the live client battleEnd is delivered while the battle state
+		// is still valid. The test server removes that state when it applies
+		// BattleResult. Deliver before removal, not after the winning action.
+		if(const auto * result = dynamic_cast<const BattleResult *>(&pack))
+		{
+			if(onResultBeforeApply)
+				onResultBeforeApply(*result);
+		}
 		RecordingGameServer::applyPack(pack);
 		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
 		{
@@ -203,6 +212,16 @@ protected:
 			policies.emplace(player, policy);
 		}
 
+		bool battleEndDelivered = false;
+		recorder.onResultBeforeApply = [&](const BattleResult & result)
+		{
+			ASSERT_FALSE(gameState()->currentBattles.empty()) << "Battle was released before its terminal event";
+			ASSERT_FALSE(battleEndDelivered) << "A battle produced multiple terminal events";
+			for(auto & entry : policies)
+				entry.second->battleEnd(battleID, &result, result.questionID);
+			battleEndDelivered = true;
+		};
+
 		if(battle()->tacticDistance > 0)
 		{
 			const auto player = battle()->sideToPlayer(battle()->tacticsSide);
@@ -271,8 +290,8 @@ protected:
 		{
 			EXPECT_EQ(result.winner, *expectedWinner);
 		}
-		for(auto & entry : policies)
-			entry.second->battleEnd(battleID, &result, result.questionID);
+		ASSERT_TRUE(battleEndDelivered) << "The terminal event was not delivered with live battle state";
+		recorder.onResultBeforeApply = {};
 		if(result.questionID != QuestionID::NONE)
 		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
