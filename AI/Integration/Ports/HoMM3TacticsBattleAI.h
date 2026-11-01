@@ -163,6 +163,9 @@ private:
 		return BattleAction::makeDefend(&stack);
 	}
 
+	// The TUM mod extends the original HoMM3 tactical policy with documented overrides.
+	// Expose the baseline decision for explicit composition, not as a hidden fallback.
+public:
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
 	{
 		if(stack.isCatapult())
