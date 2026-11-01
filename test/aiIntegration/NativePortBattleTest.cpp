@@ -458,7 +458,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeTh
 	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
 	ASSERT_FALSE(HasFatalFailure());
 	// Place an additional real enemy stack within one turn's melee reach.
-	// The existing defender remains present, so the retreat must be safe
+	// The enemy starts four hexes away: still a next-turn melee threat, but
+	// the archer can reach a safe edge hex. The existing defender remains,
+	// so retreat must be safe
 	// against *every* enemy rather than just the closest one.
 	battle()->obstacles.clear();
 	const CStack * shooter = nullptr;
@@ -468,7 +470,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeTh
 	ASSERT_NE(shooter, nullptr);
 	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::SHOOTER));
 	const BattleHex attackerPosition = shooter->getPosition();
-	const BattleHex approachingHex(attackerPosition.toInt() + 3);
+	const BattleHex approachingHex(attackerPosition.toInt() + 4);
 	ASSERT_TRUE(approachingHex.isAvailable());
 	ASSERT_EQ(battle()->battleGetUnitByPos(approachingHex), nullptr);
 	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(16), approachingHex, 25), nullptr);
