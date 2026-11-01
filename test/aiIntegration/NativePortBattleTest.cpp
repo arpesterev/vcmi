@@ -6,6 +6,7 @@
 
 #include "server/battles/BattleTestFixture.h"
 #include "../../lib/battle/BattleAction.h"
+#include "../../lib/battle/BattleLayout.h"
 #include "../../lib/callback/AIFactory.h"
 #include "../../lib/callback/CBattleCallback.h"
 #include "../../lib/callback/CBattleGameInterface.h"
@@ -117,8 +118,13 @@ protected:
 		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
 		ASSERT_GT(town->fortificationsLevel().wallsHealth, 0);
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 30));
-		gameHandler->battles->startBattle(attackerSideHero, town);
+		ASSERT_NE(attackerSideHero->getArt(ArtifactPosition::MACH4), nullptr);
+		const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
+		gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
+			attackerSideHero, nullptr, layout, town);
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+		ASSERT_TRUE(std::any_of(battle()->stacks.begin(), battle()->stacks.end(),
+			[](const auto & unit) { return unit->isCatapult(); })) << "Siege setup did not create the attacking catapult";
 	}
 
 	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt)
