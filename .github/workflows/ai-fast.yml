@@ -33,6 +33,8 @@ jobs:
     name: Linux AI regression and launcher
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    outputs:
+      native_battles: ${{ steps.native_battles.outputs.diagnostics }}
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -119,12 +121,34 @@ jobs:
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run source-port battles through the real engine
+        id: native_battles
         run: |
           cd out/build/linux-gcc-test/bin
           ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*' --gtest_list_tests > native-port-names.txt
           grep -q '^AIIntegrationNativeBattle\.' native-port-names.txt
+          status=0
           timeout 180 ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*' \
-            --gtest_output=xml:native-port-battles.xml
+            --gtest_output=xml:native-port-battles.xml > "$RUNNER_TEMP/native-battles.log" 2>&1 || status=$?
+          tail -n 120 "$RUNNER_TEMP/native-battles.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          report = {}
+          xml = Path('native-port-battles.xml')
+          if xml.exists():
+              root = ET.parse(xml).getroot()
+              report['totals'] = root.attrib
+              report['failures'] = [dict(test=case.get('classname', '') + '.' + case.get('name', ''),
+                  errors=[(failure.text or '')[:14000] for failure in case.findall('failure')])
+                  for case in root.iter('testcase') if case.findall('failure')][:3]
+          else:
+              report['error'] = 'No native battle XML report was produced'
+              report['tail'] = (Path(os.environ['RUNNER_TEMP']) / 'native-battles.log').read_text(errors='replace').splitlines()[-30:]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('diagnostics=' + json.dumps(report, separators=(',', ':')) + '\n')
+          PY
+          exit "$status"
 
       - name: Run all Nullkiller2 regressions in one process
         run: |
@@ -149,6 +173,23 @@ jobs:
         with:
           path: .ccache
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+  native-battle-summary:
+    name: Native battle evidence
+    needs: ai-linux
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Report actual native battle results
+        env:
+          NATIVE_BATTLES: ${{ needs.ai-linux.outputs.native_battles }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          report = os.environ.get('NATIVE_BATTLES')
+          print(json.dumps(json.loads(report), indent=2) if report else 'No report: native build or test setup failed.')
+          PY
 
   validate-code:
     name: Validate Code
