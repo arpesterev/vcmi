@@ -602,7 +602,9 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 40);
 	const auto * neutral = findFirst<CGCreature>();
 	ASSERT_NE(neutral, nullptr);
-	ASSERT_EQ(neutral->getOwner(), PlayerColor::NEUTRAL);
+	// A wandering monster is UNFLAGGABLE on the adventure map;
+	// SideInBattle normalizes that ownership to NEUTRAL for combat.
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
 	gameHandler->battles->startBattle(attackerSideHero, neutral);
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 
