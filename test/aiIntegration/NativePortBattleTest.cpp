@@ -12,6 +12,7 @@
 #include "../../lib/gameState/CGameState.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/networkPacks/PacksForClient.h"
+#include "../../lib/networkPacks/StackLocation.h"
 #include "../../server/CGameHandler.h"
 #include "../../server/battles/BattleProcessor.h"
 
@@ -130,7 +131,9 @@ protected:
 		for(auto & entry : policies)
 			entry.second->battleEnd(battleID, &result, result.questionID);
 		if(result.questionID != QuestionID::NONE)
+		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
+		}
 		EXPECT_TRUE(gameState()->currentBattles.empty()) << "The battle result was not applied to the adventure state";
 		for(auto & entry : callbacks)
 			entry.second->onBattleEnded(battleID);
