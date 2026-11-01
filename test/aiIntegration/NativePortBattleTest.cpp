@@ -8,6 +8,7 @@
 #include <vcmi/Environment.h>
 #include "../../lib/GameLibrary.h"
 #include "../../lib/battle/BattleAction.h"
+#include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/battle/BattleLayout.h"
 #include "../../lib/callback/AIFactory.h"
 #include "../../lib/callback/CBattleCallback.h"
