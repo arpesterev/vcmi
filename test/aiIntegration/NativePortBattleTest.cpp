@@ -510,7 +510,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 			infantry = unit.get();
 	ASSERT_NE(infantry, nullptr);
 	const auto originalHex = infantry->getPosition();
-	const BattleHex shooterHex(originalHex.toInt() + 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex shooterHex(originalHex.toInt() + 3 * GameConstants::BFIELD_WIDTH);
 	const BattleHex enemyHex(shooterHex.toInt() + 5);
 	ASSERT_TRUE(shooterHex.isAvailable());
 	ASSERT_TRUE(enemyHex.isAvailable());
@@ -518,8 +518,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 	ASSERT_EQ(battle()->battleGetUnitByPos(enemyHex), nullptr);
 	ASSERT_NE(addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 120), nullptr);
 	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), enemyHex, 15), nullptr);
-	ASSERT_GT(BattleHex::getDistance(originalHex, enemyHex), infantry->getMovementRange())
-		<< "The guard should not have a legal immediate melee attack";
+	ASSERT_GT(BattleHex::getDistance(originalHex, enemyHex),
+		static_cast<int>(infantry->getMovementRange()) + 1)
+		<< "Enemy must be beyond the guard's immediate melee range";
 	ASSERT_LE(BattleHex::getDistance(shooterHex, enemyHex),
 		static_cast<int>(battle()->battleGetUnitByPos(enemyHex)->getMovementRange()) + 1);
 
