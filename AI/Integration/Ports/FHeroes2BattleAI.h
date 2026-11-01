@@ -126,6 +126,12 @@ private:
 		if(input.armyStrength <= 0 || input.enemyArmyStrength <= 0)
 			return {};
 		input.flying = stack.hasBonusOfType(BonusType::FLYING);
+		// fheroes2 includes defensive castle/tower advantage when deciding
+		// whether to hold the line. The native projection requires actual
+		// surviving fortifications; an undefended open-field battle is not a siege.
+		input.defendingCastle = stack.unitSide() == BattleSide::DEFENDER
+			&& battle.battleGetDefendedTown() != nullptr
+			&& battle.battleGetWallState(EWallPart::GATE) != EWallState::NONE;
 		input.insideDefendedArea = stack.unitSide() == BattleSide::ATTACKER
 			? stack.getPosition().getX() < GameConstants::BFIELD_WIDTH / 2
 			: stack.getPosition().getX() >= GameConstants::BFIELD_WIDTH / 2;
