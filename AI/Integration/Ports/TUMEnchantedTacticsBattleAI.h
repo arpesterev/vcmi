@@ -56,7 +56,7 @@ public:
 			&& (shouldProtectShooters(*battle, *stack) || shouldHoldFortifiedSiege(*battle, *stack)))
 			action = BattleAction::makeDefend(stack);
 		else
-			action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack);
+			action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
 
 		logAi->debug("AI_PORT_ACTION backend=TUMEnchantedTactics battle=%d unit=%d action=%s",
 			battleID.getNum(), stack->unitId(), action.toString());
