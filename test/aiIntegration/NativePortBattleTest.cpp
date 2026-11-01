@@ -117,7 +117,10 @@ protected:
 		ASSERT_FALSE(HasFatalFailure());
 		const auto * town = findFirst<CGTownInstance>();
 		ASSERT_NE(town, nullptr);
-		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
+		if(town->fortificationsLevel().wallsHealth <= 0)
+		{
+			ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
+		}
 		ASSERT_GT(town->fortificationsLevel().wallsHealth, 0);
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 30));
 		ASSERT_NE(attackerSideHero->getArt(ArtifactPosition::MACH4), nullptr);
