@@ -1320,6 +1320,34 @@ TEST_F(AIIntegrationNativeBattle, mixedTUMAttackerAgainstFHeroes2DefenderComplet
 	EXPECT_GT(recorder.shots, 0);
 }
 
+// Exercise every directed pairing of the three native source-policy ports.
+// Reverse the backend assignment on the same armies to expose side-sensitive
+// adapter wiring, missed activations and illegal engine actions. These are
+// deterministic engine smoke tests, not a balance or win-rate benchmark.
+TEST_F(AIIntegrationNativeBattle, mixedOriginalHoMM3AttackerAgainstTUMDefenderCompletesBattle)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mixedTUMAttackerAgainstOriginalHoMM3DefenderCompletesBattle)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mixedFHeroes2AttackerAgainstTUMDefenderCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 35, CreatureID(2), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
 #ifdef ENABLE_MMAI
 TEST_F(AIIntegrationNativeBattle, integrationFourExperimentalBackendsRemainDistinctFactoryChoices)
 {
