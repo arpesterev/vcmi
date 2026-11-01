@@ -19,6 +19,7 @@
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/entities/building/TownFortifications.h"
 #include "../../lib/gameState/CGameState.h"
+#include "../../lib/mapObjects/CGCreature.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/mapObjects/CGTownInstance.h"
 #include "../../lib/networkPacks/PacksForClient.h"
@@ -586,4 +587,59 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
 	EXPECT_GT(ballistaDecisions, 0);
 	EXPECT_GT(ballistaDefendsWhileAllEnemiesBlind, 0)
 		<< "TUM ballista must not shoot the only remaining blinded target";
+}
+
+TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstRealNeutralStack)
+{
+	// Construct an actual neutral map object, not a player-owned hero whose
+	// color is mocked. The TUM protection rule explicitly requires neutrals.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	ASSERT_FALSE(HasFatalFailure());
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 40);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::NEUTRAL);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto playerView = callback->getBattle(battleID);
+	ASSERT_NE(playerView, nullptr);
+	EXPECT_EQ(battle()->sideToPlayer(BattleSide::DEFENDER), PlayerColor::NEUTRAL);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerView, *melee);
+	EXPECT_NE(baseline.actionType, EActionType::DEFEND)
+		<< "The HoMM3 baseline must advance for a meaningful TUM differential";
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "TUM melee must protect friendly shooters before neutral contact";
+	// In addition to the differential decision above, complete the battle
+	// through the real server. A fabricated winner is never accepted.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 0);
 }
