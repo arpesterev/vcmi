@@ -166,7 +166,7 @@ private:
 	// The TUM mod extends the original HoMM3 tactical policy with documented overrides.
 	// Expose the baseline decision for explicit composition, not as a hidden fallback.
 public:
-	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
+	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack, bool avoidFastDecoys = false)
 	{
 		if(stack.isCatapult())
 			return battle.getAttackableWallParts().empty() ? BattleAction::makeDefend(&stack)
@@ -236,6 +236,30 @@ public:
 			if(!available.contains(attackFrom) || battle.battleGetUnitByPos(attackTo) != target)
 				throw std::logic_error("HoMM3 tactical port produced an invalid melee candidate");
 			return BattleAction::makeMeleeAttack(&stack, attackTo, attackFrom);
+		}
+		// TUM's public description rejects chasing nearby fast stacks as bait.
+		// Apply only to movement: a legal immediate melee strike or ranged shot
+		// was already returned above. The unmodified HoMM3 baseline keeps its
+		// usual nearest-opponent route selection.
+		if(avoidFastDecoys && enemies.size() > 1)
+		{
+			const int ownSpeed = static_cast<int>(stack.getMovementRange());
+			int slowestEnemySpeed = std::numeric_limits<int>::max();
+			for(const auto * enemy : enemies)
+				slowestEnemySpeed = std::min(slowestEnemySpeed, static_cast<int>(enemy->getMovementRange()));
+			auto targets = enemies;
+			vstd::erase_if(targets, [&](const CStack * enemy)
+			{
+				return Ports::TUM::ignoreNearbyFastDecoyForMovement(
+					ownSpeed, static_cast<int>(enemy->getMovementRange()), slowestEnemySpeed,
+					BattleHex::getDistance(stack.getPosition(), enemy->getPosition()));
+			});
+			if(!targets.empty() && targets.size() < enemies.size())
+			{
+				const auto alternate = moveTowardEnemy(battle, stack, reach, available, targets);
+				if(alternate.actionType != EActionType::DEFEND)
+					return alternate;
+			}
 		}
 		return moveTowardEnemy(battle, stack, reach, available, enemies);
 	}
