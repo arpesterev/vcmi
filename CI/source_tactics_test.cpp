@@ -55,6 +55,24 @@ int main()
 	require(FHeroes2::isOutcomeImproved(immediate, distant), "Immediate attacks must outrank distant opportunities");
 	require(!FHeroes2::isOutcomeImproved(distant, immediate), "Distant high score must not replace immediate attack");
 
+	// Source meleeUnitOffense: non-evasive targets get the first pass,
+	// then the threat/path-distance ratio decides among that tier.
+	const FHeroes2::DistantTarget none{};
+	const FHeroes2::DistantTarget farArcher{100, 10, true, 2};
+	const FHeroes2::DistantTarget nearFastDecoy{1000, 2, false, 1};
+	const FHeroes2::DistantTarget nearArcher{50, 2, true, 3};
+	const FHeroes2::DistantTarget tiedArcher{100, 4, true, 4};
+	require(FHeroes2::preferDistantTarget(farArcher, none), "First distant target must be accepted");
+	require(FHeroes2::preferDistantTarget(farArcher, nearFastDecoy), "Prefer engagement over high-value evasive bait");
+	require(!FHeroes2::preferDistantTarget(nearFastDecoy, farArcher), "Fast evasive bait must not override an archer");
+	require(FHeroes2::preferDistantTarget(nearArcher, farArcher), "Threat / path distance must select better target");
+	require(!FHeroes2::preferDistantTarget(farArcher, nearArcher), "Longer route loses at lower normalized threat");
+	require(FHeroes2::preferDistantTarget(nearArcher, tiedArcher), "Equal priority must use stable stack identity");
+	try { FHeroes2::preferDistantTarget({1, 0, true, 1}, farArcher); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::preferDistantTarget({std::numeric_limits<double>::infinity(), 1, true, 1}, farArcher); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	TUM::ShooterProtection cover{false, false, true, true, false, false};
 	require(TUM::holdMeleeForShooters(cover), "Hold melee while shooters attack neutral melee");
 	cover.opponentCanReachAnyFriendlyStack = true;

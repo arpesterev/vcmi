@@ -22,7 +22,7 @@ namespace MMAI::BAI
 class Router : public CBattleGameInterface
 {
 public:
-	Router();
+	explicit Router(bool requireNeuralModel = false);
 	~Router() override;
 
 	Router(const Router &) = delete;
@@ -77,6 +77,7 @@ private:
 	std::shared_ptr<CBattleGameInterface> bai; // calls will be delegated to this object
 
 	AutocombatPreferences autocombatPreferences;
+	bool neuralOnly = false; // Factory-selected MMAI must not masquerade as BattleAI.
 	std::string addrstr = "?";
 	std::string colorname = "?";
 	const std::string basetag = "?";

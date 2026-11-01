@@ -23,8 +23,14 @@ spells and health restoration via VCMI spell simulation, with mana conservation
 and no duplicate stack command during spell resolution. This is a projection of
 source priorities, not an upstream decision-equivalence claim.
 
+Source-derived experimental fheroes2 extensions also cover melee pursuit of
+non-evasive targets, fast-shooter retreat from slower ground enemies, and
+one-hex-wide melee screens for threatened friendly archers. These use VCMI
+path legality and approximate threat scores rather than exact upstream
+valuations; full defensive spacing, kiting and spell-area responses are absent.
+
 Not implemented: complete upstream buff/debuff and creature-spell selection,
-retreat/surrender, archer kiting, exact siege positioning, upstream battle
+retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
 Do not use this partial policy as a quality replacement for the default AI.
 No source-policy equivalence evidence has been produced.

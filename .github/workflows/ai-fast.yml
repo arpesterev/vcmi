@@ -167,6 +167,109 @@ jobs:
             exit 1
           fi
 
+      # Only MMAI or four-policy integration PRs download checksum-pinned 1.8 ONNX weights; no
+      # binary weights enter this repository, Actions artifacts or release jobs.
+      - name: Install verified public MMAI neural pack into isolated CI preset
+        if: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'feature/mmai-') || startsWith(github.head_ref, 'feature/ai-four-policy-integration-')) }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://github.com/vcmi-mods/mmai/releases/download/vcmi-1.8-latest/mod.zip' \
+            --output "$RUNNER_TEMP/mmai-mod.zip"
+          echo "25c997888015386c59c74a426cd0368b5035048dd61b059854d5b7689acdb7d4  $RUNNER_TEMP/mmai-mod.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+
+          root = Path.home() / '.local/share/vcmi'
+          archive = Path(os.environ['RUNNER_TEMP']) / 'mmai-mod.zip'
+          with ZipFile(archive) as z:
+              for name in z.namelist():
+                  parts = PurePosixPath(name).parts
+                  if not parts or parts[0].lower() != 'mmai' or '..' in parts:
+                      raise ValueError('Unexpected path in MMAI release: ' + name)
+              z.extractall(root / 'Mods')
+
+          mod = root / 'Mods/mmai'
+          manifest_file = mod / 'mod.json'
+          if not manifest_file.exists():
+              raise RuntimeError('MMAI mod.json is missing from downloaded release')
+          # Use the official 1.8 release with its unmodified compatibility
+          # declaration. The release asset SHA-256 is pinned above.
+          manifest = json.loads(manifest_file.read_text())
+          compat = manifest.get('compatibility', {})
+          if compat.get('min') != '1.8.0' or compat.get('max') != '1.8.9':
+              raise RuntimeError('Unexpected MMAI 1.8 release compatibility: ' + str(compat))
+          print('Verified native MMAI compatibility:', compat)
+          settings_file = mod / 'config/mmai-settings.json'
+          model_settings = json.loads(settings_file.read_text())
+          if not {'attacker', 'defender'}.issubset(model_settings.get('models', {})):
+              raise RuntimeError('MMAI release must configure attacker and defender models')
+          for role, filename in model_settings['models'].items():
+              candidate = mod / 'models' / filename
+              if not candidate.is_file():
+                  alt = mod / 'models' / filename.replace('.onnx', '-stochastic.onnx')
+                  if not alt.is_file():
+                      raise RuntimeError('No published model for ' + role + ': ' + filename)
+                  model_settings['models'][role] = alt.name
+                  candidate = alt
+              print('MMAI neural model:', role, candidate.name, candidate.stat().st_size)
+          settings_file.write_text(json.dumps(model_settings, indent=2) + '\n')
+
+          # CVcmiTestConfig always uses the separate testModSettings preset,
+          # never the end user's launcher modSettings.json.
+          preset_file = Path.home() / '.config/vcmi/testModSettings.json'
+          preset_file.parent.mkdir(parents=True, exist_ok=True)
+          preset = json.loads(preset_file.read_text()) if preset_file.exists() else {}
+          preset_name = preset.get('activePreset', 'default')
+          preset['activePreset'] = preset_name
+          active = preset.setdefault('presets', {}).setdefault(preset_name, {}).setdefault('mods', ['vcmi', 'vcmi-test'])
+          if 'mmai' not in active:
+              active.append('mmai')
+          preset_file.write_text(json.dumps(preset, indent=2) + '\n')
+          print('CI-only test mod preset:', active)
+          PY
+
+      - name: Run real MMAI neural actions through VCMI battle engine
+        if: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'feature/mmai-') || startsWith(github.head_ref, 'feature/ai-four-policy-integration-')) }}
+        run: |
+          set -euo pipefail
+          cd out/build/linux-gcc-test/bin
+          ulimit -c 0
+          result=0
+          VCMI_AI_MMAI_NEURAL_TEST=1 timeout 300 ./vcmitest \
+            --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle' \
+            --gtest_output=xml:mmai-real-neural-battle.xml || result=$?
+          if [[ "$result" == 139 ]]; then
+            # A real-model crash is a hard test failure. Record a stack
+            # without uploading a memory dump or publishing model weights.
+            sudo apt-get install -y --no-install-recommends gdb
+            VCMI_AI_MMAI_NEURAL_TEST=1 timeout 180 gdb --quiet --batch \
+              -ex 'set pagination off' -ex 'set print thread-events off' \
+              -ex run -ex 'bt 35' -ex 'thread apply all bt 8' \
+              --args ./vcmitest \
+                --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle' || true
+          fi
+          if [[ "$result" != 0 ]]; then
+            exit "$result"
+          fi
+          python3 - <<'PY'
+          from xml.etree import ElementTree as ET
+          root = ET.parse('mmai-real-neural-battle.xml').getroot()
+          cases = list(root.iter('testcase'))
+          expected = {'mmaiWithRealNeuralModelCompletesRealBattle',
+                      'mmaiDefenderNeuralModelCompletesRealBattle',
+                      'mmaiSiegeDefenderNeuralModelCompletesRealBattle'}
+          names = {case.get('name') for case in cases}
+          if len(cases) != 3 or names != expected:
+              raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
+          if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
+              raise RuntimeError('An MMAI neural integration test failed or was skipped')
+          print('Verified: three real neural-backed native MMAI battles completed, including defended siege')
+          PY
+
       - name: Save compiled C++ objects for later develop builds
         if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
         uses: actions/cache/save@v6

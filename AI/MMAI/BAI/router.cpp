@@ -164,7 +164,7 @@ namespace
 
 #define MMAI_LOG_TAG LogTag _(logtag + "." + __func__)
 
-Router::Router() : addrstr(MakeAddrStr(this)), basetag(addrstr + ":MMAI"), logtag(basetag) {}
+Router::Router(bool requireNeuralModel) : neuralOnly(requireNeuralModel), addrstr(MakeAddrStr(this)), basetag(addrstr + ":MMAI"), logtag(basetag) {}
 
 Router::~Router() = default;
 
@@ -297,6 +297,14 @@ void Router::battleStart(
 		modelkey += ".siege";
 
 	model = GetModel(modelkey);
+	// The launcher-selected MMAI is advertised as a neural policy. Without a
+	// loadable model, refusing the battle is safer than silently executing
+	// BattleAI/StupidAI under the MMAI name. Legacy direct Router users may
+	// still intentionally opt into the scripted fallback.
+	if(neuralOnly && model->getType() != Schema::ModelType::NN)
+		throw std::runtime_error("MMAI: no neural model available for " + modelkey
+			+ "; refusing scripted fallback " + model->getName() + " under the MMAI identity");
+
 
 	logtag = basetag + ".v" + std::to_string(model->getVersion());
 	LogTag _2(logtag + "." + __func__);
@@ -333,7 +341,7 @@ void Router::battleStart(
 			break;
 		case Schema::ModelType::NN:
 			// XXX: must not call initBattleInterface here
-			bai = CreateBAI(model, env, cb, autocombatPreferences.enableSpellsUsage, autocombatPreferences.enableTacticsUsage);
+			bai = CreateBAI(model, env, cb, autocombatPreferences.enableSpellsUsage, autocombatPreferences.enableTacticsUsage, neuralOnly);
 			break;
 
 		default:

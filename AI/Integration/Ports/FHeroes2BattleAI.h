@@ -126,33 +126,60 @@ private:
 		if(input.armyStrength <= 0 || input.enemyArmyStrength <= 0)
 			return {};
 		input.flying = stack.hasBonusOfType(BonusType::FLYING);
+		// fheroes2 includes defensive castle/tower advantage when deciding
+		// whether to hold the line. The native projection requires actual
+		// surviving fortifications; an undefended open-field battle is not a siege.
+		input.defendingCastle = stack.unitSide() == BattleSide::DEFENDER
+			&& battle.battleGetDefendedTown() != nullptr
+			&& battle.battleGetWallState(EWallPart::GATE) != EWallState::NONE;
 		input.insideDefendedArea = stack.unitSide() == BattleSide::ATTACKER
 			? stack.getPosition().getX() < GameConstants::BFIELD_WIDTH / 2
 			: stack.getPosition().getX() >= GameConstants::BFIELD_WIDTH / 2;
 		return Ports::FHeroes2::selectTactics(input);
 	}
 
+	// fheroes2 meleeUnitOffense first pursues targets that cannot evade,
+	// then maximizes threat divided by the path distance. Unlike the former
+	// nearest-stack policy, this can pursue a remote archer over nearby bait.
+	// The threat and legal routes are native VCMI projections.
 	static BattleAction approach(CPlayerBattleCallback & battle, const CStack & stack,
 		const ReachabilityInfo & reachability, const BattleHexArray & available,
 		const std::vector<const CStack *> & enemies)
 	{
 		BattleHex destination;
-		int shortest = GameConstants::BFIELD_SIZE;
+		std::optional<Ports::FHeroes2::DistantTarget> best;
+		const int ownSpeed = static_cast<int>(stack.getMovementRange());
 		for(const auto * enemy : enemies)
 		{
+			BattleHex goal;
+			int shortest = GameConstants::BFIELD_SIZE;
 			for(const auto & hex : enemy->getAttackableHexes(&stack))
 			{
 				if(!hex.isValid() || !battle.isMeleeAttackPossible(&stack, enemy, hex))
 					continue;
-				const auto distance = reachability.distances[hex.toInt()];
-				if(distance < shortest || (distance == shortest && destination.isValid() && hex.toInt() < destination.toInt()))
+				const int distance = reachability.distances[hex.toInt()];
+				if(distance < shortest || (distance == shortest && (!goal.isValid() || hex.toInt() < goal.toInt())))
 				{
 					shortest = distance;
-					destination = hex;
+					goal = hex;
 				}
 			}
+			if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
+				continue;
+
+			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
+				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
+			const Ports::FHeroes2::DistantTarget candidate{
+				std::max(0.0, strength(*enemy)), std::max(1, shortest), cannotEvade,
+				static_cast<int>(enemy->unitId())};
+			if(!best || Ports::FHeroes2::preferDistantTarget(candidate, *best))
+			{
+				best = candidate;
+				destination = goal;
+			}
 		}
-		if(!destination.isValid() || shortest >= GameConstants::BFIELD_SIZE)
+		if(!destination.isValid())
 			return BattleAction::makeDefend(&stack);
 
 		if(stack.hasBonusOfType(BonusType::FLYING))
@@ -162,7 +189,7 @@ private:
 			for(const auto & hex : available)
 			{
 				const int distance = BattleHex::getDistance(destination, hex);
-				if(distance < bestDistance || (distance == bestDistance && nearest.isValid() && hex.toInt() < nearest.toInt()))
+				if(distance < bestDistance || (distance == bestDistance && (!nearest.isValid() || hex.toInt() < nearest.toInt())))
 				{
 					nearest = hex;
 					bestDistance = distance;
@@ -185,6 +212,156 @@ private:
 		return BattleAction::makeDefend(&stack);
 	}
 
+
+	// fheroes2 meleeUnitDefense prefers covering valuable friendly archers.
+	// This conservative VCMI projection moves a single-width melee stack into
+	// a reachable neighboring hex only when ground melee can threaten a shooter
+	// next turn. Never disrupt an available immediate attack; wide-unit cover,
+	// long-range deployment and spell/area-threat spacing remain unsupported.
+	static std::optional<BattleAction> coverThreatenedShooter(CPlayerBattleCallback & battle,
+		const CStack & stack, const ReachabilityInfo & reachability,
+		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
+	{
+		if(stack.doubleWide() || stack.hasBonusOfType(BonusType::SHOOTER))
+			return std::nullopt;
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		double totalShooterStrength = 0;
+		for(const auto * friendly : friends)
+		{
+			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
+				&& !friendly->doubleWide() && friendly->hasBonusOfType(BonusType::SHOOTER))
+				totalShooterStrength += strength(*friendly);
+		}
+		if(totalShooterStrength <= 0)
+			return std::nullopt;
+
+		BattleHex bestCoverHex;
+		double bestCoverValue = -std::numeric_limits<double>::infinity();
+		int bestTravel = GameConstants::BFIELD_SIZE;
+		for(const auto * friendly : friends)
+		{
+			if(friendly == &stack || !friendly->alive() || !friendly->getPosition().isValid()
+				|| friendly->doubleWide() || !friendly->hasBonusOfType(BonusType::SHOOTER))
+				continue;
+			const bool threatened = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
+			{
+				return enemy->getPosition().isValid() && !enemy->hasBonusOfType(BonusType::SHOOTER)
+					&& BattleHex::getDistance(friendly->getPosition(), enemy->getPosition())
+						<= static_cast<int>(enemy->getMovementRange()) + 1;
+			});
+			if(!threatened)
+				continue;
+			if(BattleHex::getDistance(stack.getPosition(), friendly->getPosition()) == 1)
+				return BattleAction::makeDefend(&stack);
+
+			for(const auto & hex : available)
+			{
+				if(!hex.isAvailable() || hex == stack.getPosition()
+					|| BattleHex::getDistance(hex, friendly->getPosition()) != 1)
+					continue;
+				const int travel = reachability.distances[hex.toInt()];
+				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))
+					continue;
+				// Source: archer strength minus the path-distance penalty equal
+				// to all friendly shooter strength / 15 per traveled hex.
+				const double value = strength(*friendly) - totalShooterStrength * travel / 15.0;
+				if(value > bestCoverValue || (value == bestCoverValue
+					&& (travel < bestTravel || (travel == bestTravel
+						&& (!bestCoverHex.isValid() || hex.toInt() < bestCoverHex.toInt())))))
+				{
+					bestCoverHex = hex;
+					bestCoverValue = value;
+					bestTravel = travel;
+				}
+			}
+		}
+		return bestCoverHex.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&stack, bestCoverHex))
+			: std::nullopt;
+	}
+
+	// fheroes2 ai_battle.cpp archerDecision, pinned at 0dbfe9f386f33c2500842f4a59cd284d7f03d541:
+	// only a sufficiently faster shooter attempts to escape an imminent melee
+	// threat, and only to a position safe from every visible enemy stack.
+	// Native VCMI movement hexes supply legality. Geometric enemy reach is
+	// deliberately conservative because the currently occupied archer hex
+	// could otherwise block the enemy path used to assess a future position.
+	static std::optional<BattleAction> archerRetreat(CPlayerBattleCallback & battle,
+		const CStack & stack, const std::vector<const CStack *> & enemies)
+	{
+		if(stack.doubleWide() || !stack.hasBonusOfType(BonusType::SHOOTER)
+			|| !battle.battleCanShoot(&stack) || !stack.getPosition().isValid())
+			return std::nullopt;
+
+		const int speed = static_cast<int>(stack.getMovementRange());
+		if(speed <= 0)
+			return std::nullopt;
+		if(std::any_of(enemies.begin(), enemies.end(), [](const CStack * enemy)
+		{
+			return enemy->hasBonusOfType(BonusType::FLYING);
+		}))
+			return std::nullopt;
+
+		const auto isThreatened = [&](const BattleHex & position, const CStack & enemy)
+		{
+			const int distance = BattleHex::getDistance(position, enemy.getPosition());
+			// fheroes2 considers an unblocked shooter dangerous here only
+			// when adjacent, because retreat cannot avoid a ranged attack.
+			const int reach = enemy.hasBonusOfType(BonusType::SHOOTER)
+				&& battle.battleCanShoot(&enemy) ? 1
+				: static_cast<int>(enemy.getMovementRange()) + 1;
+			return distance <= reach;
+		};
+
+		bool threatened = false;
+		for(const auto * enemy : enemies)
+		{
+			if(!isThreatened(stack.getPosition(), *enemy))
+				continue;
+			threatened = true;
+			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			if(enemySpeed > 0 && enemySpeed + 2 >= speed)
+				return std::nullopt;
+		}
+		if(!threatened)
+			return std::nullopt;
+
+		const auto reachability = battle.getReachability(&stack);
+		const auto available = battle.battleGetAvailableHexes(reachability, &stack, false);
+		BattleHex safest;
+		int safestDistance = -1;
+		int smallestCenterDistance = GameConstants::BFIELD_SIZE;
+		const BattleHex center(GameConstants::BFIELD_SIZE / 2);
+		for(const auto & hex : available)
+		{
+			if(!hex.isAvailable() || hex == stack.getPosition())
+				continue;
+			int nearest = GameConstants::BFIELD_SIZE;
+			bool safe = true;
+			for(const auto * enemy : enemies)
+			{
+				if(isThreatened(hex, *enemy))
+				{
+					safe = false;
+					break;
+				}
+				nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(hex, enemy->getPosition())));
+			}
+			if(!safe)
+				continue;
+			const int centerDistance = BattleHex::getDistance(hex, center);
+			if(nearest > safestDistance || (nearest == safestDistance
+				&& (centerDistance < smallestCenterDistance || (centerDistance == smallestCenterDistance
+					&& (!safest.isValid() || hex.toInt() < safest.toInt())))))
+			{
+				safest = hex;
+				safestDistance = nearest;
+				smallestCenterDistance = centerDistance;
+			}
+		}
+		return safest.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&stack, safest))
+			: std::nullopt;
+	}
+
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
 	{
 		if(stack.isCatapult())
@@ -203,6 +380,8 @@ private:
 		std::sort(enemies.begin(), enemies.end(), [](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
 		if(enemies.empty())
 			return BattleAction::makeDefend(&stack);
+		if(const auto retreat = archerRetreat(battle, stack, enemies))
+			return *retreat;
 
 		const CStack * shootingTarget = nullptr;
 		double bestShot = std::numeric_limits<double>::lowest();
@@ -260,7 +439,11 @@ private:
 			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
 		if(tactics(battle, stack, enemies).defensive)
+		{
+			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, enemies))
+				return *cover;
 			return BattleAction::makeDefend(&stack);
+		}
 		return approach(battle, stack, reachability, available, enemies);
 	}
 };

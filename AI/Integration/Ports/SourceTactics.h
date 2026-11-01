@@ -97,6 +97,32 @@ inline Tactics selectTactics(const TacticsInput & input)
 	return {defensive, enemyRatio < 0.15};
 }
 
+// fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
+// before using its threat / path-distance score. VCMI projects the threat
+// with native combat value; this is not the original evaluateThreatForUnit.
+struct DistantTarget
+{
+	double threat = 0;
+	int pathDistance = 0;
+	bool cannotEvade = false;
+	int unitId = -1;
+};
+
+inline bool preferDistantTarget(const DistantTarget & candidate, const DistantTarget & previous)
+{
+	if(!std::isfinite(candidate.threat) || candidate.threat < 0 || candidate.pathDistance <= 0
+		|| !std::isfinite(previous.threat) || previous.threat < 0
+		|| (previous.unitId >= 0 && previous.pathDistance <= 0))
+		throw std::invalid_argument("fheroes2 distant target needs finite threat and positive path distance");
+	if(previous.unitId < 0)
+		return true;
+	if(candidate.cannotEvade != previous.cannotEvade)
+		return candidate.cannotEvade;
+	const double score = candidate.threat / candidate.pathDistance;
+	const double previousScore = previous.threat / previous.pathDistance;
+	return score > previousScore || (score == previousScore && candidate.unitId < previous.unitId);
+}
+
 struct MeleeOutcome
 {
 	int32_t fromIndex = -1;

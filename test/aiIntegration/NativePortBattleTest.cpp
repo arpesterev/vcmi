@@ -3,11 +3,14 @@
  * License: GNU General Public License v2.0 or later.
  */
 #include "StdInc.h"
+#include <cstdlib>
 
 #include "server/battles/BattleTestFixture.h"
 #include "../../AI/Integration/Ports/HoMM3TacticsBattleAI.h"
 #include <vcmi/Environment.h>
 #include "../../lib/GameLibrary.h"
+#include "../../lib/filesystem/Filesystem.h"
+#include "../../lib/json/JsonUtils.h"
 #include "../../lib/battle/BattleAction.h"
 #include "../../lib/battle/CPlayerBattleCallback.h"
 #include "../../lib/bonuses/BonusSelector.h"
@@ -36,6 +39,15 @@ public:
 	explicit DecisionCallback(PlayerColor player) : CBattleCallback(player, nullptr) {}
 	std::optional<BattleAction> action;
 	bool spellAction = false;
+
+	// Headless native fixture has no IClient. Returning no surrender/retreat
+	// decision preserves the engine's legal combat path instead of calling
+	// CBattleCallback's UI-dependent default through a null client pointer.
+	std::optional<BattleAction> makeSurrenderRetreatDecision(const BattleID &,
+		const BattleStateInfoForRetreat &) override
+	{
+		return std::nullopt;
+	}
 
 	void battleMakeUnitAction(const BattleID &, const BattleAction & value) override
 	{
@@ -73,9 +85,18 @@ public:
 	int shots = 0;
 	int meleeAttacks = 0;
 	int acceptedResults = 0;
+	std::function<void(const BattleResult &)> onResultBeforeApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
+		// In the live client battleEnd is delivered while the battle state
+		// is still valid. The test server removes that state when it applies
+		// BattleResult. Deliver before removal, not after the winning action.
+		if(const auto * result = dynamic_cast<const BattleResult *>(&pack))
+		{
+			if(onResultBeforeApply)
+				onResultBeforeApply(*result);
+		}
 		RecordingGameServer::applyPack(pack);
 		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
 		{
@@ -105,6 +126,8 @@ protected:
 	int ballistaShots = 0;
 	int ballistaDefendsWhileAllEnemiesBlind = 0;
 	int heroSpellDecisions = 0;
+	int mmaiUnitDecisions = 0;
+	int mmaiNonpassiveDecisions = 0;
 
 	void startRecordedGame()
 	{
@@ -143,7 +166,7 @@ protected:
 		hero->mana = 100;
 	}
 
-	void prepareSiege()
+	void prepareSiege(bool includeDefenderShooter = false)
 	{
 		startRecordedGame();
 		ASSERT_FALSE(HasFatalFailure());
@@ -157,6 +180,10 @@ protected:
 		}
 		ASSERT_GT(town->fortificationsLevel().wallsHealth, 0);
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 30));
+		if(includeDefenderShooter)
+		{
+			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(1)), CreatureID(2).toCreature(), 1));
+		}
 		ASSERT_NE(attackerSideHero->getArt(ArtifactPosition::MACH4), nullptr);
 		const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
 		gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
@@ -167,8 +194,10 @@ protected:
 	}
 
 	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true,
-		const std::string & backendName = "FHeroes2Tactics")
+		const std::string & backendName = "FHeroes2Tactics", const std::string & defenderBackend = "")
 	{
+		const std::string & attackerAI = backendName;
+		const std::string & defenderAI = defenderBackend.empty() ? backendName : defenderBackend;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
 		const auto attackerPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -179,9 +208,10 @@ protected:
 			const auto player = battle()->sideToPlayer(side);
 			auto callback = std::make_shared<DecisionCallback>(player);
 			callback->onBattleStarted(battle());
-			auto policy = AIFactory::createBattleAI(backendName);
+			const auto & name = side == BattleSide::ATTACKER ? attackerAI : defenderAI;
+			auto policy = AIFactory::createBattleAI(name);
 			ASSERT_NE(policy, nullptr);
-			EXPECT_EQ(policy->dllName, backendName);
+			EXPECT_EQ(policy->dllName, name);
 			policy->playerID = player;
 			auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
 			AutocombatPreferences prefs;
@@ -193,6 +223,16 @@ protected:
 			callbacks.emplace(player, callback);
 			policies.emplace(player, policy);
 		}
+
+		bool battleEndDelivered = false;
+		recorder.onResultBeforeApply = [&](const BattleResult & result)
+		{
+			ASSERT_FALSE(gameState()->currentBattles.empty()) << "Battle was released before its terminal event";
+			ASSERT_FALSE(battleEndDelivered) << "A battle produced multiple terminal events";
+			for(auto & entry : policies)
+				entry.second->battleEnd(battleID, &result, result.questionID);
+			battleEndDelivered = true;
+		};
 
 		if(battle()->tacticDistance > 0)
 		{
@@ -217,6 +257,15 @@ protected:
 			policies.at(player)->activeStack(battleID, active);
 			ASSERT_TRUE(callback->action.has_value()) << "Backend did not respond to the actual active-stack event";
 			const auto action = *callback->action;
+			// A completed battle alone does not prove the neural side made
+			// meaningful decisions; the scripted opponent could win unaided.
+			const auto & activePolicy = player == attackerPlayer ? attackerAI : defenderAI;
+			if(activePolicy == "MMAI" && !callback->spellAction)
+			{
+				++mmaiUnitDecisions;
+				if(action.actionType != EActionType::DEFEND && action.actionType != EActionType::WAIT)
+					++mmaiNonpassiveDecisions;
+			}
 			if(callback->spellAction)
 				++heroSpellDecisions;
 			else if(active->creatureId() == CreatureID::BALLISTA)
@@ -278,8 +327,8 @@ protected:
 		{
 			EXPECT_EQ(result.winner, *expectedWinner);
 		}
-		for(auto & entry : policies)
-			entry.second->battleEnd(battleID, &result, result.questionID);
+		ASSERT_TRUE(battleEndDelivered) << "The terminal event was not delivered with live battle state";
+		recorder.onResultBeforeApply = {};
 		if(result.questionID != QuestionID::NONE)
 		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
@@ -356,6 +405,48 @@ TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(BattleSide::ATTACKER);
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2CastleGarrisonHoldsItsMeleeLineForShooters)
+{
+	// The original fheroes2 analyzeBattleState treats a defended castle as
+	// valuable shooting cover. The ratio here is deliberately tiny so the
+	// ranged-advantage branch alone would NOT justify defending.
+	prepareSiege(true);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * infantry = nullptr;
+	int shooters = 0;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			++shooters;
+	}
+	ASSERT_NE(infantry, nullptr);
+	ASSERT_EQ(shooters, 1);
+	ASSERT_NE(battle()->battleGetDefendedTown(), nullptr);
+	ASSERT_NE(battle()->battleGetWallState(EWallPart::GATE), EWallState::NONE);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "Defender must use intact fortifications as cover for its shooter";
+	runToCompletion(std::nullopt, false);
 }
 
 TEST_F(AIIntegrationNativeBattle, controlsBallistaAndCompletesBattle)
@@ -478,6 +569,227 @@ TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBatt
 	injure(injured, 300);
 	runToCompletion();
 	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendlyShooter)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	const auto originalHex = infantry->getPosition();
+	const BattleHex shooterHex(originalHex.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex enemyHex(shooterHex.toInt() + 5);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_TRUE(enemyHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(enemyHex), nullptr);
+	ASSERT_NE(addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 120), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), enemyHex, 15), nullptr);
+	ASSERT_GT(BattleHex::getDistance(originalHex, enemyHex),
+		static_cast<int>(infantry->getMovementRange()) + 1)
+		<< "Enemy must be beyond the guard's immediate melee range";
+	ASSERT_LE(BattleHex::getDistance(shooterHex, enemyHex),
+		static_cast<int>(battle()->battleGetUnitByPos(enemyHex)->getMovementRange()) + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Defensive fheroes2 melee should cover its threatened shooter: " << callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_EQ(BattleHex::getDistance(destination, shooterHex), 1)
+		<< "The melee screen must stop adjacent to the threatened archer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Engine rejected the legal cover movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	}
+	ASSERT_NE(infantry, nullptr);
+	const auto originalHex = infantry->getPosition();
+	// A weak enemy is closer in the upper lane, while a ranged threat is
+	// further away in the lower lane. Both are beyond one-turn melee reach.
+	const BattleHex weakerHex(originalHex.toInt() + 7 - 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex archerHex(originalHex.toInt() + 8 + 2 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(weakerHex.isAvailable());
+	ASSERT_TRUE(archerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(weakerHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), weakerHex, 1), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(2), archerHex, 65), nullptr);
+	ASSERT_GT(BattleHex::getDistance(originalHex, weakerHex), infantry->getMovementRange() + 1);
+	ASSERT_GT(BattleHex::getDistance(originalHex, archerHex), infantry->getMovementRange() + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Unexpected immediate action: " << callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const auto destination = callback->action->target.front().hexValue;
+	EXPECT_NE(destination, originalHex);
+	EXPECT_LT(BattleHex::getDistance(destination, archerHex),
+		BattleHex::getDistance(originalHex, archerHex))
+		<< "The initial move must close distance to the hostile archer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The engine rejected the planned distant-target movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeThreat)
+{
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	// Place an additional real enemy stack within one turn's melee reach.
+	// The enemy starts four hexes away: still a next-turn melee threat, but
+	// the archer can reach a safe edge hex. The existing defender remains,
+	// so retreat must be safe
+	// against *every* enemy rather than just the closest one.
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::SHOOTER));
+	const BattleHex attackerPosition = shooter->getPosition();
+	const BattleHex approachingHex(attackerPosition.toInt() + 4);
+	ASSERT_TRUE(approachingHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(approachingHex), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(16), approachingHex, 25), nullptr);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	std::ostringstream retreatDiagnostics;
+	const auto inspected = callback->getBattle(battleID);
+	retreatDiagnostics << "archer pos=" << shooter->getPosition().toInt()
+		<< " speed=" << shooter->getMovementRange()
+		<< " canShoot=" << inspected->battleCanShoot(shooter)
+		<< " doubleWide=" << shooter->doubleWide();
+	for(const auto * enemy : inspected->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+	{
+		retreatDiagnostics << " enemy=" << enemy->unitId() << " pos=" << enemy->getPosition().toInt()
+			<< " speed=" << enemy->getMovementRange()
+			<< " distance=" << static_cast<int>(BattleHex::getDistance(shooter->getPosition(), enemy->getPosition()))
+			<< " flying=" << enemy->hasBonusOfType(BonusType::FLYING);
+	}
+	const auto inspectedReach = inspected->getReachability(shooter);
+	const auto inspectedAvailable = inspected->battleGetAvailableHexes(inspectedReach, shooter, false);
+	retreatDiagnostics << " available=" << inspectedAvailable.size()
+		<< " decision=" << callback->action->toString();
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "The faster fheroes2 archer should first escape reachable slower melee stacks. "
+		<< retreatDiagnostics.str();
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_NE(callback->action->target.front().hexValue, attackerPosition);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native game handler rejected the requested archer escape";
+	policy.reset();
+
+	// The escape must not merely be a legal move: both sides still have
+	// to play the rest of the actual battle until a genuine result.
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2SlowArcherDoesNotAttemptUnwinnableEscape)
+{
+	prepareBattle(CreatureID(2), 25, CreatureID(16), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	const BattleHex approachingHex(shooter->getPosition().toInt() + 3);
+	ASSERT_TRUE(approachingHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(approachingHex), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(16), approachingHex, 25), nullptr);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::SHOOT)
+		<< "A shooter too slow to escape should retain its legal ranged attack";
+	runToCompletion(std::nullopt, false);
 }
 
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
@@ -840,3 +1152,123 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(recorder.shots, 0);
 }
+
+#ifdef ENABLE_MMAI
+TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScriptedAI)
+{
+	// This CI fixture deliberately installs only public Heroes III battle
+	// data, not the optional MMAI neural model mod.
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("MMAI");
+	ASSERT_NE(policy, nullptr);
+	EXPECT_EQ(policy->dllName, "MMAI");
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	policy->initBattleInterface(environment, callback, AutocombatPreferences{});
+	try
+	{
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		FAIL() << "MMAI silently accepted a scripted model without the neural model mod";
+	}
+	catch(const std::runtime_error & error)
+	{
+		EXPECT_NE(std::string(error.what()).find("refusing scripted fallback"), std::string::npos)
+			<< "Missing MMAI model must be diagnosed rather than replaced";
+	}
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
+{
+	// Separate CI invocation installs a published VCMI 1.7 MMAI model package.
+	// Its model selection must go through AIFactory and Router(true).
+	// Without a neural model Router(true) throws: this must NEVER fall back.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Run separately with a real installed MMAI model mod";
+
+	// Prove the actual model configuration and virtual filesystem resource
+	// are present before testing inference. This differentiates a missing mod
+	// from ONNX loading/schema failures without accepting a scripted fallback.
+	const auto modelConfig = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(modelConfig.isStruct()) << "MMAI neural config is not mounted in VCMI";
+	ASSERT_TRUE(modelConfig["models"]["attacker"].isString())
+		<< "Missing MMAI attacker model mapping: " << modelConfig.toCompactString();
+	const auto path = "MMAI/models/" + modelConfig["models"]["attacker"].String();
+	ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
+		<< "MMAI attacker model is not mounted: " << path;
+	prepareBattle(CreatureID(0), 45, CreatureID(0), 40);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "FHeroes2Tactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(mmaiUnitDecisions, 0) << "The neural attacker was never activated";
+	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural attacker never attempted a non-passive action";
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiDefenderNeuralModelCompletesRealBattle)
+{
+	// The independent defender model must also handle a real battle with
+	// factory-selected strict-neural MMAI. Never accept scripted fallback.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Run separately with an installed MMAI neural model pack";
+
+	const auto modelConfig = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(modelConfig.isStruct()) << "MMAI neural config is not mounted in VCMI";
+	ASSERT_TRUE(modelConfig["models"]["defender"].isString())
+		<< "Missing MMAI defender model mapping: " << modelConfig.toCompactString();
+	const auto path = "MMAI/models/" + modelConfig["models"]["defender"].String();
+	ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
+		<< "MMAI defender neural model is not mounted: " << path;
+
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 45);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "MMAI");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(mmaiUnitDecisions, 0) << "The neural defender was never activated";
+	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural defender never attempted a non-passive action";
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiSiegeDefenderNeuralModelCompletesRealBattle)
+{
+	// The official MMAI 1.8 pack has a separate defender.siege neural model.
+	// Verify model dispatch by fighting an actual fortified town to its result.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Run separately with an installed MMAI neural model pack";
+
+	const auto modelConfig = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(modelConfig.isStruct()) << "MMAI neural config is not mounted in VCMI";
+	ASSERT_TRUE(modelConfig["models"]["defender.siege"].isString())
+		<< "Missing MMAI defender.siege model mapping: " << modelConfig.toCompactString();
+	const auto path = "MMAI/models/" + modelConfig["models"]["defender.siege"].String();
+	ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
+		<< "MMAI siege neural model is not mounted: " << path;
+
+	prepareSiege();
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(BattleSide::ATTACKER, false, "FHeroes2Tactics", "MMAI");
+	EXPECT_GT(mmaiUnitDecisions, 0) << "The neural siege defender was never activated";
+	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural siege defender never attempted a non-passive action";
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
+#endif
+
+#ifdef ENABLE_MMAI
+TEST_F(AIIntegrationNativeBattle, integrationFourExperimentalBackendsRemainDistinctFactoryChoices)
+{
+	// This check is about wiring; the source-behavior and real battle tests
+	// above remain separate. Full-port IDs are intentionally not advertised.
+	for(const std::string name : {"HoMM3OriginalTactics", "FHeroes2Tactics", "TUMEnchantedTactics", "MMAI"})
+	{
+		auto policy = AIFactory::createBattleAI(name);
+		ASSERT_NE(policy, nullptr) << "Missing experimental policy: " << name;
+		EXPECT_EQ(policy->dllName, name);
+	}
+}
+#endif

@@ -30,8 +30,8 @@ namespace MMAI::BAI::V13
 using ErrorCode = Schema::V13::ErrorCode;
 using PA = Schema::V13::PlayerAttribute;
 
-BAI::BAI(Schema::IModel * model, int version, const std::shared_ptr<Environment> & env, const std::shared_ptr<CBattleCallback> & cb, bool enableSpellsUsage)
-	: model(model), version(version), logger(cb->getPlayerID().value().toString()), env(env), cb(cb), enableSpellsUsage(enableSpellsUsage)
+BAI::BAI(Schema::IModel * model, int version, const std::shared_ptr<Environment> & env, const std::shared_ptr<CBattleCallback> & cb, bool enableSpellsUsage, bool strictNeural_)
+	: model(model), version(version), logger(cb->getPlayerID().value().toString()), env(env), cb(cb), enableSpellsUsage(enableSpellsUsage), strictNeural(strictNeural_)
 {
 }
 
@@ -283,6 +283,8 @@ void BAI::activeStack(const BattleID & bid, const CStack * astack)
 	}
 	catch(const std::exception & e) // NOSONAR
 	{
+		if(strictNeural)
+			throw;
 		logger.error("Falling back to BattleAI due to MMAI error: " + std::string(e.what()));
 		auto evaluator = BattleEvaluator(env, cb, astack, cb->getPlayerID().value(), bid, battle->battleGetMySide(), 1.0f, 2);
 		cb->battleMakeUnitAction(bid, evaluator.selectStackAction(astack));
@@ -305,6 +307,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	// (print warning once, make only fallback actions from there on)
 	if(!inFallback && getActionTotalCalls >= 100)
 	{
+		if(strictNeural)
+			throw std::runtime_error("MMAI neural policy exceeded 100 inferences: scripted fallback disabled");
 		logger.warn("Reached 100 predictions, will fall back to BattleAI until this combat ends");
 		inFallback = true;
 	}
@@ -323,6 +327,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 	if(state->battlefield->astack == nullptr)
 	{
+		if(strictNeural)
+			throw std::runtime_error("MMAI neural policy lacks the active stack in its state");
 		logger.error(
 			"The current stack is not part of the state. "
 			"This should NOT happen. "
@@ -379,6 +385,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 			if(errcounter > 10)
 			{
+				if(strictNeural)
+					throw std::runtime_error("MMAI neural policy produced more than 10 invalid actions");
 				logger.warn("Got 10 consecutive errors, will fall back to BattleAI until this combat ends");
 				auto evaluator = BattleEvaluator(env, cb, astack, cb->getPlayerID().value(), bid, battle->battleGetMySide(), 1.0f, 2);
 				cb->battleMakeUnitAction(bid, evaluator.selectStackAction(astack));
