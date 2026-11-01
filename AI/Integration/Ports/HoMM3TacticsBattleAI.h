@@ -104,7 +104,7 @@ private:
 		// The original uses its own projected enemy goal, not hex distance.
 		const int32_t effect = projectedAttackEffect(exchangeValue(battle, attacker, target,
 			attacker.getPosition(), true, 0));
-		const int speed = std::max(1, target.getMovementRange());
+		const int speed = std::max(1, static_cast<int>(target.getMovementRange()));
 		const int hexDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
 		const int time = std::max(1, (hexDistance + speed - 1) / speed);
 		const bool canRetaliateLater = battle.battleCanAttackUnit(&target, &attacker);
