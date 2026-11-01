@@ -97,6 +97,19 @@ private:
 			static_cast<double>(std::numeric_limits<int32_t>::max())));
 	}
 
+	static bool isIncapacitated(const CStack & target)
+	{
+		// HoMM3's army::isIncapacitated includes disables beyond Stone Gaze.
+		// VCMI isFrozen() detects Stone Gaze only; inspect actual spell effects
+		// so Blind and Paralyze also receive the upstream 1/10 shot weighting.
+		const auto hasSpell = [&](SpellID spell)
+		{
+			return target.hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell)));
+		};
+		return target.isFrozen() || hasSpell(SpellID(SpellID::BLIND))
+			|| hasSpell(SpellID(SpellID::PARALYZE));
+	}
+
 	static int32_t rangedScore(CPlayerBattleCallback & battle,
 		const CStack & attacker, const CStack & target)
 	{
@@ -109,7 +122,7 @@ private:
 		const int time = std::max(1, (hexDistance + speed - 1) / speed);
 		const bool canRetaliateLater = battle.battleCanAttackUnit(&target, &attacker);
 		return Ports::HoMM3::rangedAttackValue(
-			{effect, target.isFrozen(), !canRetaliateLater, canRetaliateLater, time}, false);
+			{effect, isIncapacitated(target), !canRetaliateLater, canRetaliateLater, time}, false);
 	}
 
 	static BattleAction moveTowardEnemy(CPlayerBattleCallback & battle, const CStack & stack,
