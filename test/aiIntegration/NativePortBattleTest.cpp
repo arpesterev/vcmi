@@ -452,3 +452,36 @@ TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBatt
 	runToCompletion();
 	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
 }
+
+#ifdef ENABLE_MMAI
+TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScriptedAI)
+{
+	// This CI fixture deliberately installs only public Heroes III battle
+	// data, not the optional MMAI neural model mod.
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("MMAI");
+	ASSERT_NE(policy, nullptr);
+	EXPECT_EQ(policy->dllName, "MMAI");
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	policy->initBattleInterface(environment, callback, AutocombatPreferences{});
+	try
+	{
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		FAIL() << "MMAI silently accepted a scripted model without the neural model mod";
+	}
+	catch(const std::runtime_error & error)
+	{
+		EXPECT_NE(std::string(error.what()).find("refusing scripted fallback"), std::string::npos)
+			<< "Missing MMAI model must be diagnosed rather than replaced";
+	}
+}
+#endif
