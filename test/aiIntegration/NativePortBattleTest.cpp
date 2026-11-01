@@ -77,6 +77,8 @@ class AIIntegrationNativeBattle : public BattleTestFixture
 {
 protected:
 	NativeBattleRecorder recorder;
+	int ballistaDecisions = 0;
+	int ballistaShots = 0;
 
 	void startRecordedGame()
 	{
@@ -173,6 +175,12 @@ protected:
 			policies.at(player)->activeStack(battleID, active);
 			ASSERT_TRUE(callback->action.has_value()) << "Backend did not respond to the actual active-stack event";
 			const auto action = *callback->action;
+			if(active->creatureId() == CreatureID::BALLISTA)
+			{
+				++ballistaDecisions;
+				if(action.actionType == EActionType::SHOOT)
+					++ballistaShots;
+			}
 			std::ostringstream trace;
 			trace << "activation=" << decisions << " active=" << active->unitId() << " " << action.toString();
 			for(const auto & unit : battle()->stacks)
@@ -281,6 +289,22 @@ TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(BattleSide::ATTACKER);
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, controlsBallistaAndCompletesBattle)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 40);
+	setArmy(defenderSideHero, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY), MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	runToCompletion();
+	EXPECT_GT(ballistaDecisions, 0);
+	EXPECT_GT(ballistaShots, 0) << "Automatic server fire cannot substitute for an AI ballista decision";
 }
 
 TEST_F(AIIntegrationNativeBattle, completePortNameCannotSilentlySelectThePartialPolicy)
