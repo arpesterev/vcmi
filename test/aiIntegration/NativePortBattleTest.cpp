@@ -5,11 +5,14 @@
 #include "StdInc.h"
 
 #include "server/battles/BattleTestFixture.h"
+#include <vcmi/Environment.h>
+#include "../../lib/GameLibrary.h"
 #include "../../lib/battle/BattleAction.h"
 #include "../../lib/battle/BattleLayout.h"
 #include "../../lib/callback/AIFactory.h"
 #include "../../lib/callback/CBattleCallback.h"
 #include "../../lib/callback/CBattleGameInterface.h"
+#include "../../lib/callback/CCallback.h"
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/entities/building/TownFortifications.h"
 #include "../../lib/gameState/CGameState.h"
@@ -28,18 +31,35 @@ class DecisionCallback final : public CBattleCallback
 public:
 	explicit DecisionCallback(PlayerColor player) : CBattleCallback(player, nullptr) {}
 	std::optional<BattleAction> action;
+	bool spellAction = false;
 
 	void battleMakeUnitAction(const BattleID &, const BattleAction & value) override
 	{
 		if(action)
-			throw std::logic_error("Backend submitted two unit actions for one activation");
+			throw std::logic_error("Backend submitted two commands for one activation");
+		spellAction = false;
 		action = value;
 	}
 	void battleMakeTacticAction(const BattleID &, const BattleAction & value) override { action = value; }
-	void battleMakeSpellAction(const BattleID &, const BattleAction &) override
+	void battleMakeSpellAction(const BattleID &, const BattleAction & value) override
 	{
-		throw std::logic_error("Partial port unexpectedly submitted an unimplemented hero-spell decision");
+		if(action)
+			throw std::logic_error("Backend submitted a unit command before spell acknowledgement");
+		spellAction = true;
+		action = value;
 	}
+};
+
+class NativePortEnvironment final : public Environment
+{
+	std::shared_ptr<CCallback> gameCallback;
+	std::shared_ptr<DecisionCallback> battleCallback;
+public:
+	NativePortEnvironment(std::shared_ptr<CCallback> game, std::shared_ptr<DecisionCallback> battle)
+		: gameCallback(std::move(game)), battleCallback(std::move(battle)) {}
+	const Services * services() const override { return LIBRARY; }
+	const GameCb * game() const override { return gameCallback.get(); }
+	const BattleCb * battle(const BattleID & battleID) const override { return battleCallback->getBattle(battleID).get(); }
 };
 
 class NativeBattleRecorder final : public RecordingGameServer
@@ -79,6 +99,7 @@ protected:
 	NativeBattleRecorder recorder;
 	int ballistaDecisions = 0;
 	int ballistaShots = 0;
+	int heroSpellDecisions = 0;
 
 	void startRecordedGame()
 	{
@@ -109,6 +130,14 @@ protected:
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 	}
 
+	void teachBattleSpell(CGHeroInstance * hero, SpellID spell, int power = 6)
+	{
+		teachSpell(hero, spell);
+		hero->setPrimarySkill(PrimarySkill::SPELL_POWER, power, ChangeValueMode::ABSOLUTE);
+		hero->setPrimarySkill(PrimarySkill::KNOWLEDGE, 10, ChangeValueMode::ABSOLUTE);
+		hero->mana = 100;
+	}
+
 	void prepareSiege()
 	{
 		startRecordedGame();
@@ -132,7 +161,7 @@ protected:
 			[](const auto & unit) { return unit->isCatapult(); })) << "Siege setup did not create the attacking catapult";
 	}
 
-	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt)
+	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true)
 	{
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
@@ -148,7 +177,10 @@ protected:
 			ASSERT_NE(policy, nullptr);
 			EXPECT_EQ(policy->dllName, "FHeroes2Tactics");
 			policy->playerID = player;
-			policy->initBattleInterface(nullptr, callback);
+			auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+			AutocombatPreferences prefs;
+			prefs.enableSpellsUsage = spellsEnabled;
+			policy->initBattleInterface(environment, callback, prefs);
 			policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
 				battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
 				battle()->getSideHero(BattleSide::ATTACKER), battle()->getSideHero(BattleSide::DEFENDER), side, false);
@@ -175,10 +207,13 @@ protected:
 			const auto player = battle()->battleGetOwner(active);
 			auto & callback = callbacks.at(player);
 			callback->action.reset();
+			callback->spellAction = false;
 			policies.at(player)->activeStack(battleID, active);
 			ASSERT_TRUE(callback->action.has_value()) << "Backend did not respond to the actual active-stack event";
 			const auto action = *callback->action;
-			if(active->creatureId() == CreatureID::BALLISTA)
+			if(callback->spellAction)
+				++heroSpellDecisions;
+			else if(active->creatureId() == CreatureID::BALLISTA)
 			{
 				++ballistaDecisions;
 				if(action.actionType == EActionType::SHOOT)
@@ -208,10 +243,11 @@ protected:
 		}
 		std::ostringstream diagnostics;
 		diagnostics << "damage=" << recorder.damage << " shots=" << recorder.shots
-			<< " melee=" << recorder.meleeAttacks << " catapult=" << recorder.catapultAttacks.size();
+			<< " melee=" << recorder.meleeAttacks << " catapult=" << recorder.catapultAttacks.size()
+			<< " spells=" << heroSpellDecisions;
 		for(const auto & decision : recentDecisions)
 			diagnostics << '\n' << decision;
-		ASSERT_EQ(recorder.battleResults.size(), 1u) << "No unique result after 512 actual stack activations\n" << diagnostics.str();
+		ASSERT_EQ(recorder.battleResults.size(), 1u) << "No unique result after 512 actual activations\n" << diagnostics.str();
 		const auto result = recorder.battleResults.back();
 		EXPECT_GT(decisions, 0);
 		EXPECT_GT(recorder.damage, 0) << "No damage was applied by the engine";
@@ -315,4 +351,103 @@ TEST_F(AIIntegrationNativeBattle, completePortNameCannotSilentlySelectThePartial
 	EXPECT_THROW(AIFactory::createBattleAI("FHeroes2"), std::runtime_error);
 	EXPECT_THROW(AIFactory::createBattleAI("HoMM3Original"), std::runtime_error);
 	EXPECT_THROW(AIFactory::createBattleAI("TUMEnchanted"), std::runtime_error);
+}
+
+TEST_F(AIIntegrationNativeBattle, choosesOffensiveMagicAndCompletesTheBattle)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW);
+	runToCompletion(BattleSide::ATTACKER);
+	EXPECT_GT(heroSpellDecisions, 0);
+	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW);
+	runToCompletion(std::nullopt, false);
+	EXPECT_EQ(heroSpellDecisions, 0);
+	EXPECT_TRUE(recorder.casts.empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, lethalSpellFinishesBeforeAnyStaleUnitCommand)
+{
+	prepareBattle(CreatureID(2), 1, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 20);
+	runToCompletion(BattleSide::ATTACKER);
+	EXPECT_EQ(heroSpellDecisions, 1);
+	EXPECT_EQ(recorder.castsOf(SpellID::MAGIC_ARROW).size(), 1u);
+	EXPECT_EQ(recorder.shots, 0);
+	EXPECT_EQ(recorder.meleeAttacks, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, noManaStillCompletesUsingUnitActions)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW);
+	attackerSideHero->mana = 0;
+	runToCompletion();
+	EXPECT_EQ(heroSpellDecisions, 0);
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, choosesAreaDamageOnLegalBattlefieldTargets)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 50);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::FIREBALL);
+	runToCompletion();
+	EXPECT_FALSE(recorder.castsOf(SpellID::FIREBALL).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, rejectsGlobalDamageThatWouldDestroyItsOwnArmy)
+{
+	prepareBattle(CreatureID(2), 1, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::ARMAGEDDON, 20);
+	runToCompletion();
+	EXPECT_TRUE(recorder.castsOf(SpellID::ARMAGEDDON).empty());
+	EXPECT_EQ(heroSpellDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, bothSidesCastWithoutRepeatedCommandsInTheSameRound)
+{
+	prepareBattle(CreatureID(0), 150, CreatureID(0), 150);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 2);
+	teachBattleSpell(defenderSideHero, SpellID::LIGHTNING_BOLT, 2);
+	runToCompletion();
+	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_FALSE(recorder.castsOf(SpellID::LIGHTNING_BOLT).empty());
+	EXPECT_GT(heroSpellDecisions, 1);
+}
+
+TEST_F(AIIntegrationNativeBattle, overwhelmingArmyConservesMana)
+{
+	prepareBattle(CreatureID(0), 1000, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 1);
+	runToCompletion(BattleSide::ATTACKER);
+	EXPECT_EQ(heroSpellDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 60, CreatureID(0), 60);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::RESURRECTION, 4);
+	setMagicMastery(attackerSideHero, MasteryLevel::EXPERT);
+	const CStack * injured = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			injured = unit.get();
+	ASSERT_NE(injured, nullptr);
+	injure(injured, 300);
+	runToCompletion();
+	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
 }
