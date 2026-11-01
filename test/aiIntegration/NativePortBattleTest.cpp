@@ -244,6 +244,7 @@ protected:
 		}
 
 		int decisions = 0;
+		std::map<PlayerColor, int> decisionsByPlayer;
 		std::vector<std::string> recentDecisions;
 		while(recorder.battleResults.empty() && decisions < 512)
 		{
@@ -306,6 +307,7 @@ protected:
 				entry.second->actionStarted(battleID, action);
 			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action)) << "The engine rejected the selected action";
 			++decisions;
+			++decisionsByPlayer[player];
 			if(recorder.battleResults.empty())
 			{
 				for(auto & entry : policies)
@@ -336,6 +338,9 @@ protected:
 		EXPECT_TRUE(gameState()->currentBattles.empty()) << "The battle result was not applied to the adventure state";
 		EXPECT_EQ(recorder.acceptedResults, 1);
 		std::cout << "AI_NATIVE_BATTLE_RESULT backend=" << backendName
+			<< " defender_backend=" << defenderAI
+			<< " attacker_decisions=" << decisionsByPlayer[attackerPlayer]
+			<< " defender_decisions=" << decisionsByPlayer[battle()->sideToPlayer(BattleSide::DEFENDER)]
 			<< " activations=" << decisions << " damage=" << recorder.damage
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
@@ -1258,6 +1263,34 @@ TEST_F(AIIntegrationNativeBattle, mmaiSiegeDefenderNeuralModelCompletesRealBattl
 }
 
 #endif
+
+
+TEST_F(AIIntegrationNativeBattle, mixedOriginalHoMM3AttackerAgainstFHeroes2DefenderCompletesBattle)
+{
+	// Same creature/count fixture as the inverse policy assignment below.
+	// Compare policy decisions on opposite sides without changing any
+	// game rules, forcing actions, or manufacturing a winner.
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "FHeroes2Tactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mixedFHeroes2AttackerAgainstOriginalHoMM3DefenderCompletesBattle)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mixedTUMAttackerAgainstFHeroes2DefenderCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 35, CreatureID(2), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics", "FHeroes2Tactics");
+	EXPECT_GT(recorder.shots, 0);
+}
 
 #ifdef ENABLE_MMAI
 TEST_F(AIIntegrationNativeBattle, integrationFourExperimentalBackendsRemainDistinctFactoryChoices)
