@@ -578,4 +578,27 @@ TEST_F(AIIntegrationNativeBattle, mmaiDefenderNeuralModelCompletesRealBattle)
 	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural defender never attempted a non-passive action";
 }
 
+TEST_F(AIIntegrationNativeBattle, mmaiSiegeDefenderNeuralModelCompletesRealBattle)
+{
+	// The official MMAI 1.8 pack has a separate defender.siege neural model.
+	// Verify model dispatch by fighting an actual fortified town to its result.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Run separately with an installed MMAI neural model pack";
+
+	const auto modelConfig = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(modelConfig.isStruct()) << "MMAI neural config is not mounted in VCMI";
+	ASSERT_TRUE(modelConfig["models"]["defender.siege"].isString())
+		<< "Missing MMAI defender.siege model mapping: " << modelConfig.toCompactString();
+	const auto path = "MMAI/models/" + modelConfig["models"]["defender.siege"].String();
+	ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
+		<< "MMAI siege neural model is not mounted: " << path;
+
+	prepareSiege();
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(BattleSide::ATTACKER, false, "FHeroes2Tactics", "MMAI");
+	EXPECT_GT(mmaiUnitDecisions, 0) << "The neural siege defender was never activated";
+	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural siege defender never attempted a non-passive action";
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
 #endif
