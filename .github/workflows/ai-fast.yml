@@ -212,7 +212,7 @@ jobs:
 
           # CVcmiTestConfig always uses the separate testModSettings preset,
           # never the end user's launcher modSettings.json.
-          preset_file = root / 'config/testModSettings.json'
+          preset_file = Path.home() / '.config/vcmi/testModSettings.json'
           preset_file.parent.mkdir(parents=True, exist_ok=True)
           preset = json.loads(preset_file.read_text()) if preset_file.exists() else {}
           preset_name = preset.get('activePreset', 'default')
