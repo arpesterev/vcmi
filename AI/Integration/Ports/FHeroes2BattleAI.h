@@ -7,6 +7,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2SpellPolicy.h"
 #include "../../../lib/CStack.h"
 #include "../../../lib/battle/BattleAction.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
@@ -15,22 +16,25 @@
 
 namespace AIIntegration
 {
-/// Partial tactical port. VCMI supplies strength and damage projections; upstream spell,
-/// retreat, archer-kiting and siege-position policies are not implemented here.
+/// Partial tactical port with damage/restoration magic. VCMI supplies rule projections;
+/// upstream buff, retreat, archer-kiting and siege-position policies remain incomplete.
 class FHeroes2BattleAI final : public CBattleGameInterface
 {
 public:
-	void initBattleInterface(std::shared_ptr<Environment>, std::shared_ptr<CBattleCallback> callback) override
+	void initBattleInterface(std::shared_ptr<Environment> environment, std::shared_ptr<CBattleCallback> callback) override
 	{
 		if(!callback)
 			throw std::invalid_argument("FHeroes2Tactics requires a battle callback");
 		cb = std::move(callback);
+		env = std::move(environment);
+		preferences = {};
 		logAi->info("AI_SOURCE_POLICY backend=FHeroes2Tactics source=0dbfe9f386f33c2500842f4a59cd284d7f03d541 partial=true projection=VCMI");
 	}
 
-	void initBattleInterface(std::shared_ptr<Environment> env, std::shared_ptr<CBattleCallback> callback, AutocombatPreferences) override
+	void initBattleInterface(std::shared_ptr<Environment> environment, std::shared_ptr<CBattleCallback> callback, AutocombatPreferences prefs) override
 	{
-		initBattleInterface(std::move(env), std::move(callback));
+		initBattleInterface(std::move(environment), std::move(callback));
+		preferences = prefs;
 	}
 
 	void yourTacticPhase(const BattleID & battleID, int) override
@@ -47,6 +51,16 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		if(preferences.enableSpellsUsage && !stack->isCatapult() && !stack->isFirstAidTent())
+		{
+			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get()))
+			{
+				logAi->debug("AI_PORT_SPELL backend=FHeroes2Tactics battle=%d action=%s", battleID.getNum(), spell->toString());
+				cb->battleMakeSpellAction(battleID, *spell);
+				// The engine applies the spell and reactivates a surviving stack.
+				return;
+			}
+		}
 		const auto action = chooseAction(*battle, *stack);
 		logAi->debug("AI_PORT_ACTION backend=FHeroes2Tactics battle=%d unit=%d action=%s",
 			battleID.getNum(), stack->unitId(), action.toString());
@@ -55,6 +69,8 @@ public:
 
 private:
 	std::shared_ptr<CBattleCallback> cb;
+	std::shared_ptr<Environment> env;
+	AutocombatPreferences preferences;
 
 	static double strength(const CStack & stack)
 	{
