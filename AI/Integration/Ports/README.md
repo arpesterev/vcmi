@@ -52,6 +52,40 @@ claim for movement, spell selection, hero retreat, battle outcome or campaign
 planning. UI labels this as a partial port and does not claim that the
 complete original HoMM3 AI has been delivered.
 
+## TUMEnchantedTactics
+
+`TUMEnchantedTactics` is an **experimental, selectable, partial** tactical
+projection of the published TUM Enchanted combat changes. TUM Enchanted is an
+ERA mod of HoMM3 rather than a standalone AI implementation. Its upstream
+[AI Improvements.txt](https://github.com/SadnessPower/TUM-Enchanted/blob/475d80bbf3e935ac854bcb6e68ef02019efb8de3/AI%20Improvements.txt)
+documents combat behavior, but the released combat modifications are in
+compiled ERA/DLL components, not source suitable for direct porting.
+
+The TUM backend explicitly composes the experimental HoMM3 baseline with
+two independently implemented overrides derived from the documentation:
+
+- **Ballista:** excludes targets affected by Blind, Paralyze or Stone Gaze;
+  with no remaining legal target, it defends instead of waking a disabled
+  stack. We check actual VCMI spell-effect bonuses, not `isFrozen()` alone,
+  because the latter only detects Stone Gaze.
+- **Shooter protection:** when facing neutral melee-only stacks, allied
+  ranged troops can shoot, and no neutral stack can reach the friendly army
+  in its next movement, the active friendly melee stack defends instead of
+  rushing forward. Movement reach is evaluated with VCMI pathfinding. The
+  documented exception for neutral-controlled armies outside siege applies.
+
+All remaining attacks, movement and siege-machine behavior explicitly uses
+the partial HoMM3 tactical policy, not an unannounced BattleAI/EmptyAI
+fallback. The policy never changes VCMI mechanics. The separate launcher
+entry is `TUMEnchantedTactics`, **not** the reserved full-port ID
+`TUMEnchanted`.
+
+Still unimplemented or not upstream-equivalent: the full TUM defensive spell
+aggregation rules, improved tower targeting, clone/antimagic/cure selection,
+distraction avoidance, siege valuation, creature ability choices, buff/debuff
+planning and the rest of the compiled ERA AI modifications. Native battle
+smoke tests do not establish those behaviors or a match win-rate improvement.
+
 ## Native battle regressions
 
 `AIIntegrationNativeBattle` creates actual VCMI battles, obtains the active
