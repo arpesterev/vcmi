@@ -167,6 +167,72 @@ jobs:
             exit 1
           fi
 
+      # Only the MMAI development PRs download public ONNX weights; no
+      # binary weights enter this repository, Actions artifacts or release jobs.
+      - name: Install verified public MMAI neural pack into isolated CI preset
+        if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'feature/mmai-') }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://github.com/vcmi-mods/mmai/releases/download/vcmi-1.7-latest/mod.zip' \
+            --output "$RUNNER_TEMP/mmai-mod.zip"
+          echo "59aef1bbd76a02131f31c7e997111f1736a22e1c39c99df48b26feb5bf8bdb84  $RUNNER_TEMP/mmai-mod.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+
+          root = Path.home() / '.local/share/vcmi'
+          archive = Path(os.environ['RUNNER_TEMP']) / 'mmai-mod.zip'
+          with ZipFile(archive) as z:
+              for name in z.namelist():
+                  parts = PurePosixPath(name).parts
+                  if not parts or parts[0].lower() != 'mmai' or '..' in parts:
+                      raise ValueError('Unexpected path in MMAI release: ' + name)
+              z.extractall(root / 'Mods')
+
+          mod = root / 'Mods/mmai'
+          if not (mod / 'mod.json').exists():
+              raise RuntimeError('MMAI mod.json is missing from downloaded release')
+          settings_file = mod / 'config/mmai-settings.json'
+          model_settings = json.loads(settings_file.read_text())
+          if not {'attacker', 'defender'}.issubset(model_settings.get('models', {})):
+              raise RuntimeError('MMAI release must configure attacker and defender models')
+          for role, filename in model_settings['models'].items():
+              candidate = mod / 'models' / filename
+              if not candidate.is_file():
+                  alt = mod / 'models' / filename.replace('.onnx', '-stochastic.onnx')
+                  if not alt.is_file():
+                      raise RuntimeError('No published model for ' + role + ': ' + filename)
+                  model_settings['models'][role] = alt.name
+                  candidate = alt
+              print('MMAI neural model:', role, candidate.name, candidate.stat().st_size)
+          settings_file.write_text(json.dumps(model_settings, indent=2) + '\n')
+
+          # CVcmiTestConfig always uses the separate testModSettings preset,
+          # never the end user's launcher modSettings.json.
+          preset_file = root / 'config/testModSettings.json'
+          preset_file.parent.mkdir(parents=True, exist_ok=True)
+          preset = json.loads(preset_file.read_text()) if preset_file.exists() else {}
+          preset_name = preset.get('activePreset', 'default')
+          preset['activePreset'] = preset_name
+          active = preset.setdefault('presets', {}).setdefault(preset_name, {}).setdefault('mods', ['vcmi', 'vcmi-test'])
+          if 'mmai' not in active:
+              active.append('mmai')
+          preset_file.write_text(json.dumps(preset, indent=2) + '\n')
+          print('CI-only test mod preset:', active)
+          PY
+
+      - name: Run real MMAI neural actions through VCMI battle engine
+        if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'feature/mmai-') }}
+        run: |
+          set -euo pipefail
+          cd out/build/linux-gcc-test/bin
+          VCMI_AI_MMAI_NEURAL_TEST=1 timeout 300 ./vcmitest \
+            --gtest_filter='AIIntegrationNativeBattle.mmaiWithRealNeuralModelCompletesRealBattle' \
+            --gtest_output=xml:mmai-real-neural-battle.xml
+
       - name: Save compiled C++ objects for later develop builds
         if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
         uses: actions/cache/save@v6
