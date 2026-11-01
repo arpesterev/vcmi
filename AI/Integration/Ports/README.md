@@ -18,8 +18,17 @@ defence, catapult shots, first aid and ending the tactics phase. One unit
 command is submitted for each active-stack event. Command validity and all
 state changes remain the responsibility of the ordinary VCMI game handler.
 
-Not implemented: upstream hero-spell selection, creature-spell selection,
-retreat/surrender, archer kiting, exact siege positioning, upstream battle
+Source-derived extensions in the current experimental branch also cover
+melee pursuit of unescapable enemies and fast-shooter retreat, under native
+VCMI movement/target constraints. In defensive stance, an available melee
+stack now moves adjacent to a threatened friendly shooter rather than blindly
+defending, using the upstream archer-strength minus travel-cost score.
+Only one-hex-wide screens and shooters under one-turn melee threat are
+covered; no complete fheroes2 archer-screen deployment or spell-area
+spacing is claimed. All of these decisions run through actual game commands.
+
+Not implemented: full upstream hero-spell repertoire, creature-spell selection,
+retreat/surrender, exact archer kiting/cover placement, siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
 Do not use this partial policy as a quality replacement for the default AI.
 No source-policy equivalence evidence has been produced.
