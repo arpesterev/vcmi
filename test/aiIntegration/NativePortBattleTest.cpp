@@ -526,6 +526,47 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsCompletesRealRangedBattle)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndCompletesBattle)
+{
+	prepareSiege();
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->battleGetGateState(), EGateState::CLOSED);
+	const CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && !unit->isWarMachine())
+		{
+			defender = unit.get();
+			break;
+		}
+	}
+	ASSERT_NE(defender, nullptr);
+	ASSERT_TRUE(battle()->battleIsInsideWalls(defender->getPosition()));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, defender);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "The castle defender must hold while the gate is closed and nobody has breached";
+	// Resolve through the engine as well: holding must not trap the siege
+	// in a battle without a winner.
+	runToCompletion(BattleSide::ATTACKER, false, "TUMEnchantedTactics");
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
