@@ -385,9 +385,11 @@ private:
 		double bestDamageDifference = -std::numeric_limits<double>::infinity();
 		for(const auto * enemy : enemies)
 		{
-			if(!enemy->getPosition().isValid()
-				|| BattleHex::getDistance(stack.getPosition(), enemy->getPosition()) != 1)
+			if(!enemy->getPosition().isValid())
 				continue;
+			// fheroes2 measures contact between whole occupied positions. A wide
+			// enemy's tail can be adjacent even when its head is two hexes away.
+			// Trust VCMI's actual melee-contact check instead of head distance.
 			const auto attackHexes = battle.meleeAttackHexes(&stack, enemy, stack.getPosition());
 			if(attackHexes.empty())
 				continue;
