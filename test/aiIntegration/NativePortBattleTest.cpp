@@ -7,6 +7,10 @@
 
 #include "server/battles/BattleTestFixture.h"
 #include "../../AI/Integration/Ports/HoMM3TacticsBattleAI.h"
+#ifdef ENABLE_MMAI
+#include "../../AI/MMAI/BAI/factory.h"
+#include "../../AI/MMAI/BAI/router.h"
+#endif
 #include <vcmi/Environment.h>
 #include "../../lib/GameLibrary.h"
 #include "../../lib/filesystem/Filesystem.h"
@@ -1622,6 +1626,35 @@ TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScript
 		EXPECT_NE(std::string(error.what()).find("refusing scripted fallback"), std::string::npos)
 			<< "Missing MMAI model must be diagnosed rather than replaced";
 	}
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiOppositeSideMetadataIsRejected)
+{
+	// Test the production Router side-validation seam with side metadata
+	// actually read from the checksum-pinned ONNX attacker model. This is a
+	// rejection test, not a fabricated combat outcome or a replacement AI.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+	ASSERT_FALSE(HasFatalFailure());
+	const auto settings = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(settings["models"]["attacker"].isString());
+	const auto path = "MMAI/models/" + settings["models"]["attacker"].String();
+	auto model = MMAI::BAI::CreateNNModel(path);
+	ASSERT_NE(model, nullptr);
+	ASSERT_EQ(model->getType(), MMAI::Schema::ModelType::NN);
+
+	const auto attackerSide = static_cast<MMAI::Schema::Side>(static_cast<int>(BattleSide::ATTACKER));
+	const auto defenderSide = static_cast<MMAI::Schema::Side>(static_cast<int>(BattleSide::DEFENDER));
+	ASSERT_NE(attackerSide, defenderSide);
+	ASSERT_EQ(model->getSide(), attackerSide)
+		<< "The release's attacker model must declare its training side";
+	EXPECT_TRUE(MMAI::BAI::validateModelSide(model->getSide(), attackerSide, true, "attacker"));
+	EXPECT_THROW(MMAI::BAI::validateModelSide(model->getSide(), defenderSide, true, "defender"),
+		std::runtime_error) << "Strict MMAI must refuse opposite-side weights";
+	EXPECT_FALSE(MMAI::BAI::validateModelSide(model->getSide(), defenderSide, false, "defender"))
+		<< "Legacy hybrid routing reports a mismatch rather than pretending the roles agree";
+	EXPECT_TRUE(MMAI::BAI::validateModelSide(MMAI::Schema::Side::BOTH, defenderSide, true, "defender"));
 }
 
 TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
