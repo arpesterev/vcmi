@@ -240,7 +240,7 @@ jobs:
           ulimit -c 0
           result=0
           VCMI_AI_MMAI_NEURAL_TEST=1 timeout 300 ./vcmitest \
-            --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle' \
+            --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle:AIIntegrationNativeBattle.mmaiOppositeSideMetadataIsRejected' \
             --gtest_output=xml:mmai-real-neural-battle.xml || result=$?
           if [[ "$result" == 139 ]]; then
             # A real-model crash is a hard test failure. Record a stack
@@ -250,7 +250,7 @@ jobs:
               -ex 'set pagination off' -ex 'set print thread-events off' \
               -ex run -ex 'bt 35' -ex 'thread apply all bt 8' \
               --args ./vcmitest \
-                --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle' || true
+                --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle:AIIntegrationNativeBattle.mmaiOppositeSideMetadataIsRejected' || true
           fi
           if [[ "$result" != 0 ]]; then
             exit "$result"
@@ -263,17 +263,18 @@ jobs:
                       'mmaiDefenderNeuralModelCompletesRealBattle',
                       'mmaiSiegeDefenderNeuralModelCompletesRealBattle',
                       'mmaiBothNeuralSidesFightRealBattle',
+                      'mmaiOppositeSideMetadataIsRejected',
                       'mmaiAttackerAgainstHoMM3DefenderRealBattle',
                       'mmaiDefenderAgainstHoMM3AttackerRealBattle',
                       'mmaiAttackerAgainstTUMDefenderRealBattle',
                       'mmaiDefenderAgainstTUMAttackerRealBattle',
                       'mmaiStrictNeuralDoesNotCastScriptedHeroSpellRealBattle'}
           names = {case.get('name') for case in cases}
-          if len(cases) != 9 or names != expected:
+          if len(cases) != 10 or names != expected:
               raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
           if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
               raise RuntimeError('An MMAI neural integration test failed or was skipped')
-          print('Verified: nine real neural-backed MMAI battles, including both-neural confrontation, siege, mixed-policy pairs and scripted-spell exclusion')
+          print('Verified: nine real neural-backed MMAI battles plus one negative real-ONNX training-side check')
           PY
 
       - name: Save compiled C++ objects for later develop builds
