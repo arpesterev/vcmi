@@ -1383,6 +1383,34 @@ TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
 	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural attacker never attempted a non-passive action";
 }
 
+TEST_F(AIIntegrationNativeBattle, mmaiStrictNeuralDoesNotCastScriptedHeroSpellRealBattle)
+{
+	// MMAI's official ONNX action space chooses stack actions; it does not
+	// contain hero spell selection. In strict mode a learned Magic Arrow
+	// must NOT be cast by the unrelated scripted BattleEvaluator.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 20);
+	const auto observer = std::make_shared<DecisionCallback>(
+		battle()->sideToPlayer(BattleSide::ATTACKER));
+	observer->onBattleStarted(battle());
+	ASSERT_EQ(observer->getBattle(battle()->getBattleID())->battleCanCastSpell(
+		attackerSideHero, spells::Mode::HERO), ESpellCastProblem::OK)
+		<< "The fixture must make the scripted hero-spell fallback possible";
+
+	// Enable autocombat spells on purpose. All actual MMAI unit decisions
+	// must still go through ONNX and be accepted by VCMI's battle engine.
+	runToCompletion(std::nullopt, true, "MMAI", "HoMM3OriginalTactics");
+	EXPECT_EQ(heroSpellDecisions, 0) << "Strict MMAI delegated hero spells to a scripted policy";
+	EXPECT_TRUE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, mmaiDefenderNeuralModelCompletesRealBattle)
 {
 	// The independent defender model must also handle a real battle with
