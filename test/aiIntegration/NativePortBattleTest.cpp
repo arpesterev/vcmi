@@ -8,7 +8,7 @@
 #include "server/battles/BattleTestFixture.h"
 #include "../../AI/Integration/Ports/HoMM3TacticsBattleAI.h"
 #ifdef ENABLE_MMAI
-#include "../../AI/MMAI/BAI/factory.h"
+#include "../../AI/MMAI/BAI/model_api.h"
 #include "../../AI/MMAI/BAI/router.h"
 #endif
 #include <vcmi/Environment.h>
