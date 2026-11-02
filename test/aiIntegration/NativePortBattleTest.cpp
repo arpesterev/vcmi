@@ -898,6 +898,95 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotEvaluatesBothHexesOfWideTarget)
+{
+	// Pinned fheroes2 archerDecision scores the HEAD and TAIL aim points of
+	// a two-hex AREA_SHOT target separately. Place additional genuine enemy
+	// stacks only within the tail footprint. A head-only scorer misses them.
+	prepareBattle(CreatureID(45), 30, CreatureID(10), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * shooter = nullptr;
+	const CStack * wideEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(10))
+			wideEnemy = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(wideEnemy, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_TRUE(wideEnemy->doubleWide());
+	const auto & occupied = wideEnemy->getHexes();
+	ASSERT_EQ(occupied.size(), 2u);
+	const BattleHex head = occupied[0];
+	const BattleHex tail = occupied[1];
+	ASSERT_NE(head, tail);
+	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+
+	std::vector<BattleHex> tailOnly;
+	for(const auto & hex : tail.getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr
+			&& BattleHex::getDistance(hex, head) > 1)
+			tailOnly.push_back(hex);
+	}
+	ASSERT_GE(tailOnly.size(), 2u) << "The real wide stack needs free tail-only neighboring cells";
+	const auto * firstExtra = addStack(BattleSide::DEFENDER, CreatureID(0), tailOnly[0], 60);
+	const auto * secondExtra = addStack(BattleSide::DEFENDER, CreatureID(0), tailOnly[1], 60);
+	ASSERT_NE(firstExtra, nullptr);
+	ASSERT_NE(secondExtra, nullptr);
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, head));
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, tail));
+
+	const auto headVictims = battle()->getAttackedBattleUnits(shooter, wideEnemy, head, true);
+	const auto tailVictims = battle()->getAttackedBattleUnits(shooter, wideEnemy, tail, true);
+	const auto includes = [](const auto & victims, const CStack * unit)
+	{
+		return std::any_of(victims.begin(), victims.end(), [&](const auto * victim)
+		{
+			return victim->unitId() == unit->unitId();
+		});
+	};
+	for(const auto * extra : {firstExtra, secondExtra})
+	{
+		ASSERT_FALSE(includes(headVictims, extra)) << "Head shot must not reach tail-only enemies";
+		ASSERT_TRUE(includes(tailVictims, extra)) << "Tail shot must reach the real extra enemies";
+	}
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_EQ(callback->action->target.size(), 1u);
+	EXPECT_EQ(callback->action->target.front().hexValue, tail)
+		<< "Wide-area target must be aimed at its better tail footprint";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The real engine rejected the source-derived wide-target area shot";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.shots, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDifference)
 {
 	// Pinned fheroes2 archerDecision uses raw outgoing HP damage minus
