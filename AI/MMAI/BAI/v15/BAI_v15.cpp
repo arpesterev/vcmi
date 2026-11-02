@@ -91,6 +91,8 @@ void BAI::battleStart(
 	state = initState(battle.get());
 	getActionTotalMs = 0;
 	getActionTotalCalls = 0;
+	if(strictNeural && enableSpells)
+		logger.warn("MMAI neural-only: hero spell selection is unsupported by this ONNX action schema; no scripted spellcasting fallback will run");
 }
 
 // XXX: battleEnd() is NOT called by CPlayerInterface (i.e. GUI)
@@ -159,7 +161,10 @@ void BAI::yourTacticPhase(const BattleID & bid, int distance)
 
 bool BAI::maybeCastSpell(const CStack * astack, const BattleID & bid)
 {
-	if(!enableSpells)
+	// Official MMAI models select creature actions, not hero spells. The
+	// BattleEvaluator spell heuristic belongs to legacy hybrid MMAI only.
+	// A strict factory-selected neural policy must not silently use it.
+	if(strictNeural || !enableSpells)
 		return false;
 
 	const auto * hero = battle->battleGetMyHero();
