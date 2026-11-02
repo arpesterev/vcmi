@@ -376,7 +376,11 @@ private:
 	static std::optional<BattleAction> blockedArcherMelee(CPlayerBattleCallback & battle,
 		const CStack & stack, const std::vector<const CStack *> & enemies)
 	{
-		if(stack.doubleWide() || !stack.hasBonusOfType(BonusType::SHOOTER)
+		// Both occupied hexes of a wide archer participate in native VCMI
+		// melee-contact checks; fheroes2 does not exclude wide shooters here.
+		// Unlike the still single-width retreat projection, this branch
+		// evaluates VCMI-legal contact from the stack's actual position.
+		if(!stack.hasBonusOfType(BonusType::SHOOTER)
 			|| battle.battleCanShoot(&stack) || !stack.getPosition().isValid())
 			return std::nullopt;
 
