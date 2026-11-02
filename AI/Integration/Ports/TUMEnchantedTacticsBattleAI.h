@@ -165,13 +165,18 @@ private:
 		{
 			return battle.battleGetOwner(enemy) == PlayerColor::NEUTRAL;
 		});
+		// The published TUM condition is about armies having shooters, not
+		// the ability to fire in this exact activation. A shooter blocked by
+		// adjacent melee is still ranged; our own line must also have ammo
+		// and not be completely disabled by Forgetfulness to benefit from
+		// waiting. Enemy archer classification is intentionally conservative.
 		state.hasShooters = std::any_of(friends.begin(), friends.end(), [&](const CStack * friendly)
 		{
-			return friendly->alive() && battle.battleCanShoot(friendly);
+			return friendly->alive() && friendly->isShooter() && friendly->canShoot();
 		});
 		state.opponentHasShooters = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
-			return enemy->alive() && battle.battleCanShoot(enemy);
+			return enemy->alive() && enemy->isShooter();
 		});
 		if(!state.opponentIsNeutral || !state.hasShooters || state.opponentHasShooters)
 			return false;
