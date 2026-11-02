@@ -793,11 +793,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 {
 	// Original fheroes2 archerDecision accounts for multiple area victims.
-	// VCMI's Magog splash is hostile-only, never fictional friendly fire.
+	// The stripped CI creature data does not grant Magog a splash bonus. A
+	// fixture-local native SHOOTS_ALL_ADJACENT bonus exercises real VCMI area
+	// mechanics without changing creature definitions or engine rules.
 	prepareBattle(CreatureID(45), 30, CreatureID(0), 30);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
-	const CStack * shooter = nullptr;
+	CStack * shooter = nullptr;
 	const CStack * isolatedEnemy = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
@@ -809,6 +811,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 	ASSERT_NE(shooter, nullptr);
 	ASSERT_NE(isolatedEnemy, nullptr);
 	ASSERT_TRUE(shooter->isShooter());
+	// Use the existing engine bonus only in this synthetic battle fixture.
+	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
 	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
 	ASSERT_FALSE(shooter->doubleWide());
 
