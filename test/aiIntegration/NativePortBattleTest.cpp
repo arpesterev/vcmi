@@ -616,6 +616,61 @@ TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBatt
 	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveStance)
+{
+	// Pinned fheroes2 analyzeBattleState counts an archer as ranged strength
+	// even when adjacent enemy melee currently prevents a legal shot.
+	// This state used to make our projected stance incorrectly turn offensive.
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	const BattleHex shooterHex(infantry->getPosition().toInt() + 7);
+	const BattleHex blockerHex(shooterHex.toInt() + 1);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_TRUE(blockerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
+	auto * shooter = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 10);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), blockerHex, 20), nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_GT(shooter->getMovementRange(), 0u);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter))
+		<< "The enemy must really block the archer's current shot";
+	ASSERT_GT(BattleHex::getDistance(infantry->getPosition(), blockerHex),
+		static_cast<int>(infantry->getMovementRange()) + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER), battle()->getSideHero(BattleSide::DEFENDER),
+		BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "Blocked friendly archer still supports defensive fheroes2 stance: "
+		<< callback->action->toString();
+	policy.reset();
+	// The engine, not the test, chooses all subsequent actions and the winner.
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendlyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
