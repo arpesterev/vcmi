@@ -1553,6 +1553,84 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedFastArcherEscapesAdjacentSlowMe
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2ForgottenRemoteShooterDoesNotBlockSafeRetreat)
+{
+	// Pinned fheroes2 archerDecision treats a distant, unengaged archer as
+	// a ranged unit even when Forgetfulness makes its current shot illegal.
+	// A temporary speed bonus makes the old battleCanShoot-based port
+	// incorrectly classify that archer as an unavoidable fast melee threat.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(19), 30); // Grand Elf
+	setArmy(defenderSideHero, CreatureID(2), 15); // Archer
+	teachBattleSpell(attackerSideHero, SpellID::FORGETFULNESS);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	const CStack * shooter = nullptr;
+	const CStack * forgottenArcher = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			forgottenArcher = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(forgottenArcher, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	ASSERT_TRUE(forgottenArcher->isShooter());
+	ASSERT_GT(BattleHex::getDistance(shooter->getPosition(), forgottenArcher->getPosition()), 1);
+	const BattleHex blockerHex(shooter->getPosition().toInt() + 1);
+	ASSERT_TRUE(blockerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
+	const CStack * blocker = addStack(BattleSide::DEFENDER, CreatureID(16), blockerHex, 10);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
+		static_cast<int>(blocker->getMovementRange()) + 2);
+
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::FORGETFULNESS, forgottenArcher));
+	ASSERT_FALSE(battle()->battleCanShoot(forgottenArcher));
+	ASSERT_TRUE(forgottenArcher->isShooter());
+	// Deliberately make this remote archer faster than the acting Grand Elf.
+	// Its speed must not affect fheroes2's unengaged-ranged threat category.
+	const_cast<CStack *>(forgottenArcher)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED, BonusSource::OTHER, 25, BonusSourceID()));
+	ASSERT_GT(static_cast<int>(forgottenArcher->getMovementRange()),
+		static_cast<int>(shooter->getMovementRange()));
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Remote unengaged shooter under Forgetfulness must not prevent Grand Elf retreat: "
+		<< callback->action->toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Real VCMI engine rejected source-derived archer retreat";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeThreat)
 {
 	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
