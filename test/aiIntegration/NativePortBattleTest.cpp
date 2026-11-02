@@ -1325,6 +1325,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideArcherRetreatChecksItsTailFootprin
 	ASSERT_TRUE(shooter->doubleWide());
 	ASSERT_TRUE(shooter->isShooter());
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	// The stock deployment puts the attacker's tail against the field edge;
+	// there is no available hex adjacent only to that tail. Reposition the
+	// live active stack to a free central double-wide footprint first.
+	const BattleHex central(GameConstants::BFIELD_SIZE / 2);
+	ASSERT_TRUE(central.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(central), nullptr);
+	const BattleHex centralTail = shooter->occupiedHex(central);
+	ASSERT_TRUE(centralTail.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(centralTail), nullptr);
+	const_cast<CStack *>(shooter)->setPosition(central);
+	ASSERT_EQ(battle()->battleGetUnitByPos(central), shooter);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
 	const BattleHex shooterHead = shooter->getPosition();
 	const BattleHex shooterTail = shooter->occupiedHex();
 	ASSERT_TRUE(shooterTail.isAvailable());
