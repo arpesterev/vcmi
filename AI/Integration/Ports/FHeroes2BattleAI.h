@@ -294,8 +294,7 @@ private:
 		// Upstream evaluates escape before its isHandFighting() melee branch.
 		// An adjacent slow melee enemy may block a shot without preventing
 		// movement to a safe hex; shot legality must not suppress retreat.
-		if(stack.doubleWide() || !stack.hasBonusOfType(BonusType::SHOOTER)
-			|| !stack.getPosition().isValid())
+		if(!stack.hasBonusOfType(BonusType::SHOOTER) || !stack.getPosition().isValid())
 			return std::nullopt;
 
 		const int speed = static_cast<int>(stack.getMovementRange());
@@ -307,9 +306,22 @@ private:
 		}))
 			return std::nullopt;
 
+		// fheroes2 archerDecision evaluates the occupied *position*, not
+		// only its head cell. A wide shooter can be threatened beside its tail,
+		// and a wide enemy may reach either occupied cell. VCMI provides the
+		// authoritative footprint for hypothetical legal head positions.
+		const auto footprintDistance = [&](const BattleHex & position, const CStack & enemy)
+		{
+			int nearest = GameConstants::BFIELD_SIZE;
+			for(const auto & ownHex : stack.getHexes(position))
+				for(const auto & enemyHex : enemy.getHexes())
+					nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(ownHex, enemyHex)));
+			return nearest;
+		};
+
 		const auto isThreatened = [&](const BattleHex & position, const CStack & enemy)
 		{
-			const int distance = BattleHex::getDistance(position, enemy.getPosition());
+			const int distance = footprintDistance(position, enemy);
 			// fheroes2 considers an unblocked shooter dangerous here only
 			// when adjacent, because retreat cannot avoid a ranged attack.
 			const int reach = enemy.hasBonusOfType(BonusType::SHOOTER)
@@ -350,7 +362,7 @@ private:
 					safe = false;
 					break;
 				}
-				nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(hex, enemy->getPosition())));
+				nearest = std::min(nearest, footprintDistance(hex, *enemy));
 			}
 			if(!safe)
 				continue;
