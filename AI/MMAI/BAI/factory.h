@@ -13,7 +13,7 @@
 #include "AI/MMAI/common.h" // IWYU pragma: keep
 
 #include "callback/CBattleGameInterface.h"
-#include "schema/base.h"
+#include "model_api.h"
 #include <onnxruntime_cxx_api.h>
 
 namespace MMAI::BAI
@@ -40,9 +40,6 @@ struct NNContainer
 	{
 	}
 };
-
-// Factory method for versioned derived NNModel (e.g. BAI::V13::NNModel)
-std::shared_ptr<MMAI::Schema::IModel> CreateNNModel(const std::string & path, float temperature = 1.0, uint64_t seed = 0);
 
 std::shared_ptr<CBattleGameInterface>
 CreateBAI(Schema::IModel * model, const std::shared_ptr<Environment> & env, const std::shared_ptr<CBattleCallback> & cb, bool enableSpells, bool enableTactics, bool strictNeural);
