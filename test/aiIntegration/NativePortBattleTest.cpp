@@ -207,7 +207,8 @@ protected:
 	}
 
 	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true,
-		const std::string & backendName = "FHeroes2Tactics", const std::string & defenderBackend = "")
+		const std::string & backendName = "FHeroes2Tactics", const std::string & defenderBackend = "",
+		bool requireBothSidesAct = false)
 	{
 		const std::string & attackerAI = backendName;
 		const std::string & defenderAI = defenderBackend.empty() ? backendName : defenderBackend;
@@ -343,7 +344,7 @@ protected:
 		ASSERT_EQ(recorder.battleResults.size(), 1u) << "No unique result after 512 actual activations\n" << diagnostics.str();
 		const auto result = recorder.battleResults.back();
 		EXPECT_GT(decisions, 0);
-		if(attackerAI != defenderAI)
+		if(attackerAI != defenderAI || requireBothSidesAct)
 		{
 			// A completed mixed-policy battle is not evidence for both ports if
 			// one army dies before its backend is ever asked for a decision.
@@ -1723,6 +1724,24 @@ TEST_F(AIIntegrationNativeBattle, mmaiSiegeDefenderNeuralModelCompletesRealBattl
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 }
 
+
+TEST_F(AIIntegrationNativeBattle, mmaiBothNeuralSidesFightRealBattle)
+{
+	// This is an actual ONNX-vs-ONNX fight: a scripted opponent cannot
+	// conceal a model-routing defect. Both sides must submit engine-accepted
+	// commands before the native battle reaches its genuine result.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+	requireInstalledNeuralRole("defender");
+	ASSERT_FALSE(HasFatalFailure());
+
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "MMAI", true);
+	EXPECT_GE(mmaiUnitDecisions, 2);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
 
 TEST_F(AIIntegrationNativeBattle, mmaiAttackerAgainstHoMM3DefenderRealBattle)
 {
