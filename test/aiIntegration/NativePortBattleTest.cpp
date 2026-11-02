@@ -914,7 +914,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotEvaluatesBothHexesOfWideTarget
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
 			shooter = unit.get();
-		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(22))
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(102))
 			wideEnemy = unit.get();
 	}
 	ASSERT_NE(shooter, nullptr);
