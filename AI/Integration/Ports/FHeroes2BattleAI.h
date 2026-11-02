@@ -319,14 +319,31 @@ private:
 			return nearest;
 		};
 
+		// In pinned fheroes2 archerDecision, ranged enemies are melee
+		// movement threats only while actually engaged in hand-to-hand combat.
+		// VCMI battleCanShoot(false) also covers Forgetfulness, exhausted ammo
+		// and other shot restrictions: these must not turn a distant archer
+		// into an advancing melee threat for the retreat decision.
+		const auto friendlies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		const auto handFighting = [&](const CStack & enemy)
+		{
+			for(const auto * friendly : friendlies)
+			{
+				if(!friendly->alive() || battle.battleGetOwner(friendly) == battle.battleGetOwner(&enemy))
+					continue;
+				for(const auto & friendlyHex : friendly->getHexes())
+					for(const auto & enemyHex : enemy.getHexes())
+						if(BattleHex::getDistance(friendlyHex, enemyHex) == 1)
+							return true;
+			}
+			return false;
+		};
+
 		const auto isThreatened = [&](const BattleHex & position, const CStack & enemy)
 		{
 			const int distance = footprintDistance(position, enemy);
-			// fheroes2 considers an unblocked shooter dangerous here only
-			// when adjacent, because retreat cannot avoid a ranged attack.
-			const int reach = enemy.hasBonusOfType(BonusType::SHOOTER)
-				&& battle.battleCanShoot(&enemy) ? 1
-				: static_cast<int>(enemy.getMovementRange()) + 1;
+			const bool unengagedArcher = enemy.isShooter() && !handFighting(enemy);
+			const int reach = unengagedArcher ? 1 : static_cast<int>(enemy.getMovementRange()) + 1;
 			return distance <= reach;
 		};
 
