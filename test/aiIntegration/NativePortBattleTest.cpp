@@ -1258,8 +1258,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedWideArcherMakesNativeMeleeAttac
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter)
 		<< "The source policy must act for the genuinely active wide archer";
 
+	const BattleHex shooterHead = shooter->getPosition();
+	const auto candidateHexes = shooterHead.getNeighbouringTiles();
 	BattleHex adjacent;
-	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+	for(const auto & hex : candidateHexes)
 	{
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 		{
