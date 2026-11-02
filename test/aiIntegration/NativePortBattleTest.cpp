@@ -1135,6 +1135,98 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotEvaluatesBothHexesOfWideTarget
 	EXPECT_GT(recorder.shots, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAttacksWideEnemyTailInRealBattle)
+{
+	// Pinned fheroes2 archerDecision checks adjacency of full occupied
+	// positions, not merely the wide enemy's head. The VCMI projection
+	// must allow an actual adjacent tail to enter its blocked-archer melee
+	// branch, and the game handler must accept the resulting attack.
+	prepareBattle(CreatureID(19), 30, CreatureID(4), 4);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	const CStack * originalWide = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(4))
+			originalWide = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(originalWide, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_TRUE(originalWide->doubleWide());
+	ASSERT_FALSE(shooter->doubleWide());
+	ASSERT_EQ(originalWide->getHexes().size(), 2u);
+	int tailOffset = 0;
+	for(const auto & occupied : originalWide->getHexes())
+		if(occupied != originalWide->getPosition())
+			tailOffset = occupied.toInt() - originalWide->getPosition().toInt();
+	ASSERT_NE(tailOffset, 0);
+
+	BattleHex chosenHead;
+	BattleHex chosenTail;
+	const BattleHex shooterPosition = shooter->getPosition();
+	for(const auto & adjacent : shooterPosition.getNeighbouringTiles())
+	{
+		const BattleHex head(adjacent.toInt() - tailOffset);
+		if(!adjacent.isAvailable() || !head.isAvailable()
+			|| battle()->battleGetUnitByPos(adjacent) != nullptr
+			|| battle()->battleGetUnitByPos(head) != nullptr
+			|| BattleHex::getDistance(shooterPosition, head) <= 1)
+			continue;
+		chosenHead = head;
+		chosenTail = adjacent;
+		break;
+	}
+	ASSERT_TRUE(chosenHead.isValid())
+		<< "Fixture requires an empty wide head two hexes away and its adjacent tail";
+	const auto * wideEnemy = addStack(BattleSide::DEFENDER, CreatureID(4), chosenHead, 3);
+	ASSERT_NE(wideEnemy, nullptr);
+	ASSERT_TRUE(wideEnemy->doubleWide());
+	ASSERT_EQ(battle()->battleGetUnitByPos(chosenHead), wideEnemy);
+	ASSERT_EQ(battle()->battleGetUnitByPos(chosenTail), wideEnemy);
+	ASSERT_GT(BattleHex::getDistance(shooterPosition, wideEnemy->getPosition()), 1);
+	ASSERT_EQ(BattleHex::getDistance(shooterPosition, chosenTail), 1);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GE(static_cast<int>(wideEnemy->getMovementRange()) + 2,
+		static_cast<int>(shooter->getMovementRange()))
+		<< "The nearby griffin must prevent the pinned safe-retreat branch";
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto inspected = callback->getBattle(battleID);
+	ASSERT_NE(inspected, nullptr);
+	ASSERT_FALSE(inspected->meleeAttackHexes(shooter, wideEnemy, shooterPosition).empty())
+		<< "The real VCMI rules must allow a melee hit on the wide tail";
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "An adjacent wide tail must be eligible for blocked-archer melee";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(inspected->battleGetUnitByPos(callback->action->target[1].hexValue), wideEnemy);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Real game handler rejected the source-derived wide-tail melee attack";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDifference)
 {
 	// Pinned fheroes2 archerDecision uses raw outgoing HP damage minus
