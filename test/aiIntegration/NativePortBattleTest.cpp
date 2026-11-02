@@ -1165,9 +1165,19 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAttacksWideEnemyTailInRea
 			tailOffset = occupied.toInt() - originalWide->getPosition().toInt();
 	ASSERT_NE(tailOffset, 0);
 
+	// The normal attacker spawn is at the left edge. A defender's wide
+	// tail points outwards, so head-distance > 1 with tail contact cannot
+	// be arranged there. Place the real active unit on an empty central
+	// hex for this fixture; all subsequent decisions and the outcome remain
+	// native engine actions, not prescribed scripted commands.
+	const BattleHex shooterPosition(GameConstants::BFIELD_SIZE / 2);
+	ASSERT_TRUE(shooterPosition.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterPosition), nullptr);
+	const_cast<CStack *>(shooter)->setPosition(shooterPosition);
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterPosition), shooter);
+
 	BattleHex chosenHead;
 	BattleHex chosenTail;
-	const BattleHex shooterPosition = shooter->getPosition();
 	for(const auto & adjacent : shooterPosition.getNeighbouringTiles())
 	{
 		const BattleHex head(adjacent.toInt() - tailOffset);
