@@ -68,16 +68,12 @@ private:
 
 	static bool hasDisabledEffect(const CStack & unit)
 	{
-		// VCMI's isFrozen() detects petrification independently of the bonus
-		// source. Stone Gaze can be a creature attack effect rather than a
-		// SPELL_EFFECT, so checking only spell-sourced bonuses would let the
-		// TUM ballista break petrification. Keep the explicit Blind/Paralyze
-		// checks for statuses which isFrozen() does not cover.
+		// The generic isFrozen() method checks only STONE_GAZE in VCMI.
 		const auto affectedBy = [&](SpellID spell)
 		{
 			return unit.hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell)));
 		};
-		return unit.isFrozen() || !Ports::TUM::ballistaMayTarget(
+		return !Ports::TUM::ballistaMayTarget(
 			affectedBy(SpellID(SpellID::BLIND)),
 			affectedBy(SpellID(SpellID::PARALYZE)),
 			affectedBy(SpellID(SpellID::STONE_GAZE)));
