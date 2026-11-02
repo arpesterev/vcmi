@@ -790,80 +790,71 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 }
 
 
-TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotAvoidsCatastrophicFriendlyFire)
+TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 {
-	// Pinned fheroes2 archerDecision rejects an AREA_SHOT when actual
-	// projected allied HP damage is at least three times hostile damage.
-	prepareBattle(CreatureID(45), 30, CreatureID(0), 1);
+	// Original fheroes2 archerDecision accounts for multiple area victims.
+	// VCMI's Magog splash is hostile-only, never fictional friendly fire.
+	prepareBattle(CreatureID(45), 30, CreatureID(0), 30);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	const CStack * shooter = nullptr;
-	const CStack * safeEnemy = nullptr;
+	const CStack * isolatedEnemy = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
 			shooter = unit.get();
 		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
-			safeEnemy = unit.get();
+			isolatedEnemy = unit.get();
 	}
 	ASSERT_NE(shooter, nullptr);
-	ASSERT_NE(safeEnemy, nullptr);
+	ASSERT_NE(isolatedEnemy, nullptr);
 	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
 	ASSERT_FALSE(shooter->doubleWide());
 
-	BattleHex riskyHex;
-	std::vector<BattleHex> friendlyHexes;
+	BattleHex clusterHex;
+	std::vector<BattleHex> neighbours;
 	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
 	{
 		const BattleHex candidate(index);
 		if(!candidate.isAvailable() || candidate.getX() < 8 || candidate.getX() > 12
 			|| battle()->battleGetUnitByPos(candidate) != nullptr
-			|| BattleHex::getDistance(candidate, safeEnemy->getPosition()) < 4)
+			|| BattleHex::getDistance(candidate, isolatedEnemy->getPosition()) < 5)
 			continue;
-		std::vector<BattleHex> neighbours;
+		std::vector<BattleHex> freeHexes;
 		for(const auto & hex : candidate.getNeighbouringTiles())
 			if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr
-				&& BattleHex::getDistance(hex, safeEnemy->getPosition()) >= 3)
-				neighbours.push_back(hex);
-		if(neighbours.size() >= 4)
+				&& BattleHex::getDistance(hex, isolatedEnemy->getPosition()) >= 4)
+				freeHexes.push_back(hex);
+		if(freeHexes.size() >= 3)
 		{
-			riskyHex = candidate;
-			friendlyHexes.assign(neighbours.begin(), neighbours.begin() + 4);
+			clusterHex = candidate;
+			neighbours.assign(freeHexes.begin(), freeHexes.begin() + 3);
 			break;
 		}
 	}
-	ASSERT_TRUE(riskyHex.isValid());
-	const CStack * riskyEnemy = addStack(BattleSide::DEFENDER, CreatureID(0), riskyHex, 100);
-	ASSERT_NE(riskyEnemy, nullptr);
-	for(const auto & hex : friendlyHexes)
-		ASSERT_NE(addStack(BattleSide::ATTACKER, CreatureID(0), hex, 200), nullptr);
-	ASSERT_TRUE(battle()->battleCanShoot(shooter, riskyEnemy->getPosition()));
-	ASSERT_TRUE(battle()->battleCanShoot(shooter, safeEnemy->getPosition()));
-
-	// Inspect VCMI's actual splash footprint and damage projections.
-	double friendlyDamage = 0;
-	double enemyDamage = 0;
-	int friendlyVictims = 0;
-	const auto affected = battle()->getAttackedBattleUnits(
-		shooter, riskyEnemy, riskyEnemy->getPosition(), true);
-	for(const auto * victim : affected)
+	ASSERT_TRUE(clusterHex.isValid());
+	const CStack * center = addStack(BattleSide::DEFENDER, CreatureID(0), clusterHex, 1);
+	ASSERT_NE(center, nullptr);
+	std::vector<const CStack *> clustered{center};
+	for(const auto & hex : neighbours)
 	{
-		BattleAttackInfo info(shooter, victim, 0, true);
-		info.attackerPos = shooter->getPosition();
-		const auto estimate = battle()->battleEstimateDamage(info);
-		const double hp = std::min(static_cast<double>(victim->getAvailableHealth()),
-			std::max(0.0, (static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
-		if(victim->unitSide() == BattleSide::ATTACKER)
-		{
-			++friendlyVictims;
-			friendlyDamage += hp;
-		}
-		else
-			enemyDamage += hp;
+		const CStack * extra = addStack(BattleSide::DEFENDER, CreatureID(0), hex, 20);
+		ASSERT_NE(extra, nullptr);
+		clustered.push_back(extra);
 	}
-	ASSERT_GE(friendlyVictims, 4) << "The real splash area must hit all four allied stacks";
-	ASSERT_GT(enemyDamage, 0);
-	ASSERT_GE(friendlyDamage, 3.0 * enemyDamage);
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, center->getPosition()));
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, isolatedEnemy->getPosition()));
+
+	const auto splash = battle()->getAttackedBattleUnits(
+		shooter, center, center->getPosition(), true);
+	ASSERT_GE(splash.size(), 4u) << "Must use actual Magog splash victims";
+	for(const auto * victim : splash)
+		EXPECT_EQ(victim->unitSide(), BattleSide::DEFENDER)
+			<< "Do not assume fheroes2 friendly-fire mechanics inside VCMI";
+	const auto single = battle()->getAttackedBattleUnits(
+		shooter, isolatedEnemy, isolatedEnemy->getPosition(), true);
+	ASSERT_LE(single.size(), 1u);
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -883,12 +874,15 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotAvoidsCatastrophicFriendlyFire
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
 	policy->activeStack(battleID, shooter);
 	ASSERT_TRUE(callback->action.has_value());
-	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT)
-		<< "Expected a safe shot rather than a dangerous area attack";
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
 	ASSERT_FALSE(callback->action->target.empty());
-	EXPECT_EQ(callback->action->target.front().unitValue, safeEnemy->unitId());
+	const int targetID = callback->action->target.front().unitValue;
+	EXPECT_TRUE(std::any_of(clustered.begin(), clustered.end(), [&](const CStack * unit)
+	{
+		return unit->unitId() == targetID;
+	})) << "The source-derived area scorer must prefer the real multi-target splash";
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
-		<< "VCMI rejected the selected safe shot";
+		<< "The real battle engine rejected the Magog area shot";
 	policy.reset();
 	runToCompletion(std::nullopt, false);
 	EXPECT_GT(recorder.shots, 0);

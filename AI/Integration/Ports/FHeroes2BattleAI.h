@@ -410,10 +410,12 @@ private:
 			: std::nullopt;
 	}
 
-	// Source: fheroes2 archerDecision assesses *all* units inside an
-	// AREA_SHOT footprint, including friendly casualties. VCMI supplies
-	// the actual footprint and projected hit-point damage. The score uses
-	// VCMI combat-value losses, not the original fheroes2 threat simulator.
+
+	// fheroes2 archerDecision values the complete AREA_SHOT footprint.
+	// VCMI returns additional targets only: ordinary ranged attacks have
+	// no splash, and Magog SHOOTS_ALL_ADJACENT attacks hostiles only.
+	// Include the primary target explicitly, without inventing friendly hits
+	// or modifying VCMI combat rules. Values are VCMI damage projections.
 	struct RangedAreaValue
 	{
 		bool dangerous = false;
@@ -423,23 +425,21 @@ private:
 	static RangedAreaValue rangedAreaValue(CPlayerBattleCallback & battle,
 		const CStack & shooter, const CStack & target)
 	{
-		const auto victims = battle.getAttackedBattleUnits(
+		const auto additionalVictims = battle.getAttackedBattleUnits(
 			&shooter, &target, target.getPosition(), true);
-		if(victims.empty())
-			throw std::logic_error("FHeroes2 ranged attack has no affected unit");
 		double friendlyDamage = 0;
 		double enemyDamage = 0;
 		double priority = 0;
-		for(const auto * victim : victims)
+		const auto evaluate = [&](const battle::Unit & victim)
 		{
-			BattleAttackInfo info(&shooter, victim, 0, true);
+			BattleAttackInfo info(&shooter, &victim, 0, true);
 			info.attackerPos = shooter.getPosition();
 			const auto estimate = battle.battleEstimateDamage(info);
-			const double health = std::max(0.0, static_cast<double>(victim->getAvailableHealth()));
+			const double health = std::max(0.0, static_cast<double>(victim.getAvailableHealth()));
 			const double hitPoints = std::min(health, std::max(0.0,
 				(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
-			const double value = lossValue(*victim, estimate);
-			if(battle.battleGetOwner(victim) == battle.battleGetOwner(&shooter))
+			const double value = lossValue(victim, estimate);
+			if(battle.battleGetOwner(&victim) == battle.battleGetOwner(&shooter))
 			{
 				friendlyDamage += hitPoints;
 				priority -= value;
@@ -449,7 +449,11 @@ private:
 				enemyDamage += hitPoints;
 				priority += value;
 			}
-		}
+		};
+		evaluate(target);
+		for(const auto * victim : additionalVictims)
+			if(victim != &target)
+				evaluate(*victim);
 		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
 	}
 
