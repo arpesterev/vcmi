@@ -134,3 +134,20 @@ not that it reproduces the complete upstream algorithm.
 
 The reserved complete-port names must still fail explicitly. In particular,
 `FHeroes2` and `HoMM3Original` must not silently create the partial ports.
+
+## MMAI neural-only hero spells
+
+The installed, official MMAI 1.8 ONNX policies choose unit actions, not hero
+spell targets. Factory-selected `MMAI` must never ask the unrelated scripted
+`BattleEvaluator` to choose spells while reporting a neural-only backend.
+Both neural action schema versions (V13 and V15) therefore suppress the
+legacy spell heuristic in strict mode, even when autocombat spells are enabled,
+and issue an explicit battle-start warning. Existing intentionally hybrid
+`Router(false)` usage retains the upstream spell heuristic.
+
+This is a **known unsupported feature**, not a neural spell implementation.
+The real-model regression `mmaiStrictNeuralDoesNotCastScriptedHeroSpellRealBattle`
+teaches an attacker hero Magic Arrow, confirms hero casting is legal, then
+checks that a completed ONNX-controlled battle has accepted neural unit actions
+but no scripted spell cast. Spell policy learning or an explicit non-neural
+hybrid mode will be needed before full MMAI feature parity can be claimed.
