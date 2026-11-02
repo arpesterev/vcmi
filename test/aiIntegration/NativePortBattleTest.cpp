@@ -225,6 +225,9 @@ protected:
 	{
 		const std::string & attackerAI = backendName;
 		const std::string & defenderAI = defenderBackend.empty() ? backendName : defenderBackend;
+		// Some fixtures issue real server attacks to construct their starting
+		// positions before the adapter subscription is installed.
+		const int attacksBeforeEventSubscription = recorder.shots + recorder.meleeAttacks;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
 		const auto attackerPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -376,8 +379,9 @@ protected:
 			EXPECT_GT(decisionsByPlayer[defenderPlayer], 0) << "Mixed-policy defender never acted";
 		}
 		EXPECT_GT(recorder.damage, 0) << "No damage was applied by the engine";
-		EXPECT_EQ(deliveredAttackEvents, recorder.shots + recorder.meleeAttacks)
-			<< "Every native BattleAttack must traverse both source-policy event adapters";
+		EXPECT_EQ(deliveredAttackEvents,
+			recorder.shots + recorder.meleeAttacks - attacksBeforeEventSubscription)
+			<< "Every attack after policy subscription must traverse both source-policy event adapters";
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
