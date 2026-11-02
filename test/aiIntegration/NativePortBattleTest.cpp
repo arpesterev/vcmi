@@ -124,6 +124,7 @@ protected:
 	NativeBattleRecorder recorder;
 	int ballistaDecisions = 0;
 	int ballistaShots = 0;
+	std::optional<int> firstBallistaShotTarget;
 	int ballistaDefendsWhileAllEnemiesBlind = 0;
 	int heroSpellDecisions = 0;
 	int mmaiUnitDecisions = 0;
@@ -287,7 +288,11 @@ protected:
 			{
 				++ballistaDecisions;
 				if(action.actionType == EActionType::SHOOT)
+				{
 					++ballistaShots;
+					if(!firstBallistaShotTarget && !action.target.empty())
+						firstBallistaShotTarget = action.target.front().unitValue;
+				}
 				if(action.actionType == EActionType::DEFEND)
 				{
 					bool sawEnemy = false;
@@ -1294,8 +1299,12 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 
 	// All subsequent commands still come from actual active-unit events,
 	// and the VCMI engine must accept them and finish this battle.
+	const int validTargetId = validTarget->unitId();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(ballistaShots, 0);
+	ASSERT_TRUE(firstBallistaShotTarget.has_value()) << "The native battle never accepted a ballista shot";
+	EXPECT_EQ(*firstBallistaShotTarget, validTargetId)
+		<< "The first engine-accepted ballista shot must avoid the blinded enemy";
 }
 
 TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
