@@ -217,23 +217,28 @@ private:
 
 
 	// fheroes2 meleeUnitDefense prefers covering valuable friendly archers.
-	// This conservative VCMI projection moves a single-width melee stack into
-	// a reachable neighboring hex only when ground melee can threaten a shooter
-	// next turn. Both occupied cells of wide archers count as cover targets,
-	// as in upstream meleeUnitDefense. Never disrupt an immediate attack;
-	// wide covering melee units and spell/area-threat spacing remain unsupported.
+	// This conservative VCMI projection moves a melee stack into a reachable
+	// neighboring position only when ground melee can threaten a shooter
+	// next turn. Both occupied cells of wide archers *and wide covering melee
+	// units* count in the distance check. The VCMI movement projection supplies
+	// legal wide-unit head positions; never disrupt an immediate attack.
+	// Upstream side-cover priorities and spell/area-threat spacing remain partial.
 	static std::optional<BattleAction> coverThreatenedShooter(CPlayerBattleCallback & battle,
 		const CStack & stack, const ReachabilityInfo & reachability,
 		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
 	{
-		if(stack.doubleWide() || stack.hasBonusOfType(BonusType::SHOOTER))
+		if(stack.hasBonusOfType(BonusType::SHOOTER))
 			return std::nullopt;
 		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-		const auto distanceToShooter = [](const BattleHex & hex, const CStack & shooter)
+		const auto distanceToShooter = [&](const BattleHex & head, const CStack & shooter)
 		{
 			int nearest = GameConstants::BFIELD_SIZE;
-			for(const auto & occupied : shooter.getHexes())
-				nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(hex, occupied)));
+			// A wide guard covers from either occupied cell; using only its
+			// head incorrectly rejects legal screens beside the guard's tail.
+			for(const auto & guardHex : stack.getHexes(head))
+				for(const auto & shooterHex : shooter.getHexes())
+					nearest = std::min(nearest,
+						static_cast<int>(BattleHex::getDistance(guardHex, shooterHex)));
 			return nearest;
 		};
 		double totalShooterStrength = 0;
