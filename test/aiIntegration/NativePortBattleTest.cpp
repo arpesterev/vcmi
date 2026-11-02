@@ -1339,7 +1339,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideArcherRetreatChecksItsTailFootprin
 	// against this Dwarf's four. Give the synthetic test stack an existing
 	// +2 speed bonus so the upstream strictly-faster retreat gate can fire.
 	// No production creature stats or game mechanics are changed.
-	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+	const_cast<CStack *>(shooter)->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
 		BonusType::STACKS_SPEED, BonusSource::OTHER, 2, BonusSourceID()));
 	ASSERT_EQ(battle()->battleGetUnitByPos(central), shooter);
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
