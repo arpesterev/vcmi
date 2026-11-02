@@ -789,21 +789,21 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedFastArcherEscapesAdjacentSlowMe
 	// In pinned fheroes2 archerDecision, retreat is evaluated even when a
 	// nearby enemy prevents shooting. The previous VCMI port returned early
 	// on battleCanShoot(false), incorrectly forcing a melee attack.
-	prepareBattle(CreatureID(0), 40, CreatureID(16), 10);
+	// Use the naturally active attacker for the first decision. A newly
+	// inserted shooter can propose a legal escape, but the game handler
+	// correctly rejects its command when another stack owns the turn.
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 10);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
-	const CStack * infantry = nullptr;
+	const CStack * shooter = nullptr;
 	for(const auto & unit : battle()->stacks)
-		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
-			infantry = unit.get();
-	ASSERT_NE(infantry, nullptr);
-	const BattleHex shooterHex(infantry->getPosition().toInt() + 7);
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	const BattleHex shooterHex = shooter->getPosition();
 	const BattleHex blockerHex(shooterHex.toInt() + 1);
-	ASSERT_TRUE(shooterHex.isAvailable());
 	ASSERT_TRUE(blockerHex.isAvailable());
-	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
 	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
-	const auto * shooter = addStack(BattleSide::ATTACKER, CreatureID(19), shooterHex, 25);
 	const auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(16), blockerHex, 10);
 	ASSERT_NE(shooter, nullptr);
 	ASSERT_NE(blocker, nullptr);
