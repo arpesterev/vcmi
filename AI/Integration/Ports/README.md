@@ -43,8 +43,14 @@ minus estimated retaliatory hit-point damage. Our VCMI projection applies that
 priority before the general melee combat-value scorer, including native
 **two-hex ranged creatures** when VCMI confirms legal melee contact. Tests
 verify the damage-based target choice and an engine-accepted blocked Medusa Queen
-melee attack followed by a completed battle. Wide-archer *retreat* and exact
-upstream damage simulation remain unsupported.
+melee attack followed by a completed battle. Wide-archer retreat now checks both occupied hexes of the archer and
+its enemies, including hypothetical legal VCMI destination footprints. A
+native Medusa Queen regression places slower infantry adjacent only to its
+tail, applies a test-only speed bonus to satisfy the upstream retreat gate,
+and verifies a real server-accepted escape followed by a finished battle.
+This models the pinned fheroes2 `Battle::Position` decision rather than just
+the head tile; enemy path reach, danger scoring and exact upstream damage
+simulation remain approximations.
 
 Source-derived experimental fheroes2 extensions also cover melee pursuit of
 non-evasive targets, fast-shooter retreat from slower ground enemies, and
