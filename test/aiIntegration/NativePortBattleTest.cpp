@@ -784,6 +784,70 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2BlockedFastArcherEscapesAdjacentSlowMelee)
+{
+	// In pinned fheroes2 archerDecision, retreat is evaluated even when a
+	// nearby enemy prevents shooting. The previous VCMI port returned early
+	// on battleCanShoot(false), incorrectly forcing a melee attack.
+	prepareBattle(CreatureID(0), 40, CreatureID(16), 10);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	const BattleHex shooterHex(infantry->getPosition().toInt() + 7);
+	const BattleHex blockerHex(shooterHex.toInt() + 1);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_TRUE(blockerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
+	const auto * shooter = addStack(BattleSide::ATTACKER, CreatureID(19), shooterHex, 25);
+	const auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(16), blockerHex, 10);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_FALSE(shooter->doubleWide());
+	ASSERT_FALSE(battle()->battleCanShoot(shooter)) << "Adjacent enemy must block the shot";
+	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
+		static_cast<int>(blocker->getMovementRange()) + 2)
+		<< "Pinned fheroes2 only escapes enemies slower by more than two";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto homm3Decision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*callback->getBattle(battleID), *shooter);
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Blocked fast fheroes2 archer must escape slower adjacent melee: "
+		<< callback->action->toString();
+	EXPECT_NE(callback->action->actionType, homm3Decision.actionType)
+		<< "FHeroes2 retreat must differ from the independent HoMM3 melee policy";
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_GT(BattleHex::getDistance(destination, blockerHex),
+		BattleHex::getDistance(shooterHex, blockerHex));
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Real engine rejected the fast archer's blocked-shot retreat";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeThreat)
 {
 	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);

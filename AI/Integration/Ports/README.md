@@ -30,6 +30,13 @@ instead of conflating unit classification with VCMI's immediate
 `battleCanShoot()` legality. A native battle regression checks the actual
 blocked shooter and defensive response before completing the fight.
 
+The fast-archer retreat applies even when adjacent slow melee enemies
+block the current shot. This matches the upstream order of operations:
+`archerDecision` checks for a safe retreat before its blocked-shooter melee
+branch. A differential native battle test verifies that a blocked Grand Elf
+moves away under FHeroes2Tactics while HoMM3OriginalTactics takes a different
+action, and the game engine accepts the retreat and finishes the battle.
+
 Source-derived experimental fheroes2 extensions also cover melee pursuit of
 non-evasive targets, fast-shooter retreat from slower ground enemies, and
 one-hex-wide melee screens for threatened friendly archers. These use VCMI

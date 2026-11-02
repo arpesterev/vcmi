@@ -291,8 +291,11 @@ private:
 	static std::optional<BattleAction> archerRetreat(CPlayerBattleCallback & battle,
 		const CStack & stack, const std::vector<const CStack *> & enemies)
 	{
+		// Upstream evaluates escape before its isHandFighting() melee branch.
+		// An adjacent slow melee enemy may block a shot without preventing
+		// movement to a safe hex; shot legality must not suppress retreat.
 		if(stack.doubleWide() || !stack.hasBonusOfType(BonusType::SHOOTER)
-			|| !battle.battleCanShoot(&stack) || !stack.getPosition().isValid())
+			|| !stack.getPosition().isValid())
 			return std::nullopt;
 
 		const int speed = static_cast<int>(stack.getMovementRange());
