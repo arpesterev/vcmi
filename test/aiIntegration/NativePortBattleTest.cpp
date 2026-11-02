@@ -1022,6 +1022,103 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideMeleeGuardCoversWideShooterWithBot
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2WideGuardDoesNotInventNarrowEnemyTailThreat)
+{
+	// Regression for the native footprint projection in meleeUnitDefense:
+	// a wide friendly *guard* must never contribute a phantom tail to a
+	// narrow *enemy* when measuring its ability to threaten our archer.
+	prepareBattle(CreatureID(110), 1, CreatureID(0), 10);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	const CStack * originalEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(110))
+			guard = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			originalEnemy = unit.get();
+	}
+	ASSERT_NE(guard, nullptr);
+	ASSERT_NE(originalEnemy, nullptr);
+	ASSERT_TRUE(guard->doubleWide());
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex originalHead = guard->getPosition();
+	const BattleHex shooterHex(originalHead.toInt() + 4 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	const CStack * shooter = addStack(BattleSide::ATTACKER, CreatureID(77), shooterHex, 6);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->doubleWide() && shooter->isShooter());
+	const int enemyReach = static_cast<int>(originalEnemy->getMovementRange()) + 1;
+	const auto nearestToShooter = [&](const auto & hexes)
+	{
+		int nearest = GameConstants::BFIELD_SIZE;
+		for(const auto & occupied : hexes)
+			for(const auto & shooterOccupied : shooter->getHexes())
+				nearest = std::min(nearest,
+					static_cast<int>(BattleHex::getDistance(occupied, shooterOccupied)));
+		return nearest;
+	};
+
+	BattleHex enemyHex;
+	for(int offset = 1; offset <= 9; ++offset)
+	{
+		const BattleHex candidate(shooterHex.toInt() + offset);
+		if(!candidate.isAvailable() || battle()->battleGetUnitByPos(candidate))
+			continue;
+		const int realDistance = static_cast<int>(BattleHex::getDistance(candidate, shooter->getPosition()));
+		// A wide shooter may itself have a tail, so compare the actual
+		// occupied footprint (not merely the shooter's head).
+		const int realFootprintDistance = nearestToShooter(std::vector<BattleHex>{candidate});
+		const int inventedDistance = nearestToShooter(guard->getHexes(candidate));
+		if(realDistance >= 0 && realFootprintDistance == enemyReach + 1
+			&& inventedDistance <= enemyReach
+			&& BattleHex::getDistance(originalHead, candidate)
+				> guard->getMovementRange() + 1)
+		{
+			enemyHex = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(enemyHex.isValid()) << "Expected a real-footprint versus phantom-tail threat boundary";
+	const CStack * threat = addStack(BattleSide::DEFENDER, CreatureID(0), enemyHex, 15);
+	ASSERT_NE(threat, nullptr);
+	ASSERT_FALSE(threat->doubleWide());
+	ASSERT_GT(nearestToShooter(threat->getHexes()),
+		static_cast<int>(threat->getMovementRange()) + 1);
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			ASSERT_GT(nearestToShooter(unit->getHexes()),
+				static_cast<int>(unit->getMovementRange()) + 1)
+				<< "The test must have no real enemy within one-turn melee reach of the archer";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "A phantom tail must not trigger a defensive cover move: " << callback->action->toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Engine rejected the guard's actual defensive action";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
