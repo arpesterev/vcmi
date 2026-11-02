@@ -90,9 +90,11 @@ public:
 	int meleeAttacks = 0;
 	int acceptedResults = 0;
 	int injuryPackets = 0;
+	int spellPackets = 0;
 	std::function<void(const BattleResult &)> onResultBeforeApply;
 	std::function<void(const BattleAttack &)> onAttackBeforeApply;
 	std::function<void(const StacksInjured &)> onInjuriesBeforeApply;
+	std::function<void(const BattleSpellCast &)> onSpellAfterApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
@@ -121,6 +123,14 @@ public:
 				onInjuriesBeforeApply(*injuries);
 		}
 		RecordingGameServer::applyPack(pack);
+		// ApplyClientNetPackVisitor::visitBattleSpellCast notifies both sides
+		// *after* the authoritative spell pack is applied, unlike injuries.
+		if(const auto * cast = dynamic_cast<const BattleSpellCast *>(&pack))
+		{
+			++spellPackets;
+			if(onSpellAfterApply)
+				onSpellAfterApply(*cast);
+		}
 		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
 		{
 			if(attack->shot())
@@ -240,6 +250,7 @@ protected:
 		// positions before the adapter subscription is installed.
 		const int attacksBeforeEventSubscription = recorder.shots + recorder.meleeAttacks;
 		const int injuriesBeforeEventSubscription = recorder.injuryPackets;
+		const int spellsBeforeEventSubscription = recorder.spellPackets;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
 		const auto attackerPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -269,6 +280,7 @@ protected:
 
 		int deliveredAttackEvents = 0;
 		int deliveredInjuryEvents = 0;
+		int deliveredSpellEvents = 0;
 		recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
 		{
 			for(auto & entry : policies)
@@ -283,6 +295,12 @@ protected:
 			for(auto & entry : policies)
 				entry.second->battleStacksAttacked(injuries.battleID, injuries.stacks, false);
 			++deliveredInjuryEvents;
+		};
+		recorder.onSpellAfterApply = [&](const BattleSpellCast & cast)
+		{
+			for(auto & entry : policies)
+				entry.second->battleSpellCast(cast.battleID, &cast);
+			++deliveredSpellEvents;
 		};
 
 		bool battleEndDelivered = false;
@@ -403,6 +421,8 @@ protected:
 			<< "Every attack after policy subscription must traverse both source-policy event adapters";
 		EXPECT_EQ(deliveredInjuryEvents, recorder.injuryPackets - injuriesBeforeEventSubscription)
 			<< "Every spell or ability injury must notify both policies before native damage application";
+		EXPECT_EQ(deliveredSpellEvents, recorder.spellPackets - spellsBeforeEventSubscription)
+			<< "Every spell cast must notify both policies after its pack is applied";
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
@@ -412,6 +432,7 @@ protected:
 		recorder.onResultBeforeApply = {};
 		recorder.onAttackBeforeApply = {};
 		recorder.onInjuriesBeforeApply = {};
+		recorder.onSpellAfterApply = {};
 		if(result.questionID != QuestionID::NONE)
 		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
@@ -441,6 +462,7 @@ protected:
 			<< " activations=" << decisions << " damage=" << recorder.damage
 			<< " native_attack_events=" << deliveredAttackEvents
 			<< " native_injury_events=" << deliveredInjuryEvents
+			<< " native_spell_events=" << deliveredSpellEvents
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
 			<< " attacker_action_types=" << actionCounts(attackerPlayer)
@@ -586,6 +608,7 @@ TEST_F(AIIntegrationNativeBattle, choosesOffensiveMagicAndCompletesTheBattle)
 	runToCompletion(BattleSide::ATTACKER);
 	EXPECT_GT(heroSpellDecisions, 0);
 	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_GT(recorder.spellPackets, 0) << "Native spell packs must reach both AI event adapters";
 }
 
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
@@ -609,6 +632,7 @@ TEST_F(AIIntegrationNativeBattle, lethalSpellFinishesBeforeAnyStaleUnitCommand)
 	EXPECT_EQ(recorder.shots, 0);
 	EXPECT_EQ(recorder.meleeAttacks, 0);
 	EXPECT_GT(recorder.injuryPackets, 0) << "A lethal damage spell must emit native StacksInjured events";
+	EXPECT_GT(recorder.spellPackets, 0) << "A lethal spell must also emit the native cast notification";
 }
 
 TEST_F(AIIntegrationNativeBattle, noManaStillCompletesUsingUnitActions)
