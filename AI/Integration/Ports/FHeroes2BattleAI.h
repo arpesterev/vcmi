@@ -72,12 +72,12 @@ private:
 	std::shared_ptr<Environment> env;
 	AutocombatPreferences preferences;
 
-	static double strength(const CStack & stack)
+	static double strength(const battle::Unit & stack)
 	{
 		return static_cast<double>(stack.estimateCombatValue());
 	}
 
-	static double lossValue(const CStack & stack, const DamageEstimation & estimate)
+	static double lossValue(const battle::Unit & stack, const DamageEstimation & estimate)
 	{
 		const double health = static_cast<double>(stack.getAvailableHealth());
 		if(health <= 0)
