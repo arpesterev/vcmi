@@ -23,6 +23,13 @@ spells and health restoration via VCMI spell simulation, with mana conservation
 and no duplicate stack command during spell resolution. This is a projection of
 source priorities, not an upstream decision-equivalence claim.
 
+The fheroes2 stance analysis now counts a live ranged stack with remaining
+movement as ranged strength even when adjacent enemy melee temporarily blocks
+its shot. This follows upstream `analyzeBattleState`'s `isArchers()` check
+instead of conflating unit classification with VCMI's immediate
+`battleCanShoot()` legality. A native battle regression checks the actual
+blocked shooter and defensive response before completing the fight.
+
 Source-derived experimental fheroes2 extensions also cover melee pursuit of
 non-evasive targets, fast-shooter retreat from slower ground enemies, and
 one-hex-wide melee screens for threatened friendly archers. These use VCMI
