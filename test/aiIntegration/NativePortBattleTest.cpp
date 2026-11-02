@@ -129,6 +129,18 @@ protected:
 	int mmaiUnitDecisions = 0;
 	int mmaiNonpassiveDecisions = 0;
 
+#ifdef ENABLE_MMAI
+	void requireInstalledNeuralRole(const std::string & role) const
+	{
+		const auto modelConfig = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+		ASSERT_TRUE(modelConfig.isStruct()) << "MMAI neural config is not mounted";
+		ASSERT_TRUE(modelConfig["models"][role].isString()) << "Missing neural role: " << role;
+		const auto path = "MMAI/models/" + modelConfig["models"][role].String();
+		ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
+			<< "MMAI neural model is not mounted: " << path;
+	}
+#endif
+
 	void startRecordedGame()
 	{
 		startGame();
@@ -1288,6 +1300,61 @@ TEST_F(AIIntegrationNativeBattle, mmaiSiegeDefenderNeuralModelCompletesRealBattl
 	EXPECT_GT(mmaiUnitDecisions, 0) << "The neural siege defender was never activated";
 	EXPECT_GT(mmaiNonpassiveDecisions, 0) << "The neural siege defender never attempted a non-passive action";
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
+
+TEST_F(AIIntegrationNativeBattle, mmaiAttackerAgainstHoMM3DefenderRealBattle)
+{
+	// Extend neural verification beyond FHeroes2: both different policies
+	// must receive turns, submit legal actions and reach the real engine result.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(0), 45, CreatureID(0), 40);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "HoMM3OriginalTactics");
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiDefenderAgainstHoMM3AttackerRealBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("defender");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 45);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "MMAI");
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiAttackerAgainstTUMDefenderRealBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(0), 45, CreatureID(0), 40);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "TUMEnchantedTactics");
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiDefenderAgainstTUMAttackerRealBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("defender");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 45);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics", "MMAI");
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
 }
 
 #endif
