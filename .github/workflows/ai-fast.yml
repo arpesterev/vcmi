@@ -262,17 +262,18 @@ jobs:
           expected = {'mmaiWithRealNeuralModelCompletesRealBattle',
                       'mmaiDefenderNeuralModelCompletesRealBattle',
                       'mmaiSiegeDefenderNeuralModelCompletesRealBattle',
+                      'mmaiBothNeuralSidesFightRealBattle',
                       'mmaiAttackerAgainstHoMM3DefenderRealBattle',
                       'mmaiDefenderAgainstHoMM3AttackerRealBattle',
                       'mmaiAttackerAgainstTUMDefenderRealBattle',
                       'mmaiDefenderAgainstTUMAttackerRealBattle',
                       'mmaiStrictNeuralDoesNotCastScriptedHeroSpellRealBattle'}
           names = {case.get('name') for case in cases}
-          if len(cases) != 8 or names != expected:
+          if len(cases) != 9 or names != expected:
               raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
           if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
               raise RuntimeError('An MMAI neural integration test failed or was skipped')
-          print('Verified: eight real neural-backed MMAI battles, including siege, mixed-policy pairs and scripted-spell exclusion')
+          print('Verified: nine real neural-backed MMAI battles, including both-neural confrontation, siege, mixed-policy pairs and scripted-spell exclusion')
           PY
 
       - name: Save compiled C++ objects for later develop builds
