@@ -368,6 +368,48 @@ private:
 			: std::nullopt;
 	}
 
+	// Pinned fheroes2 archerDecision: if escape failed and melee has blocked
+	// the shot, choose among *adjacent* enemies by raw hit-point damage minus
+	// expected retaliation. The ordinary melee evaluator instead compares
+	// combat-value losses, which is a different decision rule. Native VCMI
+	// damage estimates are used because fheroes2's combat simulator differs.
+	static std::optional<BattleAction> blockedArcherMelee(CPlayerBattleCallback & battle,
+		const CStack & stack, const std::vector<const CStack *> & enemies)
+	{
+		if(stack.doubleWide() || !stack.hasBonusOfType(BonusType::SHOOTER)
+			|| battle.battleCanShoot(&stack) || !stack.getPosition().isValid())
+			return std::nullopt;
+
+		const CStack * bestTarget = nullptr;
+		BattleHex bestTargetHex;
+		double bestDamageDifference = -std::numeric_limits<double>::infinity();
+		for(const auto * enemy : enemies)
+		{
+			if(!enemy->getPosition().isValid()
+				|| BattleHex::getDistance(stack.getPosition(), enemy->getPosition()) != 1)
+				continue;
+			const auto attackHexes = battle.meleeAttackHexes(&stack, enemy, stack.getPosition());
+			if(attackHexes.empty())
+				continue;
+			BattleAttackInfo attack(&stack, enemy, 0, false);
+			attack.attackerPos = stack.getPosition();
+			DamageEstimation retaliation;
+			const auto damage = battle.battleEstimateDamage(attack, &retaliation);
+			const double outgoing = (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
+			const double incoming = (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
+			const double difference = outgoing - incoming;
+			if(!bestTarget || difference > bestDamageDifference)
+			{
+				bestTarget = enemy;
+				bestTargetHex = attackHexes.front();
+				bestDamageDifference = difference;
+			}
+		}
+		return bestTarget
+			? std::optional<BattleAction>(BattleAction::makeMeleeAttack(&stack, bestTargetHex, stack.getPosition()))
+			: std::nullopt;
+	}
+
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
 	{
 		if(stack.isCatapult())
@@ -388,6 +430,8 @@ private:
 			return BattleAction::makeDefend(&stack);
 		if(const auto retreat = archerRetreat(battle, stack, enemies))
 			return *retreat;
+		if(const auto melee = blockedArcherMelee(battle, stack, enemies))
+			return *melee;
 
 		const CStack * shootingTarget = nullptr;
 		double bestShot = std::numeric_limits<double>::lowest();
