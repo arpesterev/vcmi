@@ -1769,7 +1769,10 @@ TEST_F(AIIntegrationNativeBattle, mmaiBothNeuralSidesFightRealBattle)
 	requireInstalledNeuralRole("defender");
 	ASSERT_FALSE(HasFatalFailure());
 
-	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	// A symmetric melee duel can deadlock when both neural sides defend
+	// until the strict per-model inference limit. Give one side genuine ranged
+	// pressure while preserving two independently model-controlled armies.
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(std::nullopt, false, "MMAI", "MMAI", true);
 	EXPECT_GE(mmaiUnitDecisions, 2);
