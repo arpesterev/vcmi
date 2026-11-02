@@ -1228,6 +1228,76 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 	EXPECT_GT(ballistaDecisions, 0);
 	EXPECT_GT(ballistaShots, 0);
 }
+TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIsBlind)
+{
+	// TUM AI Improvements.txt excludes disabled ballista targets individually,
+	// not the whole firing action. A still-attackable enemy must be selected.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	setArmy(defenderSideHero, CreatureID(0), 50);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 12));
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * blinded = nullptr;
+	const CStack * validTarget = nullptr;
+	const CStack * ballista = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->getCount() == 50)
+				blinded = unit.get();
+			else if(unit->getCount() == 12)
+				validTarget = unit.get();
+		}
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+	}
+	ASSERT_NE(blinded, nullptr);
+	ASSERT_NE(validTarget, nullptr);
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blinded));
+	ASSERT_TRUE(blinded->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
+		BonusSourceID(SpellID(SpellID::BLIND)))));
+	ASSERT_TRUE(battle()->battleCanShoot(ballista, validTarget->getPosition()));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::SHOOT)
+		<< "A blind enemy must not suppress shots at another valid enemy";
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, validTarget->unitId())
+		<< "The TUM ballista must select the unblinded stack, never the disabled one";
+
+	// All subsequent commands still come from actual active-unit events,
+	// and the VCMI engine must accept them and finish this battle.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(ballistaShots, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
 {
 	startRecordedGame();
