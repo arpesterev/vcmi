@@ -54,9 +54,14 @@ simulation remain approximations.
 
 Source-derived experimental fheroes2 extensions also cover melee pursuit of
 non-evasive targets, fast-shooter retreat from slower ground enemies, and
-one-hex-wide melee screens for threatened friendly archers. These use VCMI
-path legality and approximate threat scores rather than exact upstream
-valuations; full defensive spacing, kiting and spell-area responses are absent.
+single-width melee screens for threatened friendly archers, including
+**double-wide archers**. Cover placement and immediate melee threats now
+consider both occupied hexes of a wide shooter, as in upstream
+`meleeUnitDefense`. The native regression exercises a real Medusa Queen and
+requires an engine-accepted guard movement followed by a completed battle.
+These policies use VCMI path legality and approximate threat scores;
+wide covering melee units, full defensive spacing, kiting and
+spell-area responses are not yet supported.
 
 Not implemented: complete upstream buff/debuff and creature-spell selection,
 retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
