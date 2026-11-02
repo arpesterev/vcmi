@@ -1308,6 +1308,86 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedWideArcherMakesNativeMeleeAttac
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2WideArcherRetreatChecksItsTailFootprint)
+{
+	// The pinned fheroes2 archerDecision measures danger against the entire
+	// Battle::Position. A Medusa Queen's tail is threatened by adjacent slow
+	// melee, although the defender is not adjacent to her head. The selected
+	// safe wide-unit movement must be accepted by the real VCMI server.
+	prepareBattle(CreatureID(77), 20, CreatureID(16), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(77))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->doubleWide());
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const BattleHex shooterHead = shooter->getPosition();
+	const BattleHex shooterTail = shooter->occupiedHex();
+	ASSERT_TRUE(shooterTail.isAvailable());
+
+	BattleHex blockerHex;
+	for(const auto & hex : shooterTail.getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr
+			&& BattleHex::getDistance(hex, shooterHead) > 1)
+		{
+			blockerHex = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(blockerHex.isAvailable()) << "Fixture needs a free tail-only adjacent hex";
+	const CStack * blocker = addStack(BattleSide::DEFENDER, CreatureID(16), blockerHex, 10);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), blocker);
+	ASSERT_EQ(BattleHex::getDistance(shooterTail, blockerHex), 1);
+	ASSERT_GT(BattleHex::getDistance(shooterHead, blockerHex), 1);
+	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
+		static_cast<int>(blocker->getMovementRange()) + 2)
+		<< "fheroes2 only retreats from sufficiently slower adjacent melee";
+	ASSERT_FALSE(battle()->battleCanShoot(shooter))
+		<< "A defender next to the tail must block this wide shooter's shot";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Wide shooter's tail must count as threatened in fheroes2 retreat: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	ASSERT_NE(destination, shooterHead);
+	int nearestAfter = GameConstants::BFIELD_SIZE;
+	for(const auto & occupied : shooter->getHexes(destination))
+		for(const auto & enemyHex : blocker->getHexes())
+			nearestAfter = std::min(nearestAfter,
+				static_cast<int>(BattleHex::getDistance(occupied, enemyHex)));
+	EXPECT_GT(nearestAfter, static_cast<int>(blocker->getMovementRange()) + 1)
+		<< "Both cells of the retreated wide shooter must be safe";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Engine rejected a wide archer's source-derived retreat";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDifference)
 {
 	// Pinned fheroes2 archerDecision uses raw outgoing HP damage minus
