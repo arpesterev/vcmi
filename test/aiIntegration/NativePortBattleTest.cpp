@@ -90,6 +90,7 @@ public:
 	int meleeAttacks = 0;
 	int acceptedResults = 0;
 	std::function<void(const BattleResult &)> onResultBeforeApply;
+	std::function<void(const BattleAttack &)> onAttackAfterApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
@@ -110,6 +111,11 @@ public:
 				++meleeAttacks;
 			for(const auto & injury : attack->bsa)
 				damage += injury.damageAmount;
+			// The server has applied the attack before the native policy receives
+			// battleAttack/battleStacksAttacked. A battle reaching a result is
+			// insufficient evidence that its event adapter was exercised.
+			if(onAttackAfterApply)
+				onAttackAfterApply(*attack);
 		}
 		if(const auto * injuries = dynamic_cast<const StacksInjured *>(&pack))
 		{
@@ -243,6 +249,17 @@ protected:
 			policies.emplace(player, policy);
 		}
 
+		int deliveredAttackEvents = 0;
+		recorder.onAttackAfterApply = [&](const BattleAttack & attack)
+		{
+			for(auto & entry : policies)
+			{
+				entry.second->battleAttack(attack.battleID, &attack);
+				entry.second->battleStacksAttacked(attack.battleID, attack.bsa, attack.shot());
+			}
+			++deliveredAttackEvents;
+		};
+
 		bool battleEndDelivered = false;
 		recorder.onResultBeforeApply = [&](const BattleResult & result)
 		{
@@ -356,6 +373,8 @@ protected:
 			EXPECT_GT(decisionsByPlayer[defenderPlayer], 0) << "Mixed-policy defender never acted";
 		}
 		EXPECT_GT(recorder.damage, 0) << "No damage was applied by the engine";
+		EXPECT_EQ(deliveredAttackEvents, recorder.shots + recorder.meleeAttacks)
+			<< "Every native BattleAttack must traverse both source-policy event adapters";
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
@@ -363,6 +382,7 @@ protected:
 		}
 		ASSERT_TRUE(battleEndDelivered) << "The terminal event was not delivered with live battle state";
 		recorder.onResultBeforeApply = {};
+		recorder.onAttackAfterApply = {};
 		if(result.questionID != QuestionID::NONE)
 		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
@@ -390,6 +410,7 @@ protected:
 			<< " attacker_decisions=" << decisionsByPlayer[attackerPlayer]
 			<< " defender_decisions=" << decisionsByPlayer[defenderPlayer]
 			<< " activations=" << decisions << " damage=" << recorder.damage
+			<< " native_attack_events=" << deliveredAttackEvents
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
 			<< " attacker_action_types=" << actionCounts(attackerPlayer)
