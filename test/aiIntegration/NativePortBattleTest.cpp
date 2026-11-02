@@ -950,6 +950,78 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedWideShoo
 }
 
 
+TEST_F(AIIntegrationNativeBattle, fheroes2WideMeleeGuardCoversWideShooterWithBothOccupiedHexes)
+{
+	// Pinned fheroes2 meleeUnitDefense considers wide guarding units. The
+	// earlier port skipped them entirely, despite the native VCMI movement
+	// engine supporting legal double-wide positions. Both footprints matter.
+	prepareBattle(CreatureID(110), 1, CreatureID(0), 10);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(110))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	ASSERT_TRUE(guard->doubleWide());
+	ASSERT_FALSE(guard->isShooter());
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex originalHead = guard->getPosition();
+	const BattleHex shooterHex(originalHead.toInt() + 4 * GameConstants::BFIELD_WIDTH);
+	const BattleHex enemyHex(shooterHex.toInt() + 5);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_TRUE(enemyHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(enemyHex), nullptr);
+	const CStack * shooter = addStack(BattleSide::ATTACKER, CreatureID(77), shooterHex, 6);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->doubleWide());
+	ASSERT_TRUE(shooter->isShooter());
+	const CStack * threat = addStack(BattleSide::DEFENDER, CreatureID(0), enemyHex, 15);
+	ASSERT_NE(threat, nullptr);
+	ASSERT_GT(BattleHex::getDistance(originalHead, enemyHex),
+		static_cast<int>(guard->getMovementRange()) + 1)
+		<< "Guard must not be able to attack the threat immediately";
+	ASSERT_LE(BattleHex::getDistance(shooterHex, enemyHex),
+		static_cast<int>(threat->getMovementRange()) + 1)
+		<< "Threat must be close enough to justify covering the shooter";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "A wide melee guard must cover a threatened wide shooter: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	int footprintDistance = GameConstants::BFIELD_SIZE;
+	for(const auto & guardHex : guard->getHexes(destination))
+		for(const auto & shooterOccupied : shooter->getHexes())
+			footprintDistance = std::min(footprintDistance,
+				static_cast<int>(BattleHex::getDistance(guardHex, shooterOccupied)));
+	EXPECT_EQ(footprintDistance, 1)
+		<< "At least one guard footprint cell must screen the wide shooter";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native battle handler rejected wide melee guard movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
