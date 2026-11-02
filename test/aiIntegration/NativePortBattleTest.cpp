@@ -805,8 +805,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDi
 	ASSERT_TRUE(shooter->isShooter());
 	ASSERT_FALSE(shooter->doubleWide());
 
+	const BattleHex shooterPosition = shooter->getPosition();
 	std::vector<BattleHex> adjacent;
-	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+	for(const auto & hex : shooterPosition.getNeighbouringTiles())
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 			adjacent.push_back(hex);
 	ASSERT_GE(adjacent.size(), 2u);
