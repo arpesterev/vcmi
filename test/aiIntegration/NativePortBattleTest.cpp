@@ -903,7 +903,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotEvaluatesBothHexesOfWideTarget
 	// Pinned fheroes2 archerDecision scores the HEAD and TAIL aim points of
 	// a two-hex AREA_SHOT target separately. Place additional genuine enemy
 	// stacks only within the tail footprint. A head-only scorer misses them.
-	prepareBattle(CreatureID(45), 30, CreatureID(10), 1);
+	// Dendroid Guard is a slower, double-wide defender; the Magog must
+	// receive the genuine first activation before evaluating its shot.
+	prepareBattle(CreatureID(45), 30, CreatureID(22), 1);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	CStack * shooter = nullptr;
@@ -912,7 +914,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotEvaluatesBothHexesOfWideTarget
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
 			shooter = unit.get();
-		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(10))
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(22))
 			wideEnemy = unit.get();
 	}
 	ASSERT_NE(shooter, nullptr);
