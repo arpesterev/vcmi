@@ -98,10 +98,15 @@ four independently implemented overrides derived from the documentation:
   stack. We check actual VCMI spell-effect bonuses, not `isFrozen()` alone,
   because the latter only detects Stone Gaze.
 - **Shooter protection:** when facing neutral melee-only stacks, allied
-  ranged troops can shoot, and no neutral stack can reach the friendly army
-  in its next movement, the active friendly melee stack defends instead of
-  rushing forward. Movement reach is evaluated with VCMI pathfinding. The
-  documented exception for neutral-controlled armies outside siege applies.
+  ranged troops still have usable shots, and no neutral stack can reach the
+  friendly army in its next movement, the active friendly melee stack defends
+  instead of rushing forward. Presence of enemy shooters is checked using
+  the native ranged-unit classification, not immediate `battleCanShoot()`:
+  an archer under Forgetfulness is still an enemy shooter for this conservative
+  interpretation of the published TUM rule. Friendly shooters need remaining
+  usable shots, even if their current firing line is blocked. Movement reach
+  is evaluated with VCMI pathfinding. The documented exception for
+  neutral-controlled armies outside siege applies.
 - **Fast-stack decoys:** when no immediate melee attack or ranged shot is
   available, prefer an accessible slower enemy over a nearby enemy that is
   at least two speed points faster than the acting melee stack and located
