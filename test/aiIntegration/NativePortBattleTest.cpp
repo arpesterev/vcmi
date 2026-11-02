@@ -90,7 +90,7 @@ public:
 	int meleeAttacks = 0;
 	int acceptedResults = 0;
 	std::function<void(const BattleResult &)> onResultBeforeApply;
-	std::function<void(const BattleAttack &)> onAttackAfterApply;
+	std::function<void(const BattleAttack &)> onAttackBeforeApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
@@ -102,6 +102,14 @@ public:
 			if(onResultBeforeApply)
 				onResultBeforeApply(*result);
 		}
+		// Mirror client/NetPacksClient.cpp ApplyFirstClientNetPackVisitor:
+		// both attack notifications precede BattleAttack.applyGs(), allowing
+		// neural policies to observe the still-live pre-damage state.
+		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
+		{
+			if(onAttackBeforeApply)
+				onAttackBeforeApply(*attack);
+		}
 		RecordingGameServer::applyPack(pack);
 		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
 		{
@@ -111,11 +119,6 @@ public:
 				++meleeAttacks;
 			for(const auto & injury : attack->bsa)
 				damage += injury.damageAmount;
-			// The server has applied the attack before the native policy receives
-			// battleAttack/battleStacksAttacked. A battle reaching a result is
-			// insufficient evidence that its event adapter was exercised.
-			if(onAttackAfterApply)
-				onAttackAfterApply(*attack);
 		}
 		if(const auto * injuries = dynamic_cast<const StacksInjured *>(&pack))
 		{
@@ -250,7 +253,7 @@ protected:
 		}
 
 		int deliveredAttackEvents = 0;
-		recorder.onAttackAfterApply = [&](const BattleAttack & attack)
+		recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
 		{
 			for(auto & entry : policies)
 			{
@@ -382,7 +385,7 @@ protected:
 		}
 		ASSERT_TRUE(battleEndDelivered) << "The terminal event was not delivered with live battle state";
 		recorder.onResultBeforeApply = {};
-		recorder.onAttackAfterApply = {};
+		recorder.onAttackBeforeApply = {};
 		if(result.questionID != QuestionID::NONE)
 		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
