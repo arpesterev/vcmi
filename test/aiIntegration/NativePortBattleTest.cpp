@@ -1833,6 +1833,76 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 	EXPECT_GT(recorder.shots, 0);
 }
 
+
+TEST_F(AIIntegrationNativeBattle, tumDoesNotMistakeForgottenNeutralArcherForMeleeOnly)
+{
+	// TUM's published hold-the-line condition requires that the enemy has
+	// no shooters. Forgetfulness blocks an archer's current shots, but it
+	// does not turn the enemy army into a melee-only neutral encounter.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 65);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(2), 55);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	teachBattleSpell(attackerSideHero, SpellID::FORGETFULNESS);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	const CStack * enemyArcher = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			enemyArcher = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(enemyArcher, nullptr);
+	ASSERT_TRUE(enemyArcher->isShooter());
+	ASSERT_TRUE(battle()->battleCanShoot(enemyArcher));
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::FORGETFULNESS, enemyArcher));
+	ASSERT_FALSE(enemyArcher->canShoot())
+		<< "Expert Forgetfulness must actually prevent this ranged unit from firing";
+	ASSERT_TRUE(enemyArcher->isShooter())
+		<< "Shot illegality must not erase the enemy's ranged unit classification";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto playerView = callback->getBattle(battleID);
+	ASSERT_NE(playerView, nullptr);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerView, *melee);
+	ASSERT_NE(baseline.actionType, EActionType::DEFEND)
+		<< "The original tactical baseline must advance in the neutral fixture";
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, baseline.actionType)
+		<< "TUM must not guard shooters against an army still containing ranged units";
+
+	// Play out the encounter through authoritative native battle actions.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 #ifdef ENABLE_MMAI
 TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScriptedAI)
 {
