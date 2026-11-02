@@ -263,10 +263,16 @@ private:
 			{
 				if(!enemy->getPosition().isValid() || enemy->hasBonusOfType(BonusType::SHOOTER))
 					return false;
+				// The threat is the *enemy's* real footprint, not a hypothetical
+				// footprint of this covering unit placed at an enemy cell. Reusing
+				// distanceToShooter here projected a wide guard's tail onto narrow
+				// opponents, inventing a one-hex closer melee threat.
+				int nearest = GameConstants::BFIELD_SIZE;
 				for(const auto & enemyHex : enemy->getHexes())
-					if(distanceToShooter(enemyHex, *friendly) <= static_cast<int>(enemy->getMovementRange()) + 1)
-						return true;
-				return false;
+					for(const auto & shooterHex : friendly->getHexes())
+						nearest = std::min(nearest,
+							static_cast<int>(BattleHex::getDistance(enemyHex, shooterHex)));
+				return nearest <= static_cast<int>(enemy->getMovementRange()) + 1;
 			});
 			if(!threatened)
 				continue;
