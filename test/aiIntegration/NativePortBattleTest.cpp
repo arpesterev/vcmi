@@ -1243,14 +1243,14 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedWideArcherMakesNativeMeleeAttac
 	// fheroes2 archerDecision handles a blocked ranged creature even when
 	// its two-hex footprint is wide. The partial VCMI port previously
 	// skipped this source-derived melee branch for all such creatures.
-	// A genuine Cyclops is a wide shooter. Adjacent enemy infantry blocks
+	// A genuine Medusa Queen is a wide shooter. Adjacent enemy infantry blocks
 	// its ranged attack, while the native engine must accept its melee hit.
-	prepareBattle(CreatureID(94), 20, CreatureID(0), 8);
+	prepareBattle(CreatureID(77), 20, CreatureID(0), 8);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	const CStack * shooter = nullptr;
 	for(const auto & unit : battle()->stacks)
-		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(94))
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(77))
 			shooter = unit.get();
 	ASSERT_NE(shooter, nullptr);
 	ASSERT_TRUE(shooter->doubleWide());
@@ -1272,7 +1272,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedWideArcherMakesNativeMeleeAttac
 	ASSERT_NE(blocker, nullptr);
 	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), blocker);
 	ASSERT_FALSE(battle()->battleCanShoot(shooter))
-		<< "The live Cyclops must actually be blocked from shooting";
+		<< "The live Medusa Queen must actually be blocked from shooting";
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
