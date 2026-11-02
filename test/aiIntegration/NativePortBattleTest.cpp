@@ -789,6 +789,88 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDifference)
+{
+	// Pinned fheroes2 archerDecision uses raw outgoing HP damage minus
+	// retaliation when a shooter is in melee and has no safe escape.
+	// Previously the port used the general combat-value melee evaluator.
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 10);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_FALSE(shooter->doubleWide());
+
+	std::vector<BattleHex> adjacent;
+	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+			adjacent.push_back(hex);
+	ASSERT_GE(adjacent.size(), 2u);
+	const auto * slowBlocker = addStack(BattleSide::DEFENDER, CreatureID(16), adjacent[0], 15);
+	const auto * fastBlocker = addStack(BattleSide::DEFENDER, CreatureID(19), adjacent[1], 15);
+	ASSERT_NE(slowBlocker, nullptr);
+	ASSERT_NE(fastBlocker, nullptr);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GE(static_cast<int>(fastBlocker->getMovementRange()) + 2,
+		static_cast<int>(shooter->getMovementRange()))
+		<< "A fast adjacent blocker must prevent the upstream escape branch";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto viewedBattle = callback->getBattle(battleID);
+	ASSERT_NE(viewedBattle, nullptr);
+	const CStack * expected = nullptr;
+	double bestDifference = -std::numeric_limits<double>::infinity();
+	for(const auto * enemy : {slowBlocker, fastBlocker})
+	{
+		const auto attackHexes = viewedBattle->meleeAttackHexes(shooter, enemy, shooter->getPosition());
+		ASSERT_FALSE(attackHexes.empty());
+		BattleAttackInfo info(shooter, enemy, 0, false);
+		info.attackerPos = shooter->getPosition();
+		DamageEstimation retaliation;
+		const auto damage = viewedBattle->battleEstimateDamage(info, &retaliation);
+		const double difference = (static_cast<double>(damage.damage.min) + damage.damage.max
+			- static_cast<double>(retaliation.damage.min) - retaliation.damage.max) / 2.0;
+		if(!expected || difference > bestDifference)
+		{
+			expected = enemy;
+			bestDifference = difference;
+		}
+	}
+	ASSERT_NE(expected, nullptr);
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const auto targetHex = callback->action->target[1].hexValue;
+	const auto * chosen = viewedBattle->battleGetUnitByPos(targetHex);
+	ASSERT_NE(chosen, nullptr);
+	EXPECT_EQ(chosen->unitId(), expected->unitId())
+		<< "Blocked fheroes2 archers rank adjacent melee enemies by damage minus retaliation";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The engine rejected the source-derived blocked-archer melee attack";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedFastArcherEscapesAdjacentSlowMelee)
 {
 	// In pinned fheroes2 archerDecision, retreat is evaluated even when a
