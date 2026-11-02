@@ -1237,6 +1237,75 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAttacksWideEnemyTailInRea
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+
+TEST_F(AIIntegrationNativeBattle, fheroes2BlockedWideArcherMakesNativeMeleeAttack)
+{
+	// fheroes2 archerDecision handles a blocked ranged creature even when
+	// its two-hex footprint is wide. The partial VCMI port previously
+	// skipped this source-derived melee branch for all such creatures.
+	// A genuine Cyclops is a wide shooter. Adjacent enemy infantry blocks
+	// its ranged attack, while the native engine must accept its melee hit.
+	prepareBattle(CreatureID(94), 20, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(94))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->doubleWide());
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter)
+		<< "The source policy must act for the genuinely active wide archer";
+
+	BattleHex adjacent;
+	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			adjacent = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(adjacent.isValid());
+	const CStack * blocker = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent, 10);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), blocker);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter))
+		<< "The live Cyclops must actually be blocked from shooting";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_FALSE(view->meleeAttackHexes(shooter, blocker, shooter->getPosition()).empty())
+		<< "This is a genuinely legal wide-shooter melee contact";
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Blocked wide shooters must use the fheroes2 melee decision";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), blocker);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native server rejected the wide archer's source-derived melee action";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDifference)
 {
 	// Pinned fheroes2 archerDecision uses raw outgoing HP damage minus
