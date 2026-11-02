@@ -312,13 +312,8 @@ void Router::battleStart(
 	auto modelside = model->getSide();
 	auto realside = static_cast<Schema::Side>(EI(side));
 
-	if(modelside != realside && modelside != Schema::Side::BOTH)
+	if(!validateModelSide(modelside, realside, neuralOnly, modelkey))
 	{
-		// A factory-selected neural policy must not quietly use weights trained
-		// for the opposite side. Preserve legacy Router(false) permissiveness.
-		if(neuralOnly)
-			throw std::runtime_error("MMAI: neural model for " + modelkey
-				+ " was trained for an incompatible battle side; refusing unsafe model routing");
 		logAi->warn(
 			"The loaded '%s' model was not trained to play as %s (modelside=%d, realside=%d)",
 			modelkey,
