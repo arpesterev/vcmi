@@ -770,6 +770,14 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeTh
 	ASSERT_TRUE(callback->action.has_value());
 	std::ostringstream retreatDiagnostics;
 	const auto inspected = callback->getBattle(battleID);
+	// Compare both source-derived backends on the *same live battlefield*,
+	// before either command is applied. HoMM3 shoots a valid target while
+	// fheroes2 chooses to preserve the faster archer by retreating.
+	const auto homm3Decision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*inspected, *shooter);
+	EXPECT_EQ(homm3Decision.actionType, EActionType::SHOOT)
+		<< "HoMM3 must retain a legal ranged shot in this differential fixture: " << homm3Decision.toString();
+	EXPECT_NE(callback->action->actionType, homm3Decision.actionType)
+		<< "Two independently selected policies unexpectedly made the same first decision";
 	retreatDiagnostics << "archer pos=" << shooter->getPosition().toInt()
 		<< " speed=" << shooter->getMovementRange()
 		<< " canShoot=" << inspected->battleCanShoot(shooter)
@@ -794,9 +802,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FastArcherEscapesAnImminentSlowMeleeTh
 		<< "The native game handler rejected the requested archer escape";
 	policy.reset();
 
-	// The escape must not merely be a legal move: both sides still have
-	// to play the rest of the actual battle until a genuine result.
-	runToCompletion(std::nullopt, false);
+	// The escape must not merely be a legal move: both distinct backends
+	// must play the remaining real battle until the engine declares a winner.
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.damage, 0);
 }
 
