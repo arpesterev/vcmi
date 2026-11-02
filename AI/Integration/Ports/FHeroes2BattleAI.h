@@ -423,10 +423,10 @@ private:
 	};
 
 	static RangedAreaValue rangedAreaValue(CPlayerBattleCallback & battle,
-		const CStack & shooter, const CStack & target)
+		const CStack & shooter, const CStack & target, const BattleHex & aimedHex)
 	{
 		const auto additionalVictims = battle.getAttackedBattleUnits(
-			&shooter, &target, target.getPosition(), true);
+			&shooter, &target, aimedHex, true);
 		double friendlyDamage = 0;
 		double enemyDamage = 0;
 		double priority = 0;
@@ -481,24 +481,39 @@ private:
 			return *melee;
 
 		const CStack * shootingTarget = nullptr;
+		BattleHex shootingHex;
 		double bestShot = std::numeric_limits<double>::lowest();
 		bool hasLegalShot = false;
 		for(const auto * enemy : enemies)
 		{
-			if(!battle.battleCanShoot(&stack, enemy->getPosition()))
-				continue;
-			hasLegalShot = true;
-			const auto area = rangedAreaValue(battle, stack, *enemy);
-			if(area.dangerous)
-				continue;
-			if(area.priority > bestShot)
+			// Pinned fheroes2 archerDecision evaluates both head and tail
+			// footprints of a wide area-shot target. Ordinary ranged shots
+			// retain unit-targeted actions, which have no separate footprint.
+			for(const auto & aimedHex : enemy->getHexes())
 			{
-				bestShot = area.priority;
-				shootingTarget = enemy;
+				if(aimedHex != enemy->getPosition()
+					&& !stack.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
+					continue;
+				if(!battle.battleCanShoot(&stack, aimedHex))
+					continue;
+				hasLegalShot = true;
+				const auto area = rangedAreaValue(battle, stack, *enemy, aimedHex);
+				if(area.dangerous)
+					continue;
+				if(area.priority > bestShot)
+				{
+					bestShot = area.priority;
+					shootingTarget = enemy;
+					shootingHex = aimedHex;
+				}
 			}
 		}
 		if(shootingTarget)
+		{
+			if(shootingHex != shootingTarget->getPosition())
+				return BattleAction::makeShotAttack(&stack, shootingHex);
 			return BattleAction::makeShotAttack(&stack, shootingTarget);
+		}
 		// Do not replace rejected friendly-fire shots with a different target
 		// chosen by the generic, target-only melee scorer.
 		if(hasLegalShot)
