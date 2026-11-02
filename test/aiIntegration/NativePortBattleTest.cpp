@@ -91,7 +91,12 @@ public:
 	int acceptedResults = 0;
 	int injuryPackets = 0;
 	int spellPackets = 0;
+	int movementPackets = 0;
+	int roundPackets = 0;
 	std::function<void(const BattleResult &)> onResultBeforeApply;
+	std::function<void(const BattleStackMoved &)> onMovementBeforeApply;
+	std::function<void(const BattleNextRound &)> onRoundBeforeApply;
+	std::function<void(const BattleNextRound &)> onRoundAfterApply;
 	std::function<void(const BattleAttack &)> onAttackBeforeApply;
 	std::function<void(const StacksInjured &)> onInjuriesBeforeApply;
 	std::function<void(const BattleSpellCast &)> onSpellAfterApply;
@@ -105,6 +110,18 @@ public:
 		{
 			if(onResultBeforeApply)
 				onResultBeforeApply(*result);
+		}
+		// The client delivers movements and the first round notification before
+		// the server packet changes its authoritative battle state.
+		if(const auto * movement = dynamic_cast<const BattleStackMoved *>(&pack))
+		{
+			if(onMovementBeforeApply)
+				onMovementBeforeApply(*movement);
+		}
+		if(const auto * round = dynamic_cast<const BattleNextRound *>(&pack))
+		{
+			if(onRoundBeforeApply)
+				onRoundBeforeApply(*round);
 		}
 		// Mirror client/NetPacksClient.cpp ApplyFirstClientNetPackVisitor:
 		// both attack notifications precede BattleAttack.applyGs(), allowing
@@ -123,6 +140,16 @@ public:
 				onInjuriesBeforeApply(*injuries);
 		}
 		RecordingGameServer::applyPack(pack);
+		// ApplyClientNetPackVisitor::visitBattleNextRound fires after the
+		// round packet is applied, paired with its pre-apply callback above.
+		if(const auto * round = dynamic_cast<const BattleNextRound *>(&pack))
+		{
+			++roundPackets;
+			if(onRoundAfterApply)
+				onRoundAfterApply(*round);
+		}
+		if(dynamic_cast<const BattleStackMoved *>(&pack))
+			++movementPackets;
 		// ApplyClientNetPackVisitor::visitBattleSpellCast notifies both sides
 		// *after* the authoritative spell pack is applied, unlike injuries.
 		if(const auto * cast = dynamic_cast<const BattleSpellCast *>(&pack))
@@ -163,6 +190,8 @@ protected:
 	int heroSpellDecisions = 0;
 	int mmaiUnitDecisions = 0;
 	int mmaiNonpassiveDecisions = 0;
+	int replayedMovementEvents = 0;
+	int replayedRoundEvents = 0;
 
 #ifdef ENABLE_MMAI
 	void requireInstalledNeuralRole(const std::string & role) const
@@ -251,6 +280,8 @@ protected:
 		const int attacksBeforeEventSubscription = recorder.shots + recorder.meleeAttacks;
 		const int injuriesBeforeEventSubscription = recorder.injuryPackets;
 		const int spellsBeforeEventSubscription = recorder.spellPackets;
+		const int movesBeforeEventSubscription = recorder.movementPackets;
+		const int roundsBeforeEventSubscription = recorder.roundPackets;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
 		const auto attackerPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -281,6 +312,30 @@ protected:
 		int deliveredAttackEvents = 0;
 		int deliveredInjuryEvents = 0;
 		int deliveredSpellEvents = 0;
+		int deliveredMovementEvents = 0;
+		int deliveredRoundFirstEvents = 0;
+		int deliveredRoundEvents = 0;
+		recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
+		{
+			const auto * movedStack = battle()->battleGetStackByID(movement.stack);
+			ASSERT_NE(movedStack, nullptr) << "Movement callback must see the pre-move live stack";
+			for(auto & entry : policies)
+				entry.second->battleStackMoved(movement.battleID, movedStack,
+					movement.tilesToMove, movement.distance, movement.teleporting);
+			++deliveredMovementEvents;
+		};
+		recorder.onRoundBeforeApply = [&](const BattleNextRound & round)
+		{
+			for(auto & entry : policies)
+				entry.second->battleNewRoundFirst(round.battleID);
+			++deliveredRoundFirstEvents;
+		};
+		recorder.onRoundAfterApply = [&](const BattleNextRound & round)
+		{
+			for(auto & entry : policies)
+				entry.second->battleNewRound(round.battleID);
+			++deliveredRoundEvents;
+		};
 		recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
 		{
 			for(auto & entry : policies)
@@ -423,6 +478,14 @@ protected:
 			<< "Every spell or ability injury must notify both policies before native damage application";
 		EXPECT_EQ(deliveredSpellEvents, recorder.spellPackets - spellsBeforeEventSubscription)
 			<< "Every spell cast must notify both policies after its pack is applied";
+		EXPECT_EQ(deliveredMovementEvents, recorder.movementPackets - movesBeforeEventSubscription)
+			<< "Every movement must notify both policies with pre-move stack state";
+		EXPECT_EQ(deliveredRoundFirstEvents, recorder.roundPackets - roundsBeforeEventSubscription)
+			<< "Every round must notify both policies before applying the new round";
+		EXPECT_EQ(deliveredRoundEvents, recorder.roundPackets - roundsBeforeEventSubscription)
+			<< "Every round must notify both policies after applying the new round";
+		replayedMovementEvents = deliveredMovementEvents;
+		replayedRoundEvents = deliveredRoundEvents;
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
@@ -433,6 +496,9 @@ protected:
 		recorder.onAttackBeforeApply = {};
 		recorder.onInjuriesBeforeApply = {};
 		recorder.onSpellAfterApply = {};
+		recorder.onMovementBeforeApply = {};
+		recorder.onRoundBeforeApply = {};
+		recorder.onRoundAfterApply = {};
 		if(result.questionID != QuestionID::NONE)
 		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
@@ -463,6 +529,8 @@ protected:
 			<< " native_attack_events=" << deliveredAttackEvents
 			<< " native_injury_events=" << deliveredInjuryEvents
 			<< " native_spell_events=" << deliveredSpellEvents
+			<< " native_movement_events=" << deliveredMovementEvents
+			<< " native_round_events=" << deliveredRoundEvents
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
 			<< " attacker_action_types=" << actionCounts(attackerPlayer)
@@ -480,6 +548,8 @@ TEST_F(AIIntegrationNativeBattle, completesMeleeBattleThroughFactory)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion();
 	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(replayedMovementEvents, 0) << "Melee fixture must exercise pre-apply movement callbacks";
+	EXPECT_GT(replayedRoundEvents, 0) << "Melee fixture must exercise both phases of round callbacks";
 }
 
 TEST_F(AIIntegrationNativeBattle, completesRangedBattleThroughFactory)
