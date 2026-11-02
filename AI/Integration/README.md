@@ -2,25 +2,36 @@
 
 ## Status
 
-**The four-backend gameplay acceptance requirement is NOT met.**
+**The full four-backend gameplay acceptance requirement is NOT met.**
 
-This change adds a source-aware registration contract, an event/command protocol,
-a native callback adapter and an evidence checker. It does not contain semantic
-ports of Heroes III, fheroes2 or TUM Enchanted. The existing MMAI is forwarded
-through `BattleEventAdapter`; its policy, models and intentional internal
-fallbacks are not replaced or improved by this wrapper.
+This integration branch combines three **partial source-derived native combat
+policies** with a strict neural-only factory route to VCMI MMAI. The source
+ports make real decisions inside VCMI, rather than delegating all actions to
+BattleAI, StupidAI or a fake match runner. Their tactical projections are not
+complete or source-equivalent implementations.
 
-| ID | Source | Native VCMI implementation in this change |
+| Requested complete ID | Selectable experimental backend | Verified implementation scope |
 | --- | --- | --- |
-| `HoMM3Original` | `sushi-shi/homm3-decomp` | Not implemented |
-| `FHeroes2` | `ihhub/fheroes2` | Not implemented |
-| `TUMEnchanted` | `SadnessPower/TUM-Enchanted` | Not implemented |
-| `MMAI` | `smanolloff/vcmi-gym`, VCMI `AI/MMAI` | Existing native implementation, event wrapper added |
+| `HoMM3Original` | `HoMM3OriginalTactics` | Partial native damage, movement and ranged priorities from `sushi-shi/homm3-decomp` |
+| `FHeroes2` | `FHeroes2Tactics` | Partial native archer, melee, defense and offensive/restorative spell policies from `ihhub/fheroes2` |
+| `TUMEnchanted` | `TUMEnchantedTactics` | Documented TUM adjustments on the partial HoMM3 baseline; the original compiled plugin is not ported |
+| `MMAI` | `MMAI` | VCMI MMAI neural model inference; factory selection refuses scripted-model fallback, while hero spell selection is not neural |
 
-Unimplemented IDs are not exposed as working launcher choices. The factory
-rejects these names instead of silently constructing `EmptyAI`. Existing
-`BattleAI`, `StupidAI`, `Nullkiller2` and explicit `EmptyAI` keep their identities.
-No save format, game rules, default AI selection or private game data is changed.
+The three reserved complete IDs are deliberately rejected by `AIFactory`
+instead of being aliases for partial implementations. The partial IDs and
+`MMAI` are combined in the launcher selection and tested through real
+native VCMI battle callbacks and server-applied actions. The test harness
+records the actual winner and each backend's engine-accepted action histogram;
+both sides must act in mixed-policy battles. Optional public, checksum-pinned
+MMAI ONNX models are only installed temporarily by the development CI jobs.
+The full four-policy equivalence checker below has **not** been satisfied.
+
+`BattleEventAdapter`, `EventChannel`, `DecisionSession` and
+`BackendRegistry` are integration and protocol contracts. They are not
+proofs of policy equivalence or replacements for independently ported combat
+decisions. Legacy direct `Router(false)` clients may still explicitly
+permit scripted MMAI fallback; factory-selected `MMAI` uses strict mode.
+No gameplay rules, save format, default AI or release workflow are changed.
 
 ## Boundaries
 
