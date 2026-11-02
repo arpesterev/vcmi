@@ -219,8 +219,9 @@ private:
 	// fheroes2 meleeUnitDefense prefers covering valuable friendly archers.
 	// This conservative VCMI projection moves a single-width melee stack into
 	// a reachable neighboring hex only when ground melee can threaten a shooter
-	// next turn. Never disrupt an available immediate attack; wide-unit cover,
-	// long-range deployment and spell/area-threat spacing remain unsupported.
+	// next turn. Both occupied cells of wide archers count as cover targets,
+	// as in upstream meleeUnitDefense. Never disrupt an immediate attack;
+	// wide covering melee units and spell/area-threat spacing remain unsupported.
 	static std::optional<BattleAction> coverThreatenedShooter(CPlayerBattleCallback & battle,
 		const CStack & stack, const ReachabilityInfo & reachability,
 		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
@@ -228,11 +229,18 @@ private:
 		if(stack.doubleWide() || stack.hasBonusOfType(BonusType::SHOOTER))
 			return std::nullopt;
 		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		const auto distanceToShooter = [](const BattleHex & hex, const CStack & shooter)
+		{
+			int nearest = GameConstants::BFIELD_SIZE;
+			for(const auto & occupied : shooter.getHexes())
+				nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(hex, occupied)));
+			return nearest;
+		};
 		double totalShooterStrength = 0;
 		for(const auto * friendly : friends)
 		{
 			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
-				&& !friendly->doubleWide() && friendly->hasBonusOfType(BonusType::SHOOTER))
+				&& friendly->hasBonusOfType(BonusType::SHOOTER))
 				totalShooterStrength += strength(*friendly);
 		}
 		if(totalShooterStrength <= 0)
@@ -244,23 +252,26 @@ private:
 		for(const auto * friendly : friends)
 		{
 			if(friendly == &stack || !friendly->alive() || !friendly->getPosition().isValid()
-				|| friendly->doubleWide() || !friendly->hasBonusOfType(BonusType::SHOOTER))
+				|| !friendly->hasBonusOfType(BonusType::SHOOTER))
 				continue;
 			const bool threatened = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 			{
-				return enemy->getPosition().isValid() && !enemy->hasBonusOfType(BonusType::SHOOTER)
-					&& BattleHex::getDistance(friendly->getPosition(), enemy->getPosition())
-						<= static_cast<int>(enemy->getMovementRange()) + 1;
+				if(!enemy->getPosition().isValid() || enemy->hasBonusOfType(BonusType::SHOOTER))
+					return false;
+				for(const auto & enemyHex : enemy->getHexes())
+					if(distanceToShooter(enemyHex, *friendly) <= static_cast<int>(enemy->getMovementRange()) + 1)
+						return true;
+				return false;
 			});
 			if(!threatened)
 				continue;
-			if(BattleHex::getDistance(stack.getPosition(), friendly->getPosition()) == 1)
+			if(distanceToShooter(stack.getPosition(), *friendly) == 1)
 				return BattleAction::makeDefend(&stack);
 
 			for(const auto & hex : available)
 			{
 				if(!hex.isAvailable() || hex == stack.getPosition()
-					|| BattleHex::getDistance(hex, friendly->getPosition()) != 1)
+					|| distanceToShooter(hex, *friendly) != 1)
 					continue;
 				const int travel = reachability.distances[hex.toInt()];
 				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))
