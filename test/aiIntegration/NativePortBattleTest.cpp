@@ -89,8 +89,10 @@ public:
 	int shots = 0;
 	int meleeAttacks = 0;
 	int acceptedResults = 0;
+	int injuryPackets = 0;
 	std::function<void(const BattleResult &)> onResultBeforeApply;
 	std::function<void(const BattleAttack &)> onAttackBeforeApply;
+	std::function<void(const StacksInjured &)> onInjuriesBeforeApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
@@ -110,6 +112,14 @@ public:
 			if(onAttackBeforeApply)
 				onAttackBeforeApply(*attack);
 		}
+		// ApplyFirstClientNetPackVisitor::visitStacksInjured delivers the
+		// battleStacksAttacked event before applying spell/ability injuries.
+		// This is distinct from the BattleAttack event pair above.
+		if(const auto * injuries = dynamic_cast<const StacksInjured *>(&pack))
+		{
+			if(onInjuriesBeforeApply)
+				onInjuriesBeforeApply(*injuries);
+		}
 		RecordingGameServer::applyPack(pack);
 		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
 		{
@@ -122,6 +132,7 @@ public:
 		}
 		if(const auto * injuries = dynamic_cast<const StacksInjured *>(&pack))
 		{
+			++injuryPackets;
 			for(const auto & injury : injuries->stacks)
 				damage += injury.damageAmount;
 		}
@@ -228,6 +239,7 @@ protected:
 		// Some fixtures issue real server attacks to construct their starting
 		// positions before the adapter subscription is installed.
 		const int attacksBeforeEventSubscription = recorder.shots + recorder.meleeAttacks;
+		const int injuriesBeforeEventSubscription = recorder.injuryPackets;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
 		const auto attackerPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -256,6 +268,7 @@ protected:
 		}
 
 		int deliveredAttackEvents = 0;
+		int deliveredInjuryEvents = 0;
 		recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
 		{
 			for(auto & entry : policies)
@@ -264,6 +277,12 @@ protected:
 				entry.second->battleStacksAttacked(attack.battleID, attack.bsa, attack.shot());
 			}
 			++deliveredAttackEvents;
+		};
+		recorder.onInjuriesBeforeApply = [&](const StacksInjured & injuries)
+		{
+			for(auto & entry : policies)
+				entry.second->battleStacksAttacked(injuries.battleID, injuries.stacks, false);
+			++deliveredInjuryEvents;
 		};
 
 		bool battleEndDelivered = false;
@@ -382,6 +401,8 @@ protected:
 		EXPECT_EQ(deliveredAttackEvents,
 			recorder.shots + recorder.meleeAttacks - attacksBeforeEventSubscription)
 			<< "Every attack after policy subscription must traverse both source-policy event adapters";
+		EXPECT_EQ(deliveredInjuryEvents, recorder.injuryPackets - injuriesBeforeEventSubscription)
+			<< "Every spell or ability injury must notify both policies before native damage application";
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
@@ -390,6 +411,7 @@ protected:
 		ASSERT_TRUE(battleEndDelivered) << "The terminal event was not delivered with live battle state";
 		recorder.onResultBeforeApply = {};
 		recorder.onAttackBeforeApply = {};
+		recorder.onInjuriesBeforeApply = {};
 		if(result.questionID != QuestionID::NONE)
 		{
 			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, attackerPlayer));
@@ -418,6 +440,7 @@ protected:
 			<< " defender_decisions=" << decisionsByPlayer[defenderPlayer]
 			<< " activations=" << decisions << " damage=" << recorder.damage
 			<< " native_attack_events=" << deliveredAttackEvents
+			<< " native_injury_events=" << deliveredInjuryEvents
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
 			<< " attacker_action_types=" << actionCounts(attackerPlayer)
@@ -585,6 +608,7 @@ TEST_F(AIIntegrationNativeBattle, lethalSpellFinishesBeforeAnyStaleUnitCommand)
 	EXPECT_EQ(recorder.castsOf(SpellID::MAGIC_ARROW).size(), 1u);
 	EXPECT_EQ(recorder.shots, 0);
 	EXPECT_EQ(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.injuryPackets, 0) << "A lethal damage spell must emit native StacksInjured events";
 }
 
 TEST_F(AIIntegrationNativeBattle, noManaStillCompletesUsingUnitActions)
