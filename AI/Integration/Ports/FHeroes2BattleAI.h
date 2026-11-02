@@ -114,13 +114,16 @@ private:
 		for(const auto * friendly : battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
 		{
 			input.armyStrength += strength(*friendly);
-			if(battle.battleCanShoot(friendly))
+			// fheroes2 analyzeBattleState counts ranged units even when an
+			// adjacent enemy currently blocks shooting. BattleCanShoot is a
+			// per-turn legality check, not the source unit classification.
+			if(friendly->isShooter() && friendly->getMovementRange() > 0)
 				input.shootersStrength += strength(*friendly);
 		}
 		for(const auto * enemy : enemies)
 		{
 			input.enemyArmyStrength += strength(*enemy);
-			if(battle.battleCanShoot(enemy))
+			if(enemy->isShooter() && enemy->getMovementRange() > 0)
 				input.enemyShootersStrength += strength(*enemy);
 		}
 		if(input.armyStrength <= 0 || input.enemyArmyStrength <= 0)
