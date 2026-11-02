@@ -50,6 +50,17 @@ int main()
 	input.armyStrength = 601;
 	require(!selectTactics(input).defensive, "Overwhelming flying army should advance");
 
+
+	// Pinned fheroes2 archerDecision friendly-fire cutoff is inclusive 3:1.
+	require(!FHeroes2::catastrophicFriendlyFire(29, 10), "Area shot below 3:1 is eligible");
+	require(FHeroes2::catastrophicFriendlyFire(30, 10), "Area shot at 3:1 is rejected");
+	require(FHeroes2::catastrophicFriendlyFire(31, 10), "Area shot above 3:1 is rejected");
+	require(!FHeroes2::catastrophicFriendlyFire(0, 10), "Direct shot with no allies remains eligible");
+	try { FHeroes2::catastrophicFriendlyFire(-1, 10); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::catastrophicFriendlyFire(std::numeric_limits<double>::infinity(), 10); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	const FHeroes2::MeleeOutcome immediate{0, 1, 1, true};
 	const FHeroes2::MeleeOutcome distant{1, 1000, 1000, false};
 	require(FHeroes2::isOutcomeImproved(immediate, distant), "Immediate attacks must outrank distant opportunities");

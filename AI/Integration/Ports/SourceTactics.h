@@ -123,6 +123,18 @@ inline bool preferDistantTarget(const DistantTarget & candidate, const DistantTa
 	return score > previousScore || (score == previousScore && candidate.unitId < previous.unitId);
 }
 
+/** fheroes2 archerDecision avoids an area shot when projected allied HP
+ * damage is at least three times the enemy damage. The caller must account
+ * for every stack in the real attack footprint, not only the aimed target.
+ */
+inline bool catastrophicFriendlyFire(double friendlyDamage, double enemyDamage)
+{
+	if(!std::isfinite(friendlyDamage) || !std::isfinite(enemyDamage)
+		|| friendlyDamage < 0 || enemyDamage < 0)
+		throw std::invalid_argument("fheroes2 area shot requires finite nonnegative damage");
+	return friendlyDamage >= 3.0 * enemyDamage;
+}
+
 struct MeleeOutcome
 {
 	int32_t fromIndex = -1;

@@ -410,6 +410,49 @@ private:
 			: std::nullopt;
 	}
 
+	// Source: fheroes2 archerDecision assesses *all* units inside an
+	// AREA_SHOT footprint, including friendly casualties. VCMI supplies
+	// the actual footprint and projected hit-point damage. The score uses
+	// VCMI combat-value losses, not the original fheroes2 threat simulator.
+	struct RangedAreaValue
+	{
+		bool dangerous = false;
+		double priority = 0;
+	};
+
+	static RangedAreaValue rangedAreaValue(CPlayerBattleCallback & battle,
+		const CStack & shooter, const CStack & target)
+	{
+		const auto victims = battle.getAttackedBattleUnits(
+			&shooter, &target, target.getPosition(), true);
+		if(victims.empty())
+			throw std::logic_error("FHeroes2 ranged attack has no affected unit");
+		double friendlyDamage = 0;
+		double enemyDamage = 0;
+		double priority = 0;
+		for(const auto * victim : victims)
+		{
+			BattleAttackInfo info(&shooter, victim, 0, true);
+			info.attackerPos = shooter.getPosition();
+			const auto estimate = battle.battleEstimateDamage(info);
+			const double health = std::max(0.0, static_cast<double>(victim->getAvailableHealth()));
+			const double hitPoints = std::min(health, std::max(0.0,
+				(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
+			const double value = lossValue(*victim, estimate);
+			if(battle.battleGetOwner(victim) == battle.battleGetOwner(&shooter))
+			{
+				friendlyDamage += hitPoints;
+				priority -= value;
+			}
+			else
+			{
+				enemyDamage += hitPoints;
+				priority += value;
+			}
+		}
+		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
+	}
+
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
 	{
 		if(stack.isCatapult())
@@ -435,19 +478,27 @@ private:
 
 		const CStack * shootingTarget = nullptr;
 		double bestShot = std::numeric_limits<double>::lowest();
+		bool hasLegalShot = false;
 		for(const auto * enemy : enemies)
 		{
 			if(!battle.battleCanShoot(&stack, enemy->getPosition()))
 				continue;
-			const double value = attackValue(battle, stack, *enemy, stack.getPosition(), true, 0);
-			if(value > bestShot)
+			hasLegalShot = true;
+			const auto area = rangedAreaValue(battle, stack, *enemy);
+			if(area.dangerous)
+				continue;
+			if(area.priority > bestShot)
 			{
-				bestShot = value;
+				bestShot = area.priority;
 				shootingTarget = enemy;
 			}
 		}
 		if(shootingTarget)
 			return BattleAction::makeShotAttack(&stack, shootingTarget);
+		// Do not replace rejected friendly-fire shots with a different target
+		// chosen by the generic, target-only melee scorer.
+		if(hasLegalShot)
+			return BattleAction::makeDefend(&stack);
 		if(!stack.getPosition().isValid())
 			return BattleAction::makeDefend(&stack);
 

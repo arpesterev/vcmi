@@ -789,6 +789,111 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 	EXPECT_GT(recorder.damage, 0);
 }
 
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotAvoidsCatastrophicFriendlyFire)
+{
+	// Pinned fheroes2 archerDecision rejects an AREA_SHOT when actual
+	// projected allied HP damage is at least three times hostile damage.
+	prepareBattle(CreatureID(45), 30, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	const CStack * safeEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			safeEnemy = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(safeEnemy, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_FALSE(shooter->doubleWide());
+
+	BattleHex riskyHex;
+	std::vector<BattleHex> friendlyHexes;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(!candidate.isAvailable() || candidate.getX() < 8 || candidate.getX() > 12
+			|| battle()->battleGetUnitByPos(candidate) != nullptr
+			|| BattleHex::getDistance(candidate, safeEnemy->getPosition()) < 4)
+			continue;
+		std::vector<BattleHex> neighbours;
+		for(const auto & hex : candidate.getNeighbouringTiles())
+			if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr
+				&& BattleHex::getDistance(hex, safeEnemy->getPosition()) >= 3)
+				neighbours.push_back(hex);
+		if(neighbours.size() >= 4)
+		{
+			riskyHex = candidate;
+			friendlyHexes.assign(neighbours.begin(), neighbours.begin() + 4);
+			break;
+		}
+	}
+	ASSERT_TRUE(riskyHex.isValid());
+	const CStack * riskyEnemy = addStack(BattleSide::DEFENDER, CreatureID(0), riskyHex, 100);
+	ASSERT_NE(riskyEnemy, nullptr);
+	for(const auto & hex : friendlyHexes)
+		ASSERT_NE(addStack(BattleSide::ATTACKER, CreatureID(0), hex, 200), nullptr);
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, riskyEnemy->getPosition()));
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, safeEnemy->getPosition()));
+
+	// Inspect VCMI's actual splash footprint and damage projections.
+	double friendlyDamage = 0;
+	double enemyDamage = 0;
+	int friendlyVictims = 0;
+	const auto affected = battle()->getAttackedBattleUnits(
+		shooter, riskyEnemy, riskyEnemy->getPosition(), true);
+	for(const auto * victim : affected)
+	{
+		BattleAttackInfo info(shooter, victim, 0, true);
+		info.attackerPos = shooter->getPosition();
+		const auto estimate = battle()->battleEstimateDamage(info);
+		const double hp = std::min(static_cast<double>(victim->getAvailableHealth()),
+			std::max(0.0, (static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
+		if(victim->unitSide() == BattleSide::ATTACKER)
+		{
+			++friendlyVictims;
+			friendlyDamage += hp;
+		}
+		else
+			enemyDamage += hp;
+	}
+	ASSERT_GE(friendlyVictims, 4) << "The real splash area must hit all four allied stacks";
+	ASSERT_GT(enemyDamage, 0);
+	ASSERT_GE(friendlyDamage, 3.0 * enemyDamage);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT)
+		<< "Expected a safe shot rather than a dangerous area attack";
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, safeEnemy->unitId());
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected the selected safe shot";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.shots, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDifference)
 {
 	// Pinned fheroes2 archerDecision uses raw outgoing HP damage minus
