@@ -1055,9 +1055,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideGuardDoesNotInventNarrowEnemyTailT
 	{
 		int nearest = GameConstants::BFIELD_SIZE;
 		for(const auto & occupied : hexes)
+		{
 			for(const auto & shooterOccupied : shooter->getHexes())
+			{
 				nearest = std::min(nearest,
 					static_cast<int>(BattleHex::getDistance(occupied, shooterOccupied)));
+			}
+		}
 		return nearest;
 	};
 
@@ -1067,12 +1071,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideGuardDoesNotInventNarrowEnemyTailT
 		const BattleHex candidate(shooterHex.toInt() + offset);
 		if(!candidate.isAvailable() || battle()->battleGetUnitByPos(candidate))
 			continue;
-		const int realDistance = static_cast<int>(BattleHex::getDistance(candidate, shooter->getPosition()));
 		// A wide shooter may itself have a tail, so compare the actual
 		// occupied footprint (not merely the shooter's head).
 		const int realFootprintDistance = nearestToShooter(std::vector<BattleHex>{candidate});
 		const int inventedDistance = nearestToShooter(guard->getHexes(candidate));
-		if(realDistance >= 0 && realFootprintDistance == enemyReach + 1
+		if(realFootprintDistance == enemyReach + 1
 			&& inventedDistance <= enemyReach
 			&& BattleHex::getDistance(originalHead, candidate)
 				> guard->getMovementRange() + 1)
@@ -1088,10 +1091,14 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideGuardDoesNotInventNarrowEnemyTailT
 	ASSERT_GT(nearestToShooter(threat->getHexes()),
 		static_cast<int>(threat->getMovementRange()) + 1);
 	for(const auto & unit : battle()->stacks)
+	{
 		if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+		{
 			ASSERT_GT(nearestToShooter(unit->getHexes()),
 				static_cast<int>(unit->getMovementRange()) + 1)
 				<< "The test must have no real enemy within one-turn melee reach of the archer";
+		}
+	}
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
