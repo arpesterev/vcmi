@@ -243,7 +243,8 @@ protected:
 		hero->mana = 100;
 	}
 
-	void prepareSiege(bool includeDefenderShooter = false)
+	void prepareSiege(bool includeDefenderShooter = false, CreatureID defenderType = CreatureID(0),
+		int defenderCount = 30)
 	{
 		startRecordedGame();
 		ASSERT_FALSE(HasFatalFailure());
@@ -256,7 +257,7 @@ protected:
 			ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
 		}
 		ASSERT_GT(town->fortificationsLevel().wallsHealth, 0);
-		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 30));
+		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), defenderType.toCreature(), defenderCount));
 		if(includeDefenderShooter)
 		{
 			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(1)), CreatureID(2).toCreature(), 1));
@@ -2312,6 +2313,50 @@ TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndComp
 	// Resolve through the engine as well: holding must not trap the siege
 	// in a battle without a winner.
 	runToCompletion(BattleSide::ATTACKER, false, "TUMEnchantedTactics");
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, tumWideSiegeDefenderHoldsOnlyWhenBothOccupiedCellsAreSheltered)
+{
+	// Exercise the actual TUM adapter with a double-wide castle garrison.
+	// The isolated predicate separately covers asymmetric head/tail cases;
+	// this live fixture proves the all-inside hold and subsequent battle.
+	prepareSiege(false, CreatureID(10), 6);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->battleGetGateState(), EGateState::CLOSED);
+	const CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER
+			&& unit->creatureId() == CreatureID(10))
+			defender = unit.get();
+	ASSERT_NE(defender, nullptr);
+	const auto occupied = defender->getHexes();
+	ASSERT_EQ(occupied.size(), 2u) << "The siege defender must be a wide creature";
+	ASSERT_TRUE(std::all_of(occupied.begin(), occupied.end(), [&](const BattleHex & hex)
+	{
+		return hex.isValid() && battle()->battleIsInsideWalls(hex);
+	})) << "The real garrison must occupy two sheltered cells for this hold test";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, defender);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "A wide defender fully behind closed fortifications should hold";
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 }
 
