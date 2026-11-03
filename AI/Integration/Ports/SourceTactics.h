@@ -237,6 +237,15 @@ inline double bloodlustAttackRatio(int beforeAttack, int afterAttack)
 	return afterAttack > beforeAttack ? 0.1 : 0.0;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue assigns Hypnotize 150%
+// of an enemy stack's strength. The native spell must actually transfer
+// tactical control; immunity, repeated casts and incapacitated units have
+// no source-derived benefit. This is a valuation rule, not turn-equivalence.
+inline double hypnotizeControlRatio(bool alreadyDisabled, bool newlyControlled)
+{
+	return !alreadyDisabled && newlyControlled ? 1.5 : 0.0;
+}
+
 // Pinned fheroes2 BattlePlanner::spellEffectValue values Blind at 80% of
 // the affected enemy strength, or 40% if this is the last enemy with an
 // available retaliation and without unlimited retaliations. The native VCMI
