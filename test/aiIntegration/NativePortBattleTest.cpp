@@ -191,6 +191,7 @@ protected:
 	int heroSpellDecisions = 0;
 	int mmaiUnitDecisions = 0;
 	int mmaiNonpassiveDecisions = 0;
+	int mmaiAutomaticDecisions = 0;
 	int replayedMovementEvents = 0;
 	int replayedRoundEvents = 0;
 
@@ -417,9 +418,18 @@ protected:
 			const auto & activePolicy = player == attackerPlayer ? attackerAI : defenderAI;
 			if(activePolicy == "MMAI" && !callback->spellAction)
 			{
-				++mmaiUnitDecisions;
-				if(action.actionType != EActionType::DEFEND && action.actionType != EActionType::WAIT)
-					++mmaiNonpassiveDecisions;
+				// VCMI MMAI's published v13/v15 backends handle first aid,
+				// catapults and arrow towers through deterministic auto-actions.
+				// They are genuine MMAI actions, but NOT ONNX-selected creature
+				// decisions. Keep them out of neural inference evidence.
+				if(active->isFirstAidTent() || active->isCatapult() || active->isTurret())
+					++mmaiAutomaticDecisions;
+				else
+				{
+					++mmaiUnitDecisions;
+					if(action.actionType != EActionType::DEFEND && action.actionType != EActionType::WAIT)
+						++mmaiNonpassiveDecisions;
+				}
 			}
 			if(callback->spellAction)
 				++heroSpellDecisions;
@@ -557,6 +567,8 @@ protected:
 			<< " native_round_events=" << deliveredRoundEvents
 			<< " ranged_attacks=" << recorder.shots << " melee_attacks=" << recorder.meleeAttacks
 			<< " spells=" << heroSpellDecisions
+			<< " mmai_model_eligible_activations=" << mmaiUnitDecisions
+			<< " mmai_automatic_activations=" << mmaiAutomaticDecisions
 			<< " attacker_action_types=" << actionCounts(attackerPlayer)
 			<< " defender_action_types=" << actionCounts(defenderPlayer)
 			<< " winner=" << (result.winner == BattleSide::ATTACKER ? "attacker" : "defender")
@@ -3300,6 +3312,29 @@ TEST_F(AIIntegrationNativeBattle, mmaiBothNeuralSidesFightRealBattle)
 	runToCompletion(std::nullopt, false, "MMAI", "MMAI", true);
 	EXPECT_GE(mmaiUnitDecisions, 2);
 	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+// Exercise the previously untested MMAI siege-attacker route against an
+// independent native defender. The official router requests attacker.siege,
+// falling back to its installed attacker model if no dedicated siege model
+// is configured. Source MMAI can use deterministic catapult actions, which
+// are counted separately from neural-eligible ordinary creature decisions.
+// Battle results, accepted catapult packets and both player turns come from
+// VCMI's actual engine; this is not evidence of trained siege superiority.
+TEST_F(AIIntegrationNativeBattle, mmaiSiegeAttackerAgainstTUMDefenderRealBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareSiege();
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "TUMEnchantedTactics", true);
+	EXPECT_GT(mmaiUnitDecisions, 0) << "No ordinary stack was controlled by the neural policy";
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+	EXPECT_GT(mmaiAutomaticDecisions, 0) << "The MMAI catapult route was not exercised";
+	EXPECT_FALSE(recorder.catapultAttacks.empty())
+		<< "The authoritative engine saw no siege-machine attack";
 }
 
 TEST_F(AIIntegrationNativeBattle, mmaiAttackerAgainstHoMM3DefenderRealBattle)
