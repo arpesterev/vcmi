@@ -3248,6 +3248,39 @@ TEST_F(AIIntegrationNativeBattle, mmaiSiegeDefenderNeuralModelCompletesRealBattl
 }
 
 
+// Pair the same ranged-versus-infantry armies against two genuinely
+// different controllers. The MMAI role uses the installed official ONNX
+// weights; FHeroes2Tactics uses its independent native archer policy.
+// Require both policies to act, and let the server determine the winner.
+// These are action-distribution smoke comparisons, not win-rate results.
+TEST_F(AIIntegrationNativeBattle, mmaiRangedAttackerAgainstFHeroes2InfantryRealBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "FHeroes2Tactics", true);
+	EXPECT_GT(recorder.shots, 0) << "Ranged-versus-infantry duel produced no engine-accepted shots";
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2RangedAttackerAgainstMMAIInfantryRealBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("defender");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "MMAI", true);
+	EXPECT_GT(recorder.shots, 0) << "Ranged-versus-infantry duel produced no engine-accepted shots";
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, mmaiBothNeuralSidesFightRealBattle)
 {
 	// This is an actual ONNX-vs-ONNX fight: a scripted opponent cannot
