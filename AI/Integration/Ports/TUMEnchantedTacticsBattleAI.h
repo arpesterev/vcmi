@@ -145,8 +145,10 @@ private:
 		return std::none_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
 			return enemy->alive() && enemy->getPosition().isValid()
-				&& (battle.battleIsInsideWalls(enemy->getPosition())
-					|| battle.isMeleeAttackPossible(&active, enemy));
+				&& (Ports::TUM::footprintBreachesCastle(enemy->getHexes(), [&](const BattleHex & hex)
+				{
+					return hex.isValid() && battle.battleIsInsideWalls(hex);
+				}) || battle.isMeleeAttackPossible(&active, enemy));
 		});
 	}
 
