@@ -283,6 +283,7 @@ protected:
 		const int spellsBeforeEventSubscription = recorder.spellPackets;
 		const int movesBeforeEventSubscription = recorder.movementPackets;
 		const int roundsBeforeEventSubscription = recorder.roundPackets;
+		const int64_t damageBeforeEventSubscription = recorder.damage;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
 		const auto attackerPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -316,6 +317,20 @@ protected:
 		int deliveredMovementEvents = 0;
 		int deliveredRoundFirstEvents = 0;
 		int deliveredRoundEvents = 0;
+		// Record damage received by each side from actual engine injury packets.
+		// This is deliberately NOT labelled "damage dealt": friendly fire,
+		// spell effects and retaliation can make that attribution misleading.
+		std::map<BattleSide, int64_t> damageTakenBySide;
+		const auto accountActualInjuries = [&](const std::vector<BattleStackAttacked> & injuries)
+		{
+			for(const auto & injury : injuries)
+			{
+				const auto * victim = battle()->battleGetStackByID(injury.stackAttacked);
+				ASSERT_NE(victim, nullptr) << "Injury packet must identify a live pre-apply victim";
+				if(victim)
+					damageTakenBySide[victim->unitSide()] += injury.damageAmount;
+			}
+		};
 		recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
 		{
 			const auto * movedStack = battle()->battleGetStackByID(movement.stack);
@@ -339,6 +354,7 @@ protected:
 		};
 		recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
 		{
+			accountActualInjuries(attack.bsa);
 			for(auto & entry : policies)
 			{
 				entry.second->battleAttack(attack.battleID, &attack);
@@ -348,6 +364,7 @@ protected:
 		};
 		recorder.onInjuriesBeforeApply = [&](const StacksInjured & injuries)
 		{
+			accountActualInjuries(injuries.stacks);
 			for(auto & entry : policies)
 				entry.second->battleStacksAttacked(injuries.battleID, injuries.stacks, false);
 			++deliveredInjuryEvents;
@@ -472,6 +489,9 @@ protected:
 			EXPECT_GT(decisionsByPlayer[defenderPlayer], 0) << "Mixed-policy defender never acted";
 		}
 		EXPECT_GT(recorder.damage, 0) << "No damage was applied by the engine";
+		EXPECT_EQ(damageTakenBySide[BattleSide::ATTACKER] + damageTakenBySide[BattleSide::DEFENDER],
+			recorder.damage - damageBeforeEventSubscription)
+			<< "Per-side pre-apply injury evidence must reconcile with engine-applied damage";
 		EXPECT_EQ(deliveredAttackEvents,
 			recorder.shots + recorder.meleeAttacks - attacksBeforeEventSubscription)
 			<< "Every attack after policy subscription must traverse both source-policy event adapters";
@@ -527,6 +547,8 @@ protected:
 			<< " attacker_decisions=" << decisionsByPlayer[attackerPlayer]
 			<< " defender_decisions=" << decisionsByPlayer[defenderPlayer]
 			<< " activations=" << decisions << " damage=" << recorder.damage
+			<< " attacker_damage_taken=" << damageTakenBySide[BattleSide::ATTACKER]
+			<< " defender_damage_taken=" << damageTakenBySide[BattleSide::DEFENDER]
 			<< " native_attack_events=" << deliveredAttackEvents
 			<< " native_injury_events=" << deliveredInjuryEvents
 			<< " native_spell_events=" << deliveredSpellEvents
