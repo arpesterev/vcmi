@@ -277,7 +277,7 @@ jobs:
               raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
           if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
               raise RuntimeError('An MMAI neural integration test failed or was skipped')
-          print('Verified: twelve real MMAI battle cases (some with source-native automatic siege-machine actions) plus one negative real-ONNX training-side check')
+          print('Verified: twelve model-gated MMAI battle cases plus one negative real-ONNX training-side check; engine siege packets are not necessarily MMAI decisions')
           PY
 
       - name: Save compiled C++ objects for later develop builds
