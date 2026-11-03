@@ -970,7 +970,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerA
 	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
 	ASSERT_EQ(battle()->battleGetUnitByPos(enemyHex), nullptr);
 	const CStack * shooter = addStack(BattleSide::DEFENDER, CreatureID(2), shooterHex, 120);
-	const CStack * enemy = addStack(BattleSide::ATTACKER, CreatureID(0), enemyHex, 15);
+	const CStack * enemy = addStack(BattleSide::ATTACKER, CreatureID(0), enemyHex, 45);
 	ASSERT_NE(shooter, nullptr);
 	ASSERT_NE(enemy, nullptr);
 	ASSERT_GT(BattleHex::getDistance(initial, enemyHex),
