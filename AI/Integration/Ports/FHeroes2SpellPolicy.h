@@ -51,7 +51,9 @@ class FHeroes2SpellPolicy
 			const double strength = static_cast<double>(unit->estimateCombatValue());
 			result.strength += strength;
 			result.weightedSpeed += strength * unit->getMovementRange();
-			if(battle.battleCanShoot(unit))
+			// Pinned fheroes2 analyzeBattleState counts movable archers even
+			// when a temporary spell or adjacent enemy prevents this turn's shot.
+			if(unit->isShooter() && unit->getMovementRange() > 0)
 				result.shooters += strength;
 		}
 		return result;
@@ -113,6 +115,14 @@ class FHeroes2SpellPolicy
 	}
 
 public:
+	/// Report the source-defined ranged strength used in spell conservation.
+	/// Native battle regressions can observe it without changing AI decisions.
+	static double sourceArcherStrength(const CPlayerBattleCallback & battle,
+		PlayerColor player, bool friendly)
+	{
+		return army(battle, player, friendly).shooters;
+	}
+
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
 		const Environment * environment)
 	{

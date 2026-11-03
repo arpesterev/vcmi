@@ -7,6 +7,7 @@
 
 #include "server/battles/BattleTestFixture.h"
 #include "../../AI/Integration/Ports/HoMM3TacticsBattleAI.h"
+#include "../../AI/Integration/Ports/FHeroes2SpellPolicy.h"
 #ifdef ENABLE_MMAI
 #include "../../AI/MMAI/BAI/model_api.h"
 #include "../../AI/MMAI/BAI/router.h"
@@ -770,6 +771,43 @@ TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBatt
 	injure(injured, 300);
 	runToCompletion();
 	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatPreservesForgottenArcherStrength)
+{
+	// fheroes2's spell-conservation threshold uses strategic archer strength,
+	// not immediate shooting legality. Validate that contract against a
+	// real VCMI spell effect and then play the native battle to its result.
+	prepareBattle(CreatureID(0), 60, CreatureID(2), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * defenderArcher = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			defenderArcher = unit.get();
+	ASSERT_NE(defenderArcher, nullptr);
+	ASSERT_TRUE(defenderArcher->isShooter());
+	ASSERT_TRUE(battle()->battleCanShoot(defenderArcher));
+
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto observer = std::make_shared<DecisionCallback>(player);
+	observer->onBattleStarted(battle());
+	const auto playerView = observer->getBattle(battle()->getBattleID());
+	ASSERT_NE(playerView, nullptr);
+	const double rangedBefore = AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, false);
+	ASSERT_GT(rangedBefore, 0);
+
+	teachBattleSpell(attackerSideHero, SpellID::FORGETFULNESS);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::FORGETFULNESS, defenderArcher));
+	ASSERT_TRUE(defenderArcher->isShooter());
+	ASSERT_FALSE(defenderArcher->canShoot())
+		<< "Forgetfulness must prevent the enemy archer's immediate shot";
+	EXPECT_DOUBLE_EQ(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, false), rangedBefore)
+		<< "Spell policy must not erase the archer from strategic ranged strength";
+
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
 }
 
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveStance)
