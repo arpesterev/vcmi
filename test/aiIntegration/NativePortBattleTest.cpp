@@ -2275,6 +2275,47 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsCompletesRealRangedBattle)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2WideCastleDefenderKeepsShelteredStanceInRealSiege)
+{
+	// The pinned fheroes2 defended-area predicate uses BOTH wide-unit
+	// occupied cells and castle geometry. Confirm the VCMI projection uses
+	// a genuine castle garrison and that ordinary AI/engine actions finish.
+	prepareSiege(true, CreatureID(10), 6);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->battleGetGateState(), EGateState::CLOSED);
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER
+			&& unit->creatureId() == CreatureID(10))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	ASSERT_EQ(guard->getHexes().size(), 2u);
+	ASSERT_TRUE(std::all_of(guard->getHexes().begin(), guard->getHexes().end(),
+		[&](const BattleHex & hex) { return hex.isValid() && battle()->battleIsInsideWalls(hex); }))
+		<< "This siege fixture must have a genuinely sheltered wide garrison";
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "A fully sheltered wide castle guard should favor the ranged castle defense";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndCompletesBattle)
 {
 	prepareSiege();

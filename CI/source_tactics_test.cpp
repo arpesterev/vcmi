@@ -62,6 +62,24 @@ int main()
 	try { FHeroes2::catastrophicFriendlyFire(std::numeric_limits<double>::infinity(), 10); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// fheroes2's defended-area test rejects a wide unit straddling the
+	// border, even when its head remains on the defended side. Also reject
+	// an empty/invalid footprint; the actual castle geometry is supplied
+	// by VCMI and tested in the native siege below.
+	const auto isDefendedCell = [](bool defended) { return defended; };
+	require(FHeroes2::isPositionInDefendedArea(std::array<bool, 1>{true}, isDefendedCell),
+		"Single sheltered fheroes2 unit can defend");
+	require(!FHeroes2::isPositionInDefendedArea(std::array<bool, 1>{false}, isDefendedCell),
+		"Single exposed fheroes2 unit should attack");
+	require(FHeroes2::isPositionInDefendedArea(std::array<bool, 2>{true, true}, isDefendedCell),
+		"Both occupied cells of wide fheroes2 defender are sheltered");
+	require(!FHeroes2::isPositionInDefendedArea(std::array<bool, 2>{true, false}, isDefendedCell),
+		"Exposed wide tail invalidates fheroes2 defensive stance");
+	require(!FHeroes2::isPositionInDefendedArea(std::array<bool, 2>{false, true}, isDefendedCell),
+		"Exposed wide head invalidates fheroes2 defensive stance");
+	require(!FHeroes2::isPositionInDefendedArea(std::array<bool, 0>{}, isDefendedCell),
+		"Empty footprint cannot justify fheroes2 defense");
+
 	const FHeroes2::MeleeOutcome immediate{0, 1, 1, true};
 	const FHeroes2::MeleeOutcome distant{1, 1000, 1000, false};
 	require(FHeroes2::isOutcomeImproved(immediate, distant), "Immediate attacks must outrank distant opportunities");

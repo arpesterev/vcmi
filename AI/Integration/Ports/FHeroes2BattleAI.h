@@ -135,9 +135,22 @@ private:
 		input.defendingCastle = stack.unitSide() == BattleSide::DEFENDER
 			&& battle.battleGetDefendedTown() != nullptr
 			&& battle.battleGetWallState(EWallPart::GATE) != EWallState::NONE;
-		input.insideDefendedArea = stack.unitSide() == BattleSide::ATTACKER
-			? stack.getPosition().getX() < GameConstants::BFIELD_WIDTH / 2
-			: stack.getPosition().getX() >= GameConstants::BFIELD_WIDTH / 2;
+		// Pinned fheroes2 isPositionLocatedInDefendedArea checks the entire
+		// Battle::Position, not only a wide stack's head. During castle defense
+		// it uses castle cells instead of the open-field midpoint. VCMI owns
+		// the occupied-cell geometry and siege wall classification.
+		const auto isDefended = [&](const BattleHex & hex)
+		{
+			if(!hex.isValid())
+				return false;
+			if(input.defendingCastle)
+				return battle.battleIsInsideWalls(hex);
+			return stack.unitSide() == BattleSide::ATTACKER
+				? hex.getX() < GameConstants::BFIELD_WIDTH / 2
+				: hex.getX() >= GameConstants::BFIELD_WIDTH / 2;
+		};
+		input.insideDefendedArea = Ports::FHeroes2::isPositionInDefendedArea(
+			stack.getHexes(), isDefended);
 		return Ports::FHeroes2::selectTactics(input);
 	}
 

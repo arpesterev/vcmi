@@ -61,6 +61,17 @@ struct TacticsInput
 	bool defendingCastle = false;
 };
 
+// Pinned fheroes2 BattlePlanner::isPositionLocatedInDefendedArea tests
+// *both* cells of a wide unit, including the reflected footprint. Its
+// castle case uses castle geometry rather than the field's x midpoint.
+// The caller supplies authoritative VCMI occupied hexes and geometry.
+template<typename Footprint, typename IsDefended>
+inline bool isPositionInDefendedArea(const Footprint & occupied, IsDefended isDefended)
+{
+	return occupied.begin() != occupied.end()
+		&& std::all_of(occupied.begin(), occupied.end(), isDefended);
+}
+
 struct Tactics
 {
 	bool defensive = false;

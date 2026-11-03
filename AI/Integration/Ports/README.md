@@ -52,6 +52,16 @@ This models the pinned fheroes2 `Battle::Position` decision rather than just
 the head tile; enemy path reach, danger scoring and exact upstream damage
 simulation remain approximations.
 
+The pinned fheroes2 `BattlePlanner::isPositionLocatedInDefendedArea` also checks
+**both occupied cells** of a double-wide melee stack, including in castle
+defense. The VCMI projection now uses both native occupied hexes and the
+authoritative inside-walls classification during an actual fortified siege,
+rather than classifying only the stack's head by the battlefield midpoint.
+A native regression checks a sheltered double-wide castle guard's decision
+and completes the siege through the engine. Boundary head/tail cases are
+separately pinned in the deterministic predicate test; their physical
+reachability in live castle layouts is not yet established.
+
 Source-derived experimental fheroes2 extensions also cover melee pursuit of
 non-evasive targets, fast-shooter retreat from slower ground enemies, and
 melee screens for threatened friendly archers, including **double-wide archers
