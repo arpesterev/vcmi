@@ -101,6 +101,7 @@ public:
 	std::function<void(const BattleAttack &)> onAttackBeforeApply;
 	std::function<void(const StacksInjured &)> onInjuriesBeforeApply;
 	std::function<void(const BattleSpellCast &)> onSpellAfterApply;
+	std::function<void(const BattleSpellCast &)> onSpellEffectAfterApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
@@ -158,6 +159,8 @@ public:
 			++spellPackets;
 			if(onSpellAfterApply)
 				onSpellAfterApply(*cast);
+			if(onSpellEffectAfterApply)
+				onSpellEffectAfterApply(*cast);
 		}
 		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
 		{
@@ -528,6 +531,7 @@ protected:
 		recorder.onAttackBeforeApply = {};
 		recorder.onInjuriesBeforeApply = {};
 		recorder.onSpellAfterApply = {};
+		recorder.onSpellEffectAfterApply = {};
 		recorder.onMovementBeforeApply = {};
 		recorder.onRoundBeforeApply = {};
 		recorder.onRoundAfterApply = {};
@@ -766,7 +770,20 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlessAndCompletesBattle)
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
 	ASSERT_FALSE(HasFatalFailure());
 	teachBattleSpell(attackerSideHero, SpellID::BLESS, 6);
+	const CStack * blessed = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			blessed = unit.get();
+	ASSERT_NE(blessed, nullptr);
+	const int minDamageBefore = blessed->getMinDamage(false);
+	bool observedRealBuff = false;
+	recorder.onSpellEffectAfterApply = [&](const BattleSpellCast & cast)
+	{
+		if(cast.spellID == SpellID::BLESS)
+			observedRealBuff |= blessed->getMinDamage(false) > minDamageBefore;
+	};
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_TRUE(observedRealBuff) << "Bless must really improve the native stack damage range";
 	EXPECT_FALSE(recorder.castsOf(SpellID::BLESS).empty())
 		<< "FHeroes2 must cast a source-valued Bless through the actual engine";
 	EXPECT_GT(recorder.damage, 0);
@@ -780,7 +797,20 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
 	ASSERT_FALSE(HasFatalFailure());
 	teachBattleSpell(attackerSideHero, SpellID::CURSE, 6);
+	const CStack * cursed = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			cursed = unit.get();
+	ASSERT_NE(cursed, nullptr);
+	const int maxDamageBefore = cursed->getMaxDamage(false);
+	bool observedRealDebuff = false;
+	recorder.onSpellEffectAfterApply = [&](const BattleSpellCast & cast)
+	{
+		if(cast.spellID == SpellID::CURSE)
+			observedRealDebuff |= cursed->getMaxDamage(false) < maxDamageBefore;
+	};
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_TRUE(observedRealDebuff) << "Curse must really diminish the native enemy damage range";
 	EXPECT_FALSE(recorder.castsOf(SpellID::CURSE).empty())
 		<< "FHeroes2 must cast a source-valued Curse through the actual engine";
 	EXPECT_GT(recorder.damage, 0);
