@@ -101,7 +101,7 @@ public:
 	std::function<void(const BattleAttack &)> onAttackBeforeApply;
 	std::function<void(const StacksInjured &)> onInjuriesBeforeApply;
 	std::function<void(const BattleSpellCast &)> onSpellAfterApply;
-	std::function<void(const BattleSpellCast &)> onSpellEffectAfterApply;
+	std::function<void(const StacksInjured &)> onInjuriesAfterApply;
 
 	void applyPack(CPackForClient & pack) override
 	{
@@ -159,8 +159,7 @@ public:
 			++spellPackets;
 			if(onSpellAfterApply)
 				onSpellAfterApply(*cast);
-			if(onSpellEffectAfterApply)
-				onSpellEffectAfterApply(*cast);
+
 		}
 		if(const auto * attack = dynamic_cast<const BattleAttack *>(&pack))
 		{
@@ -173,6 +172,8 @@ public:
 		}
 		if(const auto * injuries = dynamic_cast<const StacksInjured *>(&pack))
 		{
+			if(onInjuriesAfterApply)
+				onInjuriesAfterApply(*injuries);
 			++injuryPackets;
 			for(const auto & injury : injuries->stacks)
 				damage += injury.damageAmount;
@@ -531,7 +532,7 @@ protected:
 		recorder.onAttackBeforeApply = {};
 		recorder.onInjuriesBeforeApply = {};
 		recorder.onSpellAfterApply = {};
-		recorder.onSpellEffectAfterApply = {};
+		recorder.onInjuriesAfterApply = {};
 		recorder.onMovementBeforeApply = {};
 		recorder.onRoundBeforeApply = {};
 		recorder.onRoundAfterApply = {};
@@ -777,9 +778,12 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlessAndCompletesBattle)
 	ASSERT_NE(blessed, nullptr);
 	const int minDamageBefore = blessed->getMinDamage(false);
 	bool observedRealBuff = false;
-	recorder.onSpellEffectAfterApply = [&](const BattleSpellCast & cast)
+	// BattleSpellCast is emitted *before* SetStackEffect in VCMI.
+	// A post-apply StacksInjured packet (including the spell's terminal
+	// empty packet) is emitted after every spell effect has been applied.
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
-		if(cast.spellID == SpellID::BLESS)
+		if(!recorder.castsOf(SpellID::BLESS).empty())
 			observedRealBuff |= blessed->getMinDamage(false) > minDamageBefore;
 	};
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
@@ -804,9 +808,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 	ASSERT_NE(cursed, nullptr);
 	const int maxDamageBefore = cursed->getMaxDamage(false);
 	bool observedRealDebuff = false;
-	recorder.onSpellEffectAfterApply = [&](const BattleSpellCast & cast)
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
-		if(cast.spellID == SpellID::CURSE)
+		if(!recorder.castsOf(SpellID::CURSE).empty())
 			observedRealDebuff |= cursed->getMaxDamage(false) < maxDamageBefore;
 	};
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
