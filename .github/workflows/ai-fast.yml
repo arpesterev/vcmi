@@ -268,13 +268,15 @@ jobs:
                       'mmaiDefenderAgainstHoMM3AttackerRealBattle',
                       'mmaiAttackerAgainstTUMDefenderRealBattle',
                       'mmaiDefenderAgainstTUMAttackerRealBattle',
-                      'mmaiStrictNeuralDoesNotCastScriptedHeroSpellRealBattle'}
+                      'mmaiStrictNeuralDoesNotCastScriptedHeroSpellRealBattle',
+                      'mmaiRangedAttackerAgainstFHeroes2InfantryRealBattle',
+                      'mmaiDefenderAgainstFHeroes2RangedAttackerRealBattle'}
           names = {case.get('name') for case in cases}
-          if len(cases) != 10 or names != expected:
+          if len(cases) != 12 or names != expected:
               raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
           if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
               raise RuntimeError('An MMAI neural integration test failed or was skipped')
-          print('Verified: nine real neural-backed MMAI battles plus one negative real-ONNX training-side check')
+          print('Verified: eleven real neural-backed MMAI battles plus one negative real-ONNX training-side check')
           PY
 
       - name: Save compiled C++ objects for later develop builds
