@@ -845,6 +845,37 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeStoneSkinAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeRangedShieldAndCompletesBattle)
+{
+	// Heroes II Shield values the enemy ranged contingent. VCMI's distinct
+	// Air Shield reduces ranged damage, while Heroes III Shield is melee-only.
+	// Exercise the actual analogous native effect and an accepted server cast.
+	prepareBattle(CreatureID(0), 80, CreatureID(2), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::AIR_SHIELD, 6);
+	const CStack * protectedStack = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			protectedStack = unit.get();
+	ASSERT_NE(protectedStack, nullptr);
+	const auto effect = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::AIR_SHIELD)));
+	ASSERT_FALSE(protectedStack->hasBonus(effect));
+	bool observedRangedProtection = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::AIR_SHIELD).empty())
+			observedRangedProtection |= protectedStack->hasBonus(effect)
+				&& protectedStack->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::AIR_SHIELD).empty())
+		<< "FHeroes2 must choose ranged protection against actual archers";
+	EXPECT_TRUE(observedRangedProtection)
+		<< "The real VCMI server must apply ranged damage mitigation";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 {
 	// Source-derived 10% Bloodlust valuation must be gated on a real

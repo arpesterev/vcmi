@@ -105,6 +105,16 @@ value. The live-battle regression checks the accepted spell and the
 subsequent melee attack increase after server effect packets. This does
 not establish Heroes II spell-duration or attack arithmetic equivalence.
 
+The fheroes2 `spellEffectValue` Shield priority uses 0.30 times the
+enemy ranged-strength share (1.25x for friendly archers). This is deliberately
+mapped to VCMI **Air Shield**, not VCMI Shield: the latter protects against
+melee damage in Heroes III, whereas the Heroes II source prioritizes shielding
+against ranged troops. A native hypothetical cast must actually add Air
+Shield before a unit receives a positive score; zero enemy ranged strength
+cannot justify the spell. The deterministic ratio contracts and a real
+engine-accepted Air Shield battle establish this *cross-game semantic
+projection*, not identical spell identities, damage rules or upstream parity.
+
 Blind now uses the pinned fheroes2 `spellEffectValue` control ratios:
 0.80 of an enemy stack's strength, or 0.40 against the final enemy when
 retaliation remains possible and is not unlimited. The native hypothetical

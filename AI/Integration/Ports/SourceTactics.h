@@ -210,6 +210,23 @@ inline double stoneSkinDefenseRatio(int beforeDefense, int afterDefense)
 	return afterDefense > beforeDefense ? 0.1 : 0.0;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue values the Heroes II Shield
+// at 30% times the opposing ranged-strength share, boosted by 25% for a
+// protected archer. Heroes III's SHIELD protects against *melee* damage;
+// the native VCMI analogue for this ranged protection is AIR_SHIELD.
+// Only a newly applied native ranged protection can earn this ratio.
+inline double shieldRangedRatio(double enemyShootersStrength, double enemyArmyStrength,
+	bool protectedShooter, bool effectiveNativeChange)
+{
+	if(!std::isfinite(enemyShootersStrength) || !std::isfinite(enemyArmyStrength)
+		|| enemyShootersStrength < 0 || enemyArmyStrength <= 0
+		|| enemyShootersStrength > enemyArmyStrength)
+		throw std::invalid_argument("fheroes2 ranged Shield requires a finite ranged fraction in [0, 1]");
+	if(!effectiveNativeChange || enemyShootersStrength == 0)
+		return 0.0;
+	return 0.3 * enemyShootersStrength / enemyArmyStrength * (protectedShooter ? 1.25 : 1.0);
+}
+
 // Pinned fheroes2 BattlePlanner::spellEffectValue values Bloodlust at 10% of
 // a friendly stack's strength. Bloodlust changes melee attack; a hypothetical
 // VCMI cast must actually increase melee attack to receive source value.

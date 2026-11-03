@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -163,10 +163,11 @@ public:
 			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
 			const bool attackBuff = spell->id == SpellID::BLOODLUST;
+			const bool rangedShield = spell->id == SpellID::AIR_SHIELD;
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !disablingSpell && !berserkSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !disablingSpell && !berserkSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -242,6 +243,20 @@ public:
 						value += static_cast<double>(old.unit->estimateCombatValue())
 							* Ports::FHeroes2::stoneSkinDefenseRatio(
 								old.unit->getDefense(false), after->getDefense(false));
+					}
+					// Heroes II Shield's original source ratio protects against
+					// ranged damage. Heroes III SHIELD is a melee reduction; VCMI
+					// AIR_SHIELD is the analogous ranged-protection effect.
+					// A hypothetical cast must actually add that native effect.
+					if(rangedShield && friendly && after && after->alive() && health == old.health)
+					{
+						const auto shieldEffect = Selector::source(BonusSource::SPELL_EFFECT,
+							BonusSourceID(SpellID(SpellID::AIR_SHIELD)));
+						const bool newlyProtected = after->hasBonus(shieldEffect)
+							&& !old.unit->hasBonus(shieldEffect);
+						value += static_cast<double>(old.unit->estimateCombatValue())
+							* Ports::FHeroes2::shieldRangedRatio(theirs.shooters,
+								theirs.strength, old.unit->isShooter(), newlyProtected);
 					}
 					// Pinned fheroes2 spellEffectValue gives Bloodlust 10% of
 					// friendly stack strength. VCMI applies the attack bonus only

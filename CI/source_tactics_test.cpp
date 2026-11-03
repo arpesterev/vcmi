@@ -128,6 +128,21 @@ int main()
 	try { FHeroes2::bloodlustAttackRatio(-1, 4); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Heroes II Shield weights 30% by enemy ranged strength, with a 25%
+	// bonus to friendly archers. VCMI uses AIR_SHIELD for ranged protection.
+	require(FHeroes2::shieldRangedRatio(100, 100, false, true) == 0.3,
+		"Ranged Shield base ratio against a wholly ranged army");
+	require(FHeroes2::shieldRangedRatio(50, 100, true, true) == 0.1875,
+		"Friendly shooters receive the original Shield priority increase");
+	require(FHeroes2::shieldRangedRatio(0, 100, true, true) == 0,
+		"No ranged opponents means no ranged Shield benefit");
+	require(FHeroes2::shieldRangedRatio(100, 100, true, false) == 0,
+		"Already-active or resisted Shield cannot be valued");
+	try { FHeroes2::shieldRangedRatio(110, 100, false, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::shieldRangedRatio(-1, 100, false, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Pinned fheroes2 Blind ratios: 80% except the last enemy,
 	// which needs an available, limited retaliation for 40%.
 	// A resisted Blind or an enemy disabled by another spell scores zero.
