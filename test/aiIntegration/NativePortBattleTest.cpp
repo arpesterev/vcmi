@@ -2668,6 +2668,85 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// The published TUM Hypnotize priority is a single comparison across all
+// attack types. A legal ranged shot must not suppress a higher-scoring melee
+// strike when the latter also receives substantial retaliation.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherComparesShotAgainstMelee)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * archer = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+	ASSERT_NE(archer, nullptr);
+	ASSERT_TRUE(archer->isShooter());
+	const BattleHex targetHex(archer->getPosition().toInt() + 3);
+	ASSERT_TRUE(targetHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(targetHex), nullptr);
+	const CStack * formerAlly = addStack(BattleSide::ATTACKER, CreatureID(0), targetHex, 100);
+	ASSERT_NE(formerAlly, nullptr);
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, archer));
+	ASSERT_TRUE(archer->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(archer), player);
+	battle()->activeStack = archer->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(archer, formerAlly->getPosition()))
+		<< "The regression requires a real legal shot";
+	const auto score = [&](BattleHex from, bool shooting, int distance)
+	{
+		BattleAttackInfo info(archer, formerAlly, distance, shooting);
+		info.attackerPos = from;
+		DamageEstimation retaliation;
+		const auto damage = view->battleEstimateDamage(info, &retaliation);
+		const double dealt = std::min(static_cast<double>(formerAlly->getAvailableHealth()),
+			(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
+		const double received = shooting ? 0.0 : std::min(static_cast<double>(archer->getAvailableHealth()),
+			(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+		return AIIntegration::Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
+	};
+	const double shotScore = score(archer->getPosition(), true, 0);
+	const auto reach = view->getReachability(archer);
+	const auto available = view->battleGetAvailableHexes(reach, archer, false);
+	double bestMeleeScore = -1;
+	for(const auto & hex : available)
+		if(hex.isAvailable() && !view->meleeAttackHexes(archer, formerAlly, hex).empty())
+			bestMeleeScore = std::max(bestMeleeScore, score(hex, false, reach.distances[hex.toInt()]));
+	ASSERT_GT(bestMeleeScore, shotScore)
+		<< "Test needs genuine melee superiority over the available shot";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, archer);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "TUM must compare legal shot and melee by the same Hypnotize score";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), formerAlly);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI server rejected the Hypnotized archer's chosen melee strike";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
