@@ -1,5 +1,6 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
 
+#include <array>
 #include <iostream>
 #include <string>
 
@@ -98,6 +99,20 @@ int main()
 		require(TUM::ballistaMayTarget(effects & 1, effects & 2, effects & 4) == (effects == 0), "Do not wake disabled targets with a ballista");
 	require(!TUM::creatureMayApplyEffect(true), "Do not recast existing effect");
 	require(TUM::creatureMayApplyEffect(false), "Allow a new effect");
+	// Siege hold is invalidated by a breach in either occupied cell of a
+	// double-wide enemy. A head-only check would miss the second case.
+	const auto insideWalls = [](bool inside) { return inside; };
+	require(!TUM::footprintBreachesCastle(std::array<bool, 1>{false}, insideWalls),
+		"Outside single-cell enemy has not breached");
+	require(TUM::footprintBreachesCastle(std::array<bool, 1>{true}, insideWalls),
+		"Inside single-cell enemy has breached");
+	require(!TUM::footprintBreachesCastle(std::array<bool, 2>{false, false}, insideWalls),
+		"Both cells of wide enemy remain outside");
+	require(TUM::footprintBreachesCastle(std::array<bool, 2>{true, false}, insideWalls),
+		"Wide enemy head inside castle invalidates hold");
+	require(TUM::footprintBreachesCastle(std::array<bool, 2>{false, true}, insideWalls),
+		"Wide enemy tail inside castle invalidates hold");
+
 	// The published fast-decoy fix has no recoverable scoring code.
 	// Pin the conservative movement-only predicate and its boundary cases.
 	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 6),
