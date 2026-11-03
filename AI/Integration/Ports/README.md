@@ -62,6 +62,13 @@ and completes the siege through the engine. Boundary head/tail cases are
 separately pinned in the deterministic predicate test; their physical
 reachability in live castle layouts is not yet established.
 
+Pinned fheroes2 `meleeUnitOffense` replaces the prior distant movement
+target when the new threat/distance priority is **equal**, not only greater.
+The native predicate now preserves this last-visited tie behavior. VCMI visits
+candidate targets in sorted unit-ID order; original fheroes2 army enumeration
+may differ. This correction has deterministic contract coverage, not a new
+source-equivalence or win-rate claim.
+
 Source-derived experimental fheroes2 extensions also cover melee pursuit of
 non-evasive targets, fast-shooter retreat from slower ground enemies, and
 melee screens for threatened friendly archers, including **double-wide archers
