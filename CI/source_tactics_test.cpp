@@ -90,6 +90,22 @@ int main()
 	try { FHeroes2::slowSpeedRatio(4, 2, 5, false, false, false, false, 0); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// fheroes2 spellEffectValue: Bless/Curse are 15% of strength,
+	// doubled when cancelling the opposite effect. A fixed-damage unit,
+	// resisted cast or an unchanged damage range must not score value.
+	require(FHeroes2::blessCurseDamageRatio(1, 3, false, true) == 0.15,
+		"Bless and Curse assign fifteen percent to a varying damage range");
+	require(FHeroes2::blessCurseDamageRatio(1, 3, true, true) == 0.3,
+		"Counteracting opposite damage magic doubles the spell value");
+	require(FHeroes2::blessCurseDamageRatio(2, 2, true, true) == 0,
+		"A fixed-damage creature gets no Bless or Curse source value");
+	require(FHeroes2::blessCurseDamageRatio(1, 3, true, false) == 0,
+		"VCMI immunity, already-active effect or native no-op has no value");
+	try { FHeroes2::blessCurseDamageRatio(-1, 3, false, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::blessCurseDamageRatio(3, 2, false, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Pinned getSpellDisruptingRayRatio: full value for three points,
 	// partial value at the minimum defense boundary, reduced valuation
 	// against a larger enemy and no value without an actual native change.
