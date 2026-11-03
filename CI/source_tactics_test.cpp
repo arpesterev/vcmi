@@ -117,6 +117,17 @@ int main()
 	try { FHeroes2::stoneSkinDefenseRatio(-1, 4); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Pinned fheroes2 spellEffectValue values Bloodlust at 10% of
+	// stack strength only if a real cast increases native melee attack.
+	require(FHeroes2::bloodlustAttackRatio(4, 7) == 0.1,
+		"Bloodlust rewards a native melee attack increase");
+	require(FHeroes2::bloodlustAttackRatio(4, 4) == 0,
+		"Already-active or resisted Bloodlust must have no value");
+	require(FHeroes2::bloodlustAttackRatio(7, 4) == 0,
+		"Decreased attack does not count as a Bloodlust buff");
+	try { FHeroes2::bloodlustAttackRatio(-1, 4); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Pinned getSpellDisruptingRayRatio: full value for three points,
 	// partial value at the minimum defense boundary, reduced valuation
 	// against a larger enemy and no value without an actual native change.

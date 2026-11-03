@@ -845,6 +845,32 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeStoneSkinAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
+{
+	// Source-derived 10% Bloodlust valuation must be gated on a real
+	// VCMI melee attack gain, then accepted by the real server.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::BLOODLUST, 6);
+	const CStack * buffed = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			buffed = unit.get();
+	ASSERT_NE(buffed, nullptr);
+	const int originalMeleeAttack = buffed->getAttack(false);
+	bool observedRealMeleeGain = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::BLOODLUST).empty())
+			observedRealMeleeGain |= buffed->getAttack(false) > originalMeleeAttack;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::BLOODLUST).empty())
+		<< "FHeroes2 must select Bloodlust without the scripted BattleAI";
+	EXPECT_TRUE(observedRealMeleeGain) << "Native Bloodlust must improve melee attack";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);

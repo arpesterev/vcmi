@@ -98,6 +98,13 @@ otherwise ineffectual casts earn zero. A live-battle regression checks the
 actual defense increase after effect application and a completed battle.
 This does not establish parity for Heroes II spell duration or defense math.
 
+Bloodlust follows the pinned fheroes2 `spellEffectValue` 0.10
+strength ratio, but only when a real VCMI hypothetical spellcast increases
+the unit's **melee** attack. A resisted or already-active Bloodlust has no
+value. The live-battle regression checks the accepted spell and the
+subsequent melee attack increase after server effect packets. This does
+not establish Heroes II spell-duration or attack arithmetic equivalence.
+
 Spell selection now also evaluates `Haste` and `Slow` using the pinned
 `BattlePlanner::getSpellHasteRatio` and `getSpellSlowRatio` priorities,
 but derives speed changes from an actual VCMI hypothetical spellcast.

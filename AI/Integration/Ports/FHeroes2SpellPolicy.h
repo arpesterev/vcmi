@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -158,8 +158,9 @@ public:
 			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
 			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
+			const bool attackBuff = spell->id == SpellID::BLOODLUST;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -235,6 +236,16 @@ public:
 						value += static_cast<double>(old.unit->estimateCombatValue())
 							* Ports::FHeroes2::stoneSkinDefenseRatio(
 								old.unit->getDefense(false), after->getDefense(false));
+					}
+					// Pinned fheroes2 spellEffectValue gives Bloodlust 10% of
+					// friendly stack strength. VCMI applies the attack bonus only
+					// to melee: score the actual post-cast melee attack increase.
+					// Resisted and already-active effects must not use mana.
+					if(attackBuff && friendly && after && after->alive() && health == old.health)
+					{
+						value += static_cast<double>(old.unit->estimateCombatValue())
+							* Ports::FHeroes2::bloodlustAttackRatio(
+								old.unit->getAttack(false), after->getAttack(false));
 					}
 					// fheroes2 spellEffectValue values Haste/Slow based on the
 					// speed actually gained/lost, not an unrelated damage

@@ -210,6 +210,16 @@ inline double stoneSkinDefenseRatio(int beforeDefense, int afterDefense)
 	return afterDefense > beforeDefense ? 0.1 : 0.0;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue values Bloodlust at 10% of
+// a friendly stack's strength. Bloodlust changes melee attack; a hypothetical
+// VCMI cast must actually increase melee attack to receive source value.
+inline double bloodlustAttackRatio(int beforeAttack, int afterAttack)
+{
+	if(beforeAttack < 0 || afterAttack < 0)
+		throw std::invalid_argument("fheroes2 Bloodlust requires nonnegative attack");
+	return afterAttack > beforeAttack ? 0.1 : 0.0;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.
