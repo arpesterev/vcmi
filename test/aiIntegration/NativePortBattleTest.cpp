@@ -2536,6 +2536,25 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 	ASSERT_GE(static_cast<int>(fast->getMovementRange()), speed + 2);
 	ASSERT_LE(static_cast<int>(slow->getMovementRange()), speed);
 	const int distance = BattleHex::getDistance(origin, fast->getPosition());
+	// The live Griffin decoy occupies two native VCMI hexes. Verify that
+	// the tactical predicate receives their true minimum distance rather
+	// than the head-only approximation before playing the complete battle.
+	const auto fastCells = fast->getHexes();
+	const auto ownCells = own->getHexes();
+	ASSERT_EQ(fastCells.size(), 2u);
+	int expectedFootprintDistance = GameConstants::BFIELD_SIZE;
+	for(const auto & friendlyCell : ownCells)
+		for(const auto & enemyCell : fastCells)
+			expectedFootprintDistance = std::min(expectedFootprintDistance,
+				static_cast<int>(BattleHex::getDistance(friendlyCell, enemyCell)));
+	const int footprintDistance = AIIntegration::Ports::TUM::nearestFootprintDistance(
+		ownCells, fastCells, [](const BattleHex & lhs, const BattleHex & rhs)
+		{
+			return BattleHex::getDistance(lhs, rhs);
+		});
+	ASSERT_EQ(footprintDistance, expectedFootprintDistance);
+	ASSERT_LE(footprintDistance, distance);
+	ASSERT_LE(footprintDistance, speed * 2 + 1);
 	ASSERT_GT(distance, speed + 1) << "The decoy must not be immediately attackable";
 	ASSERT_LE(distance, speed * 2 + 1) << "The decoy must fall inside the guarded movement range";
 
