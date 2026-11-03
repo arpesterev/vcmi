@@ -202,21 +202,20 @@ public:
 							old.unit->getDefense(false), after->getDefense(false),
 							ours.strength, enemyStrength);
 					}
-					// Pinned fheroes2 spellEffectValue awards 15% of the target
-					// strength for Bless/Curse, doubled when removing the opposite
-					// effect. Only credit an actual projected VCMI improvement
-					// or deterioration of the correct side's melee damage range.
-					// This is a source-priority projection, not Heroes II damage rules.
+					// fheroes2 spellEffectValue gives Bless/Curse 15% of target
+					// strength, doubled when removing the opposite effect.
+					// Native VCMI keeps getMinDamage/getMaxDamage unchanged:
+					// Bless and Curse control the damage *roll* through
+					// ALWAYS_MAXIMUM_DAMAGE / ALWAYS_MINIMUM_DAMAGE bonuses.
+					// Only value a newly applied projected roll-mode bonus,
+					// not fixed damage or a resisted/already-active no-op.
 					if(damageRangeSpell && after && after->alive() && health == old.health && old.unit->unitType())
 					{
 						const bool blessing = spell->id == SpellID::BLESS;
 						if((blessing && friendly) || (!blessing && !friendly))
 						{
-							const bool changed = blessing
-								? (after->getMinDamage(false) > old.unit->getMinDamage(false)
-									|| after->getMaxDamage(false) > old.unit->getMaxDamage(false))
-								: (after->getMinDamage(false) < old.unit->getMinDamage(false)
-									|| after->getMaxDamage(false) < old.unit->getMaxDamage(false));
+							const auto bonus = blessing ? BonusType::ALWAYS_MAXIMUM_DAMAGE : BonusType::ALWAYS_MINIMUM_DAMAGE;
+							const bool changed = after->hasBonusOfType(bonus) && !old.unit->hasBonusOfType(bonus);
 							const SpellID opposite(blessing ? SpellID::CURSE : SpellID::BLESS);
 							const bool counteracting = old.unit->hasBonus(Selector::source(
 								BonusSource::SPELL_EFFECT, BonusSourceID(opposite)));
