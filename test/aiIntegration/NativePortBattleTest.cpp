@@ -902,6 +902,39 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeHypnotizeAndCompletesBattle)
+{
+	// Keep a second defending stack alive: an effective control transfer
+	// must be observed after native packets, and the remaining enemies
+	// must still be defeated by legal engine actions.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 80);
+	setArmy(defenderSideHero, CreatureID(0), 20);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 30));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	bool sawControlTransfer = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(recorder.castsOf(SpellID::HYPNOTIZE).empty())
+			return;
+		for(const auto & unit : battle()->stacks)
+			if(unit->unitSide() == BattleSide::DEFENDER && unit->isHypnotized()
+				&& battle()->battleGetOwner(unit.get()) == player)
+				sawControlTransfer = true;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::HYPNOTIZE).empty())
+		<< "FHeroes2 must select Hypnotize from a real control projection";
+	EXPECT_TRUE(sawControlTransfer)
+		<< "The native game engine must transfer control of a defending stack";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlindAndCompletesBattle)
 {
 	// The pinned fheroes2 spell policy values Blind only when a real
