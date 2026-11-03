@@ -146,6 +146,19 @@ int main()
 	require(!TUM::footprintFullyInsideCastle(std::array<bool, 0>{}, insideWalls),
 		"Empty or invalid footprint cannot justify a fortified hold");
 
+	// TUM Hypnotize uses damage dealt PLUS retaliation received, unlike
+	// the net-exchange score of an ordinary combatant.
+	require(TUM::hypnotizedAttackDamageSum(10, 25) == 35,
+		"Hypnotized attacker values both directions of melee damage");
+	require(TUM::hypnotizedAttackDamageSum(12, 0) == 12,
+		"Hypnotized ranged shot does not invent retaliation");
+	require(TUM::hypnotizedAttackDamageSum(10, 30) > TUM::hypnotizedAttackDamageSum(20, 5),
+		"Retaliation can reverse the preferred TUM Hypnotize target");
+	try { TUM::hypnotizedAttackDamageSum(-1, 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { TUM::hypnotizedAttackDamageSum(std::numeric_limits<double>::infinity(), 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// The published fast-decoy fix has no recoverable scoring code.
 	// Pin the conservative movement-only predicate and its boundary cases.
 	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 6),

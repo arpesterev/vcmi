@@ -51,6 +51,15 @@ public:
 		BattleAction action;
 		if(stack->creatureId() == CreatureID::BALLISTA)
 			action = chooseBallistaShot(*battle, *stack);
+		// Published TUM Hypnotize override: attacking former allies is scored
+		// by damage inflicted + retaliation received, not net exchange.
+		else if(stack->isHypnotized() && stack->unitOwner() != battle->battleGetOwner(stack))
+		{
+			if(const auto attack = chooseHypnotizedAttack(*battle, *stack))
+				action = *attack;
+			else
+				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
+		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
 			&& !battle->battleCanShoot(stack)
 			&& (shouldProtectShooters(*battle, *stack) || shouldHoldFortifiedSiege(*battle, *stack)))
@@ -104,6 +113,86 @@ private:
 		}
 		return selected ? BattleAction::makeShotAttack(&stack, selected)
 			: BattleAction::makeDefend(&stack);
+	}
+
+	// AI Improvements.txt / SPELLS / HYPNOTIZE: attack the original ally
+	// with maximum projected outgoing + incoming damage. VCMI computes
+	// actual legal positions and combat estimates. The closed-source TUM
+	// spell internals are not claimed to have been reproduced.
+	static std::optional<BattleAction> chooseHypnotizedAttack(CPlayerBattleCallback & battle, const CStack & stack)
+	{
+		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		vstd::erase_if(targets, [](const CStack * target)
+		{
+			return !target->alive() || target->isInvincible() || !target->getPosition().isValid();
+		});
+		std::sort(targets.begin(), targets.end(), [](const CStack * lhs, const CStack * rhs)
+		{
+			return lhs->unitId() < rhs->unitId();
+		});
+		const auto score = [&](const CStack & victim, BattleHex origin, int distance, bool shooting)
+		{
+			BattleAttackInfo info(&stack, &victim, distance, shooting);
+			info.attackerPos = origin;
+			DamageEstimation retaliation;
+			const auto damage = battle.battleEstimateDamage(info, &retaliation);
+			const double dealt = std::min(static_cast<double>(victim.getAvailableHealth()),
+				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
+			const double received = shooting ? 0.0 : std::min(static_cast<double>(stack.getAvailableHealth()),
+				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
+		};
+
+		const CStack * bestShot = nullptr;
+		double bestScore = -std::numeric_limits<double>::infinity();
+		for(const auto * target : targets)
+		{
+			if(!battle.battleCanShoot(&stack, target->getPosition()))
+				continue;
+			const double value = score(*target, stack.getPosition(), 0, true);
+			if(!bestShot || value > bestScore)
+			{
+				bestShot = target;
+				bestScore = value;
+			}
+		}
+		if(bestShot)
+			return BattleAction::makeShotAttack(&stack, bestShot);
+		if(!stack.getPosition().isValid())
+			return std::nullopt;
+
+		const auto reach = battle.getReachability(&stack);
+		auto available = battle.battleGetAvailableHexes(reach, &stack, false);
+		available.sort([](const BattleHex & lhs, const BattleHex & rhs)
+		{
+			return lhs.toInt() < rhs.toInt();
+		});
+		const CStack * bestTarget = nullptr;
+		BattleHex from;
+		BattleHex attacked;
+		bestScore = -std::numeric_limits<double>::infinity();
+		for(const auto * target : targets)
+		{
+			for(const auto & hex : available)
+			{
+				if(!hex.isAvailable())
+					continue;
+				const auto attackedHexes = battle.meleeAttackHexes(&stack, target, hex);
+				if(attackedHexes.empty())
+					continue;
+				const double value = score(*target, hex, reach.distances[hex.toInt()], false);
+				if(!bestTarget || value > bestScore)
+				{
+					bestTarget = target;
+					from = hex;
+					attacked = attackedHexes.front();
+					bestScore = value;
+				}
+			}
+		}
+		return bestTarget
+			? std::optional<BattleAction>(BattleAction::makeMeleeAttack(&stack, attacked, from))
+			: std::nullopt;
 	}
 
 	static bool canReachFriendlyNextTurn(CPlayerBattleCallback & battle,

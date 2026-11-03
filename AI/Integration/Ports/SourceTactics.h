@@ -228,6 +228,18 @@ inline bool ignoreNearbyFastDecoyForMovement(int ownSpeed, int enemySpeed, int s
 		&& static_cast<int64_t>(hexDistance) <= static_cast<int64_t>(ownSpeed) * 2 + 1;
 }
 
+/// AI Improvements.txt: Hypnotized troops under AI control prefer attacks
+/// against their original allies that maximize damage dealt PLUS received.
+/// The actual damage inputs are projections from the host battle engine.
+inline double hypnotizedAttackDamageSum(double dealt, double received)
+{
+	const double total = dealt + received;
+	if(!std::isfinite(dealt) || !std::isfinite(received) || !std::isfinite(total)
+		|| dealt < 0 || received < 0)
+		throw std::invalid_argument("TUM Hypnotize score requires finite nonnegative damage");
+	return total;
+}
+
 /// AI Improvements.txt: do not repeat an already active creature buff or debuff.
 inline bool creatureMayApplyEffect(bool alreadyActive)
 {

@@ -2571,6 +2571,82 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// A genuine VCMI Hypnotize spell transfers the melee unit's control to the
+// opposing army. TUM should then attack its former allies by maximizing
+// damage dealt plus retaliation received, rather than normal net exchange.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage)
+{
+	prepareBattle(CreatureID(0), 10, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	std::vector<BattleHex> positions;
+	for(const auto & hex : guard->getPosition().getNeighbouringTiles())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+			positions.push_back(hex);
+	ASSERT_GE(positions.size(), 2u);
+	const CStack * weak = addStack(BattleSide::ATTACKER, CreatureID(0), positions[0], 5);
+	const CStack * strong = addStack(BattleSide::ATTACKER, CreatureID(0), positions[1], 80);
+	ASSERT_NE(weak, nullptr);
+	ASSERT_NE(strong, nullptr);
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, guard));
+	ASSERT_TRUE(guard->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_NE(guard->unitOwner(), player);
+	ASSERT_EQ(battle()->battleGetOwner(guard), player);
+	battle()->activeStack = guard->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto score = [&](const CStack * target)
+	{
+		BattleAttackInfo info(guard, target, 0, false);
+		info.attackerPos = guard->getPosition();
+		DamageEstimation retaliation;
+		const auto damage = view->battleEstimateDamage(info, &retaliation);
+		return AIIntegration::Ports::TUM::hypnotizedAttackDamageSum(
+			std::min(static_cast<double>(target->getAvailableHealth()),
+				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0),
+			std::min(static_cast<double>(guard->getAvailableHealth()),
+				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0));
+	};
+	ASSERT_GT(score(strong), score(weak))
+		<< "A dangerous original ally must outrank a weak target in summed damage";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const auto * chosen = view->battleGetUnitByPos(callback->action->target[1].hexValue);
+	ASSERT_NE(chosen, nullptr);
+	EXPECT_EQ(chosen->unitId(), strong->unitId())
+		<< "TUM Hypnotize must maximize dealt + received damage";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI server rejected the Hypnotized unit's real attack";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
