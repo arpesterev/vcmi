@@ -22,6 +22,17 @@ namespace AIIntegration::Ports
 {
 namespace HoMM3
 {
+// Source: ai_tactical.cpp, type_AI_attack_hex_chooser::check_adjacent_hexes.
+// Once the attack value and turn count tie, Cavalier/Champion choose the
+// costlier approach to preserve jousting; other troops prefer a cheaper route.
+// This predicate applies only to positions reachable in the same turn.
+inline bool preferEqualValueMeleeHex(int candidatePathCost, int currentPathCost, bool jouster)
+{
+	if(candidatePathCost < 0 || currentPathCost < 0)
+		throw std::invalid_argument("HoMM3 melee tie break requires nonnegative path costs");
+	return jouster ? candidatePathCost > currentPathCost : candidatePathCost < currentPathCost;
+}
+
 struct RangedTarget
 {
 	int32_t attackEffect = 0;

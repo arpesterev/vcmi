@@ -99,6 +99,15 @@ use native VCMI projections instead of the original game combat simulator.
 The original target-time and incapacitation conditions are only approximated
 with VCMI distance/speed and frozen status.
 
+The pinned HoMM3 `type_AI_attack_hex_chooser::check_adjacent_hexes`
+breaks equal-value attack-position ties within the same arrival turn by
+preferring a longer path for Cavalier/Champion jousting and a shorter path
+for other troops. The native port applies this rule only after VCMI legal
+move/attack filtering and equal projected exchange scores. Contract tests
+pin both directions; a completed engine battle checks a Cavalier's
+first real charge against a nearby one-hit target. This is not the full
+HoMM3 attack-position evaluator or its global enemy-threat map.
+
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign

@@ -225,6 +225,11 @@ public:
 		BattleHex attackFrom;
 		BattleHex attackTo;
 		double bestExchange = -std::numeric_limits<double>::infinity();
+		int bestPathCost = -1;
+		// Source ai_tactical.cpp breaks equal-value, same-turn melee ties
+		// toward the longer path only for Cavalier/Champion. All positions
+		// in 'available' are legal in the current turn (VCMI projection).
+		const bool jouster = stack.creatureId() == CreatureID(10) || stack.creatureId() == CreatureID(11);
 		for(const auto * enemy : enemies)
 		{
 			for(const auto & hex : available)
@@ -234,13 +239,19 @@ public:
 				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
 				if(attackedHexes.empty())
 					continue;
-				const double exchange = exchangeValue(battle, stack, *enemy, hex, false, reach.distances[hex.toInt()]);
-				if(!target || exchange > bestExchange)
+				const int pathCost = reach.distances[hex.toInt()];
+				if(pathCost < 0)
+					continue;
+				const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost);
+				if(!target || exchange > bestExchange
+					|| (exchange == bestExchange
+						&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
 				{
 					target = enemy;
 					attackFrom = hex;
 					attackTo = attackedHexes.front();
 					bestExchange = exchange;
+					bestPathCost = pathCost;
 				}
 			}
 		}

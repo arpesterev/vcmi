@@ -19,6 +19,7 @@ int main()
 {
 	using namespace AIIntegration::Ports;
 	using HoMM3::rangedAttackValue;
+	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
 
 	for(int difficulty = 0; difficulty < 2; ++difficulty)
@@ -31,6 +32,19 @@ int main()
 						const int divisor = difficulty ? 1 : incapacitated ? 10 : !cannotAttack && hasTarget && time <= 5 ? time : 5;
 						require(rangedAttackValue(target, difficulty) == 1001 / divisor, "HoMM3 target weighting changed");
 					}
+
+	// HoMM3 check_adjacent_hexes: on equal melee value and one-turn
+	// reachability, Cavalier/Champion prefer the greater path cost.
+	require(preferEqualValueMeleeHex(6, 4, true), "Jouster prefers a longer equal-value charge");
+	require(!preferEqualValueMeleeHex(4, 6, true), "Jouster rejects a shorter equal-value charge");
+	require(preferEqualValueMeleeHex(4, 6, false), "Regular troop prefers the cheaper equal-value position");
+	require(!preferEqualValueMeleeHex(6, 4, false), "Regular troop rejects an expensive equal-value position");
+	require(!preferEqualValueMeleeHex(4, 4, true), "Equal cost must keep a stable choice");
+	require(!preferEqualValueMeleeHex(4, 4, false), "Equal cost must keep a stable non-jouster choice");
+	try { preferEqualValueMeleeHex(-1, 4, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { preferEqualValueMeleeHex(4, -1, false); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 
 	FHeroes2::TacticsInput input{100, 100, 30, 0, true, false, false};
 	require(selectTactics(input).defensive, "Protect the ranged advantage");

@@ -2252,6 +2252,77 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3JousterPrefersLongerEqualValueMeleeRoute)
+{
+	// The pinned HoMM3 check_adjacent_hexes prefers a *longer* same-turn
+	// approach for Cavalier/Champion when attack value is otherwise tied.
+	// A single nearby Peasant is killed outright from any legal attack hex,
+	// keeping exchange value equal while native path costs differ. The far
+	// defender ensures the real game continues after the first accepted hit.
+	prepareBattle(CreatureID(10), 2, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_TRUE(cavalier->hasBonusOfType(BonusType::JOUSTING));
+	const BattleHex nearbyHex(cavalier->getPosition().toInt() + 5);
+	ASSERT_TRUE(nearbyHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearbyHex), nullptr);
+	const CStack * nearbyPeasant = addStack(BattleSide::DEFENDER, CreatureID(0), nearbyHex, 1);
+	ASSERT_NE(nearbyPeasant, nullptr);
+
+	const auto reach = battle()->getReachability(cavalier);
+	const auto available = battle()->battleGetAvailableHexes(reach, cavalier, false);
+	int shortest = std::numeric_limits<int>::max();
+	int longest = -1;
+	for(const auto & hex : available)
+	{
+		if(!hex.isAvailable() || battle()->meleeAttackHexes(cavalier, nearbyPeasant, hex).empty())
+			continue;
+		const int cost = reach.distances[hex.toInt()];
+		if(cost < 0)
+			continue;
+		shortest = std::min(shortest, cost);
+		longest = std::max(longest, cost);
+	}
+	ASSERT_LT(shortest, longest) << "The native fixture needs two legal equal-kill routes with distinct costs";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	policy->activeStack(battleID, cavalier);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK_NO_RETURN);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const BattleHex from = callback->action->target.front().hexValue;
+	const BattleHex destination = callback->action->target[1].hexValue;
+	ASSERT_TRUE(from.isValid());
+	EXPECT_EQ(reach.distances[from.toInt()], longest)
+		<< "The first native Cavalier strike must use the longer equal-value approach";
+	EXPECT_EQ(battle()->battleGetUnitByPos(destination), nearbyPeasant);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected the source-derived Cavalier charge";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "FHeroes2Tactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 {
 	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
