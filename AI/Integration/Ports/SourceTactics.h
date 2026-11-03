@@ -12,6 +12,7 @@
  */
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -158,6 +159,15 @@ inline bool isOutcomeImproved(const MeleeOutcome & candidate, const MeleeOutcome
 
 namespace TUM
 {
+// Treat every occupied cell as a possible siege breach. A wide stack's head
+// can be outside a wall while its tail is already within the defended area.
+// The caller supplies VCMI's authoritative wall geometry, not a local rule.
+template<typename Footprint, typename InsideWalls>
+inline bool footprintBreachesCastle(const Footprint & occupied, InsideWalls insideWalls)
+{
+	return std::any_of(occupied.begin(), occupied.end(), insideWalls);
+}
+
 struct ShooterProtection
 {
 	bool controlledByNeutral = false;
