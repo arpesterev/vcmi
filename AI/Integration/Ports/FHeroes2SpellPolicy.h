@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -164,10 +164,11 @@ public:
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
 			const bool attackBuff = spell->id == SpellID::BLOODLUST;
 			const bool rangedShield = spell->id == SpellID::AIR_SHIELD;
+			const bool hypnotizeSpell = spell->id == SpellID::HYPNOTIZE;
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !disablingSpell && !berserkSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -267,6 +268,25 @@ public:
 						value += static_cast<double>(old.unit->estimateCombatValue())
 							* Ports::FHeroes2::bloodlustAttackRatio(
 								old.unit->getAttack(false), after->getAttack(false));
+					}
+					// Pinned fheroes2 spellEffectValue gives Hypnotize 1.5
+					// times enemy strength. Require actual VCMI control transfer
+					// after a hypothetical cast: mere spell eligibility or a
+					// resisted/ineffectual cast never justifies spending mana.
+					if(hypnotizeSpell && !friendly && after && after->alive() && health == old.health)
+					{
+						const auto effect = [](SpellID id)
+						{
+							return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
+						};
+						const bool alreadyDisabled = old.unit->isFrozen()
+							|| old.unit->hasBonus(effect(SpellID(SpellID::BLIND)))
+							|| old.unit->hasBonus(effect(SpellID(SpellID::PARALYZE)));
+						const bool newlyControlled = after->isHypnotized()
+							&& !old.unit->isHypnotized()
+							&& projected->battleGetOwner(after) == player;
+						value += static_cast<double>(old.unit->estimateCombatValue())
+							* Ports::FHeroes2::hypnotizeControlRatio(alreadyDisabled, newlyControlled);
 					}
 					// Pinned fheroes2 spellEffectValue values Blind at 0.8 of
 					// enemy strength (0.4 for a retaliating last enemy).
