@@ -758,6 +758,34 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeDisruptingRayAndCompletesBat
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlessAndCompletesBattle)
+{
+	// A real VCMI hypothetical Bless must increase Pikeman's variable
+	// damage range before this partial fheroes2 policy assigns any value.
+	// No separate scripted BattleAI spell decision is involved.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::BLESS, 6);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::BLESS).empty())
+		<< "FHeroes2 must cast a source-valued Bless through the actual engine";
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
+{
+	// The enemy's native damage range is reduced by Curse in a real
+	// battle; the original ratio is applied only when simulation detects
+	// an actual deterioration of the enemy's damage statistics.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::CURSE, 6);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::CURSE).empty())
+		<< "FHeroes2 must cast a source-valued Curse through the actual engine";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
