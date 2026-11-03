@@ -263,9 +263,15 @@ public:
 			auto targets = enemies;
 			vstd::erase_if(targets, [&](const CStack * enemy)
 			{
+				// A wide target can be within the decoy radius by its tail
+				// even when its head lies outside. Use native occupied cells.
+				const int distance = Ports::TUM::nearestFootprintDistance(
+					stack.getHexes(), enemy->getHexes(), [](const BattleHex & lhs, const BattleHex & rhs)
+					{
+						return BattleHex::getDistance(lhs, rhs);
+					});
 				return Ports::TUM::ignoreNearbyFastDecoyForMovement(
-					ownSpeed, static_cast<int>(enemy->getMovementRange()), slowestEnemySpeed,
-					BattleHex::getDistance(stack.getPosition(), enemy->getPosition()));
+					ownSpeed, static_cast<int>(enemy->getMovementRange()), slowestEnemySpeed, distance);
 			});
 			if(!targets.empty() && targets.size() < enemies.size())
 			{
