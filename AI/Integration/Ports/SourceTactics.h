@@ -168,6 +168,16 @@ inline bool footprintBreachesCastle(const Footprint & occupied, InsideWalls insi
 	return std::any_of(occupied.begin(), occupied.end(), insideWalls);
 }
 
+// A fortified melee defender may hold only while its *entire* occupied
+// footprint is behind the wall. An inside head with an outside tail
+// must not be mistaken for a sheltered defender. Reject empty footprints.
+template<typename Footprint, typename InsideWalls>
+inline bool footprintFullyInsideCastle(const Footprint & occupied, InsideWalls insideWalls)
+{
+	return occupied.begin() != occupied.end()
+		&& std::all_of(occupied.begin(), occupied.end(), insideWalls);
+}
+
 struct ShooterProtection
 {
 	bool controlledByNeutral = false;

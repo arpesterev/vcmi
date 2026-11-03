@@ -129,14 +129,15 @@ four independently implemented overrides derived from the documentation:
   route. The published TUM mod describes avoiding nearby high-speed
   distractions but does not disclose the precise scoring. This is a bounded
   movement-only approximation, not original-algorithm equivalence.
-- **Fortified siege defense:** melee defenders already inside castle walls
+- **Fortified siege defense:** melee defenders entirely inside castle walls
   hold while the gate remains closed or blocked and no enemy has breached
   the walls or reached melee. They resume normal actions after a breach
-  or an opened/destroyed gate. Breach detection consults **every occupied
-  hex** of enemy stacks, so a double-wide unit cannot hide its inside-wall
-  tail behind an outside-wall head. The isolated predicate has head/tail
+  or an opened/destroyed gate. Both the defending unit and enemies are
+  checked by **their full occupied footprint**: a wide defender with an
+  exposed tail cannot use the fortified hold, and a wide attacker with an
+  inside-wall tail counts as a breach. The isolated predicates have head/tail
   regression checks; native siege completion is checked separately, but
-  the tail-only breach case has not been validated as a reachable live siege
+  either boundary case has not been validated as a reachable live siege
   configuration. This is a deliberately conservative VCMI interpretation
   of TUM's documented increased preference for staying within fortifications,
   not a reconstruction of its unpublished scoring.

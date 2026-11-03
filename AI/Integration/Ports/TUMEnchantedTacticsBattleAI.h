@@ -130,11 +130,16 @@ private:
 		// TUM's published siege adjustment favors remaining behind intact
 		// fortifications. With no disclosed plugin source, model only the
 		// conservative case: a closed/blocked gate and no enemy inside the walls.
+		// A wide defender is sheltered only if both its occupied cells are
+		// inside: a head-only check can hold a unit already straddling a wall.
 		// Never prevent the defender from responding once the gate opens, an
 		// enemy breaches the walls, or a melee enemy is already adjacent.
 		if(active.unitSide() != BattleSide::DEFENDER
 			|| battle.battleGetDefendedTown() == nullptr
-			|| !battle.battleIsInsideWalls(active.getPosition()))
+			|| !Ports::TUM::footprintFullyInsideCastle(active.getHexes(), [&](const BattleHex & hex)
+			{
+				return hex.isValid() && battle.battleIsInsideWalls(hex);
+			}))
 			return false;
 		const auto gate = battle.battleGetGateState();
 		if(gate != EGateState::CLOSED && gate != EGateState::BLOCKED)

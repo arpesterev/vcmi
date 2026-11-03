@@ -113,6 +113,21 @@ int main()
 	require(TUM::footprintBreachesCastle(std::array<bool, 2>{false, true}, insideWalls),
 		"Wide enemy tail inside castle invalidates hold");
 
+	// The mirrored condition applies to wide *defenders*: one exposed
+	// cell invalidates the fortified hold even if the head is sheltered.
+	require(TUM::footprintFullyInsideCastle(std::array<bool, 1>{true}, insideWalls),
+		"Sheltered single-cell defender can hold");
+	require(!TUM::footprintFullyInsideCastle(std::array<bool, 1>{false}, insideWalls),
+		"Exposed single-cell defender cannot hold");
+	require(TUM::footprintFullyInsideCastle(std::array<bool, 2>{true, true}, insideWalls),
+		"Wide defender wholly behind walls can hold");
+	require(!TUM::footprintFullyInsideCastle(std::array<bool, 2>{false, true}, insideWalls),
+		"Wide defender outside head invalidates hold");
+	require(!TUM::footprintFullyInsideCastle(std::array<bool, 2>{true, false}, insideWalls),
+		"Wide defender exposed tail invalidates hold");
+	require(!TUM::footprintFullyInsideCastle(std::array<bool, 0>{}, insideWalls),
+		"Empty or invalid footprint cannot justify a fortified hold");
+
 	// The published fast-decoy fix has no recoverable scoring code.
 	// Pin the conservative movement-only predicate and its boundary cases.
 	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 6),
