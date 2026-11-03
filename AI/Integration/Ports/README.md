@@ -115,7 +115,7 @@ documents combat behavior, but the released combat modifications are in
 compiled ERA/DLL components, not source suitable for direct porting.
 
 The TUM backend explicitly composes the experimental HoMM3 baseline with
-four independently implemented overrides derived from the documentation:
+five independently implemented overrides derived from the documentation:
 
 - **Ballista:** excludes targets affected by Blind, Paralyze or Stone Gaze;
   with no remaining legal target, it defends instead of waking a disabled
@@ -143,6 +143,13 @@ four independently implemented overrides derived from the documentation:
   the original HoMM3 route. The published TUM mod describes avoiding nearby
   high-speed distractions but does not disclose the precise scoring. This
   remains a bounded movement-only approximation, not original equivalence.
+- **Hypnotized attack preference:** a genuinely hypnotized creature chooses
+  between all legal native shots and reachable melee attacks using estimated
+  damage dealt **plus retaliation received**, rather than automatically
+  prioritizing shooting. The comparison is based on VCMI damage estimates,
+  not TUM's unpublished damage simulator. A live Hypnotize regression with
+  legal ranged and melee alternatives checks that the higher-scoring action
+  is accepted by the game server and the battle reaches an actual result.
 - **Fortified siege defense:** melee defenders entirely inside castle walls
   hold while the gate remains closed or blocked and no enemy has breached
   the walls or reached melee. They resume normal actions after a breach
