@@ -134,11 +134,15 @@ four independently implemented overrides derived from the documentation:
 - **Fast-stack decoys:** when no immediate melee attack or ranged shot is
   available, prefer an accessible slower enemy over a nearby enemy that is
   at least two speed points faster than the acting melee stack and located
-  within roughly two of its movement turns. If no
-  movement toward the slower stack is possible, preserve the original HoMM3
-  route. The published TUM mod describes avoiding nearby high-speed
-  distractions but does not disclose the precise scoring. This is a bounded
-  movement-only approximation, not original-algorithm equivalence.
+  within roughly two of its movement turns. Proximity uses the **nearest
+  occupied hex of each stack**, including double-wide enemies and actors,
+  rather than the heads alone. The deterministic test pins the boundary
+  where a wide target's head falls outside the radius but its tail is inside;
+  the native Griffin encounter checks actual occupied cells and completes a
+  VCMI battle. If no movement toward the slower stack is possible, preserve
+  the original HoMM3 route. The published TUM mod describes avoiding nearby
+  high-speed distractions but does not disclose the precise scoring. This
+  remains a bounded movement-only approximation, not original equivalence.
 - **Fortified siege defense:** melee defenders entirely inside castle walls
   hold while the gate remains closed or blocked and no enemy has breached
   the walls or reached melee. They resume normal actions after a breach
