@@ -99,6 +99,36 @@ int main()
 		{"policy_cannot_send_unsolicited_commands", [] { Fixture f; f.policy.unsolicited = true; rejects([&] { f.session.post(input(2, InputKind::UPDATE, observation(2))); }); require(f.commands.empty()); }},
 		{"reentrant_ack_is_queued_after_pending_is_set", [] { Policy p; DecisionSession * pointer = nullptr; std::vector<Command> commands; DecisionSession s(7, p, [&](const Command & c) { commands.push_back(c); pointer->post(input(3, InputKind::ACCEPTED, observation(2), c.request)); }); pointer = &s; s.post(input(1, InputKind::START, observation())); s.post(input(2, InputKind::DECIDE)); require(commands.size() == 1 && !s.hasPendingCommand()); require(p.observed.size() == 3 && p.observed.back() == InputKind::ACCEPTED); }},
 		{"transport_failure_does_not_retry", [] { Policy p; int calls = 0; DecisionSession s(7, p, [&](const Command &) { ++calls; throw std::runtime_error("transport failed"); }); s.post(input(1, InputKind::START, observation())); rejects([&] { s.post(input(2, InputKind::DECIDE)); }); require(s.isFaulted() && calls == 1); rejects([&] { s.post(input(2, InputKind::DECIDE)); }); require(calls == 1); }},
+		{"nonstandard_policy_failure_faults_session", [] {
+			struct ThrowingPolicy final : Policy
+			{
+				std::optional<Decision> onEvent(const InputEvent & event) override
+				{
+					if(event.kind == InputKind::DECIDE)
+						throw 42;
+					return Policy::onEvent(event);
+				}
+			} policy;
+			DecisionSession session(7, policy, [](const Command &) {});
+			session.post(input(1, InputKind::START, observation()));
+			bool caughtOriginal = false;
+			try { session.post(input(2, InputKind::DECIDE)); }
+			catch(int error) { caughtOriginal = error == 42; }
+			require(caughtOriginal && session.isFaulted());
+			rejects([&] { session.post(input(3, InputKind::DECIDE)); });
+		}},
+		{"nonstandard_transport_failure_does_not_retry", [] {
+			Policy policy;
+			int calls = 0;
+			DecisionSession session(7, policy, [&](const Command &) { ++calls; throw 42; });
+			session.post(input(1, InputKind::START, observation()));
+			bool caughtOriginal = false;
+			try { session.post(input(2, InputKind::DECIDE)); }
+			catch(int error) { caughtOriginal = error == 42; }
+			require(caughtOriginal && session.isFaulted() && calls == 1);
+			rejects([&] { session.post(input(3, InputKind::DECIDE)); });
+			require(calls == 1);
+		}},
 		{"empty_decision_is_an_error_not_idle", [] { Fixture f; f.policy.decision.reset(); rejects([&] { f.decide(); }); require(f.session.isFaulted()); }},
 		{"wrong_thread_is_rejected_before_state_access", [] { Fixture f; bool rejected = false; std::thread t([&] { try { f.decide(); } catch(const std::logic_error &) { rejected = true; } }); t.join(); require(rejected && f.commands.empty()); f.decide(); require(f.commands.size() == 1); }},
 		{"missing_start_rejected", [] { Policy p; DecisionSession s(7, p, [](const Command &) {}); rejects([&] { s.post(input(1, InputKind::DECIDE)); }); }},
