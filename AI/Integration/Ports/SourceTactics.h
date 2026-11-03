@@ -185,6 +185,21 @@ inline double disruptingRayDefenseRatio(int beforeDefense, int afterDefense,
 	return ratio;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue gives Bless and Curse
+// 15% of the affected stack's strength, doubled if counteracting the
+// opposite spell. The caller must first confirm that the VCMI hypothetical
+// cast actually changes the unit's damage; do not score immunity or a no-op.
+// The original fheroes2 check excludes creatures with a fixed damage range.
+inline double blessCurseDamageRatio(int baseMinDamage, int baseMaxDamage,
+	bool hasOppositeEffect, bool effectiveNativeChange)
+{
+	if(baseMinDamage < 0 || baseMaxDamage < baseMinDamage)
+		throw std::invalid_argument("fheroes2 Bless/Curse requires an ordered nonnegative damage range");
+	if(baseMinDamage == baseMaxDamage || !effectiveNativeChange)
+		return 0;
+	return hasOppositeEffect ? 0.3 : 0.15;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.
