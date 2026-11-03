@@ -143,6 +143,15 @@ int main()
 	try { FHeroes2::shieldRangedRatio(-1, 100, false, true); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Pinned fheroes2 Hypnotize is 150% of target strength, contingent
+	// on an actual new control transfer rather than spell eligibility.
+	require(FHeroes2::hypnotizeControlRatio(false, true) == 1.5,
+		"Hypnotize values a successfully controlled enemy");
+	require(FHeroes2::hypnotizeControlRatio(false, false) == 0,
+		"Resisted or repeated Hypnotize cannot be scored");
+	require(FHeroes2::hypnotizeControlRatio(true, true) == 0,
+		"An already disabled enemy cannot earn a fresh control valuation");
+
 	// Pinned fheroes2 Blind ratios: 80% except the last enemy,
 	// which needs an available, limited retaliation for 40%.
 	// A resisted Blind or an enemy disabled by another spell scores zero.
