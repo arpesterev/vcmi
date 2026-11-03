@@ -111,7 +111,15 @@ int main()
 	require(!FHeroes2::preferDistantTarget(nearFastDecoy, farArcher), "Fast evasive bait must not override an archer");
 	require(FHeroes2::preferDistantTarget(nearArcher, farArcher), "Threat / path distance must select better target");
 	require(!FHeroes2::preferDistantTarget(farArcher, nearArcher), "Longer route loses at lower normalized threat");
-	require(FHeroes2::preferDistantTarget(nearArcher, tiedArcher), "Equal priority must use stable stack identity");
+	// Pinned meleeUnitOffense uses "if (priority < maxPriority) continue":
+	// equal-ranked later candidates replace the earlier choice. The test
+	// checks both visitation orders, not an invented low-unit-ID preference.
+	require(FHeroes2::preferDistantTarget(nearArcher, tiedArcher),
+		"Equal-scoring later candidate replaces an earlier higher-ID target");
+	require(FHeroes2::preferDistantTarget(tiedArcher, nearArcher),
+		"Equal-scoring later candidate replaces an earlier lower-ID target");
+	require(!FHeroes2::preferDistantTarget(farArcher, tiedArcher),
+		"Strictly weaker distant candidate must not override the winner");
 	try { FHeroes2::preferDistantTarget({1, 0, true, 1}, farArcher); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 	try { FHeroes2::preferDistantTarget({std::numeric_limits<double>::infinity(), 1, true, 1}, farArcher); return 1; }
