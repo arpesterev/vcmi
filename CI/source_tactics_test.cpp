@@ -90,6 +90,22 @@ int main()
 	try { FHeroes2::slowSpeedRatio(4, 2, 5, false, false, false, false, 0); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Pinned getSpellDisruptingRayRatio: full value for three points,
+	// partial value at the minimum defense boundary, reduced valuation
+	// against a larger enemy and no value without an actual native change.
+	require(FHeroes2::disruptingRayDefenseRatio(6, 3, 200, 100) == 0.2,
+		"Disrupting Ray values the full three-point defense reduction");
+	require(std::fabs(FHeroes2::disruptingRayDefenseRatio(2, 1, 100, 100) - 0.2 / 3) < 1e-9,
+		"Disrupting Ray cannot reduce defense below one");
+	require(FHeroes2::disruptingRayDefenseRatio(6, 3, 50, 100) == 0.1,
+		"Weaker army discounts a spell against an oversized target");
+	require(FHeroes2::disruptingRayDefenseRatio(1, 1, 100, 100) == 0,
+		"Minimum defense has no further Disrupting Ray value");
+	require(FHeroes2::disruptingRayDefenseRatio(6, 6, 100, 100) == 0,
+		"Resisted or repeated no-op Disrupting Ray has no value");
+	try { FHeroes2::disruptingRayDefenseRatio(-1, 0, 100, 100); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Pinned fheroes2 archerDecision friendly-fire cutoff is inclusive 3:1.
 	require(!FHeroes2::catastrophicFriendlyFire(29, 10), "Area shot below 3:1 is eligible");
 	require(FHeroes2::catastrophicFriendlyFire(30, 10), "Area shot at 3:1 is rejected");

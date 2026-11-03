@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// This covers damage, health restoration and source-derived Haste/Slow speed effects; other buffs, dispels and retreat are not yet ported.
+/// This covers damage, restoration, Haste/Slow, and a projected Disrupting Ray defense reduction; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -155,8 +155,9 @@ public:
 			const auto * spell = entry.get();
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
 			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
+			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -189,6 +190,16 @@ public:
 						const double restored = static_cast<double>(after->estimateCombatValue())
 							* static_cast<double>(health - old.health) / static_cast<double>(health);
 						value += friendly ? restored : -restored;
+					}
+					// Pinned fheroes2 values Disrupting Ray against enemy defense.
+					// Use VCMI's post-cast defense to exclude immunity, minimum-
+					// defense and no-op effects. No source-equivalence claim is made.
+					if(defenseSpell && !friendly && after && after->alive() && health == old.health)
+					{
+						const double enemyStrength = static_cast<double>(old.unit->estimateCombatValue());
+						value += enemyStrength * Ports::FHeroes2::disruptingRayDefenseRatio(
+							old.unit->getDefense(false), after->getDefense(false),
+							ours.strength, enemyStrength);
 					}
 					// fheroes2 spellEffectValue values Haste/Slow based on the
 					// speed actually gained/lost, not an unrelated damage

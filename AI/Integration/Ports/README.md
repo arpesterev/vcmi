@@ -69,6 +69,14 @@ candidate targets in sorted unit-ID order; original fheroes2 army enumeration
 may differ. This correction has deterministic contract coverage, not a new
 source-equivalence or win-rate claim.
 
+Spell selection also values the pinned `getSpellDisruptingRayRatio`
+(0.2 of target strength for a full defense reduction, with the source's
+weaker-army discount). VCMI's hypothetical cast supplies the actual target
+defense before/after, including immunity and already depleted defense, so
+an ineffectual cast is never given a fictitious benefit. A native test requires
+an engine-accepted Disrupting Ray cast and a completed battle. This is not
+source-identical spell damage/stat arithmetic or a complete buff/debuff policy.
+
 Spell selection now also evaluates `Haste` and `Slow` using the pinned
 `BattlePlanner::getSpellHasteRatio` and `getSpellSlowRatio` priorities,
 but derives speed changes from an actual VCMI hypothetical spellcast.

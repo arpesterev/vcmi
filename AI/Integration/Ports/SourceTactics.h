@@ -163,6 +163,28 @@ inline double slowSpeedRatio(int before, int after, double friendlyAverageSpeed,
 	return ratio;
 }
 
+// Source: fheroes2 BattlePlanner::getSpellDisruptingRayRatio
+// (ai_battle_spell.cpp). Spell::ExtraValue is three defense points in the
+// pinned Heroes II policy. The VCMI caller supplies the *observed* defense
+// reduction from a real hypothetical cast, not an assumed successful effect.
+// It cannot score a no-op, a fully depleted target or a resisted spell.
+inline double disruptingRayDefenseRatio(int beforeDefense, int afterDefense,
+	double friendlyArmyStrength, double targetStrength)
+{
+	if(beforeDefense < 0 || afterDefense < 0 || !std::isfinite(friendlyArmyStrength)
+		|| !std::isfinite(targetStrength) || friendlyArmyStrength <= 0 || targetStrength <= 0)
+		throw std::invalid_argument("fheroes2 Disrupting Ray requires valid defense and positive armies");
+	if(beforeDefense <= 1 || afterDefense >= beforeDefense)
+		return 0;
+	constexpr double sourceDefenseReduction = 3.0;
+	const double actualReduction = std::min(
+		static_cast<double>(beforeDefense - 1), static_cast<double>(beforeDefense - afterDefense));
+	double ratio = 0.2 * std::min(1.0, actualReduction / sourceDefenseReduction);
+	if(friendlyArmyStrength < targetStrength)
+		ratio *= friendlyArmyStrength / targetStrength;
+	return ratio;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.

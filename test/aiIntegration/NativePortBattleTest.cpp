@@ -744,6 +744,20 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeSlowAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeDisruptingRayAndCompletesBattle)
+{
+	// Pinned fheroes2 getSpellDisruptingRayRatio values a real defense loss,
+	// not damage inflicted by the spell. Only this spell is learned; the
+	// actual engine must accept the cast and return a genuine battle result.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::DISRUPTING_RAY, 6);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISRUPTING_RAY).empty())
+		<< "FHeroes2 must select projected defense reduction without scripted BattleAI";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
