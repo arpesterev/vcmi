@@ -69,6 +69,16 @@ candidate targets in sorted unit-ID order; original fheroes2 army enumeration
 may differ. This correction has deterministic contract coverage, not a new
 source-equivalence or win-rate claim.
 
+Spell selection now also evaluates `Haste` and `Slow` using the pinned
+`BattlePlanner::getSpellHasteRatio` and `getSpellSlowRatio` priorities,
+but derives speed changes from an actual VCMI hypothetical spellcast.
+The target's current movement and relative army speed, shooting class,
+existing opposing speed effect and distance influence value; no speed
+change gives no value. Native engine battles check non-damage Haste
+and Slow decisions and real combat resolution. This bounded port does
+not implement all upstream buff/debuff evaluation, dispels or exact
+Heroes II battlefield-geometry and tactical-stance semantics.
+
 Source-derived experimental fheroes2 extensions also cover melee pursuit of
 non-evasive targets, fast-shooter retreat from slower ground enemies, and
 melee screens for threatened friendly archers, including **double-wide archers

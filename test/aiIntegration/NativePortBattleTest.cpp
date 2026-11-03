@@ -717,6 +717,33 @@ TEST_F(AIIntegrationNativeBattle, choosesOffensiveMagicAndCompletesTheBattle)
 	EXPECT_GT(recorder.spellPackets, 0) << "Native spell packs must reach both AI event adapters";
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeHasteAndCompletesBattle)
+{
+	// The source-derived Haste speed valuation uses VCMI's projected
+	// spell effect. Only Haste is taught to this hero, so a genuine cast
+	// proves the policy can select a non-damage spell without BattleAI.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::HASTE, 6);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::HASTE).empty())
+		<< "FHeroes2 must value native movement buffs, not only damage or resurrection";
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeSlowAndCompletesBattle)
+{
+	// A slower melee army can benefit from reducing enemy Cavalier speed.
+	// This is a real status spell applied through the ordinary game handler.
+	prepareBattle(CreatureID(0), 100, CreatureID(10), 12);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::SLOW, 6);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::SLOW).empty())
+		<< "FHeroes2 must evaluate projected enemy movement loss";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);

@@ -120,6 +120,49 @@ inline Tactics selectTactics(const TacticsInput & input)
 	return {defensive, enemyRatio < 0.15};
 }
 
+// Source: fheroes2 AI::BattlePlanner::getSpellHasteRatio and
+// getSpellSlowRatio (ai_battle_spell.cpp). The before/after speeds must
+// come from actual VCMI spell simulation: if no speed changes, the spell
+// has no movement value, including when its effect is already active.
+inline double hasteSpeedRatio(int before, int after, double enemyAverageSpeed,
+	bool currentlySlowed, bool shooter, bool defensiveTactics)
+{
+	if(before < 0 || after < 0 || !std::isfinite(enemyAverageSpeed) || enemyAverageSpeed < 0)
+		throw std::invalid_argument("fheroes2 Haste ratio requires valid speeds");
+	if(after <= before)
+		return 0;
+	double ratio = 0.05 * (after - before);
+	if(before < enemyAverageSpeed)
+		ratio *= 2;
+	if(currentlySlowed)
+		ratio *= 2;
+	else if(shooter || defensiveTactics)
+		ratio /= 2;
+	return ratio;
+}
+
+inline double slowSpeedRatio(int before, int after, double friendlyAverageSpeed,
+	bool shooter, bool attackingCastle, bool currentlyHasted, bool flying,
+	int distanceFromApproachEdge)
+{
+	if(before < 0 || after < 0 || !std::isfinite(friendlyAverageSpeed)
+		|| friendlyAverageSpeed < 0 || distanceFromApproachEdge < 1)
+		throw std::invalid_argument("fheroes2 Slow ratio requires valid speeds and distance");
+	if(after >= before)
+		return 0;
+	// Source special case for enemy archers or an attacking siege.
+	if(shooter || attackingCastle)
+		return 0.01;
+	double ratio = 0.1 * (before - after);
+	if(before < friendlyAverageSpeed)
+		ratio /= 2;
+	if(currentlyHasted)
+		ratio *= 2;
+	else if(!flying)
+		ratio /= distanceFromApproachEdge;
+	return ratio;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.

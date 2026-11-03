@@ -66,6 +66,30 @@ int main()
 	require(!selectTactics(input).defensive, "Overwhelming flying army should advance");
 
 
+	// fheroes2 BattlePlanner's Haste/Slow valuations use real projected
+	// speed changes, target type, relative army speed and distance. An
+	// already-active buff with unchanged speed is worth zero.
+	require(FHeroes2::hasteSpeedRatio(4, 6, 7, false, false, false) == 0.2,
+		"Haste doubles value for slow allied melee relative to enemy speed");
+	require(FHeroes2::hasteSpeedRatio(4, 6, 4, false, true, false) == 0.05,
+		"Haste is worth less when a shooter does not need movement");
+	require(FHeroes2::hasteSpeedRatio(4, 6, 4, true, true, false) == 0.2,
+		"Haste counteracts an existing Slow before shooter discount");
+	require(FHeroes2::hasteSpeedRatio(4, 4, 7, true, false, false) == 0,
+		"Repeated Haste with no actual speed gain has no value");
+	require(FHeroes2::slowSpeedRatio(8, 4, 5, false, false, false, false, 2) == 0.2,
+		"Slow values loss of mobility reduced by distance");
+	require(FHeroes2::slowSpeedRatio(8, 4, 5, true, false, false, false, 2) == 0.01,
+		"Source Slow special case for archers uses a small fixed value");
+	require(FHeroes2::slowSpeedRatio(8, 4, 5, false, false, true, false, 2) == 0.8,
+		"Slow that cancels Haste restores twice the tactical value");
+	require(FHeroes2::slowSpeedRatio(8, 8, 5, false, false, false, false, 2) == 0,
+		"Repeated Slow with no actual change has no value");
+	try { FHeroes2::hasteSpeedRatio(-1, 4, 5, false, false, false); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::slowSpeedRatio(4, 2, 5, false, false, false, false, 0); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Pinned fheroes2 archerDecision friendly-fire cutoff is inclusive 3:1.
 	require(!FHeroes2::catastrophicFriendlyFire(29, 10), "Area shot below 3:1 is eligible");
 	require(FHeroes2::catastrophicFriendlyFire(30, 10), "Area shot at 3:1 is rejected");

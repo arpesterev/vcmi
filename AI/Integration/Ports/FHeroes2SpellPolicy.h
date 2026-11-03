@@ -20,7 +20,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// This covers damage and health restoration, not the upstream buff/retreat policy.
+/// This covers damage, health restoration and source-derived Haste/Slow speed effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -153,8 +153,9 @@ public:
 		{
 			const auto * spell = entry.get();
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
+			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -187,6 +188,38 @@ public:
 						const double restored = static_cast<double>(after->estimateCombatValue())
 							* static_cast<double>(health - old.health) / static_cast<double>(health);
 						value += friendly ? restored : -restored;
+					}
+					// fheroes2 spellEffectValue values Haste/Slow based on the
+					// speed actually gained/lost, not an unrelated damage
+					// spell's health delta. HypotheticBattle applies native
+					// VCMI resistance, stacking, legality and duration.
+					if(speedSpell && after && after->alive() && health == old.health)
+					{
+						const int beforeSpeed = static_cast<int>(old.unit->getMovementRange());
+						const int afterSpeed = static_cast<int>(after->getMovementRange());
+						const double strength = static_cast<double>(old.unit->estimateCombatValue());
+						if(friendly && spell->id == SpellID::HASTE)
+						{
+							const bool slowed = old.unit->hasBonus(Selector::source(
+								BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::SLOW))));
+							value += strength * Ports::FHeroes2::hasteSpeedRatio(
+								beforeSpeed, afterSpeed, theirs.averageSpeed(), slowed,
+								old.unit->isShooter(), false);
+						}
+						else if(!friendly && spell->id == SpellID::SLOW && old.position.isValid())
+						{
+							const bool hasted = old.unit->hasBonus(Selector::source(
+								BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::HASTE))));
+							const bool attackingCastle = real->battleGetDefendedTown() != nullptr
+								&& real->battleGetMySide() == BattleSide::ATTACKER;
+							const int distance = old.unit->unitSide() == BattleSide::DEFENDER
+								? old.position.getX()
+								: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
+							value += strength * Ports::FHeroes2::slowSpeedRatio(
+								beforeSpeed, afterSpeed, ours.averageSpeed(), old.unit->isShooter(),
+								attackingCastle, hasted,
+								old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
+						}
 					}
 				}
 				if(friendlyHealth <= 0)
