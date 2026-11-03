@@ -143,7 +143,11 @@ inline bool preferDistantTarget(const DistantTarget & candidate, const DistantTa
 		return candidate.cannotEvade;
 	const double score = candidate.threat / candidate.pathDistance;
 	const double previousScore = previous.threat / previous.pathDistance;
-	return score > previousScore || (score == previousScore && candidate.unitId < previous.unitId);
+	// Pinned meleeUnitOffense replaces the previous movement target unless
+	// its existing priority is strictly greater. Equal scores therefore select
+	// the *last visited* eligible unit, not the lowest numeric unit ID.
+	// VCMI visits candidates by stable unit ID; upstream enumerates army order.
+	return score >= previousScore;
 }
 
 /** fheroes2 archerDecision avoids an area shot when projected allied HP
