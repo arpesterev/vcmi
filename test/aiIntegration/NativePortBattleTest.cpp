@@ -765,8 +765,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeDisruptingRayAndCompletesBat
 
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlessAndCompletesBattle)
 {
-	// A real VCMI hypothetical Bless must increase Pikeman's variable
-	// damage range before this partial fheroes2 policy assigns any value.
+	// A real VCMI hypothetical Bless must activate Pikeman's maximum-
+	// damage roll before this partial fheroes2 policy assigns any value.
 	// No separate scripted BattleAI spell decision is involved.
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
 	ASSERT_FALSE(HasFatalFailure());
@@ -776,18 +776,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlessAndCompletesBattle)
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
 			blessed = unit.get();
 	ASSERT_NE(blessed, nullptr);
-	const int minDamageBefore = blessed->getMinDamage(false);
+	ASSERT_FALSE(blessed->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE));
 	bool observedRealBuff = false;
 	// BattleSpellCast is emitted *before* SetStackEffect in VCMI.
 	// A post-apply StacksInjured packet (including the spell's terminal
-	// empty packet) is emitted after every spell effect has been applied.
+	// empty packet) is emitted after all spell effects have been applied.
 	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
 		if(!recorder.castsOf(SpellID::BLESS).empty())
-			observedRealBuff |= blessed->getMinDamage(false) > minDamageBefore;
+			observedRealBuff |= blessed->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE);
 	};
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
-	EXPECT_TRUE(observedRealBuff) << "Bless must really improve the native stack damage range";
+	EXPECT_TRUE(observedRealBuff) << "Bless must really force the native maximum-damage roll";
 	EXPECT_FALSE(recorder.castsOf(SpellID::BLESS).empty())
 		<< "FHeroes2 must cast a source-valued Bless through the actual engine";
 	EXPECT_GT(recorder.damage, 0);
@@ -795,9 +795,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlessAndCompletesBattle)
 
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 {
-	// The enemy's native damage range is reduced by Curse in a real
-	// battle; the original ratio is applied only when simulation detects
-	// an actual deterioration of the enemy's damage statistics.
+	// The enemy's native minimum-damage roll mode is imposed by Curse;
+	// the source ratio is applied only when the projection detects it.
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
 	ASSERT_FALSE(HasFatalFailure());
 	teachBattleSpell(attackerSideHero, SpellID::CURSE, 6);
@@ -806,15 +805,15 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
 			cursed = unit.get();
 	ASSERT_NE(cursed, nullptr);
-	const int maxDamageBefore = cursed->getMaxDamage(false);
+	ASSERT_FALSE(cursed->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
 	bool observedRealDebuff = false;
 	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
 		if(!recorder.castsOf(SpellID::CURSE).empty())
-			observedRealDebuff |= cursed->getMaxDamage(false) < maxDamageBefore;
+			observedRealDebuff |= cursed->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE);
 	};
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
-	EXPECT_TRUE(observedRealDebuff) << "Curse must really diminish the native enemy damage range";
+	EXPECT_TRUE(observedRealDebuff) << "Curse must really force the native minimum-damage roll";
 	EXPECT_FALSE(recorder.castsOf(SpellID::CURSE).empty())
 		<< "FHeroes2 must cast a source-valued Curse through the actual engine";
 	EXPECT_GT(recorder.damage, 0);
