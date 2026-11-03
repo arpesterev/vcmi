@@ -199,6 +199,27 @@ not that it reproduces the complete upstream algorithm.
 The reserved complete-port names must still fail explicitly. In particular,
 `FHeroes2` and `HoMM3Original` must not silently create the partial ports.
 
+## MMAI special-unit behavior and neural evidence
+
+The upstream MMAI V13/V15 backends use deterministic, built-in native
+auto-actions for first-aid tents, catapults and arrow towers; these actions
+are **not** inferred from ONNX. This is source-native MMAI handling, not a
+fallback to VCMI BattleAI, and battle results still come from the real
+engine. Model-backed creature turns must be distinguished from these
+automatic unit turns when evaluating combat behavior.
+
+The model-gated native harness now records
+`mmai_model_eligible_activations` separately from
+`mmai_automatic_activations`. Its neural decision assertions exclude
+the three kinds of source-automatic war machines; the numbers remain
+execution evidence, not independently instrumented inference counts.
+The dedicated MMAI siege-attacker versus TUM partial-policy fixture also
+checks that the official model-controlled creatures act, the attacker
+operates a real catapult, both sides move and the game engine decides the
+result. The router may select a generic attacker model for siege if no
+specific `attacker.siege` model is configured; neither case proves that
+MMAI has learned siege-machine or hero-spell decisions.
+
 ## MMAI neural-only hero spells
 
 The installed, official MMAI 1.8 ONNX policies choose unit actions, not hero
