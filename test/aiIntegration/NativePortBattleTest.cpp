@@ -2308,7 +2308,7 @@ TEST_F(AIIntegrationNativeBattle, homm3JousterPrefersLongerEqualValueMeleeRoute)
 	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
 	policy->activeStack(battleID, cavalier);
 	ASSERT_TRUE(callback->action.has_value());
-	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK_NO_RETURN);
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
 	ASSERT_GE(callback->action->target.size(), 2u);
 	const BattleHex from = callback->action->target.front().hexValue;
 	const BattleHex destination = callback->action->target[1].hexValue;
