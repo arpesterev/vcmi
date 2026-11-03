@@ -143,23 +143,24 @@ private:
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
 		};
 
-		const CStack * bestShot = nullptr;
+		// TUM's published Hypnotize priority applies across all legal attack
+		// types. A legal shot does not automatically outrank a reachable melee
+		// strike whose retaliation makes the combined damage larger.
+		std::optional<BattleAction> bestAction;
 		double bestScore = -std::numeric_limits<double>::infinity();
 		for(const auto * target : targets)
 		{
 			if(!battle.battleCanShoot(&stack, target->getPosition()))
 				continue;
 			const double value = score(*target, stack.getPosition(), 0, true);
-			if(!bestShot || value > bestScore)
+			if(!bestAction || value > bestScore)
 			{
-				bestShot = target;
+				bestAction = BattleAction::makeShotAttack(&stack, target);
 				bestScore = value;
 			}
 		}
-		if(bestShot)
-			return BattleAction::makeShotAttack(&stack, bestShot);
 		if(!stack.getPosition().isValid())
-			return std::nullopt;
+			return bestAction;
 
 		const auto reach = battle.getReachability(&stack);
 		auto available = battle.battleGetAvailableHexes(reach, &stack, false);
@@ -167,10 +168,6 @@ private:
 		{
 			return lhs.toInt() < rhs.toInt();
 		});
-		const CStack * bestTarget = nullptr;
-		BattleHex from;
-		BattleHex attacked;
-		bestScore = -std::numeric_limits<double>::infinity();
 		for(const auto * target : targets)
 		{
 			for(const auto & hex : available)
@@ -181,18 +178,14 @@ private:
 				if(attackedHexes.empty())
 					continue;
 				const double value = score(*target, hex, reach.distances[hex.toInt()], false);
-				if(!bestTarget || value > bestScore)
+				if(!bestAction || value > bestScore)
 				{
-					bestTarget = target;
-					from = hex;
-					attacked = attackedHexes.front();
+					bestAction = BattleAction::makeMeleeAttack(&stack, attackedHexes.front(), hex);
 					bestScore = value;
 				}
 			}
 		}
-		return bestTarget
-			? std::optional<BattleAction>(BattleAction::makeMeleeAttack(&stack, attacked, from))
-			: std::nullopt;
+		return bestAction;
 	}
 
 	static bool canReachFriendlyNextTurn(CPlayerBattleCallback & battle,
