@@ -101,7 +101,10 @@ public:
 				apply(next);
 			}
 		}
-		catch(const std::exception &)
+		// Policies and transports may fail outside std::exception. A failed
+		// dispatch must never leave the session in the dispatching state or
+		// silently accept later commands. Preserve the original exception.
+		catch(...)
 		{
 			failed = true;
 			dispatching = false;
