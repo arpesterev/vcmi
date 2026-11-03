@@ -77,6 +77,18 @@ an ineffectual cast is never given a fictitious benefit. A native test requires
 an engine-accepted Disrupting Ray cast and a completed battle. This is not
 source-identical spell damage/stat arithmetic or a complete buff/debuff policy.
 
+Spell selection also applies the pinned fheroes2 `spellEffectValue` base
+ratios for **Bless** and **Curse**: 0.15 of the relevant unit's projected
+combat strength (0.30 when counteracting the opposite effect), and zero
+for creatures with fixed base damage. The partial VCMI projection checks
+that a hypothetical cast really improves allied or reduces enemy melee
+damage before scoring it, so already-effective, immune or no-op casts do
+not receive a fictitious value. Standalone contracts check the ratio and
+negative cases; native battle fixtures require each spell to be cast by
+the actual FHeroes2Tactics controller and the battle to end normally.
+This is not complete fheroes2 spell planning, spell duration parity or
+identical Heroes II/III combat arithmetic.
+
 Spell selection now also evaluates `Haste` and `Slow` using the pinned
 `BattlePlanner::getSpellHasteRatio` and `getSpellSlowRatio` priorities,
 but derives speed changes from an actual VCMI hypothetical spellcast.
