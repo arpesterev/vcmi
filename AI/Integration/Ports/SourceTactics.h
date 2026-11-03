@@ -214,6 +214,19 @@ inline bool ballistaMayTarget(bool blind, bool paralyzed, bool petrified)
 	return !blind && !paralyzed && !petrified;
 }
 
+// Tactical distances between wide units must use their actual occupied cells.
+// Both footprints come from the host game; an empty footprint cannot select
+// a nearby decoy. The caller supplies the game's authoritative hex metric.
+template<typename FirstFootprint, typename SecondFootprint, typename Distance>
+inline int nearestFootprintDistance(const FirstFootprint & first, const SecondFootprint & second, Distance distance)
+{
+	int nearest = std::numeric_limits<int>::max();
+	for(const auto & firstCell : first)
+		for(const auto & secondCell : second)
+			nearest = std::min(nearest, static_cast<int>(distance(firstCell, secondCell)));
+	return nearest;
+}
+
 /// AI Improvements.txt: avoid chasing a faster nearby decoy when a
 /// reachable slower opponent exists, within two movement turns. No source-level TUM scoring is public;
 /// this predicate is a conservative, explicitly approximate interpretation.
