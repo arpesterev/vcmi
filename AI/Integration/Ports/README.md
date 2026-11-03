@@ -115,6 +115,14 @@ cannot justify the spell. The deterministic ratio contracts and a real
 engine-accepted Air Shield battle establish this *cross-game semantic
 projection*, not identical spell identities, damage rules or upstream parity.
 
+Hypnotize now uses the pinned fheroes2 `spellEffectValue` control ratio of
+1.5 times the enemy stack's strength. The VCMI hypothetical cast must
+actually switch tactical ownership of a living enemy; resisted, redundant
+or already disabled targets cannot receive fictitious priority. A native
+multi-stack battle regression requires the selected spell, an observable
+post-packet ownership change, real damage and an engine-decided battle.
+This is not identical Heroes II control duration or spell-cost arithmetic.
+
 Blind now uses the pinned fheroes2 `spellEffectValue` control ratios:
 0.80 of an enemy stack's strength, or 0.40 against the final enemy when
 retaliation remains possible and is not unlimited. The native hypothetical
