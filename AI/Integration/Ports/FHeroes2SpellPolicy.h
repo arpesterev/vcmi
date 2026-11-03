@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include "SourceTactics.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
 #include "../../../lib/CStack.h"
