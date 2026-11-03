@@ -2289,8 +2289,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideCastleDefenderKeepsShelteredStance
 			&& unit->creatureId() == CreatureID(10))
 			guard = unit.get();
 	ASSERT_NE(guard, nullptr);
-	ASSERT_EQ(guard->getHexes().size(), 2u);
-	ASSERT_TRUE(std::all_of(guard->getHexes().begin(), guard->getHexes().end(),
+	const auto occupied = guard->getHexes();
+	ASSERT_EQ(occupied.size(), 2u);
+	ASSERT_TRUE(std::all_of(occupied.begin(), occupied.end(),
 		[&](const BattleHex & hex) { return hex.isValid() && battle()->battleIsInsideWalls(hex); }))
 		<< "This siege fixture must have a genuinely sheltered wide garrison";
 	const auto battleID = battle()->getBattleID();
