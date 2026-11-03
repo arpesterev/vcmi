@@ -948,6 +948,75 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerArchers)
+{
+	// Source meleeUnitDefense protects archers only when the melee unit
+	// still belongs to its original army. Hypnotize changes the controller
+	// without changing the source army. Test a real VCMI spell, not a mock
+	// owner flag, and require a legal resulting unit action.
+	prepareBattle(CreatureID(0), 10, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex initial = guard->getPosition();
+	const BattleHex shooterHex(initial.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex enemyHex(shooterHex.toInt() + 5);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_TRUE(enemyHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(enemyHex), nullptr);
+	const CStack * shooter = addStack(BattleSide::DEFENDER, CreatureID(2), shooterHex, 120);
+	const CStack * enemy = addStack(BattleSide::ATTACKER, CreatureID(0), enemyHex, 15);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(enemy, nullptr);
+	ASSERT_GT(BattleHex::getDistance(initial, enemyHex),
+		static_cast<int>(guard->getMovementRange()) + 1)
+		<< "Guard must not have a competing immediate melee attack";
+	ASSERT_LE(BattleHex::getDistance(shooterHex, enemyHex),
+		static_cast<int>(enemy->getMovementRange()) + 1)
+		<< "The foreign archer must be threatened for this regression";
+
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, guard));
+	ASSERT_TRUE(guard->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_NE(guard->unitOwner(), player);
+	ASSERT_EQ(battle()->battleGetOwner(guard), player)
+		<< "The actual spell must transfer tactical control";
+	ASSERT_TRUE(shooter->isShooter());
+	// Select this live stack's activation. As with the fixture's act(),
+	// the test changes turn scheduling only, never combat/game rules.
+	battle()->activeStack = guard->unitId();
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "A hypnotized enemy may not reposition to screen its controller's archers: "
+		<< callback->action->toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Engine rejected the hypnotized unit's defensive command";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedWideShooter)
 {
 	// Pinned fheroes2 meleeUnitDefense visits both cells of every archer,
