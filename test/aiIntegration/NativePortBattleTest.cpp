@@ -2319,7 +2319,11 @@ TEST_F(AIIntegrationNativeBattle, homm3JousterPrefersLongerEqualValueMeleeRoute)
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "VCMI rejected the source-derived Cavalier charge";
 	policy.reset();
-	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "FHeroes2Tactics");
+	// The first Cavalier decision was already submitted to the real engine
+	// before the continuation harness begins counting policy activations.
+	// This is a source-policy regression, not a mixed-AI matchup: continue
+	// with HoMM3 on both sides rather than claiming an unobserved first turn.
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
