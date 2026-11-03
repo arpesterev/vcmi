@@ -819,6 +819,32 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeStoneSkinAndCompletesBattle)
+{
+	// The source values Stone Skin as a defensive buff. Observe the real
+	// VCMI defense change after its effect packets, not merely a spellcast.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::STONE_SKIN, 6);
+	const CStack * protectedStack = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			protectedStack = unit.get();
+	ASSERT_NE(protectedStack, nullptr);
+	const int originalDefense = protectedStack->getDefense(false);
+	bool sawRealDefenseGain = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::STONE_SKIN).empty())
+			sawRealDefenseGain |= protectedStack->getDefense(false) > originalDefense;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::STONE_SKIN).empty())
+		<< "FHeroes2 must select Stone Skin without the scripted BattleAI";
+	EXPECT_TRUE(sawRealDefenseGain) << "Native Stone Skin must increase actual defense";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);

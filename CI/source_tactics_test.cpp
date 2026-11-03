@@ -106,6 +106,17 @@ int main()
 	try { FHeroes2::blessCurseDamageRatio(3, 2, false, true); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Pinned fheroes2 spellEffectValue values Stone Skin at 10% only
+	// when the VCMI simulation actually increases the target's defense.
+	require(FHeroes2::stoneSkinDefenseRatio(4, 7) == 0.1,
+		"Stone Skin values an observed native defense increase");
+	require(FHeroes2::stoneSkinDefenseRatio(4, 4) == 0,
+		"Already-active or resisted Stone Skin must not consume mana for no benefit");
+	require(FHeroes2::stoneSkinDefenseRatio(7, 4) == 0,
+		"Lower defense cannot count as a successful Stone Skin buff");
+	try { FHeroes2::stoneSkinDefenseRatio(-1, 4); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Pinned getSpellDisruptingRayRatio: full value for three points,
 	// partial value at the minimum defense boundary, reduced valuation
 	// against a larger enemy and no value without an actual native change.

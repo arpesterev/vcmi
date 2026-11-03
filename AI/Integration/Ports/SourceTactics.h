@@ -200,6 +200,16 @@ inline double blessCurseDamageRatio(int baseMinDamage, int baseMaxDamage,
 	return hasOppositeEffect ? 0.3 : 0.15;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue gives Stone Skin 10%
+// of the affected unit's strength. No-op spells must not be scored: use
+// the defense before/after an actual VCMI hypothetical cast.
+inline double stoneSkinDefenseRatio(int beforeDefense, int afterDefense)
+{
+	if(beforeDefense < 0 || afterDefense < 0)
+		throw std::invalid_argument("fheroes2 Stone Skin requires nonnegative defense");
+	return afterDefense > beforeDefense ? 0.1 : 0.0;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.

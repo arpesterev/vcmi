@@ -91,6 +91,13 @@ observed after the engine's effect packets, and the battle to end normally.
 This is not complete fheroes2 spell planning, spell duration parity or
 identical Heroes II/III combat arithmetic.
 
+Stone Skin also uses the pinned fheroes2 `spellEffectValue` base ratio of
+0.10 of allied stack strength. The native hypothetical cast must increase
+VCMI defense before the spell earns any value; resisted, already-active and
+otherwise ineffectual casts earn zero. A live-battle regression checks the
+actual defense increase after effect application and a completed battle.
+This does not establish parity for Heroes II spell duration or defense math.
+
 Spell selection now also evaluates `Haste` and `Slow` using the pinned
 `BattlePlanner::getSpellHasteRatio` and `getSpellSlowRatio` priorities,
 but derives speed changes from an actual VCMI hypothetical spellcast.

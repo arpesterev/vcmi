@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// This covers damage, restoration, Haste/Slow, Bless/Curse, and a projected Disrupting Ray defense reduction; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -157,8 +157,9 @@ public:
 			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
 			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
 			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
+			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -225,6 +226,15 @@ public:
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(),
 									counteracting, changed);
 						}
+					}
+					// Pinned fheroes2 spellEffectValue assigns Stone Skin 10% of
+					// allied stack strength. Only accept VCMI's observed defense
+					// gain; immunities and already-active buffs must score zero.
+					if(defenseBuff && friendly && after && after->alive() && health == old.health)
+					{
+						value += static_cast<double>(old.unit->estimateCombatValue())
+							* Ports::FHeroes2::stoneSkinDefenseRatio(
+								old.unit->getDefense(false), after->getDefense(false));
 					}
 					// fheroes2 spellEffectValue values Haste/Slow based on the
 					// speed actually gained/lost, not an unrelated damage
