@@ -145,6 +145,10 @@ jobs:
           else:
               report['error'] = 'No native battle XML report was produced'
               report['tail'] = (Path(os.environ['RUNNER_TEMP']) / 'native-battles.log').read_text(errors='replace').splitlines()[-30:]
+          for failure in report.get('failures', []):
+              print('NATIVE_BATTLE_FAILURE:', failure['test'])
+              for error in failure['errors']:
+                  print(error)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('diagnostics=' + json.dumps(report, separators=(',', ':')) + '\n')
           PY
