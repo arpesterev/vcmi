@@ -276,8 +276,22 @@ private:
 			});
 			if(!threatened)
 				continue;
+			// A guard already adjacent to one threatened shooter must not
+			// immediately defend without considering the other shooters.
+			// Treat its current screen as a zero-travel candidate, then
+			// compare every reachable cover using the same source-derived
+			// archer-strength / travel-penalty ranking.
 			if(distanceToShooter(stack.getPosition(), *friendly) == 1)
-				return BattleAction::makeDefend(&stack);
+			{
+				const double value = strength(*friendly);
+				if(value > bestCoverValue)
+				{
+					bestCoverValue = value;
+					bestCoverHex = stack.getPosition();
+					bestTravel = 0;
+				}
+				continue;
+			}
 
 			for(const auto & hex : available)
 			{
@@ -300,7 +314,8 @@ private:
 				}
 			}
 		}
-		return bestCoverHex.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&stack, bestCoverHex))
+		return bestCoverHex.isValid() && bestCoverHex != stack.getPosition()
+			? std::optional<BattleAction>(BattleAction::makeMove(&stack, bestCoverHex))
 			: std::nullopt;
 	}
 
