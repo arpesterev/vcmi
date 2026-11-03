@@ -159,6 +159,23 @@ int main()
 	try { TUM::hypnotizedAttackDamageSum(std::numeric_limits<double>::infinity(), 2); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// In the live VCMI projection, a fast double-wide decoy may be near
+	// by its tail, even if its head is just outside the two-turn radius.
+	const auto linearDistance = [](int first, int second) { return std::abs(first - second); };
+	const int wideDistance = TUM::nearestFootprintDistance(
+		std::array<int, 1>{0}, std::array<int, 2>{10, 9}, linearDistance);
+	require(wideDistance == 9, "Decoy distance must use the nearest occupied cell");
+	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 10),
+		"Wide enemy head alone would miss the guarded radius");
+	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, wideDistance),
+		"Wide enemy tail inside the radius must count as nearby");
+	require(TUM::nearestFootprintDistance(std::array<int, 2>{0, 1},
+		std::array<int, 2>{10, 11}, linearDistance) == 9,
+		"Wide acting stack must also use both occupied cells");
+	require(TUM::nearestFootprintDistance(std::array<int, 0>{},
+		std::array<int, 1>{5}, linearDistance) == std::numeric_limits<int>::max(),
+		"Invalid empty footprint must not create a nearby target");
+
 	// The published fast-decoy fix has no recoverable scoring code.
 	// Pin the conservative movement-only predicate and its boundary cases.
 	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 6),
