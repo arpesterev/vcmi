@@ -65,6 +65,17 @@ int main()
 		{"backend_error_does_not_fall_back", [] { BackendRegistry<int> r; r.add(build(), []() -> std::shared_ptr<int> { throw std::runtime_error("backend failure"); }); rejects([&] { r.create(BackendId::FHEROES2, "h3-test"); }); }},
 		{"native_event_is_delivered_once", [] { std::vector<EventRecord> log; EventChannel c("MMAI", [&](const auto & e) { log.push_back(e); }); int n = 0; c.deliver(3, "activeStack", [&] { ++n; }); require(n == 1 && log.size() == 2); require(log[0].phase == EventPhase::BEGIN && log[1].phase == EventPhase::COMPLETE); require(log[0].sequence == log[1].sequence && log[0].backend == "MMAI"); }},
 		{"native_event_failure_is_not_success", [] { std::vector<EventRecord> log; EventChannel c("MMAI", [&](const auto & e) { log.push_back(e); }); rejects([&] { c.deliver(2, "activeStack", [] { throw std::runtime_error("failure"); }); }); require(log.size() == 2 && log.back().phase == EventPhase::FAILED); }},
+		{"nonstandard_backend_failure_is_observed_and_rethrown", [] {
+			std::vector<EventRecord> log;
+			EventChannel c("FHeroes2Tactics", [&](const auto & event) { log.push_back(event); });
+			bool caughtOriginal = false;
+			try { c.deliver(17, "activeStack", [] { throw 42; }); }
+			catch(int error) { caughtOriginal = error == 42; }
+			require(caughtOriginal);
+			require(log.size() == 2 && log[0].phase == EventPhase::BEGIN && log[1].phase == EventPhase::FAILED);
+			require(log[0].sequence == log[1].sequence && log[1].battle == 17);
+			require(log[1].backend == "FHeroes2Tactics" && log[1].kind == "activeStack");
+		}},
 		{"nested_native_events_keep_identity", [] { std::vector<EventRecord> log; EventChannel c("MMAI", [&](const auto & e) { log.push_back(e); }); c.deliver(3, "outer", [&] { c.deliver(3, "inner", [] {}); }); require(log.size() == 4); require(log[0].sequence == 1 && log[1].sequence == 2 && log[2].sequence == 2 && log[3].sequence == 1); }},
 		{"commands_only_on_decision_events", [] { Fixture f; require(f.commands.empty()); f.decide(); require(f.commands.size() == 1 && f.session.hasPendingCommand()); require(f.commands[0].session == 7 && f.commands[0].basedOnRevision == 1 && f.commands[0].eventSequence == 2); }},
 		{"same_event_replay_does_not_duplicate_command", [] { Fixture f; f.decide(); f.session.post(input(2, InputKind::DECIDE)); require(f.commands.size() == 1); }},
