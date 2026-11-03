@@ -240,7 +240,12 @@ private:
 		const CStack & stack, const ReachabilityInfo & reachability,
 		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
 	{
-		if(stack.hasBonusOfType(BonusType::SHOOTER))
+		// fheroes2 meleeUnitDefense explicitly skips archer cover when the
+		// current stack's original army differs from its current controller.
+		// In VCMI this happens with Hypnotize: a stolen guard must not screen
+		// the controller's archers as though it belonged to their army.
+		if(stack.hasBonusOfType(BonusType::SHOOTER)
+			|| stack.unitOwner() != battle.battleGetOwner(&stack))
 			return std::nullopt;
 		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
 		const auto distanceToShooter = [&](const BattleHex & head, const CStack & shooter)
