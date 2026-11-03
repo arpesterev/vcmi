@@ -83,7 +83,7 @@ namespace
 		return repo.get();
 	}
 
-	Schema::IModel * GetModel(const std::string & key)
+	Schema::IModel * GetModel(const std::string & key, bool requireNeuralModel)
 	{
 		const auto * repo = GetModelRepository();
 		auto lock = std::lock_guard<std::mutex>(repo->mutex);
@@ -144,6 +144,16 @@ namespace
 
 		if(!model)
 		{
+			// A user-selected strict MMAI must never return even a temporary
+			// scripted model to the router. Legacy hybrid callers may still use
+			// the explicitly configured fallback, but strict selection fails here.
+			if(requireNeuralModel)
+			{
+				logAi->error("MMAI: %s: no neural model available; refusing scripted fallback %s",
+					key, repo->fallbackName);
+				throw std::runtime_error("MMAI: no neural model available for " + key
+					+ "; refusing scripted fallback " + repo->fallbackName + " under the MMAI identity");
+			}
 			logAi->error("MMAI: %s: falling back to %s", key, repo->fallbackName);
 			ASSERT(repo->fallbackModel != nullptr, "fallback error: model is null");
 			model = repo->fallbackModel;
@@ -296,7 +306,7 @@ void Router::battleStart(
 	if(cb->getBattle(bid)->battleGetWallState(EWallPart::GATE) != EWallState::NONE)
 		modelkey += ".siege";
 
-	model = GetModel(modelkey);
+	model = GetModel(modelkey, neuralOnly);
 	// The launcher-selected MMAI is advertised as a neural policy. Without a
 	// loadable model, refusing the battle is safer than silently executing
 	// BattleAI/StupidAI under the MMAI name. Legacy direct Router users may
