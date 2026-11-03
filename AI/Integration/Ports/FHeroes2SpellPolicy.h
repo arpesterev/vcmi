@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, Blind and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -164,8 +164,9 @@ public:
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
 			const bool attackBuff = spell->id == SpellID::BLOODLUST;
 			const bool disablingSpell = spell->id == SpellID::BLIND;
+			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !disablingSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !disablingSpell && !berserkSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -273,6 +274,34 @@ public:
 								enemyCount == 1,
 								old.unit->hasBonusOfType(BonusType::UNLIMITED_RETALIATIONS),
 								old.unit->ableToRetaliate(), alreadyDisabled, newBlind);
+					}
+					// Pinned fheroes2 spellEffectValue values Berserker at 85%
+					// of enemy strength, excluding the final enemy and reducing
+					// value for distant non-archers. The VCMI spell is a location
+					// effect, so only score actual newly affected enemy stacks.
+					// Native ATTACKS_NEAREST_CREATURE must be newly applied; a
+					// resisted spell or an existing disable earns zero.
+					if(berserkSpell && !friendly && after && after->alive()
+						&& health == old.health && old.position.isValid())
+					{
+						const auto effect = [](SpellID id)
+						{
+							return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
+						};
+						const bool alreadyDisabled = old.unit->isFrozen()
+							|| old.unit->hasBonus(effect(SpellID(SpellID::BLIND)))
+							|| old.unit->hasBonus(effect(SpellID(SpellID::PARALYZE)))
+							|| old.unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+						const bool gainedBerserk = after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
+							&& after->hasBonus(effect(SpellID(SpellID::BERSERK)))
+							&& !old.unit->hasBonus(effect(SpellID(SpellID::BERSERK)));
+						const int distance = old.unit->unitSide() == BattleSide::DEFENDER
+							? old.position.getX()
+							: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
+						value += static_cast<double>(old.unit->estimateCombatValue())
+							* Ports::FHeroes2::berserkControlRatio(
+								enemyCount == 1, old.unit->isShooter(), std::max(1, distance),
+								alreadyDisabled, gainedBerserk);
 					}
 					// fheroes2 spellEffectValue values Haste/Slow based on the
 					// speed actually gained/lost, not an unrelated damage

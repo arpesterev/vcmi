@@ -235,6 +235,21 @@ inline double blindControlRatio(bool isLastEnemy, bool unlimitedRetaliations,
 	return isLastEnemy ? 0.4 : 0.8;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue: Berserker is worth 85%
+// of the affected enemy's strength, except when only one enemy remains.
+// Non-archers receive the original distance-from-approach-edge penalty.
+// This ratio may be used only after the native hypothetical cast confirms
+// a newly applied Berserk status (rather than resistance or another disable).
+inline double berserkControlRatio(bool lastEnemy, bool shooter, int distanceFromApproachEdge,
+	bool alreadyDisabled, bool effectiveNativeChange)
+{
+	if(distanceFromApproachEdge < 1)
+		throw std::invalid_argument("fheroes2 Berserk requires positive distance from approach edge");
+	if(lastEnemy || alreadyDisabled || !effectiveNativeChange)
+		return 0.0;
+	return shooter ? 0.85 : 0.85 / distanceFromApproachEdge;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.

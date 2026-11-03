@@ -900,6 +900,59 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlindAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBerserkAndCompletesBattle)
+{
+	// fheroes2 only values Berserker when at least two enemy stacks remain.
+	// A real VCMI location spell must newly impose ATTACKS_NEAREST_CREATURE
+	// on an enemy before the independent policy assigns its control value.
+	EXPECT_DOUBLE_EQ(AIIntegration::Ports::FHeroes2::berserkControlRatio(
+		false, true, 1, false, true), 0.85);
+	EXPECT_DOUBLE_EQ(AIIntegration::Ports::FHeroes2::berserkControlRatio(
+		false, false, 5, false, true), 0.17);
+	EXPECT_DOUBLE_EQ(AIIntegration::Ports::FHeroes2::berserkControlRatio(
+		true, true, 1, false, true), 0.0);
+	EXPECT_DOUBLE_EQ(AIIntegration::Ports::FHeroes2::berserkControlRatio(
+		false, true, 1, true, true), 0.0);
+	EXPECT_DOUBLE_EQ(AIIntegration::Ports::FHeroes2::berserkControlRatio(
+		false, true, 1, false, false), 0.0);
+
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 80);
+	setArmy(defenderSideHero, CreatureID(0), 70);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 20));
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::BERSERK, 6);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	std::vector<const CStack *> enemies;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			enemies.push_back(unit.get());
+	ASSERT_EQ(enemies.size(), 2u);
+	const auto effect = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BERSERK)));
+	for(const auto * enemy : enemies)
+		EXPECT_FALSE(enemy->hasBonus(effect));
+	bool observedRealBerserk = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(recorder.castsOf(SpellID::BERSERK).empty())
+			return;
+		for(const auto * enemy : enemies)
+			if(enemy->alive())
+				observedRealBerserk |= enemy->hasBonus(effect)
+					&& enemy->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::BERSERK).empty())
+		<< "FHeroes2 must select a real enemy-control spell rather than a scripted fallback";
+	EXPECT_TRUE(observedRealBerserk)
+		<< "The actual VCMI server must apply Berserk before the next creature action";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
