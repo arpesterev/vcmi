@@ -132,9 +132,14 @@ four independently implemented overrides derived from the documentation:
 - **Fortified siege defense:** melee defenders already inside castle walls
   hold while the gate remains closed or blocked and no enemy has breached
   the walls or reached melee. They resume normal actions after a breach
-  or an opened/destroyed gate. This is a deliberately conservative VCMI
-  interpretation of TUM's documented increased preference for staying
-  within fortifications, not a reconstruction of its unpublished scoring.
+  or an opened/destroyed gate. Breach detection consults **every occupied
+  hex** of enemy stacks, so a double-wide unit cannot hide its inside-wall
+  tail behind an outside-wall head. The isolated predicate has head/tail
+  regression checks; native siege completion is checked separately, but
+  the tail-only breach case has not been validated as a reachable live siege
+  configuration. This is a deliberately conservative VCMI interpretation
+  of TUM's documented increased preference for staying within fortifications,
+  not a reconstruction of its unpublished scoring.
 
 All remaining attacks, movement and siege-machine behavior explicitly uses
 the partial HoMM3 tactical policy, not an unannounced BattleAI/EmptyAI
