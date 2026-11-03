@@ -1169,6 +1169,124 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideGuardDoesNotInventNarrowEnemyTailT
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2GuardRepositionsFromCoveredWeakShooterToThreatenedStrongShooter)
+{
+	// Pinned fheroes2 meleeUnitDefense compares *all* friendly shooters
+	// using strength minus distance penalty. Already standing beside one
+	// weak archer is a zero-travel candidate, not a reason to stop evaluating
+	// a more valuable threatened archer.
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	const CStack * originalEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			originalEnemy = unit.get();
+	}
+	ASSERT_NE(guard, nullptr);
+	ASSERT_NE(originalEnemy, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex guardHex = guard->getPosition();
+	const BattleHex weakHex(guardHex.toInt() + GameConstants::BFIELD_WIDTH);
+	const BattleHex strongHex(guardHex.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(weakHex.isAvailable());
+	ASSERT_TRUE(strongHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(weakHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(strongHex), nullptr);
+	const CStack * weak = addStack(BattleSide::ATTACKER, CreatureID(2), weakHex, 1);
+	const CStack * strong = addStack(BattleSide::ATTACKER, CreatureID(2), strongHex, 80);
+	ASSERT_NE(weak, nullptr);
+	ASSERT_NE(strong, nullptr);
+	ASSERT_TRUE(weak->isShooter());
+	ASSERT_TRUE(strong->isShooter());
+	ASSERT_EQ(BattleHex::getDistance(guardHex, weakHex), 1);
+	ASSERT_GT(strong->estimateCombatValue(), weak->estimateCombatValue());
+	const int enemyReach = static_cast<int>(originalEnemy->getMovementRange()) + 1;
+	const int guardReach = static_cast<int>(guard->getMovementRange()) + 1;
+	const auto findThreatPosition = [&](const BattleHex & shooterHex)
+	{
+		BattleHex best;
+		int longestToGuard = -1;
+		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+		{
+			const BattleHex hex(index);
+			if(!hex.isAvailable() || hex.getX() <= shooterHex.getX()
+				|| battle()->battleGetUnitByPos(hex) != nullptr)
+				continue;
+			const int toShooter = BattleHex::getDistance(hex, shooterHex);
+			const int toGuard = BattleHex::getDistance(hex, guardHex);
+			if(toShooter < 2 || toShooter > enemyReach || toGuard <= guardReach)
+				continue;
+			if(toGuard > longestToGuard)
+			{
+				best = hex;
+				longestToGuard = toGuard;
+			}
+		}
+		return best;
+	};
+	const BattleHex weakEnemyHex = findThreatPosition(weakHex);
+	ASSERT_TRUE(weakEnemyHex.isValid()) << "Need a real enemy threatening the covered weak shooter";
+	const CStack * weakEnemy = addStack(BattleSide::DEFENDER, CreatureID(0), weakEnemyHex, 15);
+	ASSERT_NE(weakEnemy, nullptr);
+	const BattleHex strongEnemyHex = findThreatPosition(strongHex);
+	ASSERT_TRUE(strongEnemyHex.isValid()) << "Need a real enemy threatening the stronger shooter";
+	const CStack * strongEnemy = addStack(BattleSide::DEFENDER, CreatureID(0), strongEnemyHex, 15);
+	ASSERT_NE(strongEnemy, nullptr);
+	ASSERT_LE(BattleHex::getDistance(weakEnemy->getPosition(), weakHex), enemyReach);
+	ASSERT_LE(BattleHex::getDistance(strongEnemy->getPosition(), strongHex), enemyReach);
+	ASSERT_GT(BattleHex::getDistance(guardHex, weakEnemyHex), guardReach);
+	ASSERT_GT(BattleHex::getDistance(guardHex, strongEnemyHex), guardReach);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reachability = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(reachability, guard, false);
+	bool canReachStrongCover = false;
+	for(const auto & hex : available)
+	{
+		if(hex.isAvailable() && hex != guardHex
+			&& BattleHex::getDistance(hex, strongHex) == 1
+			&& reachability.distances[hex.toInt()] <= guard->getMovementRange())
+			canReachStrongCover = true;
+	}
+	ASSERT_TRUE(canReachStrongCover) << "Guard must be able to screen the strong shooter this turn";
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Already guarding a weak archer must not mask a more valuable threatened archer: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_EQ(BattleHex::getDistance(destination, strongHex), 1)
+		<< "The chosen cover must protect the more valuable archer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native engine rejected the selected new cover position";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
