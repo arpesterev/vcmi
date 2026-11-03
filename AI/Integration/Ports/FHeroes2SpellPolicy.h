@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// This covers damage, restoration, Haste/Slow, and a projected Disrupting Ray defense reduction; other buffs, dispels and retreat are not yet ported.
+/// This covers damage, restoration, Haste/Slow, Bless/Curse, and a projected Disrupting Ray defense reduction; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -156,8 +156,9 @@ public:
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
 			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
 			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
+			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -200,6 +201,31 @@ public:
 						value += enemyStrength * Ports::FHeroes2::disruptingRayDefenseRatio(
 							old.unit->getDefense(false), after->getDefense(false),
 							ours.strength, enemyStrength);
+					}
+					// Pinned fheroes2 spellEffectValue awards 15% of the target
+					// strength for Bless/Curse, doubled when removing the opposite
+					// effect. Only credit an actual projected VCMI improvement
+					// or deterioration of the correct side's melee damage range.
+					// This is a source-priority projection, not Heroes II damage rules.
+					if(damageRangeSpell && after && after->alive() && health == old.health && old.unit->unitType())
+					{
+						const bool blessing = spell->id == SpellID::BLESS;
+						if((blessing && friendly) || (!blessing && !friendly))
+						{
+							const bool changed = blessing
+								? (after->getMinDamage(false) > old.unit->getMinDamage(false)
+									|| after->getMaxDamage(false) > old.unit->getMaxDamage(false))
+								: (after->getMinDamage(false) < old.unit->getMinDamage(false)
+									|| after->getMaxDamage(false) < old.unit->getMaxDamage(false));
+							const SpellID opposite(blessing ? SpellID::CURSE : SpellID::BLESS);
+							const bool counteracting = old.unit->hasBonus(Selector::source(
+								BonusSource::SPELL_EFFECT, BonusSourceID(opposite)));
+							const auto * creature = old.unit->unitType();
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::blessCurseDamageRatio(
+									creature->getBaseDamageMin(), creature->getBaseDamageMax(),
+									counteracting, changed);
+						}
 					}
 					// fheroes2 spellEffectValue values Haste/Slow based on the
 					// speed actually gained/lost, not an unrelated damage
