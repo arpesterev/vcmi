@@ -105,6 +105,15 @@ value. The live-battle regression checks the accepted spell and the
 subsequent melee attack increase after server effect packets. This does
 not establish Heroes II spell-duration or attack arithmetic equivalence.
 
+Blind now uses the pinned fheroes2 `spellEffectValue` control ratios:
+0.80 of an enemy stack's strength, or 0.40 against the final enemy when
+retaliation remains possible and is not unlimited. The native hypothetical
+cast must introduce a new Blind spell effect; an immune, already blinded
+or otherwise incapacitated unit receives no value. A server-side battle
+regression checks that the actual status was applied and combat completed.
+This is a bounded source-derived priority, not Heroes II/III spell-duration
+or retaliation-behavior equivalence.
+
 Spell selection now also evaluates `Haste` and `Slow` using the pinned
 `BattlePlanner::getSpellHasteRatio` and `getSpellSlowRatio` priorities,
 but derives speed changes from an actual VCMI hypothetical spellcast.

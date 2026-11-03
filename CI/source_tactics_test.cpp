@@ -128,6 +128,22 @@ int main()
 	try { FHeroes2::bloodlustAttackRatio(-1, 4); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Pinned fheroes2 Blind ratios: 80% except the last enemy,
+	// which needs an available, limited retaliation for 40%.
+	// A resisted Blind or an enemy disabled by another spell scores zero.
+	require(FHeroes2::blindControlRatio(false, false, false, false, true) == 0.8,
+		"Blind values control of an enemy when other enemies remain");
+	require(FHeroes2::blindControlRatio(true, false, true, false, true) == 0.4,
+		"Blind values the last enemy at the source's reduced ratio");
+	require(FHeroes2::blindControlRatio(true, true, true, false, true) == 0,
+		"Blind must not value last-enemy unlimited retaliation");
+	require(FHeroes2::blindControlRatio(true, false, false, false, true) == 0,
+		"Blind must not value last-enemy spent retaliation");
+	require(FHeroes2::blindControlRatio(false, false, true, true, true) == 0,
+		"Do not value Blind over a pre-existing disabling effect");
+	require(FHeroes2::blindControlRatio(false, false, true, false, false) == 0,
+		"Blind must not value resisted or already-active native effect");
+
 	// Pinned getSpellDisruptingRayRatio: full value for three points,
 	// partial value at the minimum defense boundary, reduced valuation
 	// against a larger enemy and no value without an actual native change.

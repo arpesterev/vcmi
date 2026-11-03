@@ -220,6 +220,21 @@ inline double bloodlustAttackRatio(int beforeAttack, int afterAttack)
 	return afterAttack > beforeAttack ? 0.1 : 0.0;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue values Blind at 80% of
+// the affected enemy strength, or 40% if this is the last enemy with an
+// available retaliation and without unlimited retaliations. The native VCMI
+// simulation must actually apply the Blind effect, and a pre-existing
+// disable must not be counted as another successful spell.
+inline double blindControlRatio(bool isLastEnemy, bool unlimitedRetaliations,
+	bool canRetaliate, bool alreadyDisabled, bool effectiveNativeChange)
+{
+	if(alreadyDisabled || !effectiveNativeChange)
+		return 0.0;
+	if(isLastEnemy && (unlimitedRetaliations || !canRetaliate))
+		return 0.0;
+	return isLastEnemy ? 0.4 : 0.8;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.

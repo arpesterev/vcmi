@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, Blind and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -147,6 +147,10 @@ public:
 		for(const auto * unit : real->battleGetAllStacks(false))
 			before.push_back({unit, unit->getAvailableHealth(), unit->getCount(), unit->getPosition(), real->battleGetOwner(unit)});
 		const int64_t mana = hero->mana;
+		const auto enemyCount = std::count_if(before.begin(), before.end(), [&](const UnitSnapshot & old)
+		{
+			return old.owner != player && old.health > 0;
+		});
 		std::optional<BattleAction> best;
 		double bestValue = 0;
 
@@ -159,8 +163,9 @@ public:
 			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
 			const bool attackBuff = spell->id == SpellID::BLOODLUST;
+			const bool disablingSpell = spell->id == SpellID::BLIND;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !disablingSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -246,6 +251,28 @@ public:
 						value += static_cast<double>(old.unit->estimateCombatValue())
 							* Ports::FHeroes2::bloodlustAttackRatio(
 								old.unit->getAttack(false), after->getAttack(false));
+					}
+					// Pinned fheroes2 spellEffectValue values Blind at 0.8 of
+					// enemy strength (0.4 for a retaliating last enemy).
+					// Require a new, real VCMI Blind bonus after simulation;
+					// never value a resisted cast or another active disable.
+					if(disablingSpell && !friendly && after && after->alive() && health == old.health)
+					{
+						const auto hasEffect = [&](const auto * unit, SpellID effect)
+						{
+							return unit->hasBonus(Selector::source(
+								BonusSource::SPELL_EFFECT, BonusSourceID(effect)));
+						};
+						const bool alreadyDisabled = old.unit->isFrozen()
+							|| hasEffect(old.unit, SpellID(SpellID::BLIND))
+							|| hasEffect(old.unit, SpellID(SpellID::PARALYZE));
+						const bool newBlind = hasEffect(after, SpellID(SpellID::BLIND))
+							&& !hasEffect(old.unit, SpellID(SpellID::BLIND));
+						value += static_cast<double>(old.unit->estimateCombatValue())
+							* Ports::FHeroes2::blindControlRatio(
+								enemyCount == 1,
+								old.unit->hasBonusOfType(BonusType::UNLIMITED_RETALIATIONS),
+								old.unit->ableToRetaliate(), alreadyDisabled, newBlind);
 					}
 					// fheroes2 spellEffectValue values Haste/Slow based on the
 					// speed actually gained/lost, not an unrelated damage

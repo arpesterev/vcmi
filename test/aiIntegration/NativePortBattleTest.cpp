@@ -871,6 +871,35 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBlindAndCompletesBattle)
+{
+	// The pinned fheroes2 spell policy values Blind only when a real
+	// hypothetical cast adds the effect. Observe the actual status
+	// after engine packets and complete combat with real server actions.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	const CStack * blinded = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			blinded = unit.get();
+	ASSERT_NE(blinded, nullptr);
+	const auto blindSelector = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLIND)));
+	ASSERT_FALSE(blinded->hasBonus(blindSelector));
+	bool observedRealBlind = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::BLIND).empty())
+			observedRealBlind |= blinded->hasBonus(blindSelector);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::BLIND).empty())
+		<< "FHeroes2 must select Blind without scripted BattleAI";
+	EXPECT_TRUE(observedRealBlind) << "Engine must apply the real native Blind effect";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
