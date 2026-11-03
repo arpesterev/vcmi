@@ -3267,7 +3267,7 @@ TEST_F(AIIntegrationNativeBattle, mmaiRangedAttackerAgainstFHeroes2InfantryRealB
 	EXPECT_GT(mmaiNonpassiveDecisions, 0);
 }
 
-TEST_F(AIIntegrationNativeBattle, fheroes2RangedAttackerAgainstMMAIInfantryRealBattle)
+TEST_F(AIIntegrationNativeBattle, mmaiDefenderAgainstFHeroes2RangedAttackerRealBattle)
 {
 	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
 		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
