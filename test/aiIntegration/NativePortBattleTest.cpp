@@ -803,8 +803,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatPreservesForgottenArcherStr
 	ASSERT_TRUE(defenderArcher->isShooter());
 	ASSERT_FALSE(defenderArcher->canShoot())
 		<< "Forgetfulness must prevent the enemy archer's immediate shot";
-	EXPECT_DOUBLE_EQ(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, false), rangedBefore)
-		<< "Spell policy must not erase the archer from strategic ranged strength";
+	// Forgetfulness also changes the unit's dynamic combat value. The source
+	// preserves its ranged classification, not a frozen pre-spell weight.
+	ASSERT_GT(defenderArcher->getMovementRange(), 0);
+	const double rangedAfter = AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, false);
+	EXPECT_GT(rangedAfter, 0);
+	EXPECT_DOUBLE_EQ(rangedAfter, static_cast<double>(defenderArcher->estimateCombatValue()))
+		<< "The disabled archer must contribute its current strength to spell-threat accounting";
 
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
 	EXPECT_GT(recorder.damage, 0);
