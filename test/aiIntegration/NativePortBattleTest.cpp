@@ -2919,6 +2919,34 @@ TEST_F(AIIntegrationNativeBattle, mmaiDefenderAgainstTUMAttackerRealBattle)
 #endif
 
 
+// Validate real spell packets across *different* source-policy event adapters.
+// Prior spell regressions used FHeroes2Tactics on both sides; these fixtures
+// verify FHeroes2's source-prioritized hero casts are accepted and delivered
+// when its opponent uses another independent native policy.
+TEST_F(AIIntegrationNativeBattle, mixedFHeroes2AttackerCastsRealSpellAgainstHoMM3Defender)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "HoMM3OriginalTactics", true);
+	EXPECT_GT(heroSpellDecisions, 0);
+	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_GT(recorder.spellPackets, 0);
+	EXPECT_GT(recorder.injuryPackets, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mixedFHeroes2DefenderCastsRealSpellAgainstTUMAttacker)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(defenderSideHero, SpellID::MAGIC_ARROW);
+	runToCompletion(std::nullopt, true, "TUMEnchantedTactics", "FHeroes2Tactics", true);
+	EXPECT_GT(heroSpellDecisions, 0);
+	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_GT(recorder.spellPackets, 0);
+	EXPECT_GT(recorder.injuryPackets, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, mixedOriginalHoMM3AttackerAgainstFHeroes2DefenderCompletesBattle)
 {
 	// Same creature/count fixture as the inverse policy assignment below.
