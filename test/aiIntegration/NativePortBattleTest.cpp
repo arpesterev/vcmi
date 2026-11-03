@@ -3127,6 +3127,8 @@ TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScript
 	{
 		EXPECT_NE(std::string(error.what()).find("refusing scripted fallback"), std::string::npos)
 			<< "Missing MMAI model must be diagnosed rather than replaced";
+		EXPECT_NE(std::string(error.what()).find("attacker"), std::string::npos)
+			<< "Strict MMAI failure must identify the missing attacker role";
 	}
 }
 
