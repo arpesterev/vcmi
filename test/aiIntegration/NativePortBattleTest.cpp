@@ -2585,7 +2585,9 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage
 			guard = unit.get();
 	ASSERT_NE(guard, nullptr);
 	std::vector<BattleHex> positions;
-	for(const auto & hex : guard->getPosition().getNeighbouringTiles())
+	const auto guardPosition = guard->getPosition();
+	const auto neighbouringHexes = guardPosition.getNeighbouringTiles();
+	for(const auto & hex : neighbouringHexes)
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 			positions.push_back(hex);
 	ASSERT_GE(positions.size(), 2u);
