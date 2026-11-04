@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Clone/Mirror Image, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, native elemental summoning, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Clone/Mirror Image, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -158,6 +158,10 @@ public:
 		{
 			const auto * spell = entry.get();
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
+			const bool summonSpell = spell->id == SpellID::SUMMON_AIR_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_EARTH_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_FIRE_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_WATER_ELEMENTAL;
 			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
 			const bool dispelSpell = spell->id == SpellID::DISPEL;
 			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
@@ -170,7 +174,7 @@ public:
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -198,7 +202,7 @@ public:
 						friendlyHealth += health;
 					if(health < old.health)
 						value += (friendly ? -1 : 1) * damageValue(*old.unit, old.health - health, friendly ? ours : theirs);
-					else if(health > old.health && after && !after->isClone())
+					else if(health > old.health && after && !after->isClone() && !summonSpell)
 					{
 						const double restored = static_cast<double>(after->estimateCombatValue())
 							* static_cast<double>(health - old.health) / static_cast<double>(health);
@@ -513,6 +517,39 @@ public:
 								clone->isShooter(), clone->hasBonusOfType(BonusType::FLYING),
 								static_cast<int>(clone->getMovementRange()), theirs.averageSpeed(), true);
 					}
+				}
+				// Pinned fheroes2 spellSummonValue counts the combat strength of
+				// newly summoned troops and halves it when already overwhelming
+				// the enemy. Use the *native simulated* new/augmented stacks:
+				// a legal spell with no actual spawn must score zero. Heroes III
+				// elemental placement, combat strength and reinforcement rules
+				// belong to VCMI, not to the Heroes II battle simulator.
+				if(summonSpell)
+				{
+					double summonedValue = 0;
+					for(const auto * unit : projected->battleGetUnitsIf([](const battle::Unit * u) { return !u->isGhost(); }))
+					{
+						if(!unit->alive() || unit->isClone() || projected->battleGetOwner(unit) != player)
+							continue;
+						const auto prior = std::find_if(before.begin(), before.end(), [&](const UnitSnapshot & old)
+						{
+							return old.unit->unitId() == unit->unitId();
+						});
+						if(prior == before.end())
+						{
+							summonedValue += static_cast<double>(unit->estimateCombatValue());
+						}
+						else if(prior->unit->unitSlot() == SlotID::SUMMONED_SLOT_PLACEHOLDER
+							&& unit->getAvailableHealth() > prior->health)
+						{
+							// Some VCMI summon configurations reinforce the original
+							// elemental stack instead of creating a second unit ID.
+							const double newHealth = static_cast<double>(unit->getAvailableHealth());
+							summonedValue += static_cast<double>(unit->estimateCombatValue())
+								* (newHealth - static_cast<double>(prior->health)) / newHealth;
+						}
+					}
+					value += summonedValue * (ours.strength > theirs.strength * 2 ? 0.5 : 1.0);
 				}
 				if(friendlyHealth <= 0)
 					continue;

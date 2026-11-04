@@ -1334,6 +1334,35 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// fheroes2 spellSummonValue values the actual summoned troop, with a
+// reduction when already overwhelming the defender. This native VCMI
+// projection must create elemental stacks through the server, rather than
+// merely recording the spell choice in the decision callback.
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeElementalSummonAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 60, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::SUMMON_AIR_ELEMENTAL, 12);
+	bool sawNativeElemental = false;
+	recorder.onUnitsChangedAfterApply = [&](const BattleUnitsChanged &)
+	{
+		for(const auto & unit : battle()->stacks)
+		{
+			if(unit->alive() && unit->unitSide() == BattleSide::ATTACKER
+				&& unit->creatureId() == CreatureID(CreatureID::AIR_ELEMENTAL))
+				sawNativeElemental = true;
+		}
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::SUMMON_AIR_ELEMENTAL).empty())
+		<< "The independent source-policy must select the elemental summon";
+	EXPECT_TRUE(sawNativeElemental)
+		<< "The game server must create a living elemental stack";
+	EXPECT_GT(replayedUnitChangeEvents, 0)
+		<< "Summon insertion must be delivered through native unit-change events";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Pinned Heroes II MIRRORIMAGE evaluates the newly created duplicate,
 // with an archery-specific source ratio. VCMI's CLONE is the native
 // projection. No mock spawn or substituted spell decision is allowed.

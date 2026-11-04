@@ -69,6 +69,15 @@ candidate targets in sorted unit-ID order; original fheroes2 army enumeration
 may differ. This correction has deterministic contract coverage, not a new
 source-equivalence or win-rate claim.
 
+Elemental summoning is now an explicit experimental projection of pinned
+fheroes2 `spellSummonValue`: value the newly created or reinforced friendly
+elemental stack in a `HypotheticBattle` preview, halving that value if our
+army is already more than twice as strong. The VCMI server must accept the
+hero spell, create the elemental and deliver unit-change events in the
+native regression. This uses Heroes III elemental placement, spell cost
+and creature strength, **not** a claim of identical Heroes II summoning.
+The live regression is unverified until its exact-head CI run succeeds.
+
 Spell selection also values the pinned `getSpellDisruptingRayRatio`
 (0.2 of target strength for a full defense reduction, with the source's
 weaker-army discount). VCMI's hypothetical cast supplies the actual target
