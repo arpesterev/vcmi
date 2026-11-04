@@ -64,6 +64,20 @@ int main()
 	try { HoMM3::pinnedShooterValue(std::numeric_limits<double>::infinity(), 4, 10, 1); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Original getMultiHeadBonus counts additional enemies; getBreathBonus
+	// also subtracts damage to allies. The host engine resolves which
+	// stacks are actually struck from a given native attack hex.
+	require(HoMM3::collateralStrikeValue(true, 21.5) == 21.5,
+		"HoMM3 multi-head collateral must reward enemy damage");
+	require(HoMM3::collateralStrikeValue(false, 21.5) == -21.5,
+		"HoMM3 breath collateral must penalize friendly fire");
+	require(HoMM3::collateralStrikeValue(true, 0) == 0,
+		"Zero secondary damage must not create bonus");
+	try { HoMM3::collateralStrikeValue(true, -1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::collateralStrikeValue(false, std::numeric_limits<double>::infinity()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// HoMM3 checkAdjacentHexes evaluates BOTH attacker's occupied hexes and
 	// shares its visited-shooter mask. Physical contact on a wide tail must
 	// count, while a nonadjacent head alone does not. A wide shooter may also
