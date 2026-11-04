@@ -1030,13 +1030,33 @@ private:
 				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
 				if(attackedHexes.empty())
 					continue;
-				const double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
-				const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
-				if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+				// Pinned fheroes2 optimalAttackVector / doubleCellAttackValue
+				// values the second creature struck by a two-cell melee attack.
+				// VCMI owns the actual area footprint, which may also include
+				// friendly units; compare every legal target hex instead of
+				// unconditionally attacking the first head/tail cell.
+				for(const auto & hitHex : attackedHexes)
 				{
-					target = enemy;
-					targetHex = attackedHexes.front();
-					best = candidate;
+					double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
+					const auto collateral = battle.getAttackedBattleUnits(
+						&stack, enemy, hitHex, false, hex);
+					for(const auto * victim : collateral)
+					{
+						if(victim == enemy || victim == &stack)
+							continue;
+						BattleAttackInfo extra(&stack, victim, reachability.distances[hex.toInt()], false);
+						extra.attackerPos = hex;
+						const double effect = lossValue(*victim, battle.battleEstimateDamage(extra));
+						value += battle.battleGetOwner(victim) == battle.battleGetOwner(&stack)
+							? -effect : effect;
+					}
+					const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
+					if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+					{
+						target = enemy;
+						targetHex = hitHex;
+						best = candidate;
+					}
 				}
 			}
 		}
