@@ -28,6 +28,7 @@ int main()
 	FHeroes2::WithdrawalContext withdrawal;
 	withdrawal.friendlyStrength = 10;
 	withdrawal.enemyStrength = 150;
+	withdrawal.considerRetreat = true;
 	withdrawal.canFlee = true;
 	withdrawal.canSurrender = true;
 	withdrawal.canAffordSurrender = true;
@@ -58,6 +59,10 @@ int main()
 	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
 		"Never force human autocombat to withdraw");
 	withdrawal.humanController = false;
+	withdrawal.considerRetreat = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"The source only considers retreat when its army has few slots or loses one");
+	withdrawal.considerRetreat = true;
 	withdrawal.friendlyStrength = 20;
 	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
 		"A non-hopeless battle is fought");
