@@ -3161,6 +3161,79 @@ TEST_F(AIIntegrationNativeBattle, homm3MeleeEngagesLiveShooterAndCompletesBattle
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3WideCavalierUsesNativeAttackGeometryAgainstShooter)
+{
+	// The pinned checkAdjacentHexes evaluates the attacker's second occupied
+	// cell when considering a shooter pin. The geometric predicate is covered
+	// by CI/source_tactics_test.cpp; this fixture additionally requires a real
+	// two-hex stack, legal first engine melee attack and terminal battle result.
+	// Native VCMI valuations do NOT prove exact decompiled HoMM3 decisions.
+	prepareBattle(CreatureID(10), 12, CreatureID(2), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_TRUE(cavalier->doubleWide());
+	ASSERT_EQ(cavalier->getHexes().size(), 2u);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+
+	const BattleHex nearbyHex(cavalier->getPosition().toInt() + 5);
+	ASSERT_TRUE(nearbyHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearbyHex), nullptr);
+	const auto * closerShooter = addStack(BattleSide::DEFENDER, CreatureID(2), nearbyHex, 8);
+	ASSERT_NE(closerShooter, nullptr);
+	ASSERT_TRUE(closerShooter->isShooter());
+	ASSERT_GT(BattleHex::getDistance(cavalier->getPosition(), nearbyHex), 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reach = view->getReachability(cavalier);
+	const auto available = view->battleGetAvailableHexes(reach, cavalier, false);
+	bool legalContact = false;
+	for(const auto & candidate : available)
+	{
+		if(!candidate.isAvailable()
+			|| view->meleeAttackHexes(cavalier, closerShooter, candidate).empty())
+			continue;
+		const auto footprint = cavalier->getHexes(candidate);
+		for(const auto & ownHex : footprint)
+			for(const auto & shooterHex : closerShooter->getHexes())
+				legalContact |= BattleHex::getDistance(ownHex, shooterHex) == 1;
+	}
+	ASSERT_TRUE(legalContact) << "The server must expose a legal wide-stack attack position";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, cavalier);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "The independent HoMM3 policy must select legal native melee: "
+		<< callback->action->toString();
+	ASSERT_GE(callback->action->target.size(), 2u);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Real VCMI game handler rejected wide Cavalier's melee command";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 {
 	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
