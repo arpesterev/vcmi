@@ -876,7 +876,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBlindAndCompletesBattle)
 	const auto blind = Selector::source(
 		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLIND)));
 	ASSERT_TRUE(friendly->hasBonus(blind));
-	ASSERT_TRUE(friendly->isFrozen());
+	// VCMI isFrozen() represents Stone Gaze, not Blind. Blind gives
+	// NOT_ACTIVE and must prevent this living stack from taking a turn.
+	ASSERT_TRUE(friendly->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_FALSE(friendly->canMove());
 	ASSERT_EQ(friendly->getAvailableHealth(), healthBefore)
 		<< "Cure must have value from dispelling Blind, not prior injury";
 	teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
@@ -884,7 +887,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBlindAndCompletesBattle)
 	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
 		if(!recorder.castsOf(SpellID::CURE).empty())
-			sawNativeDispel |= !friendly->hasBonus(blind) && !friendly->isFrozen();
+			sawNativeDispel |= !friendly->hasBonus(blind) && friendly->canMove();
 	};
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
 	EXPECT_FALSE(recorder.castsOf(SpellID::CURE).empty())
