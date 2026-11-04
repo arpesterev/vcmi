@@ -195,8 +195,10 @@ private:
 			BattleAttackInfo info(&attacker, secondary, pathCost, false);
 			info.attackerPos = from;
 			const double loss = lossValue(*secondary, battle.battleEstimateDamage(info));
+			// Ownership, not immutable deployment side: Hypnotize can make
+			// a stack friendly or hostile for the current action.
 			value += Ports::HoMM3::collateralStrikeValue(
-				secondary->unitSide() != attacker.unitSide(), loss);
+				battle.battleGetOwner(secondary) != battle.battleGetOwner(&attacker), loss);
 		}
 		if(!std::isfinite(value))
 			throw std::logic_error("Nonfinite HoMM3 collateral attack projection");
