@@ -223,6 +223,11 @@ friendly stacks. A native breath-attack regression checks the selected
 `WALK_AND_ATTACK`, server acceptance, multiple actual injuries, and battle
 completion. This tests the projection on Heroes III creature bonuses and
 hex geometry, **not** Heroes II breath behavior or general port parity.
+A separate native regression supplies equal-value adjacent targets and a real
+friendly unit on one breath ray. It requires the FHeroes2 policy to select a
+non-friendly-fire vector, VCMI to accept the independent action, and the
+protected unit's real server health to remain unchanged. The splash ability
+is attached only to the test creature, not to any gameplay definitions.
 
 Not implemented: complete upstream buff/debuff and creature-spell selection,
 retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
