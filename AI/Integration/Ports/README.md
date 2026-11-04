@@ -188,6 +188,18 @@ pin both directions; a completed engine battle checks a Cavalier's
 first real charge against a nearby one-hit target. This is not the full
 HoMM3 attack-position evaluator or its global enemy-threat map.
 
+The pinned `type_AI_attack_hex_chooser::getHexAttackValue` also rewards
+attack hexes adjacent to an opposing shooter that was not already engaged.
+The source helper's survivor-health scaling and minimum-one contribution are
+covered by contract tests. A narrow native projection now uses VCMI damage
+estimates (incoming ranged vs melee) as the engagement value, only for
+single-hex moving stacks, and ignores shooters already blocked at their
+current position. A completed melee-versus-shooter battle exercises the real
+engine path. This is NOT the original HoMM3 per-creature combat-value pricing,
+and does not reconstruct the two-hex attacker footprint, complete multi-head
+or breath attacks, or the global enemy-threat map. No reference decision parity
+is claimed for this slice.
+
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign
