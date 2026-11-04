@@ -663,15 +663,25 @@ private:
 		if(stack.isFirstAidTent())
 			return BattleAction::makeHeal(&stack);
 
-		auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		// Pinned fheroes2 analyzeBattleState and archerDecision examine the
+		// *whole living enemy force*, even when siege walls or temporary
+		// shooting restrictions block an attack right now. Filtering it by
+		// native attack legality corrupts the stance and escape risk.
+		auto allEnemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		vstd::erase_if(allEnemies, [](const CStack * enemy)
+		{
+			return !enemy->alive() || enemy->isInvincible();
+		});
+		std::sort(allEnemies.begin(), allEnemies.end(),
+			[](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
+		// Keep a separate VCMI-eligible set for selecting attack targets.
+		// The native server, not the Heroes II heuristic, decides legality.
+		auto enemies = allEnemies;
 		vstd::erase_if(enemies, [&](const CStack * enemy)
 		{
-			// Ranged-only war machines cannot pass the melee eligibility check.
-			return !enemy->alive() || enemy->isInvincible()
-				|| (!battle.battleCanShoot(&stack, enemy->getPosition())
-					&& !battle.battleCanAttackUnit(&stack, enemy));
+			return !battle.battleCanShoot(&stack, enemy->getPosition())
+				&& !battle.battleCanAttackUnit(&stack, enemy);
 		});
-		std::sort(enemies.begin(), enemies.end(), [](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
 		if(enemies.empty())
 		{
 			// Closed walls can make the garrison temporarily unattackable.
@@ -686,7 +696,7 @@ private:
 			}
 			return BattleAction::makeDefend(&stack);
 		}
-		if(const auto retreat = archerRetreat(battle, stack, enemies))
+		if(const auto retreat = archerRetreat(battle, stack, allEnemies))
 			return *retreat;
 		if(const auto melee = blockedArcherMelee(battle, stack, enemies))
 			return *melee;
@@ -769,14 +779,15 @@ private:
 					+ " occupant=" + (occupant ? std::to_string(occupant->unitId()) : "none"));
 			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
-		if(tactics(battle, stack, enemies).defensive)
+		const auto stance = tactics(battle, stack, allEnemies);
+		if(stance.defensive)
 		{
-			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, enemies))
+			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
 				return *cover;
 			return BattleAction::makeDefend(&stack);
 		}
 		return approach(battle, stack, reachability, available, enemies,
-			tactics(battle, stack, enemies).cautiousOffensive);
+			stance.cautiousOffensive);
 	}
 };
 }
