@@ -3765,14 +3765,20 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesEngineProjectedLoss)
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_EQ(callback->action->target.front().unitValue, greatestProjectedLoss->unitId())
 		<< "TUM must aim at the greater engine-projected loss, not the largest original stack";
-	const int expectedTargetID = greatestProjectedLoss->unitId();
+	// Keep the proposal and its native evaluation on the same battlefield
+	// snapshot. Other units can deal damage before the ballista's first
+	// regularly scheduled activation and change the optimal target.
+	// Direct a test-only ballista activation through the real server gate;
+	// this is not evidence of the scheduler selecting this activation first.
+	battle()->activeStack = ballista->unitId();
+	const int shotsBefore = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native server rejected the damage-aware ballista shot";
+	EXPECT_GT(recorder.shots, shotsBefore) << "The accepted shot produced no native attack event";
 	policy.reset();
 
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
-	EXPECT_GT(ballistaShots, 0);
-	ASSERT_TRUE(firstBallistaShotTarget.has_value()) << "No actual ballista shot was accepted by VCMI";
-	EXPECT_EQ(*firstBallistaShotTarget, expectedTargetID)
-		<< "The real server must accept the projected-loss target before battle completion";
+	EXPECT_GT(recorder.damage, 0);
 }
 
 TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIsBlind)
