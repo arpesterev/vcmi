@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2RoundLimiter.h"
 #include "../AI/Integration/Ports/FHeroes2RetreatDecision.h"
 #include "../AI/Integration/Ports/FHeroes2DispelValuation.h"
 
@@ -23,6 +24,30 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+
+	// fheroes2 isLimitOfTurnsExceeded: 50 consecutive round transitions,
+	// not 50 unit activations, and casualties on either side reset the cap.
+	FHeroes2::DeathlessRoundLimiter stale;
+	require(!stale.observe(-1, 0, 0), "Tactics phase must not consume the round limit");
+	require(!stale.observe(0, 0, 0), "First battle round establishes the baseline");
+	for(int round = 1; round < 50; ++round)
+		require(!stale.observe(round, 0, 0), "Retreat must not trigger before 50 deathless rounds");
+	require(stale.remainingRounds() == 1, "One remaining deathless transition at round 49");
+	require(stale.observe(50, 0, 0), "50th deathless round must trigger source stalemate policy");
+	require(stale.observe(50, 0, 0), "Same-round reactivation must not clear the stalemate");
+	require(!stale.observe(51, 1, 0), "New attacker casualties reset the stalemate");
+	require(stale.remainingRounds() == 50, "Casualty reset must restore complete horizon");
+	for(int round = 52; round < 101; ++round)
+		require(!stale.observe(round, 1, 0), "Casualty reset must preserve full 50-round horizon");
+	require(stale.observe(101, 1, 0), "Stalemate restarts after a casualty reset");
+	require(!stale.observe(102, 1, 1), "Defender casualties also reset source stalemate");
+	require(!stale.observe(104, 1, 1), "Discontinuous round observations reset the counter");
+	require(stale.remainingRounds() == 50, "A missing round cannot count as no losses");
+	stale.reset();
+	require(!stale.observe(0, 0, 0), "A new battle must discard an exhausted previous counter");
+	require(stale.remainingRounds() == 50, "New battle starts with full horizon");
+
+
 
 	// fheroes2 BattlePlanner::planUnitTurn: surrender/retreat policy is
 	// driven by the ratio, hero value, rehire viability and legal options.
