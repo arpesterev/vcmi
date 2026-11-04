@@ -204,6 +204,15 @@ shot, FHeroes2's independent cover movement, server acceptance, and a
 completed battle. Heroes II targeting, speed and ability rules are not
 equated with Heroes III.
 
+Pinned fheroes2 `optimalAttackVector` / `doubleCellAttackValue` considers
+additional victims of line attacks when choosing a melee strike. This partial
+adapter now scores each native VCMI-legal melee target hex using the
+authoritative additional-victim footprint and penalizes collateral hits on
+friendly stacks. A native breath-attack regression checks the selected
+`WALK_AND_ATTACK`, server acceptance, multiple actual injuries, and battle
+completion. This tests the projection on Heroes III creature bonuses and
+hex geometry, **not** Heroes II breath behavior or general port parity.
+
 Not implemented: complete upstream buff/debuff and creature-spell selection,
 retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
