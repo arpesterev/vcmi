@@ -4059,6 +4059,84 @@ TEST_F(AIIntegrationNativeBattle, tumBlindNeutralThreatDoesNotBreakShooterScreen
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, tumIncapacitatedOnlyShooterCannotHoldMeleeScreen)
+{
+	// AI Improvements.txt explains that melee holds so friendly shooters can
+	// fire against neutral troops. Native canShoot() checks ammunition and
+	// Forgetfulness, NOT whether NOT_ACTIVE disables the shooter's turn.
+	// A disabled-only firing line must not freeze our melee progress.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 40);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	CStack * disabledArcher = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() != BattleSide::ATTACKER)
+			continue;
+		if(unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		if(unit->creatureId() == CreatureID(2))
+			disabledArcher = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(disabledArcher, nullptr);
+	ASSERT_TRUE(disabledArcher->isShooter());
+	ASSERT_TRUE(disabledArcher->canShoot());
+	// Fixture-only native creature-source paralysis. No ability proc is
+	// claimed; this is an actual status in an otherwise genuine VCMI battle.
+	disabledArcher->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	ASSERT_TRUE(disabledArcher->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(disabledArcher->canShoot())
+		<< "Native canShoot() must still count arrows despite inability to act";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_EQ(battle()->sideToPlayer(BattleSide::DEFENDER), PlayerColor::NEUTRAL);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_NE(baseline.actionType, EActionType::WAIT);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->toString(), baseline.toString())
+		<< "Do not wait for a shooter the engine cannot activate";
+	EXPECT_NE(callback->action->actionType, EActionType::WAIT);
+
+	const int meleeID = melee->unitId();
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	ASSERT_TRUE(lastFirstAcceptedActionTypeByUnit.contains(meleeID))
+		<< "The actual melee unit never took a server-accepted turn";
+	EXPECT_EQ(lastFirstAcceptedActionTypeByUnit.at(meleeID), baseline.actionType)
+		<< "The server must accept a real non-WAIT alternative to idle screening";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumOutOfAmmoArcherNeverBecomesMeleeShooterGuard)
 {
 	// TUM's published neutral screen is a MELEE tactic. An exhausted archer
