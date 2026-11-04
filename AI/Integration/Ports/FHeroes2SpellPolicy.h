@@ -272,6 +272,28 @@ public:
 								* Ports::FHeroes2::blessCurseDamageRatio(
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
 						}
+						// Pinned fheroes2 spellDispelValue also evaluates friendly
+						// Stone Skin and Bloodlust on enemy units. Reuse the
+						// original spellEffectValue ratios in reverse, but only if
+						// the native Dispel really removes the source bonus and
+						// its corresponding defense / melee-attack increase.
+						// A resisted cast or no-op never earns priority.
+						const auto stoneSkin = Selector::source(BonusSource::SPELL_EFFECT,
+							BonusSourceID(SpellID(SpellID::STONE_SKIN)));
+						if(old.unit->hasBonus(stoneSkin) && !after->hasBonus(stoneSkin))
+						{
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::stoneSkinDefenseRatio(
+									after->getDefense(false), old.unit->getDefense(false));
+						}
+						const auto bloodlust = Selector::source(BonusSource::SPELL_EFFECT,
+							BonusSourceID(SpellID(SpellID::BLOODLUST)));
+						if(old.unit->hasBonus(bloodlust) && !after->hasBonus(bloodlust))
+						{
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::bloodlustAttackRatio(
+									after->getAttack(false), old.unit->getAttack(false));
+						}
 					}
 					// Pinned fheroes2 spellDispelValue also values CURE as removal
 					// of hostile magic, not only recovered hit points. Evaluate only

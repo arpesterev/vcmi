@@ -862,6 +862,82 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyBlessAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Dispel must value the enemy's real Stone Skin defense bonus using the
+// pinned fheroes2 spellDispelValue, not a synthetic score. Native VCMI
+// targeting and effect removal are checked in a complete server battle.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyStoneSkinAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	const int baseDefense = enemy->getDefense(false);
+	const auto originalHealth = enemy->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::STONE_SKIN, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::STONE_SKIN, enemy));
+	const auto stoneSkin = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::STONE_SKIN)));
+	ASSERT_TRUE(enemy->hasBonus(stoneSkin));
+	ASSERT_GT(enemy->getDefense(false), baseDefense);
+	ASSERT_EQ(enemy->getAvailableHealth(), originalHealth);
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	bool observedRemoval = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			observedRemoval |= !enemy->hasBonus(stoneSkin) && enemy->getDefense(false) == baseDefense;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty())
+		<< "FHeroes2 must independently choose Dispel against enemy Stone Skin";
+	EXPECT_TRUE(observedRemoval)
+		<< "The real server must remove Stone Skin and restore enemy defense";
+	EXPECT_GT(recorder.damage, 0);
+}
+
+// Bloodlust is another positive enemy effect in the pinned fheroes2
+// dispel policy. Require actual native melee-attack restoration following
+// an engine-accepted Dispel, then a completed non-synthetic battle.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyBloodlustAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	const int baseAttack = enemy->getAttack(false);
+	const auto originalHealth = enemy->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::BLOODLUST, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLOODLUST, enemy));
+	const auto bloodlust = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLOODLUST)));
+	ASSERT_TRUE(enemy->hasBonus(bloodlust));
+	ASSERT_GT(enemy->getAttack(false), baseAttack);
+	ASSERT_EQ(enemy->getAvailableHealth(), originalHealth);
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	bool observedRemoval = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			observedRemoval |= !enemy->hasBonus(bloodlust) && enemy->getAttack(false) == baseAttack;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty())
+		<< "FHeroes2 must independently choose Dispel against enemy Bloodlust";
+	EXPECT_TRUE(observedRemoval)
+		<< "The real server must remove Bloodlust and restore enemy melee attack";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // fheroes2 spellDispelValue values removing an enemy's beneficial magic.
 // Dispel must be the policy's own hero decision, remove a real enemy Haste
 // through authoritative server packets and complete combat with damage.
