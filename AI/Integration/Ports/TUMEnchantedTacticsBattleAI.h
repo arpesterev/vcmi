@@ -206,6 +206,13 @@ private:
 	static bool canReachFriendlyNextTurn(CPlayerBattleCallback & battle,
 		const CStack & enemy, const std::vector<const CStack *> & friends)
 	{
+		// TUM's next-turn threat gate is about stacks able to move, not
+		// merely their geometric reach. Native NOT_ACTIVE covers Blind,
+		// Paralyze and Petrification even when a creature ability applied it.
+		// A disabled neutral must not provoke a pointless melee charge while
+		// friendly shooters can exploit the immobilization.
+		if(enemy.hasBonusOfType(BonusType::NOT_ACTIVE) || enemy.isFrozen())
+			return false;
 		const auto reach = battle.getReachability(&enemy);
 		for(const auto * friendly : friends)
 		{
