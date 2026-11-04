@@ -297,11 +297,11 @@ protected:
 	}
 
 	void prepareSiege(bool includeDefenderShooter = false, CreatureID defenderType = CreatureID(0),
-		int defenderCount = 30)
+		int defenderCount = 30, CreatureID attackerType = CreatureID(10), int attackerCount = 30)
 	{
 		startRecordedGame();
 		ASSERT_FALSE(HasFatalFailure());
-		setArmy(attackerSideHero, CreatureID(10), 30);
+		setArmy(attackerSideHero, attackerType, attackerCount);
 		ASSERT_FALSE(HasFatalFailure());
 		const auto * town = findFirst<CGTownInstance>();
 		ASSERT_NE(town, nullptr);
@@ -765,6 +765,59 @@ TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 	EXPECT_GT(replayedCatapultEvents, 0)
 		<< "Siege-machine packet must reach both experimental adapters after applying to the battle";
+}
+
+
+// The pinned Heroes II policy moves towards castle-wall approach cells when
+// no garrison unit is reachable. Only the VCMI server establishes legality
+// and the battle outcome: this wall heuristic is an explicit rule projection.
+TEST_F(AIIntegrationNativeBattle, fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk)
+{
+	prepareSiege(false, CreatureID(0), 30, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_NE(battle()->battleGetDefendedTown(), nullptr);
+	ASSERT_NE(battle()->battleGetWallState(EWallPart::GATE), EWallState::NONE);
+	const CStack * infantry = nullptr;
+	const CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			defender = unit.get();
+	}
+	ASSERT_NE(infantry, nullptr);
+	ASSERT_NE(defender, nullptr);
+	const BattleHex origin = infantry->getPosition();
+	const int originalDistance = BattleHex::getDistance(origin, defender->getPosition());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Mobile attacker must approach the intact castle wall: " << callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex selected = callback->action->target.front().hexValue;
+	EXPECT_LT(BattleHex::getDistance(selected, defender->getPosition()), originalDistance);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative server rejected FHeroes2 siege movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+	EXPECT_GT(recorder.damage, 0);
 }
 
 TEST_F(AIIntegrationNativeBattle, fheroes2CastleGarrisonHoldsItsMeleeLineForShooters)
