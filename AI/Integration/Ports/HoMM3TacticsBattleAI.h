@@ -177,8 +177,15 @@ private:
 		double worstLoss = 0;
 		for(const auto * enemy : enemies)
 		{
+			// The pinned findEnemyAttacks source excludes stacks which cannot
+			// act (including the source's incapacitating spell guard). A Blind
+			// or Paralyze target is still physically present and may be attacked,
+			// but must not project imaginary next-turn melee or ranged damage.
+			// This threat projection is HoMM3-only; TUM calls chooseAction
+			// with avoidFastDecoys and retains its existing baseline choices.
 			if(enemy == &primaryTarget || !enemy->alive()
-				|| enemy->isCatapult() || enemy->isFirstAidTent())
+				|| enemy->isCatapult() || enemy->isFirstAidTent()
+				|| isIncapacitated(*enemy) || !enemy->canMove())
 				continue;
 			int distance = std::numeric_limits<int>::max();
 			for(const auto & enemyHex : enemy->getHexes())
