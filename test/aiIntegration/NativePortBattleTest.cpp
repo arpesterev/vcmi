@@ -3527,7 +3527,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2ArcherRetreatReleasesEnemyShooterFromH
 	ASSERT_TRUE(shooter->isShooter());
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
 	BattleHex blockerHex;
-	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+	const BattleHex shooterPosition = shooter->getPosition();
+	for(const auto & hex : shooterPosition.getNeighbouringTiles())
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 		{
 			blockerHex = hex;
@@ -3548,11 +3549,12 @@ TEST_F(AIIntegrationNativeBattle, fheroes2ArcherRetreatReleasesEnemyShooterFromH
 	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
 		static_cast<int>(blocker->getMovementRange()) + 2);
 	ASSERT_FALSE(battle()->battleCanShoot(shooter));
-	const auto friends = battle()->battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-	ASSERT_EQ(std::count_if(friends.begin(), friends.end(), [&](const CStack * unit)
-	{
-		return unit != shooter && unit->alive();
-	}), 0) << "The moving shooter must be the enemy archer's only melee engagement";
+	ASSERT_EQ(std::count_if(battle()->stacks.begin(), battle()->stacks.end(),
+		[&](const auto & unit)
+		{
+			return unit.get() != shooter && unit->alive()
+				&& unit->unitSide() == BattleSide::ATTACKER;
+		}), 0) << "The moving shooter must be the enemy archer's only melee engagement";
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
