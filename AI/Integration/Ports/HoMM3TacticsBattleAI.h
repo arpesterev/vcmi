@@ -82,8 +82,15 @@ private:
 		info.attackerPos = from;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
+		// Pinned simulateAttack returns immediately when the first hit kills
+		// its victim. Some native retaliation previews are independent of that
+		// simulated first hit, so never charge an impossible counterattack for
+		// a CERTAIN kill. Keep the TUM-composed baseline unchanged until the
+		// HoMM3-only sequential exchange is independently validated.
+		const bool certainFirstHitKill = projectSecondMeleeStrike && !shooting
+			&& oldTargetHealth > 0 && damage.damage.min >= oldTargetHealth;
 		double score = lossValue(target, damage)
-			- (shooting ? 0 : lossValue(attacker, retaliation));
+			- (shooting || certainFirstHitKill ? 0.0 : lossValue(attacker, retaliation));
 
 		// Pinned type_AI_combat_parameters::simulateAttack performs a second
 		// creatureTwoAttacks melee strike AFTER the defender's first retaliation,
@@ -104,7 +111,8 @@ private:
 			auto afterAttacker = attacker.acquireState();
 			auto afterTarget = target.acquireState();
 			int64_t firstHitLoss = expectedDamage(damage, afterTarget->getAvailableHealth());
-			int64_t retaliationLoss = expectedDamage(retaliation, afterAttacker->getAvailableHealth());
+			int64_t retaliationLoss = certainFirstHitKill ? 0
+				: expectedDamage(retaliation, afterAttacker->getAvailableHealth());
 			afterTarget->damage(firstHitLoss);
 			afterAttacker->damage(retaliationLoss);
 			if(afterAttacker->alive() && afterTarget->alive())

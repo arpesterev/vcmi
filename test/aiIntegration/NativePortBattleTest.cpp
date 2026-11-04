@@ -3153,6 +3153,83 @@ TEST_F(AIIntegrationNativeBattle, homm3CrusaderSecondStrikeSurvivesRetaliationAn
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned simulateAttack stops as soon as the first melee blow kills the
+// defender. The HoMM3-only value projection cannot charge a counterattack
+// that a guaranteed lethal first hit makes impossible. Observe the actual
+// VCMI packet sequence rather than assuming the damage preview resolves it.
+TEST_F(AIIntegrationNativeBattle, homm3GuaranteedLethalFirstHitHasNoPhantomCounterattack)
+{
+	prepareBattle(CreatureID(7), 20, CreatureID(0), 1); // Crusaders vs a Peasant
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * crusaders = nullptr;
+	CStack * peasant = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(7))
+			crusaders = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			peasant = unit.get();
+	}
+	ASSERT_NE(crusaders, nullptr);
+	ASSERT_NE(peasant, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), crusaders);
+	const BattleHex adjacent(crusaders->getPosition().toInt() + 5);
+	ASSERT_TRUE(adjacent.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), nullptr);
+	peasant->setPosition(adjacent);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	BattleAttackInfo first(crusaders, peasant, 0, false);
+	DamageEstimation hypotheticalRetaliation;
+	const auto firstEstimate = view->battleEstimateDamage(first, &hypotheticalRetaliation);
+	ASSERT_GE(firstEstimate.damage.min, peasant->getAvailableHealth())
+		<< "The first native hit must be certain to kill for this regression";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, crusaders);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(action.target[1].hexValue), peasant);
+
+	const auto crusaderID = static_cast<ui32>(crusaders->unitId());
+	const auto peasantID = static_cast<ui32>(peasant->unitId());
+	int firstStrikes = 0;
+	int counterattacks = 0;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.stackAttacking == crusaderID && !attack.shot() && !attack.counter())
+			++firstStrikes;
+		if(attack.stackAttacking == peasantID && attack.counter())
+			++counterattacks;
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "VCMI server rejected HoMM3's legal guaranteed-lethal melee";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(firstStrikes, 1) << "A second strike cannot hit an already dead defender";
+	EXPECT_EQ(counterattacks, 0) << "A defender killed by the opening hit cannot retaliate";
+	EXPECT_EQ(recorder.battleResults.size(), 1u)
+		<< "The real game handler must terminate this one-on-one combat";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
 	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
