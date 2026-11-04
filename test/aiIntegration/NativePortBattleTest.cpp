@@ -3684,6 +3684,97 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// Source-published TUM Hypnotize values incoming retaliation as a benefit,
+// but an already exhausted stack cannot deliver it. Compare the native
+// HoMM3 net-exchange baseline with the TUM positive-exchange policy, execute
+// TUM's independent choice through the real battle server, and finish combat.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedAttackDoesNotRewardExhaustedRetaliation)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+
+	std::vector<BattleHex> positions;
+	for(const auto & hex : guard->getPosition().getNeighbouringTiles())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+			positions.push_back(hex);
+	ASSERT_GE(positions.size(), 2u);
+	auto * exhausted = addStack(BattleSide::ATTACKER, CreatureID(0), positions[0], 80);
+	auto * ready = addStack(BattleSide::ATTACKER, CreatureID(0), positions[1], 80);
+	ASSERT_NE(exhausted, nullptr);
+	ASSERT_NE(ready, nullptr);
+	ASSERT_TRUE(exhausted->ableToRetaliate());
+	ASSERT_TRUE(ready->ableToRetaliate());
+	exhausted->counterAttacks.use();
+	ASSERT_FALSE(exhausted->ableToRetaliate())
+		<< "Fixture must genuinely exhaust the native VCMI retaliation allowance";
+	ASSERT_TRUE(ready->ableToRetaliate());
+
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, guard));
+	ASSERT_TRUE(guard->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(guard), player);
+	battle()->activeStack = guard->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto score = [&](const CStack * target)
+	{
+		BattleAttackInfo info(guard, target, 0, false);
+		info.attackerPos = guard->getPosition();
+		DamageEstimation retaliation;
+		const auto damage = view->battleEstimateDamage(info, &retaliation);
+		const double health = static_cast<double>(target->getAvailableHealth());
+		const double dealt = std::min(health,
+			(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
+		const double received = !target->ableToRetaliate()
+			|| static_cast<double>(damage.damage.min) >= health ? 0.0
+			: std::min(static_cast<double>(guard->getAvailableHealth()),
+				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+		return AIIntegration::Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
+	};
+	ASSERT_GT(score(ready), score(exhausted))
+		<< "Only the ready target can deliver the incoming damage TUM rewards";
+
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *guard);
+	ASSERT_EQ(baseline.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(baseline.target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(baseline.target[1].hexValue), exhausted)
+		<< "The net-exchange HoMM3 baseline should prefer the spent target";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), ready)
+		<< "TUM must reward only physically possible received damage";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI server rejected TUM's independent Hypnotize melee decision";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 // The published TUM Hypnotize priority is a single comparison across all
 // attack types. A legal ranged shot must not suppress a higher-scoring melee
 // strike when the latter also receives substantial retaliation.
