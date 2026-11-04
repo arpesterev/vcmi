@@ -33,6 +33,21 @@ inline bool preferEqualValueMeleeHex(int candidatePathCost, int currentPathCost,
 	return jouster ? candidatePathCost > currentPathCost : candidatePathCost < currentPathCost;
 }
 
+// Source: checkAdjacentHexes combines getHexAttackValue for both occupied
+// cells of a double-wide attacker, with a single shared checked-shooter mask.
+// Evaluate physical footprint contact once per *shooter*, not once per hex.
+// VCMI supplies the prospective head/tail cells and actual legal attacks.
+template<typename AttackerFootprint, typename ShooterFootprint, typename Distance>
+inline bool attackFootprintEngagesShooter(const AttackerFootprint & attacker,
+	const ShooterFootprint & shooter, Distance distance)
+{
+	for(const auto & attackerHex : attacker)
+		for(const auto & shooterHex : shooter)
+			if(distance(attackerHex, shooterHex) == 1)
+				return true;
+	return false;
+}
+
 // Source: ai_tactical.cpp, type_AI_attack_hex_chooser::getHexAttackValue.
 // An adjacent enemy shooter that loses its ability to shoot contributes the
 // difference between its ranged and melee combat values, scaled by surviving
