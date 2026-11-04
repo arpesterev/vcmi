@@ -553,7 +553,7 @@ private:
 				continue;
 			const bool threatened = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 			{
-				if(!enemy->getPosition().isValid() || enemy->hasBonusOfType(BonusType::SHOOTER))
+				if(!enemy->getPosition().isValid())
 					return false;
 				// The threat is the *enemy's* real footprint, not a hypothetical
 				// footprint of this covering unit placed at an enemy cell. Reusing
@@ -564,6 +564,11 @@ private:
 					for(const auto & shooterHex : friendly->getHexes())
 						nearest = std::min(nearest,
 							static_cast<int>(BattleHex::getDistance(enemyHex, shooterHex)));
+				// fheroes2 meleeUnitDefense considers every adjacent enemy
+				// blocking an archer, including an enemy shooter in melee.
+				// A distant shooter is not a projected advancing melee threat.
+				if(enemy->isShooter())
+					return nearest == 1;
 				return nearest <= futureThreatSpeed(*enemy) + 1;
 			});
 			if(!threatened)
