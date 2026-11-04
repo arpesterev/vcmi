@@ -237,4 +237,32 @@ TEST(MMAINNOutputValidation, StrictLiveBattleRejectsGymResetButAllowsGraphAction
 	EXPECT_NO_THROW(enforceStrictNNLiveBattleAction(false, ACTION_RETREAT));
 }
 
+TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion)
+{
+	using MMAI::BAI::requireNNV15ActionActor;
+	struct Unit
+	{
+		int cstack = 0;
+	};
+	struct Action
+	{
+		std::shared_ptr<Unit> by;
+	};
+
+	const auto unit = std::make_shared<Unit>();
+	const auto action = std::make_shared<Action>();
+	action->by = unit;
+	int otherStack = 0;
+
+	EXPECT_NO_THROW(requireNNV15ActionActor(action, &unit->cstack));
+	EXPECT_THROW(requireNNV15ActionActor(action, &otherStack), std::runtime_error);
+
+	auto missingActor = std::make_shared<Action>();
+	EXPECT_THROW(requireNNV15ActionActor(missingActor, &unit->cstack), std::runtime_error);
+	EXPECT_THROW(requireNNV15ActionActor(action, static_cast<const int *>(nullptr)), std::runtime_error);
+
+	std::shared_ptr<Action> missingAction;
+	EXPECT_THROW(requireNNV15ActionActor(missingAction, &unit->cstack), std::runtime_error);
+}
+
 #endif
