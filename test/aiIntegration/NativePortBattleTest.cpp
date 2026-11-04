@@ -3072,13 +3072,14 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
-TEST_F(AIIntegrationNativeBattle, homm3JousterPrefersLongerEqualValueMeleeRoute)
+TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
-	// The pinned HoMM3 check_adjacent_hexes prefers a *longer* same-turn
-	// approach for Cavalier/Champion when attack value is otherwise tied.
-	// A single nearby Peasant is killed outright from any legal attack hex,
-	// keeping exchange value equal while native path costs differ. The far
-	// defender ensures the real game continues after the first accepted hit.
+	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
+	// Cavalier's longer-path tie break. These two legal attacks kill the
+	// same nearby Peasant, but a second enemy threatens one landing hex.
+	// Native next-turn risk may legitimately break the damage-value tie;
+	// the source's longer-route predicate is verified independently by
+	// the pure contract suite. The far defender also keeps combat alive.
 	prepareBattle(CreatureID(10), 2, CreatureID(0), 1);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
@@ -3133,8 +3134,9 @@ TEST_F(AIIntegrationNativeBattle, homm3JousterPrefersLongerEqualValueMeleeRoute)
 	const BattleHex from = callback->action->target.front().hexValue;
 	const BattleHex destination = callback->action->target[1].hexValue;
 	ASSERT_TRUE(from.isValid());
-	EXPECT_EQ(reach.distances[from.toInt()], longest)
-		<< "The first native Cavalier strike must use the longer equal-value approach";
+	EXPECT_GE(reach.distances[from.toInt()], shortest);
+	EXPECT_LT(reach.distances[from.toInt()], longest)
+		<< "The separate enemy's projected landing threat must precede the jousting tie break";
 	EXPECT_EQ(battle()->battleGetUnitByPos(destination), nearbyPeasant);
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "VCMI rejected the source-derived Cavalier charge";
