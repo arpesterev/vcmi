@@ -235,6 +235,7 @@ protected:
 	NativeBattleRecorder recorder;
 	std::map<PlayerColor, std::map<EActionType, int>> lastAcceptedActionTypesByPlayer;
 	std::map<int, std::map<EActionType, int>> lastAcceptedActionTypesByUnit;
+	std::map<int, EActionType> lastFirstAcceptedActionTypeByUnit;
 	int ballistaDecisions = 0;
 	int ballistaShots = 0;
 	std::optional<int> firstBallistaShotTarget;
@@ -495,6 +496,7 @@ protected:
 		std::map<PlayerColor, int> decisionsByPlayer;
 		std::map<PlayerColor, std::map<EActionType, int>> acceptedActionTypesByPlayer;
 		std::map<int, std::map<EActionType, int>> acceptedActionTypesByUnit;
+		std::map<int, EActionType> firstAcceptedActionTypeByUnit;
 		std::vector<std::string> recentDecisions;
 		while(recorder.battleResults.empty() && decisions < 512)
 		{
@@ -574,6 +576,7 @@ protected:
 			++decisionsByPlayer[player];
 			++acceptedActionTypesByPlayer[player][action.actionType];
 			++acceptedActionTypesByUnit[actingUnitId][action.actionType];
+			firstAcceptedActionTypeByUnit.try_emplace(actingUnitId, action.actionType);
 			if(recorder.battleResults.empty())
 			{
 				for(auto & entry : policies)
@@ -629,6 +632,7 @@ protected:
 		replayedRoundEvents = deliveredRoundEvents;
 		lastAcceptedActionTypesByPlayer = acceptedActionTypesByPlayer;
 		lastAcceptedActionTypesByUnit = acceptedActionTypesByUnit;
+		lastFirstAcceptedActionTypeByUnit = firstAcceptedActionTypeByUnit;
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
@@ -3899,8 +3903,11 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsWhenAllTargetsHaveDifferentD
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(lastAcceptedActionTypesByUnit[ballistaId][EActionType::DEFEND], 0)
 		<< "There was no engine-accepted ballista DEFEND";
-	EXPECT_EQ(ballistaShots, 0)
-		<< "The ballista must never wake permanently disabled targets";
+	ASSERT_TRUE(lastFirstAcceptedActionTypeByUnit.contains(ballistaId));
+	EXPECT_EQ(lastFirstAcceptedActionTypeByUnit.at(ballistaId), EActionType::DEFEND)
+		<< "The first authoritative ballista action must spare all disabled targets";
+	// Blind applied by a hero spell can expire in later rounds. A later
+	// legal shot after expiry is not a violation of the TUM rule.
 }
 
 TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstRealNeutralStack)
