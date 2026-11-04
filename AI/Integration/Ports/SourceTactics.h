@@ -81,9 +81,9 @@ inline double moreExposedFootprintThreat(double head, double tail)
 }
 
 // HoMM3 getMultiHeadBonus credits additional enemies, while getBreathBonus
- // debits friendly stacks hit beyond the primary target. VCMI enumerates
- // only targets actually affected by the attack from the chosen native hex.
- // This is signed projected combat value, NOT identical HoMM3 damage math.
+// debits friendly stacks hit beyond the primary target. VCMI enumerates
+// only targets actually affected by the attack from the chosen native hex.
+// This is signed projected combat value, NOT identical HoMM3 damage math.
 inline double collateralStrikeValue(bool enemy, double projectedLoss)
 {
 	if(!std::isfinite(projectedLoss) || projectedLoss < 0)
