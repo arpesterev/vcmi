@@ -1231,6 +1231,44 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCloneAndCompletesBattle)
 	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
 	ASSERT_FALSE(HasFatalFailure());
 	teachBattleSpell(attackerSideHero, SpellID::CLONE, 20);
+	// Check spell legality and hypothetical native spawn independently
+	// before judging FHeroes2's chosen action.
+	const auto casterPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto probeCallback = std::make_shared<DecisionCallback>(casterPlayer);
+	probeCallback->onBattleStarted(battle());
+	auto probeEnvironment = std::make_shared<NativePortEnvironment>(makeCallback(casterPlayer), probeCallback);
+	const CStack * original = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			original = unit.get();
+	ASSERT_NE(original, nullptr);
+	bool foundCloneSpell = false;
+	for(const auto & entry : LIBRARY->spellh->objects)
+	{
+		if(entry->id != SpellID::CLONE)
+			continue;
+		foundCloneSpell = true;
+		EXPECT_TRUE(entry->isCombat()) << "Clone is not recognized as a combat spell";
+		EXPECT_FALSE(entry->isCreatureAbility()) << "Clone is unexpectedly a creature-only spell";
+		EXPECT_TRUE(entry->canBeCast(probeCallback.get(), spells::Mode::HERO, attackerSideHero))
+			<< "Clone cannot be cast by the trained fixture hero";
+		spells::BattleCast legality(probeCallback.get(), attackerSideHero, spells::Mode::HERO, entry.get());
+		const auto mechanics = entry->battleMechanics(&legality);
+		EXPECT_EQ(mechanics->getTargetTypes().size(), 1u)
+			<< "Clone's targeting shape differs from the current spell enumerator";
+		spells::Target target{battle::Destination(original->getPosition())};
+		EXPECT_TRUE(mechanics->canBeCastAt(target)) << "Native Clone cannot target this Archer";
+		auto simulation = std::make_shared<HypotheticBattle>(probeEnvironment.get(), probeCallback);
+		spells::BattleCast projectedCast(simulation.get(), attackerSideHero, spells::Mode::HERO, entry.get());
+		projectedCast.castEval(simulation->getServerCallback(), target);
+		const auto projected = simulation->battleGetAllStacks(false);
+		const auto cloneCount = std::count_if(projected.begin(), projected.end(),
+			[&](const auto * unit) { return unit->alive() && unit->isClone() && simulation->battleGetOwner(unit) == casterPlayer; });
+		EXPECT_GT(cloneCount, 0)
+			<< "Clone projection produced no friendly clone; mutated unit states: " << simulation->stackStates.size()
+			<< ", visible stacks: " << projected.size();
+	}
+	EXPECT_TRUE(foundCloneSpell) << "No native Clone spell registered";
 	bool sawNativeClone = false;
 	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
