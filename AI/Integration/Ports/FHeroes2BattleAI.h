@@ -66,8 +66,16 @@ public:
 			{
 				double ourStrength = 0;
 				double enemyStrength = 0;
+				int initialFriendlySlots = 0;
+				bool fullyLostStack = false;
 				for(const auto * unit : battle->battleGetAllStacks())
 				{
+					if(unit->unitSide() == battle->battleGetMySide()
+						&& (unit->getCount() > 0 || unit->getKilled() > 0))
+					{
+						++initialFriendlySlots;
+						fullyLostStack |= unit->getCount() == 0 && unit->getKilled() > 0;
+					}
 					if(!unit->alive() || unit->isInvincible())
 						continue;
 					if(battle->battleGetOwner(unit) == hero->getOwner())
@@ -94,7 +102,8 @@ public:
 				// Source NORMAL difficulty ratio. No hidden-map intelligence:
 				// only the current battle, owned hero and owned player economy.
 				const Ports::FHeroes2::WithdrawalContext context{ourStrength, enemyStrength, 100.0 / 7.5,
-					false, canFlee, canSurrender, affordable, valuableArtifacts, canRehire, primarySkillTotal};
+					false, initialFriendlySlots < 4 || fullyLostStack, canFlee, canSurrender,
+					affordable, valuableArtifacts, canRehire, primarySkillTotal};
 				switch(Ports::FHeroes2::decideWithdrawal(context))
 				{
 					case Ports::FHeroes2::Withdrawal::RETREAT:
