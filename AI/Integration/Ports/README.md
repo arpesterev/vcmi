@@ -204,7 +204,7 @@ documents combat behavior, but the released combat modifications are in
 compiled ERA/DLL components, not source suitable for direct porting.
 
 The TUM backend explicitly composes the experimental HoMM3 baseline with
-five independently implemented overrides derived from the documentation:
+six independently implemented overrides derived from the documentation:
 
 - **Ballista:** excludes targets affected by Blind, Paralyze or Stone Gaze;
   with no remaining legal target, it defends instead of waking a disabled
