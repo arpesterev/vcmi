@@ -358,9 +358,24 @@ private:
 				distance = std::min(distance, static_cast<int>(BattleHex::getDistance(cell, enemyHex)));
 			if(distance == std::numeric_limits<int>::max())
 				continue;
-			// If our future footprint pins a shooter it cannot shoot us.
+			// Project the shot at the future occupied cell. A normal archer
+			// loses its shot when engaged, but unrestricted FREE_SHOOTING
+			// (e.g. Sharpshooter's Bow) still permits adjacent shots.
+			// Respect LIMITED_SHOOTING_RANGE, too: querying
+			// battleCanShoot(enemy, cell) would reject this currently empty
+			// landing hex, not answer the hypothetical attack question.
 			const bool blocked = engagesFootprints(attacker.getHexes(destination), enemy->getHexes());
-			const bool canShoot = enemy->isShooter() && !blocked && battle.battleCanShoot(enemy);
+			const auto restricted = Selector::typeSubtype(BonusType::FREE_SHOOTING,
+				BonusCustomSubtype::freeShootingExceptAdjacent);
+			const bool canShootAdjacent = !enemy->hasBonus(restricted)
+				|| enemy->hasBonus(Selector::type()(BonusType::FREE_SHOOTING).And(restricted.Not()));
+			const auto limitedRange = enemy->getBonus(Selector::type()(BonusType::LIMITED_SHOOTING_RANGE));
+			const bool canShoot = enemy->isShooter()
+				&& Ports::HoMM3::projectedNativeRangedThreat(
+					battle.battleCanShoot(enemy), blocked, enemy->canShootBlocked(),
+					canShootAdjacent, limitedRange != nullptr,
+					limitedRange ? limitedRange->val : 0,
+					BattleHex::getDistance(enemy->getPosition(), cell));
 			const int movement = std::max(0, static_cast<int>(enemy->getMovementRange()));
 			// A shooter-only war machine or arrow tower is not a melee attacker,
 			// even when its hex borders our prospective landing position. The
