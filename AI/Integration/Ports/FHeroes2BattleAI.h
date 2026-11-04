@@ -682,6 +682,11 @@ private:
 			return !battle.battleCanShoot(&stack, enemy->getPosition())
 				&& !battle.battleCanAttackUnit(&stack, enemy);
 		});
+		// Source archerDecision assesses retreat before testing whether a
+		// legal shot or melee target exists. A blocked shooter must still
+		// consider the movement threats of otherwise inaccessible enemies.
+		if(const auto retreat = archerRetreat(battle, stack, allEnemies))
+			return *retreat;
 		if(enemies.empty())
 		{
 			// Closed walls can make the garrison temporarily unattackable.
@@ -696,8 +701,6 @@ private:
 			}
 			return BattleAction::makeDefend(&stack);
 		}
-		if(const auto retreat = archerRetreat(battle, stack, allEnemies))
-			return *retreat;
 		if(const auto melee = blockedArcherMelee(battle, stack, enemies))
 			return *melee;
 
