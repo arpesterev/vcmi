@@ -2192,6 +2192,70 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 }
 
 
+// Pinned fheroes2 meleeUnitDefense enumerates *all* enemies adjacent to
+// a blocked friendly archer. In Heroes III, a real adjacent enemy shooter
+// blocks shots even if the enemy also has an innate ranged attack.
+TEST_F(AIIntegrationNativeBattle, fheroes2EngagedEnemyShooterTriggersNativeArcherScreen)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex archerHex(origin.toInt() + 5);
+	const BattleHex blockerHex(archerHex.toInt() + 1);
+	ASSERT_TRUE(archerHex.isAvailable());
+	ASSERT_TRUE(blockerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
+	const CStack * archer = addStack(BattleSide::ATTACKER, CreatureID(2), archerHex, 120);
+	const CStack * blocker = addStack(BattleSide::DEFENDER, CreatureID(2), blockerHex, 10);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_TRUE(archer->isShooter());
+	ASSERT_TRUE(blocker->isShooter());
+	ASSERT_EQ(BattleHex::getDistance(archerHex, blockerHex), 1);
+	ASSERT_FALSE(battle()->battleCanShoot(archer))
+		<< "Native engine must treat the adjacent enemy archer as a real shot blocker";
+	ASSERT_GT(BattleHex::getDistance(origin, blockerHex),
+		static_cast<int>(guard->getMovementRange()) + 1)
+		<< "Guard must not select an immediate melee attack on the blocker";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "FHeroes2 must independently screen an archer blocked by a ranged enemy: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_EQ(BattleHex::getDistance(destination, archerHex), 1);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI rejected FHeroes2 archer-cover movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlindDistantMeleeDoesNotPullGuardAwayFromDefensiveLine)
 {
 	// Pinned fheroes2 meleeUnitDefense uses a unit's effective speed:
