@@ -8,6 +8,9 @@
 
 #include "SourceTactics.h"
 #include "FHeroes2SpellPolicy.h"
+#include "FHeroes2RoundLimiter.h"
+
+#include <map>
 #include "FHeroes2RetreatDecision.h"
 #include "../../../lib/CPlayerState.h"
 #include "../../../lib/entities/artifact/ArtifactUtils.h"
@@ -58,6 +61,32 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		// fheroes2 exits an AI attacker's battle after 50 consecutive
+		// rounds with no deaths. VCMI must authorize retreat, and a
+		// human-controlled autobattle must never lose its hero this way.
+		// This is evaluated before another spell or unit action.
+		if(!human && !humanAutocombat && battle->battleGetMySide() == BattleSide::ATTACKER)
+		{
+			uint64_t attackerDeaths = 0;
+			uint64_t defenderDeaths = 0;
+			for(const CStack * unit : battle->battleGetAllStacks())
+			{
+				const auto killed = static_cast<uint64_t>(std::max(0, unit->getKilled()));
+				if(unit->unitSide() == BattleSide::ATTACKER)
+					attackerDeaths += killed;
+				else if(unit->unitSide() == BattleSide::DEFENDER)
+					defenderDeaths += killed;
+			}
+			auto & limiter = stalemateByBattle[battleID.getNum()];
+			if(limiter.observe(battle->battleGetRound(), attackerDeaths, defenderDeaths)
+				&& battle->battleGetMyHero() && battle->battleCanFlee())
+			{
+				logAi->info("AI_PORT_STALEMATE backend=FHeroes2Tactics battle=%d rounds=%u action=RETREAT",
+					battleID.getNum(), Ports::FHeroes2::DeathlessRoundLimiter::MAX_ROUNDS_WITHOUT_DEATHS);
+				cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(BattleSide::ATTACKER));
+				return;
+			}
+		}
 		if(!human && !humanAutocombat && env && env->game())
 		{
 			const auto * hero = battle->battleGetMyHero();
@@ -133,7 +162,19 @@ public:
 		cb->battleMakeUnitAction(battleID, action);
 	}
 
+void battleStart(const BattleID & battleID, const CCreatureSet *, const CCreatureSet *,
+		int3, const CGHeroInstance *, const CGHeroInstance *, BattleSide, bool) override
+	{
+		stalemateByBattle[battleID.getNum()].reset();
+	}
+
+	void battleEnd(const BattleID & battleID, const BattleResult *, QuestionID) override
+	{
+		stalemateByBattle.erase(battleID.getNum());
+	}
+
 private:
+	std::map<int32_t, Ports::FHeroes2::DeathlessRoundLimiter> stalemateByBattle;
 	std::shared_ptr<CBattleCallback> cb;
 	std::shared_ptr<Environment> env;
 	AutocombatPreferences preferences;

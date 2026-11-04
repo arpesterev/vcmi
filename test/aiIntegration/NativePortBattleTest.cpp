@@ -709,6 +709,140 @@ protected:
 	}
 };
 
+// fheroes2 BattlePlanner::isLimitOfTurnsExceeded: an attacking AI retreats
+// after 50 consecutive *actual* VCMI rounds without casualties. The fixture
+// deliberately makes both armies DEFEND for the preceding rounds, so it can
+// exercise this rare stalemate without changing combat stats or fabricating
+// round events. The policy's final RETREAT must be accepted by the server.
+TEST_F(AIIntegrationNativeBattle, fheroes2RetreatsAfterFiftyRealDeathlessRounds)
+{
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->tacticDistance, 0);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanFlee()) << "The source policy may only retreat when VCMI permits it";
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	// Direct AI registration uses the two-argument overload. The three-
+	// argument variant is reserved for human-invoked autocombat in VCMI.
+	policy->initBattleInterface(environment, callback);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	const auto initialRound = battle()->battleGetRound();
+	ASSERT_GE(initialRound, 0);
+
+	for(int elapsed = 0; elapsed <= 50; ++elapsed)
+	{
+		ASSERT_TRUE(recorder.battleResults.empty()) << "Battle ended without the source AI retreat";
+		ASSERT_EQ(battle()->battleGetRound(), initialRound + elapsed)
+			<< "Count engine rounds, not callbacks or unit activations";
+		const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+		ASSERT_NE(active, nullptr);
+		ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER)
+			<< "This scenario requires a faster attacking Grand Elf";
+		for(const auto & unit : battle()->stacks)
+			EXPECT_EQ(unit->getKilled(), 0) << "This is a deathless-round regression";
+		callback->action.reset();
+		policy->activeStack(battleID, active);
+		ASSERT_TRUE(callback->action.has_value());
+		if(elapsed < 50)
+		{
+			EXPECT_NE(callback->action->actionType, EActionType::RETREAT)
+				<< "The native port must not retreat before the source's 50-round limit";
+			// Apply genuine defending actions for all stacks and advance via
+			// the authoritative server instead of forging round packets.
+			endRound();
+			ASSERT_FALSE(HasFatalFailure());
+			continue;
+		}
+
+		EXPECT_EQ(callback->action->actionType, EActionType::RETREAT)
+			<< "The source cap must produce a native retreat instead of another DEFEND";
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+			<< "VCMI rejected the source-derived retreat";
+		ASSERT_EQ(recorder.battleResults.size(), 1u);
+		EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
+		if(recorder.battleResults.back().questionID != QuestionID::NONE)
+		{
+			ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		}
+		EXPECT_TRUE(gameState()->currentBattles.empty()) << "Native retreat result not applied to adventure state";
+		EXPECT_EQ(recorder.acceptedResults, 1);
+	}
+	callback->onBattleEnded(battleID);
+}
+
+// A human player's auto-combat installs its battle AI using the three-
+// argument overload (CPlayerInterface::prepareAutoFightingAI). Its inherited
+// CBattleGameInterface::human flag defaults to false, so guarding only that
+// flag would incorrectly force a human hero to retreat after 50 quiet rounds.
+// Verify the human-origin path using native, not fabricated, round transitions.
+TEST_F(AIIntegrationNativeBattle, fheroes2AutocombatDoesNotForceHumanRetreat)
+{
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+
+	for(int elapsed = 0; elapsed <= 50; ++elapsed)
+	{
+		ASSERT_TRUE(recorder.battleResults.empty());
+		const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+		ASSERT_NE(active, nullptr);
+		ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+		callback->action.reset();
+		policy->activeStack(battleID, active);
+		ASSERT_TRUE(callback->action.has_value());
+		EXPECT_NE(callback->action->actionType, EActionType::RETREAT)
+			<< "Human autocombat must not silently retreat on deathless round " << elapsed;
+		if(elapsed < 50)
+		{
+			endRound();
+			ASSERT_FALSE(HasFatalFailure());
+		}
+	}
+	// The policy's non-retreat action must be acceptable to the VCMI server.
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	// This real shot may immediately eliminate the opposing army; otherwise
+	// continue the same battle to its terminal result. Never require a living
+	// defender after a legitimate server-accepted non-retreat command.
+	if(recorder.battleResults.empty())
+		runToCompletion();
+	else
+	{
+		const auto & result = recorder.battleResults.front();
+		EXPECT_EQ(result.winner, BattleSide::ATTACKER);
+		if(result.questionID != QuestionID::NONE)
+		{
+			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, player));
+		}
+		EXPECT_TRUE(gameState()->currentBattles.empty());
+		EXPECT_EQ(recorder.acceptedResults, 1);
+	}
+}
+
 TEST_F(AIIntegrationNativeBattle, completesMeleeBattleThroughFactory)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
