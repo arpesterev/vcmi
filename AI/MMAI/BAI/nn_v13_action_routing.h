@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <vector>
@@ -22,6 +23,27 @@ namespace MMAI::BAI
 // SampleFn is the production categorical sampler (or its deterministic
 // greedy mode). This helper neither invents actions nor repairs bad logits:
 // relevant branches are still validated by categorical and the V13 masks.
+// The ONNX V13 action lookup is a dense [4][165][165] table.
+// Reject malformed metadata on model load, rather than failing on a later
+// live server turn when an action selects a jagged row.
+template<typename T>
+void validateV13ActionTableShape(const std::vector<std::vector<std::vector<T>>> & table)
+{
+	constexpr size_t actionCount = 4;
+	constexpr size_t hexCount = 165;
+	if(table.size() != actionCount)
+		throw std::runtime_error("MMAI V13: action_table expected 4 primary actions");
+	for(size_t action = 0; action < actionCount; ++action)
+	{
+		if(table[action].size() != hexCount)
+			throw std::runtime_error("MMAI V13: action_table primary action " + std::to_string(action) + " has invalid hex1 count");
+		for(size_t hex = 0; hex < hexCount; ++hex)
+			if(table[action][hex].size() != hexCount)
+				throw std::runtime_error("MMAI V13: action_table primary action " + std::to_string(action) +
+					" hex1 " + std::to_string(hex) + " has invalid hex2 count");
+	}
+}
+
 template<typename SampleFn>
 auto sampleV13ActionPath(
 	const std::vector<float> & mainProbabilities,

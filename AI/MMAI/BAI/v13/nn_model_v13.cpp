@@ -292,12 +292,7 @@ Vec3D<int32_t> NNModel::readActionTable() const
 		throwf(std::string("failed to parse 'action_table' JSON: ") + e.what());
 	}
 
-	if(res.size() != 4)
-		throwf("readActionTable: bad size for d1: want: 4, have: %zu", res.size());
-	if(res[0].size() != 165)
-		throwf("readActionTable: bad size for d2: want: 165, have: %zu", res[0].size());
-	if(res[0][0].size() != 165)
-		throwf("readActionTable: bad size for d3: want: 165, have: %zu", res[0][0].size());
+	validateV13ActionTableShape(res);
 
 	return res;
 }

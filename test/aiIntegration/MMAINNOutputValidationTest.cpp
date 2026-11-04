@@ -107,4 +107,23 @@ TEST(MMAINNOutputValidation, V13RejectsInvalidRequiredHead)
 		hex1, hex2, v13TestGreedy), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13RejectsJaggedActionTableMetadata)
+{
+	using MMAI::BAI::validateV13ActionTableShape;
+	std::vector<std::vector<std::vector<int32_t>>> table(
+		4, std::vector<std::vector<int32_t>>(165, std::vector<int32_t>(165, 0)));
+	EXPECT_NO_THROW(validateV13ActionTableShape(table));
+
+	// Previously only action 0 / hex 0 was checked on model load.
+	// A missing row in another primary action or a short last hex2 row
+	// survived loading and could break a later model-selected battle action.
+	table[3].pop_back();
+	EXPECT_THROW(validateV13ActionTableShape(table), std::runtime_error);
+	table[3].emplace_back(165, 0);
+	table[2][164].pop_back();
+	EXPECT_THROW(validateV13ActionTableShape(table), std::runtime_error);
+	table[2][164].push_back(0);
+	EXPECT_NO_THROW(validateV13ActionTableShape(table));
+}
+
 #endif
