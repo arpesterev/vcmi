@@ -3372,6 +3372,88 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedPrefersActiveTargetOverBlindAndComp
 	EXPECT_GT(recorder.shots, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3RangedDiscountsNonSpellInactiveTargetAndServerAcceptsShot)
+{
+	// Pinned ai_tactical.cpp getRangedAttackValue discounts stacks for which
+	// army::isIncapacitated() is true. VCMI can carry NOT_ACTIVE from a
+	// non-spell source. Inject that native bonus only into the fixture;
+	// do not claim that a particular creature ability was exercised here.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 200);
+	setArmy(defenderSideHero, CreatureID(0), 35);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 14));
+	ASSERT_FALSE(HasFatalFailure());
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * shooter = nullptr;
+	const CStack * disabled = nullptr;
+	const CStack * active = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			shooter = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->getCount() == 35)
+				disabled = unit.get();
+			else if(unit->getCount() == 14)
+				active = unit.get();
+		}
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(disabled, nullptr);
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto before = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(before.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(before.target.empty());
+	EXPECT_EQ(before.target.front().unitValue, disabled->unitId());
+
+	const_cast<CStack *>(disabled)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(disabled->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_FALSE(disabled->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
+		BonusSourceID(SpellID(SpellID::BLIND)))));
+	const auto after = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(after.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(after.target.empty());
+	EXPECT_EQ(after.target.front().unitValue, active->unitId())
+		<< "Non-spell NOT_ACTIVE must receive the source incapacitation penalty";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, active->unitId());
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The actual VCMI server rejected the independently chosen shot";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsAppliesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);

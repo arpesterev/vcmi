@@ -106,8 +106,12 @@ private:
 		{
 			return target.hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell)));
 		};
-		return target.isFrozen() || hasSpell(SpellID(SpellID::BLIND))
-			|| hasSpell(SpellID(SpellID::PARALYZE));
+		// VCMI NOT_ACTIVE also represents disables originating from creature
+		// abilities or other bonus sources. The HoMM3 isIncapacitated branch
+		// must discount those targets in ranged scoring as well as the threat
+		// projection; spell-only filtering misses that independent state.
+		return target.hasBonusOfType(BonusType::NOT_ACTIVE) || target.isFrozen()
+			|| hasSpell(SpellID(SpellID::BLIND)) || hasSpell(SpellID(SpellID::PARALYZE));
 	}
 
 	// Source getHexAttackValue rewards an attack hex that pins opposing
