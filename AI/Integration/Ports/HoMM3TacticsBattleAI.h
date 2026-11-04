@@ -185,7 +185,7 @@ private:
 			// with avoidFastDecoys and retains its existing baseline choices.
 			if(enemy == &primaryTarget || !enemy->alive()
 				|| enemy->isCatapult() || enemy->isFirstAidTent()
-				|| isIncapacitated(*enemy) || !enemy->canMove())
+				|| isIncapacitated(*enemy) || enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
 				continue;
 			int distance = std::numeric_limits<int>::max();
 			for(const auto & enemyHex : enemy->getHexes())
