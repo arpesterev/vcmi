@@ -182,7 +182,7 @@ private:
 				continue;
 			int distance = std::numeric_limits<int>::max();
 			for(const auto & enemyHex : enemy->getHexes())
-				distance = std::min(distance, BattleHex::getDistance(cell, enemyHex));
+				distance = std::min(distance, static_cast<int>(BattleHex::getDistance(cell, enemyHex)));
 			if(distance == std::numeric_limits<int>::max())
 				continue;
 			// If our future footprint pins a shooter it cannot shoot us.
