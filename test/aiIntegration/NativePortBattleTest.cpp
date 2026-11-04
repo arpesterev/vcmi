@@ -2207,7 +2207,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2EngagedEnemyShooterTriggersNativeArche
 	ASSERT_NE(guard, nullptr);
 	ASSERT_EQ(battle()->battleActiveUnit(), guard);
 	const BattleHex origin = guard->getPosition();
-	const BattleHex archerHex(origin.toInt() + 5);
+	const BattleHex archerHex(origin.toInt() + 6);
 	const BattleHex blockerHex(archerHex.toInt() + 1);
 	ASSERT_TRUE(archerHex.isAvailable());
 	ASSERT_TRUE(blockerHex.isAvailable());
