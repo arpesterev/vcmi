@@ -246,6 +246,12 @@ std::shared_ptr<BattleAction> BAI::maybeBuildAutoAction(const CStack * astack, c
 
 std::optional<BattleAction> BAI::maybeFleeOrSurrender(const BattleID & bid)
 {
+	// Published V13/V15 ONNX schemas do not choose surrender or retreat.
+	// Preserve the legacy adventure-layer decision only in hybrid mode;
+	// strict neural combat must not silently delegate this policy to a callback.
+	if(strictNeural)
+		return std::nullopt;
+
 	BattleStateInfoForRetreat bs;
 
 	bs.canFlee = battle->battleCanFlee();
