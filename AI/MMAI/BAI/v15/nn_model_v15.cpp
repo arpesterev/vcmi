@@ -9,6 +9,7 @@
  */
 
 #include "nn_model_v15.h"
+#include "BAI/nn_output_validation.h"
 
 #include "schema/base.h"
 #include "schema/v15/constants.h"
@@ -159,8 +160,9 @@ namespace
 		auto sample = Sample{};
 		auto greedy = Sample{};
 
-		if(temperature < 0.0f)
-			throwf("sample: negative temperature");
+		// Validate the actual ONNX head in both greedy and stochastic modes.
+		// Neither NaN/Inf nor negative weights may be interpreted as actions.
+		validateNNActionDistribution(probs, temperature);
 
 		bool isGreedy = temperature < 1e-5;
 
