@@ -140,8 +140,16 @@ void CSettingsView::fillValidCombatAILibraries(QComboBox * comboBox, QString act
 
 #ifdef ENABLE_BATTLE_AI
 	comboBox->addItem(tr("BattleAI (default, recommended)"), "BattleAI");
+	comboBox->addItem(tr("HoMM3 tactics (partial port, experimental)"), "HoMM3OriginalTactics");
+	comboBox->setItemData(comboBox->count() - 1,
+		tr("Independent HoMM3 ranged target weights with VCMI legality and damage estimates. Not the full original combat AI; spells, tactical retreat and original path valuation are not implemented."),
+		Qt::ToolTipRole);
+	comboBox->addItem(tr("TUM Enchanted tactics (partial port, experimental)"), "TUMEnchantedTactics");
+	comboBox->setItemData(comboBox->count() - 1,
+		tr("Experimental TUM combat exceptions: protected shooter stance against neutral melee and ballista targets excluding Blind, Paralyze and Petrification. Other decisions use an explicit partial HoMM3 baseline; not a complete TUM ERA plugin port."),
+		Qt::ToolTipRole);
 	comboBox->addItem(tr("FHeroes2 tactics (partial port, experimental)"), "FHeroes2Tactics");
-	comboBox->setItemData(comboBox->count() - 1, tr("Partial tactical port using VCMI strength and damage estimates. Hero spell AI, retreat AI and full upstream behavior are not implemented."), Qt::ToolTipRole);
+	comboBox->setItemData(comboBox->count() - 1, tr("Partial tactical port with native attack, movement, damage/restoration spell selection and mana conservation. Complete fheroes2 retreat, creature spells and tactical valuations are not implemented."), Qt::ToolTipRole);
 #endif
 
 #ifdef ENABLE_MMAI
