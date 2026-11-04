@@ -31,6 +31,17 @@ inline void enforceStrictNNModelLoad(bool strictNeural, const std::string & key,
 		throw std::runtime_error("MMAI: configured neural model '" + key + "' (" + configuredPath
 			+ ") failed to load: " + cause.what() + "; refusing substitute neural policy");
 }
+// V15 action nodes are generated for a particular active stack. If an
+// event adapter becomes stale, a node may refer to a different creature.
+// Runtime validation is required even in release builds (assert is disabled).
+// Keep this check independent of the concrete graph types for regression tests.
+template<typename ActionPtr, typename Stack>
+inline void requireNNV15ActionActor(const ActionPtr & action, const Stack * activeStack)
+{
+	if(!action || !activeStack || !action->by || &action->by->cstack != activeStack)
+		throw std::runtime_error("MMAI V15: model action has no matching active creature");
+}
+
 // ACTION_RESET is a gym episode command, not a legal live battle move.
 // The original adapter turns it into a hero retreat to reset training.
 // V15 may legitimately select graph action ID 0, which numerically equals
