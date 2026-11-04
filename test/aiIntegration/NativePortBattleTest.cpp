@@ -1263,7 +1263,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCloneAndCompletesBattle)
 		auto simulation = std::make_shared<HypotheticBattle>(probeEnvironment.get(), realBattle);
 		spells::BattleCast projectedCast(simulation.get(), attackerSideHero, spells::Mode::HERO, entry.get());
 		projectedCast.castEval(simulation->getServerCallback(), target);
-		const auto projected = simulation->battleGetAllStacks(false);
+		const auto projected = simulation->battleGetUnitsIf([](const battle::Unit * unit) { return !unit->isGhost(); });
 		std::ostringstream cloneProbe;
 		for(const auto & [id, state] : simulation->stackStates)
 			cloneProbe << " state[id=" << id << " clone=" << state->isClone()
