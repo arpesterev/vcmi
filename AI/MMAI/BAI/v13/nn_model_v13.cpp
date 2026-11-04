@@ -14,6 +14,7 @@
 #include "filesystem/Filesystem.h"
 #include "nn_model_v13.h"
 #include "BAI/nn_output_validation.h"
+#include "BAI/nn_v13_action_routing.h"
 #include "schema/base.h"
 #include "vstd/CLoggerBase.h"
 #include "json/JsonNode.h"
@@ -457,9 +458,22 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	const auto hex1_mask = toVec2D<int>("hex1_mask", outputs[4], {4, 165});
 	const auto hex2_mask = toVec2D<int>("hex2_mask", outputs[5], {165, 165});
 
-	const auto [act0_sample, act0_greedy] = categorical(act0_probs, temperature, rng);
-	const auto [hex1_sample, hex1_greedy] = categorical(hex1_probs.at(act0_sample.index), temperature, rng);
-	const auto [hex2_sample, hex2_greedy] = categorical(hex2_probs.at(hex1_sample.index), temperature, rng);
+	// V13 is hierarchical. WAIT has no hex parameters, while only AMOVE
+	// needs hex2. Do not sample unused ONNX rows: they may be all zeros.
+	// Decode the greedy path independently, not under the sampled action's
+	// conditional heads; zero-temperature sampling does not consume RNG.
+	const auto [act0_sample, hex1_sample, hex2_sample] = sampleV13ActionPath(
+		act0_probs, hex1_probs, hex2_probs,
+		[this](const std::vector<float> & probabilities) {
+			return categorical(probabilities, temperature, rng).first;
+		}
+	);
+	const auto [act0_greedy, hex1_greedy, hex2_greedy] = sampleV13ActionPath(
+		act0_probs, hex1_probs, hex2_probs,
+		[this](const std::vector<float> & probabilities) {
+			return categorical(probabilities, 0.0f, rng).first;
+		}
+	);
 
 	if(act0_sample.prob == 0)
 		throwf("getAction: act0_sample has 0 probability");
