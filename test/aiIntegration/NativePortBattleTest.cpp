@@ -3501,6 +3501,76 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 }
 
 
+TEST_F(AIIntegrationNativeBattle, tumWarMachineCannotBeSlowAnchorForFastDecoyAvoidance)
+{
+	// Pinned TUM only discourages pursuing fast mobile bait near slower stacks.
+	// A VCMI siege weapon must not become the speed-zero "slow army" that
+	// makes an otherwise legitimate fast opponent look like a distraction.
+	// The SIEGE_WEAPON bonus is explicit fixture setup, not a creature proc.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * own = nullptr;
+	CStack * machineLike = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->creatureId() != CreatureID(0))
+			continue;
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			own = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER)
+			machineLike = unit.get();
+	}
+	ASSERT_NE(own, nullptr);
+	ASSERT_NE(machineLike, nullptr);
+	const auto origin = own->getPosition();
+	const int baitY = origin.getY() >= 4 ? origin.getY() - 3 : origin.getY() + 3;
+	const BattleHex baitHex(static_cast<si16>(origin.getX() + 5), static_cast<si16>(baitY));
+	ASSERT_TRUE(baitHex.isAvailable());
+	ASSERT_LT(BattleHex::getDistance(origin, baitHex),
+		BattleHex::getDistance(origin, machineLike->getPosition()));
+	const auto * fast = addStack(BattleSide::DEFENDER, CreatureID(4), baitHex, 12);
+	ASSERT_NE(fast, nullptr);
+	const int ownSpeed = static_cast<int>(own->getMovementRange());
+	ASSERT_GE(static_cast<int>(fast->getMovementRange()), ownSpeed + 2);
+	ASSERT_GT(BattleHex::getDistance(origin, baitHex), ownSpeed + 1);
+	ASSERT_LE(BattleHex::getDistance(origin, baitHex), ownSpeed * 2 + 1);
+	ASSERT_LE(static_cast<int>(machineLike->getMovementRange()), ownSpeed);
+	machineLike->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SIEGE_WEAPON, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(machineLike->hasBonusOfType(BonusType::SIEGE_WEAPON));
+	ASSERT_FALSE(machineLike->isMeleeAttacker());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *own);
+	ASSERT_EQ(baseline.actionType, EActionType::WALK);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, own);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->toString(), baseline.toString())
+		<< "No slower mobile stack exists, so a siege weapon must not redirect TUM's movement";
+	battle()->activeStack = own->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI server rejected the independently selected TUM movement";
+	EXPECT_GT(recorder.movementPackets, 0);
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumDoesNotAvoidIncapacitatedFastStackAsMobileDecoy)
 {
 	// A paralyzed fast stack cannot be a mobile distraction. TUM must
