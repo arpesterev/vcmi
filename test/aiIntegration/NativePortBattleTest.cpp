@@ -1586,6 +1586,31 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeRangedShieldAndCompletesBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Source spellDragonSlayerValue must never waste mana on a non-dragon
+// army. Heroes III uses its own Slayer target classifications and bonus.
+TEST_F(AIIntegrationNativeBattle, fheroes2CastsNativeSlayerAgainstDragonAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 100, CreatureID(132), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::SLAYER, 6);
+	const CStack * buffed = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			buffed = unit.get();
+	ASSERT_NE(buffed, nullptr);
+	bool nativeSlayerApplied = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::SLAYER).empty())
+			nativeSlayerApplied |= buffed->hasBonusOfType(BonusType::SLAYER);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::SLAYER).empty())
+		<< "Source-derived Dragon Slayer must produce a real hero cast against dragons";
+	EXPECT_TRUE(nativeSlayerApplied) << "The server must apply the native Slayer effect";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 {
 	// Source-derived 10% Bloodlust valuation must be gated on a real
