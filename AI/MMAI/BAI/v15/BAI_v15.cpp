@@ -313,8 +313,7 @@ namespace
 		// mismatch can invalidate its actor or target before conversion.
 		// assert() disappears in release builds: reject such actions instead
 		// of dereferencing null or sending a different command to the server.
-		if(!a || !acstack || !a->by || &a->by->cstack != acstack)
-			throw std::runtime_error("MMAI V15: model action has no matching active creature");
+		requireNNV15ActionActor(a, acstack);
 
 		switch(a->actionType)
 		{
