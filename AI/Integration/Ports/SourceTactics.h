@@ -33,6 +33,29 @@ inline bool preferEqualValueMeleeHex(int candidatePathCost, int currentPathCost,
 	return jouster ? candidatePathCost > currentPathCost : candidatePathCost < currentPathCost;
 }
 
+// Source: ai_tactical.cpp, type_AI_attack_hex_chooser::getHexAttackValue.
+// An adjacent enemy shooter that loses its ability to shoot contributes the
+// difference between its ranged and melee combat values, scaled by surviving
+// hit points / hit points per creature. The recovered implementation floors
+// even a nonpositive contribution to one. Native VCMI attack estimates are
+// an explicit projection of those HoMM3 combat values, not a direct port.
+inline int32_t pinnedShooterValue(double rangedUnitValue, double meleeUnitValue,
+	int64_t remainingHitPoints, int64_t hitPointsPerCreature)
+{
+	if(!std::isfinite(rangedUnitValue) || !std::isfinite(meleeUnitValue)
+		|| rangedUnitValue < 0 || meleeUnitValue < 0 || remainingHitPoints < 0
+		|| hitPointsPerCreature <= 0)
+		throw std::invalid_argument("HoMM3 shooter pin needs nonnegative values and positive unit health");
+	if(remainingHitPoints == 0)
+		return 0;
+	const double scaled = (rangedUnitValue - meleeUnitValue)
+		* static_cast<double>(remainingHitPoints) / static_cast<double>(hitPointsPerCreature);
+	if(!std::isfinite(scaled))
+		throw std::invalid_argument("HoMM3 shooter pin overflowed");
+	return static_cast<int32_t>(std::clamp(std::trunc(scaled), 1.0,
+		static_cast<double>(std::numeric_limits<int32_t>::max())));
+}
+
 struct RangedTarget
 {
 	int32_t attackEffect = 0;
