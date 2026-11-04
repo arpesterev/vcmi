@@ -4381,6 +4381,11 @@ TEST_F(AIIntegrationNativeBattle, tumNonMeleeNeutralDoesNotBreakShooterScreen)
 	const auto * neutral = findFirst<CGCreature>();
 	ASSERT_NE(neutral, nullptr);
 	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	// Keep a second ordinary melee neutral so the authoritative battle has
+	// a damageable, attacking enemy after the first becomes non-melee.
+	// Otherwise VCMI can end the encounter without a single injury.
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(neutral->id, SlotID(1)), CreatureID(0).toCreature(), 35));
 	gameHandler->battles->startBattle(attackerSideHero, neutral);
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 
@@ -4390,7 +4395,8 @@ TEST_F(AIIntegrationNativeBattle, tumNonMeleeNeutralDoesNotBreakShooterScreen)
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
 			melee = unit.get();
-		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0)
+			&& unit->getCount() == 80)
 			opponent = unit.get();
 	}
 	ASSERT_NE(melee, nullptr);
