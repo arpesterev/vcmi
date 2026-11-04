@@ -7,6 +7,7 @@
 #ifdef ENABLE_MMAI
 #include "../../AI/MMAI/BAI/nn_output_validation.h"
 #include "../../AI/MMAI/BAI/nn_model_metadata.h"
+#include "../../AI/MMAI/BAI/nn_model_resolution.h"
 #include "../../AI/MMAI/BAI/nn_v13_action_routing.h"
 
 #include <algorithm>
@@ -152,6 +153,42 @@ TEST(MMAINNOutputValidation, RejectsInvalidModelVersionMetadata)
 	for(const char * value : {"", "15bad", "13.0", " 15", "+15", "-13",
 		"0", "12", "14", "16", "99999999999999999999"})
 		EXPECT_THROW(parseNNModelVersion(value), std::runtime_error);
+}
+
+TEST(MMAINNOutputValidation, StrictRejectsConfiguredNeuralLoadError)
+{
+	using MMAI::BAI::enforceStrictNNModelLoad;
+	const std::runtime_error missing("ONNX resource not found");
+	EXPECT_NO_THROW(enforceStrictNNModelLoad(false, "attacker.siege", "siege.onnx", missing));
+	try
+	{
+		enforceStrictNNModelLoad(true, "attacker.siege", "siege.onnx", missing);
+		FAIL() << "strict MMAI accepted broken configured ONNX";
+	}
+	catch(const std::runtime_error & e)
+	{
+		const std::string diagnostic(e.what());
+		EXPECT_NE(diagnostic.find("attacker.siege"), std::string::npos);
+		EXPECT_NE(diagnostic.find("siege.onnx"), std::string::npos);
+		EXPECT_NE(diagnostic.find("ONNX resource not found"), std::string::npos);
+		EXPECT_NE(diagnostic.find("refusing substitute"), std::string::npos);
+	}
+}
+
+TEST(MMAINNOutputValidation, LegacyFallbackCannotPoisonStrictModelCache)
+{
+	using MMAI::BAI::mayCacheResolvedNNModel;
+	const std::map<std::string, std::string> configured = {
+		{"attacker", "attacker.onnx"},
+		{"attacker.siege", "siege.onnx"}
+	};
+	// A broken explicit siege model may fall back in hybrid mode, but the
+	// parent weights cannot be cached under the failed siege-model key.
+	EXPECT_FALSE(mayCacheResolvedNNModel(configured, "attacker.siege", "attacker.onnx"));
+	EXPECT_TRUE(mayCacheResolvedNNModel(configured, "attacker.siege", "siege.onnx"));
+	EXPECT_TRUE(mayCacheResolvedNNModel(configured, "attacker", "attacker.onnx"));
+	// Keys with no explicit override can intentionally inherit ancestors.
+	EXPECT_TRUE(mayCacheResolvedNNModel(configured, "attacker.siege.optional", "attacker.onnx"));
 }
 
 #endif

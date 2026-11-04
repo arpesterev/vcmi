@@ -21,6 +21,7 @@
 #include "../../StupidAI/StupidAI.h"
 
 #include "BAI/factory.h"
+#include "BAI/nn_model_resolution.h"
 #include "BAI/scripted/scripted_model.h"
 #include "BAI/v13/BAI_v13.h"
 
@@ -101,6 +102,9 @@ namespace
 
 			if(it != repo->models.end())
 			{
+				// Do not reuse a hybrid-cached substitute for a configured strict neural role.
+				if(requireNeuralModel && !mayCacheResolvedNNModel(repo->paths, currentKey, it->second.second))
+					throw std::runtime_error("MMAI: cached neural policy differs from configured model for " + currentKey);
 				model = it->second.first;
 				logAi->debug("MMAI: cache hit: %s (%s)", currentKey, it->second.second);
 				break;
@@ -119,14 +123,21 @@ namespace
 					model = CreateNNModel(path, repo->temperature, repo->seed);
 					for(const auto & k : keysToAdd)
 					{
+						// A failed configured role may inherit its parent in hybrid mode,
+						// but must not cache the substitute under that explicit role.
+						if(!mayCacheResolvedNNModel(repo->paths, k, path))
+							continue;
 						logAi->debug("MMAI: cache write: %s (%s)", k, path);
 						repo->models.try_emplace(k, model, path);
 					}
 					break;
 				}
-				catch(std::exception & e)
+				catch(const std::exception & e)
 				{
 					logAi->error("MMAI: load error: %s: %s", currentKey, std::string(e.what()));
+					// Refuse silently changing the neural policy after a failed
+					// explicitly configured ONNX load. Legacy hybrid remains unchanged.
+					enforceStrictNNModelLoad(requireNeuralModel, currentKey, path, e);
 				}
 			}
 			else

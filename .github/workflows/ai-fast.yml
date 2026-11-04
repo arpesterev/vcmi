@@ -245,7 +245,9 @@ jobs:
                       'V13RejectsInvalidRequiredHead',
                       'V13RejectsJaggedActionTableMetadata',
                       'RejectsInvalidModelSideMetadata',
-                      'RejectsInvalidModelVersionMetadata'}
+                      'RejectsInvalidModelVersionMetadata',
+                      'StrictRejectsConfiguredNeuralLoadError',
+                      'LegacyFallbackCannotPoisonStrictModelCache'}
           if {c.get('name') for c in cases} != expected or len(cases) != len(expected):
               raise RuntimeError('MMAI ONNX output contract tests missing: ' + str(cases))
           if any(c.find(t) is not None for c in cases for t in ('failure', 'error', 'skipped')):
