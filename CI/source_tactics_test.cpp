@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2DragonSlayer.h"
 #include "../AI/Integration/Ports/FHeroes2SiegeGeometry.h"
 #include "../AI/Integration/Ports/FHeroes2RoundLimiter.h"
 #include "../AI/Integration/Ports/FHeroes2RetreatDecision.h"
@@ -25,6 +26,24 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	// Pinned spellDragonSlayerValue: no dragons, no native effect, and
+	// mixed enemy armies must receive different priorities.
+	require(FHeroes2::dragonSlayerValue(100, 0, 100, true) == 0,
+		"Dragon Slayer has no value without living dragons");
+	require(FHeroes2::dragonSlayerValue(100, 100, 100, false) == 0,
+		"An immune/already-affected stack must not consume mana");
+	require(FHeroes2::dragonSlayerValue(100, 100, 100, true) == 10,
+		"All-dragon enemy army retains source Bloodlust-like base value");
+	require(FHeroes2::dragonSlayerValue(100, 50, 100, true) == 5,
+		"Half-dragon enemy army halves the valuation");
+	require(FHeroes2::dragonSlayerValue(100, 50, 200, true) == 2.5,
+		"Threat from other enemy stacks lowers Dragon Slayer priority");
+	try { FHeroes2::dragonSlayerValue(100, 150, 100, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::dragonSlayerValue(100,
+		std::numeric_limits<double>::infinity(), 100, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Source meleeUnitOffense fallback: closest legal wall approach after
 	// direct garrison approaches fail, with a stable path-cost tie break.
 	const FHeroes2::SiegeWallApproach noWallCandidate{0, 0, -1};

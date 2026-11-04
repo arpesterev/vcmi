@@ -10,6 +10,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2DragonSlayer.h"
 #include "FHeroes2DispelValuation.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
@@ -152,6 +153,11 @@ public:
 		{
 			return old.owner != player && old.health > 0;
 		});
+		double enemyDragonStrength = 0;
+		for(const auto & old : before)
+			if(old.owner != player && old.health > 0
+				&& old.unit->hasBonusOfType(BonusType::DRAGON_NATURE))
+				enemyDragonStrength += static_cast<double>(old.unit->estimateCombatValue());
 		std::optional<BattleAction> best;
 		double bestValue = 0;
 
@@ -166,6 +172,7 @@ public:
 			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
 			const bool dispelSpell = spell->id == SpellID::DISPEL;
 			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
+			const bool dragonSlayerSpell = spell->id == SpellID::SLAYER;
 			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
 			const bool attackBuff = spell->id == SpellID::BLOODLUST;
@@ -175,7 +182,7 @@ public:
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -208,6 +215,19 @@ public:
 						const double restored = static_cast<double>(after->estimateCombatValue())
 							* static_cast<double>(health - old.health) / static_cast<double>(health);
 						value += friendly ? restored : -restored;
+					}
+					// Pinned spellDragonSlayerValue only values this buff when
+					// enemy dragons exist. VCMI's SLAYER is a target-dependent
+					// creature bonus, so require a newly applied real native
+					// hypothetical effect, not a guessed damage increase.
+					if(dragonSlayerSpell && friendly && after && after->alive()
+						&& health == old.health)
+					{
+						const bool nativeEffectGained = after->hasBonusOfType(BonusType::SLAYER)
+							&& !old.unit->hasBonusOfType(BonusType::SLAYER);
+						value += Ports::FHeroes2::dragonSlayerValue(
+							static_cast<double>(old.unit->estimateCombatValue()),
+							enemyDragonStrength, theirs.strength, nativeEffectGained);
 					}
 					// Pinned fheroes2 values Disrupting Ray against enemy defense.
 					// Use VCMI's post-cast defense to exclude immunity, minimum-
