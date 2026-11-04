@@ -102,6 +102,27 @@ int main()
 		std::array<int, 0>{}, linearDistance),
 		"HoMM3 empty enemy footprint cannot generate score");
 
+	// HoMM3 findEnemyAttacks uses an enemy-threat field; VCMI must not
+	// project an impossible shot onto an empty future landing cell.
+	require(!HoMM3::projectedNativeRangedThreat(true, true, false, true, false, 0, 1),
+		"Ordinary shooter cannot fire through new melee contact");
+	require(HoMM3::projectedNativeRangedThreat(true, true, true, true, false, 0, 1),
+		"Unrestricted free shooting remains dangerous when engaged");
+	require(!HoMM3::projectedNativeRangedThreat(true, true, true, false, false, 0, 1),
+		"Restricted free shooter cannot shoot an adjacent target");
+	require(!HoMM3::projectedNativeRangedThreat(false, false, true, true, false, 0, 2),
+		"A currently disabled shooter must not invent a shot");
+	require(HoMM3::projectedNativeRangedThreat(true, false, false, false, true, 3, 3),
+		"Native limited shooting range includes its exact boundary");
+	require(!HoMM3::projectedNativeRangedThreat(true, false, false, false, true, 3, 4),
+		"Native limited-range shooter cannot threaten beyond its range");
+	require(HoMM3::projectedNativeRangedThreat(true, false, false, false, false, 0, 4),
+		"Unlimited normal shooting may threaten a distant cell");
+	try { HoMM3::projectedNativeRangedThreat(true, false, false, false, true, -1, 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::projectedNativeRangedThreat(true, false, false, false, false, 0, -1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Source checkAdjacentHexes combines a wide stack's per-cell threats
 	// using min, so the more exposed cell dominates, not their average.
 	require(HoMM3::moreExposedFootprintThreat(-50, -10) == -50,
