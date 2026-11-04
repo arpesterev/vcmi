@@ -3230,6 +3230,82 @@ TEST_F(AIIntegrationNativeBattle, homm3GuaranteedLethalFirstHitHasNoPhantomCount
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned ai_tactical.cpp::findEnemyAttacks excludes enemies which cannot
+// attack. A Ballista can shoot, but it is not a melee threat just because
+// its occupied hex is adjacent to a prospective attack landing cell.
+// Prove the negative engine predicate and execute an independently chosen
+// HoMM3OriginalTactics command through the real server. This does NOT prove
+// a different attack hex from the prior approximation or retail parity.
+TEST_F(AIIntegrationNativeBattle, homm3RangedOnlyBallistaCannotProjectMeleeLandingThreat)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(7), 8); // Crusaders
+	setArmy(defenderSideHero, CreatureID(0), 25); // Peasants
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(defenderSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	const CStack * crusaders = nullptr;
+	CStack * peasants = nullptr;
+	const CStack * ballista = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(7))
+			crusaders = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			peasants = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+	}
+	ASSERT_NE(crusaders, nullptr);
+	ASSERT_NE(peasants, nullptr);
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), crusaders);
+	const BattleHex adjacent(crusaders->getPosition().toInt() + 5);
+	ASSERT_TRUE(adjacent.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), nullptr);
+	peasants->setPosition(adjacent);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(ballista))
+		<< "The fixture requires a genuine shooting machine";
+	ASSERT_FALSE(view->battleCanAttackUnit(ballista, crusaders))
+		<< "VCMI must reject a hypothetical melee attack by the Ballista";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, crusaders);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(action.target[1].hexValue), peasants);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "VCMI server rejected the HoMM3 attack while a ranged-only machine was present";
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
 	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
