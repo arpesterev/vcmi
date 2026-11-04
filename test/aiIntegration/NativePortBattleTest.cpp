@@ -4051,10 +4051,11 @@ TEST_F(AIIntegrationNativeBattle, tumBlindNeutralThreatDoesNotBreakShooterScreen
 	ASSERT_TRUE(callback->action.has_value());
 	EXPECT_EQ(callback->action->actionType, EActionType::WAIT)
 		<< "An immobile neutral must not force a melee charge despite its speed";
+	const int meleeId = melee->unitId();
 	policy.reset();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
-	EXPECT_GT(lastAcceptedActionTypesByPlayer[player][EActionType::WAIT], 0)
-		<< "The actual VCMI server must accept the protective WAIT";
+	EXPECT_GT(lastAcceptedActionTypesByUnit[meleeId][EActionType::WAIT], 0)
+		<< "The actual VCMI server must accept this melee stack's protective WAIT";
 	EXPECT_GT(recorder.damage, 0);
 }
 
