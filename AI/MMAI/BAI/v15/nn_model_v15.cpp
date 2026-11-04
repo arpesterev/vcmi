@@ -560,6 +560,7 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	const auto modelGreedyAction = toScalar<int64_t>("action", outputs[0]);
 	const auto activeProbs = toVec1D<float>("active_probs", outputs[1], static_cast<int64_t>(activeActionIds.size()));
 	const auto value = toScalar<float>("value", outputs[2]);
+	validateNNValueEstimate(value);
 	const auto activeActionIdsOut = toVec1D<int64_t>("active_action_ids_out", outputs[3], static_cast<int64_t>(activeActionIds.size()));
 
 	if(activeActionIds.empty())
