@@ -218,7 +218,7 @@ TEST(MMAINNOutputValidation, LegacyFallbackCannotPoisonStrictModelCache)
 	EXPECT_TRUE(mayCacheResolvedNNModel(configured, "attacker.siege.optional", "attacker.onnx"));
 }
 
-TEST(MMAINNOutputValidation, StrictLiveBattleRejectsGymResetAndUntrainedRetreat)
+TEST(MMAINNOutputValidation, StrictLiveBattleRejectsGymResetButAllowsGraphActionZero)
 {
 	using MMAI::BAI::enforceStrictNNLiveBattleAction;
 	using MMAI::Schema::ACTION_RESET;
@@ -226,7 +226,10 @@ TEST(MMAINNOutputValidation, StrictLiveBattleRejectsGymResetAndUntrainedRetreat)
 	// Do not turn a training reset into an unsolicited hero retreat when
 	// the VCMI server is waiting for a strict neural stack action.
 	EXPECT_THROW(enforceStrictNNLiveBattleAction(true, ACTION_RESET), std::runtime_error);
-	EXPECT_THROW(enforceStrictNNLiveBattleAction(true, ACTION_RETREAT), std::runtime_error);
+	// In V15, action IDs are graph node indexes starting at 0; rejecting
+	// numeric ACTION_RETREAT would mistakenly reject a legal learned move.
+	EXPECT_EQ(ACTION_RETREAT, 0);
+	EXPECT_NO_THROW(enforceStrictNNLiveBattleAction(true, ACTION_RETREAT));
 	EXPECT_NO_THROW(enforceStrictNNLiveBattleAction(true, 0));
 	EXPECT_NO_THROW(enforceStrictNNLiveBattleAction(true, 42));
 	// Preserve upstream training/hybrid behavior when strict mode is off.
