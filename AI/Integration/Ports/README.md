@@ -69,6 +69,13 @@ candidate targets in sorted unit-ID order; original fheroes2 army enumeration
 may differ. This correction has deterministic contract coverage, not a new
 source-equivalence or win-rate claim.
 
+Siege assault now projects pinned fheroes2 `meleeUnitOffense`'s
+last-resort advance towards walls when no enemy attack position is reachable.
+Heroes II targets cells beneath walls; VCMI uses a nearest-garrison-footprint
+approximation and native reachable head hexes. The Heroes III wall geometry
+and siege rules differ, so this is not exact Heroes II pathfinding. Native
+siege action acceptance and result require exact-head server CI confirmation.
+
 Cautious melee movement now projects the pinned fheroes2
 `findOptimalPositionForSubsequentAttack`: inspect native-reachable steps
 of a multi-turn pursuit, prefer minimal projected enemy melee exposure,
