@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2ThreatProjection.h"
 
 #include <array>
 #include <iostream>
@@ -21,6 +22,43 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	// Source Unit::evaluateThreatForUnit: damage-based threat with
+	// ground-movement reach, completed turns and two-attacks cases.
+	const FHeroes2::ThreatProjection threat{100, 10, 4, false, false,
+		false, false, false, 0, false};
+	require(std::fabs(FHeroes2::evaluateSourceThreat(threat) - 100.0 / 3.75) < 1e-8,
+		"Distant slow melee gets source 1.5 * distance / speed penalty");
+	auto near = threat;
+	near.footprintDistance = 5;
+	require(FHeroes2::evaluateSourceThreat(near) == 100,
+		"Ground melee already in next-turn reach keeps its damage weight");
+	auto archer = threat;
+	archer.shooter = true;
+	require(FHeroes2::evaluateSourceThreat(archer) == 100,
+		"Shooters do not suffer ground-path distance penalty");
+	auto flyer = threat;
+	flyer.flying = true;
+	require(FHeroes2::evaluateSourceThreat(flyer) == 100,
+		"Flying troops retain full damage priority");
+	auto moved = archer;
+	moved.moved = true;
+	require(FHeroes2::evaluateSourceThreat(moved) == 80,
+		"Already-moved attackers are discounted 1/1.25");
+	auto doubleStrike = archer;
+	doubleStrike.extraAttacks = 1;
+	require(FHeroes2::evaluateSourceThreat(doubleStrike) == 200,
+		"A second attack increases predicted damage threat");
+	auto clone = archer;
+	clone.clone = true;
+	require(FHeroes2::evaluateSourceThreat(clone) == 1000,
+		"Source prioritizes a one-hit clone at tenfold threat");
+	auto disabled = clone;
+	disabled.disabled = true;
+	require(FHeroes2::evaluateSourceThreat(disabled) == 0,
+		"Disabled stacks cannot exert offensive next-turn threat");
+	try { auto bad = threat; bad.expectedDamage = -1;
+		FHeroes2::evaluateSourceThreat(bad); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 
 	for(int difficulty = 0; difficulty < 2; ++difficulty)
 		for(int incapacitated = 0; incapacitated < 2; ++incapacitated)
