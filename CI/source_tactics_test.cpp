@@ -194,6 +194,25 @@ int main()
 	try { FHeroes2::catastrophicFriendlyFire(std::numeric_limits<double>::infinity(), 10); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Pinned Mirror Image valuation from fheroes2 spellEffectValue:
+	// 100% for shooters, 55% for flyers, 33% for other creatures,
+	// and fivefold discount below the opposing average speed.
+	require(FHeroes2::mirrorImageCloneRatio(true, false, 6, 5, true) == 1.0,
+		"Ranged Mirror Image keeps full source strength");
+	require(FHeroes2::mirrorImageCloneRatio(false, true, 6, 5, true) == 0.55,
+		"Flying Mirror Image uses source's 55% ratio");
+	require(FHeroes2::mirrorImageCloneRatio(false, false, 6, 5, true) == 0.33,
+		"Ground Mirror Image uses source's 33% ratio");
+	require(FHeroes2::mirrorImageCloneRatio(true, false, 4, 5, true) == 0.2,
+		"Slow Mirror Image shooter is discounted fivefold");
+	require(FHeroes2::mirrorImageCloneRatio(false, true, 4, 5, false) == 0,
+		"No simulated friendly clone must never earn source value");
+	try { FHeroes2::mirrorImageCloneRatio(false, false, -1, 2, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::mirrorImageCloneRatio(false, false, 2,
+		std::numeric_limits<double>::infinity(), true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// fheroes2's defended-area test rejects a wide unit straddling the
 	// border, even when its head remains on the defended side. Also reject
 	// an empty/invalid footprint; the actual castle geometry is supplied
