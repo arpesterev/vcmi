@@ -198,6 +198,7 @@ protected:
 	int mmaiAutomaticDecisions = 0;
 	int replayedMovementEvents = 0;
 	int replayedRoundEvents = 0;
+	int encounterSeed = seed; // Fixture-only RNG input for reproducible directed matchups.
 
 #ifdef ENABLE_MMAI
 	void requireInstalledNeuralRole(const std::string & role) const
@@ -219,7 +220,7 @@ protected:
 		gameHandler.reset();
 		recorder.gameState = gameState();
 		gameHandler = std::make_shared<CGameHandler>(recorder, gameState());
-		gameHandler->randomizer->setSeed(seed);
+		gameHandler->randomizer->setSeed(encounterSeed);
 	}
 
 	void setArmy(const CArmedInstance * army, CreatureID type, int count)
@@ -558,7 +559,8 @@ protected:
 			}
 			return out.str();
 		};
-		std::cout << "AI_NATIVE_BATTLE_RESULT backend=" << backendName
+		std::cout << "AI_NATIVE_BATTLE_RESULT seed=" << encounterSeed
+			<< " backend=" << backendName
 			<< " defender_backend=" << defenderAI
 			<< " attacker_decisions=" << decisionsByPlayer[attackerPlayer]
 			<< " defender_decisions=" << decisionsByPlayer[defenderPlayer]
@@ -4098,6 +4100,37 @@ TEST_F(AIIntegrationNativeBattle, mixedFHeroes2AttackerAgainstTUMDefenderComplet
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "TUMEnchantedTactics");
 	EXPECT_GT(recorder.shots, 0);
 }
+
+// Repeat all six *ordered* source-policy pairings with two independent
+// reproducible native RNG seeds. Together with the existing seed-1337
+// fixtures this provides three observations per pairing, but no confidence
+// interval or win-rate claim: army composition, layout and source/host rules
+// remain fixed. Every action and result still goes through the real server.
+// Only test seeding and observability change, never the production game RNG.
+#define AI_SEEDED_SOURCE_MATCHUP(testName, attackerPolicy, defenderPolicy, battleRngSeed) \
+TEST_F(AIIntegrationNativeBattle, testName) \
+{ \
+	encounterSeed = battleRngSeed; \
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30); \
+	ASSERT_FALSE(HasFatalFailure()); \
+	runToCompletion(std::nullopt, false, attackerPolicy, defenderPolicy, true); \
+	EXPECT_GT(recorder.shots, 0) << "Expected real engine ranged attacks in the comparison"; \
+}
+
+AI_SEEDED_SOURCE_MATCHUP(seed2027HoMM3AgainstFHeroes2, "HoMM3OriginalTactics", "FHeroes2Tactics", 2027)
+AI_SEEDED_SOURCE_MATCHUP(seed2027FHeroes2AgainstHoMM3, "FHeroes2Tactics", "HoMM3OriginalTactics", 2027)
+AI_SEEDED_SOURCE_MATCHUP(seed2027HoMM3AgainstTUM, "HoMM3OriginalTactics", "TUMEnchantedTactics", 2027)
+AI_SEEDED_SOURCE_MATCHUP(seed2027TUMAgainstHoMM3, "TUMEnchantedTactics", "HoMM3OriginalTactics", 2027)
+AI_SEEDED_SOURCE_MATCHUP(seed2027FHeroes2AgainstTUM, "FHeroes2Tactics", "TUMEnchantedTactics", 2027)
+AI_SEEDED_SOURCE_MATCHUP(seed2027TUMAgainstFHeroes2, "TUMEnchantedTactics", "FHeroes2Tactics", 2027)
+AI_SEEDED_SOURCE_MATCHUP(seed2029HoMM3AgainstFHeroes2, "HoMM3OriginalTactics", "FHeroes2Tactics", 2029)
+AI_SEEDED_SOURCE_MATCHUP(seed2029FHeroes2AgainstHoMM3, "FHeroes2Tactics", "HoMM3OriginalTactics", 2029)
+AI_SEEDED_SOURCE_MATCHUP(seed2029HoMM3AgainstTUM, "HoMM3OriginalTactics", "TUMEnchantedTactics", 2029)
+AI_SEEDED_SOURCE_MATCHUP(seed2029TUMAgainstHoMM3, "TUMEnchantedTactics", "HoMM3OriginalTactics", 2029)
+AI_SEEDED_SOURCE_MATCHUP(seed2029FHeroes2AgainstTUM, "FHeroes2Tactics", "TUMEnchantedTactics", 2029)
+AI_SEEDED_SOURCE_MATCHUP(seed2029TUMAgainstFHeroes2, "TUMEnchantedTactics", "FHeroes2Tactics", 2029)
+
+#undef AI_SEEDED_SOURCE_MATCHUP
 
 #ifdef ENABLE_MMAI
 TEST_F(AIIntegrationNativeBattle, integrationFourExperimentalBackendsRemainDistinctFactoryChoices)
