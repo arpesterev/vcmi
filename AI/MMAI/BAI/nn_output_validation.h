@@ -35,4 +35,13 @@ inline void validateNNActionDistribution(const std::vector<float> & probabilitie
 	if(!hasPositiveProbability)
 		throw std::runtime_error("MMAI: neural action distribution contains no positive probability");
 }
+
+// V15 emits a critic value in addition to the action head. Although the
+// value does not determine the selected action, non-finite ONNX output is
+// evidence of a broken model and must not be accepted as a valid prediction.
+inline void validateNNValueEstimate(float estimate)
+{
+	if(!std::isfinite(estimate))
+		throw std::runtime_error("MMAI: non-finite neural value estimate");
+}
 }
