@@ -194,6 +194,16 @@ after a VCMI-authorized Blind, require acceptance of a selected `DEFEND`
 or `WALK`, and complete actual combat. This tests the *projection*, not
 Heroes II combat-engine equivalence.
 
+Pinned fheroes2 `meleeUnitDefense` considers every enemy adjacent to
+a friendly archer, including enemy archers who are engaged in melee.
+Under Heroes III's VCMI rules, a nearby enemy shooter still blocks a
+friendly archer's ranged attack; the adapter treats that **adjacent**
+enemy as a real shooter-cover threat without treating remote ranged units
+as future ground-melee pursuers. A native regression requires the blocked
+shot, FHeroes2's independent cover movement, server acceptance, and a
+completed battle. Heroes II targeting, speed and ability rules are not
+equated with Heroes III.
+
 Not implemented: complete upstream buff/debuff and creature-spell selection,
 retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
