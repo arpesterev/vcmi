@@ -280,10 +280,14 @@ private:
 		// the ability to fire in this exact activation. A shooter blocked by
 		// adjacent melee is still ranged; our own line must also have ammo
 		// and not be completely disabled by Forgetfulness to benefit from
-		// waiting. Enemy archer classification is intentionally conservative.
+		// waiting. A blinded/paralyzed/petrified shooter has ammunition but
+		// cannot take the turn needed to provide ranged support. Do not hold
+		// melee for a completely incapacitated firing line. Enemy shooter
+		// classification remains intentionally conservative.
 		state.hasShooters = std::any_of(friends.begin(), friends.end(), [&](const CStack * friendly)
 		{
-			return friendly->alive() && friendly->isShooter() && friendly->canShoot();
+			return friendly->alive() && friendly->isShooter() && friendly->canShoot()
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE) && !friendly->isFrozen();
 		});
 		state.opponentHasShooters = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
