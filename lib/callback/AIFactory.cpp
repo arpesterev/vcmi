@@ -95,7 +95,7 @@ std::shared_ptr<CBattleGameInterface> AIFactory::createBattleAI(const std::strin
 	if(name == "MMAI")
 #ifdef ENABLE_MMAI
 		return std::make_shared<AIIntegration::BattleEventAdapter>(
-			name, std::make_shared<MMAI::BAI::Router>(),
+			name, std::make_shared<MMAI::BAI::Router>(true), // A selected MMAI requires an NN, never scripted fallback.
 			[](const AIIntegration::EventRecord & event)
 			{
 				logGlobal->trace("AI_BACKEND_EVENT backend=%s seq=%llu battle=%lld kind=%s phase=%d",

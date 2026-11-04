@@ -53,7 +53,9 @@ public:
 		{
 			std::forward<Handler>(handler)();
 		}
-		catch(const std::exception &)
+		// A backend may throw outside the std::exception hierarchy. Preserve
+		// the original failure and never report its native event as COMPLETE.
+		catch(...)
 		{
 			event.phase = EventPhase::FAILED;
 			observe(event);

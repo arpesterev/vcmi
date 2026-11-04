@@ -83,7 +83,7 @@ namespace
 		return repo.get();
 	}
 
-	Schema::IModel * GetModel(const std::string & key)
+	Schema::IModel * GetModel(const std::string & key, bool requireNeuralModel)
 	{
 		const auto * repo = GetModelRepository();
 		auto lock = std::lock_guard<std::mutex>(repo->mutex);
@@ -144,6 +144,16 @@ namespace
 
 		if(!model)
 		{
+			// A user-selected strict MMAI must never return even a temporary
+			// scripted model to the router. Legacy hybrid callers may still use
+			// the explicitly configured fallback, but strict selection fails here.
+			if(requireNeuralModel)
+			{
+				logAi->error("MMAI: %s: no neural model available; refusing scripted fallback %s",
+					key, repo->fallbackName);
+				throw std::runtime_error("MMAI: no neural model available for " + key
+					+ "; refusing scripted fallback " + repo->fallbackName + " under the MMAI identity");
+			}
 			logAi->error("MMAI: %s: falling back to %s", key, repo->fallbackName);
 			ASSERT(repo->fallbackModel != nullptr, "fallback error: model is null");
 			model = repo->fallbackModel;
@@ -164,7 +174,7 @@ namespace
 
 #define MMAI_LOG_TAG LogTag _(logtag + "." + __func__)
 
-Router::Router() : addrstr(MakeAddrStr(this)), basetag(addrstr + ":MMAI"), logtag(basetag) {}
+Router::Router(bool requireNeuralModel) : neuralOnly(requireNeuralModel), addrstr(MakeAddrStr(this)), basetag(addrstr + ":MMAI"), logtag(basetag) {}
 
 Router::~Router() = default;
 
@@ -296,7 +306,15 @@ void Router::battleStart(
 	if(cb->getBattle(bid)->battleGetWallState(EWallPart::GATE) != EWallState::NONE)
 		modelkey += ".siege";
 
-	model = GetModel(modelkey);
+	model = GetModel(modelkey, neuralOnly);
+	// The launcher-selected MMAI is advertised as a neural policy. Without a
+	// loadable model, refusing the battle is safer than silently executing
+	// BattleAI/StupidAI under the MMAI name. Legacy direct Router users may
+	// still intentionally opt into the scripted fallback.
+	if(neuralOnly && model->getType() != Schema::ModelType::NN)
+		throw std::runtime_error("MMAI: no neural model available for " + modelkey
+			+ "; refusing scripted fallback " + model->getName() + " under the MMAI identity");
+
 
 	logtag = basetag + ".v" + std::to_string(model->getVersion());
 	LogTag _2(logtag + "." + __func__);
@@ -304,7 +322,8 @@ void Router::battleStart(
 	auto modelside = model->getSide();
 	auto realside = static_cast<Schema::Side>(EI(side));
 
-	if(modelside != realside && modelside != Schema::Side::BOTH)
+	if(!validateModelSide(modelside, realside, neuralOnly, modelkey))
+	{
 		logAi->warn(
 			"The loaded '%s' model was not trained to play as %s (modelside=%d, realside=%d)",
 			modelkey,
@@ -312,6 +331,7 @@ void Router::battleStart(
 			static_cast<int>(modelside),
 			static_cast<int>(realside)
 		);
+	}
 
 	switch(model->getType())
 	{
@@ -333,7 +353,7 @@ void Router::battleStart(
 			break;
 		case Schema::ModelType::NN:
 			// XXX: must not call initBattleInterface here
-			bai = CreateBAI(model, env, cb, autocombatPreferences.enableSpellsUsage, autocombatPreferences.enableTacticsUsage);
+			bai = CreateBAI(model, env, cb, autocombatPreferences.enableSpellsUsage, autocombatPreferences.enableTacticsUsage, neuralOnly);
 			break;
 
 		default:

@@ -145,10 +145,68 @@ jobs:
           else:
               report['error'] = 'No native battle XML report was produced'
               report['tail'] = (Path(os.environ['RUNNER_TEMP']) / 'native-battles.log').read_text(errors='replace').splitlines()[-30:]
+          for failure in report.get('failures', []):
+              print('NATIVE_BATTLE_FAILURE:', failure['test'])
+              for error in failure['errors']:
+                  print(error)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('diagnostics=' + json.dumps(report, separators=(',', ':')) + '\n')
           PY
           exit "$status"
+
+      - name: Check seeded three-policy battle comparison evidence
+        run: |
+          python3 - <<'PY'
+          import itertools
+          import os
+          from pathlib import Path
+
+          names = {
+              "HoMM3": "HoMM3OriginalTactics",
+              "FHeroes2": "FHeroes2Tactics",
+              "TUM": "TUMEnchantedTactics",
+          }
+          seeds = (1337, 2027, 2029)
+          pairs = list(itertools.permutations(names, 2))
+          expected = {
+              f"seed{seed}{a}Against{b}": (str(seed), names[a], names[b])
+              for seed in seeds for a, b in pairs
+          }
+          recorded = {}
+          active_case = None
+          log_path = Path(os.environ["RUNNER_TEMP"]) / "native-battles.log"
+          for line in log_path.read_text(errors="replace").splitlines():
+              if line.startswith("[ RUN      ] AIIntegrationNativeBattle."):
+                  active_case = line.rsplit(".", 1)[-1].strip()
+              elif line.startswith("AI_NATIVE_BATTLE_RESULT ") and active_case in expected:
+                  fields = dict(fragment.split("=", 1) for fragment in line.split()[1:] if "=" in fragment)
+                  expected_identity = expected[active_case]
+                  actual_identity = (fields.get("seed"), fields.get("backend"), fields.get("defender_backend"))
+                  if actual_identity != expected_identity:
+                      raise SystemExit(f"Policy/seed identity mismatch for {active_case}: {actual_identity}")
+                  for metric in ("attacker_decisions", "defender_decisions", "damage"):
+                      if int(fields.get(metric, "0")) <= 0:
+                          raise SystemExit(f"Missing actual engine activity for {active_case}: {metric}")
+                  if fields.get("winner") not in ("attacker", "defender"):
+                      raise SystemExit(f"No native winner for {active_case}")
+                  if active_case in recorded:
+                      raise SystemExit(f"Duplicate native outcome for {active_case}")
+                  recorded[active_case] = fields
+
+          missing = sorted(set(expected) - set(recorded))
+          if missing:
+              raise SystemExit("Missing engine-backed seeded matchup evidence: " + ", ".join(missing))
+          print("AI_SOURCE_POLICY_SEEDED_MATRIX seeds=1337,2027,2029 fixture=grand_elf25_vs_dwarves25x2 trials=18")
+          for a, b in pairs:
+              samples = [recorded[f"seed{seed}{a}Against{b}"] for seed in seeds]
+              wins = sum(sample["winner"] == "attacker" for sample in samples)
+              damage = sum(int(sample["damage"]) for sample in samples)
+              attacks = sum(int(sample["attacker_decisions"]) for sample in samples)
+              defenses = sum(int(sample["defender_decisions"]) for sample in samples)
+              print(f"AI_SOURCE_POLICY_MATCHUP attacker={names[a]} defender={names[b]} "
+                    f"wins_attacker={wins}/3 accepted_activations={attacks}/{defenses} "
+                    f"total_engine_damage={damage} samples=3 statistical_claim=false")
+          PY
 
       - name: Run all Nullkiller2 regressions in one process
         run: |
@@ -166,6 +224,119 @@ jobs:
             cat server-errors.log
             exit 1
           fi
+
+      # Only MMAI or four-policy integration PRs download checksum-pinned 1.8 ONNX weights; no
+      # binary weights enter this repository, Actions artifacts or release jobs.
+      - name: Install verified public MMAI neural pack into isolated CI preset
+        if: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'feature/mmai-') || startsWith(github.head_ref, 'feature/ai-four-policy-integration-')) }}
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --silent --show-error \
+            'https://github.com/vcmi-mods/mmai/releases/download/vcmi-1.8-latest/mod.zip' \
+            --output "$RUNNER_TEMP/mmai-mod.zip"
+          echo "25c997888015386c59c74a426cd0368b5035048dd61b059854d5b7689acdb7d4  $RUNNER_TEMP/mmai-mod.zip" | sha256sum -c -
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+
+          root = Path.home() / '.local/share/vcmi'
+          archive = Path(os.environ['RUNNER_TEMP']) / 'mmai-mod.zip'
+          with ZipFile(archive) as z:
+              for name in z.namelist():
+                  parts = PurePosixPath(name).parts
+                  if not parts or parts[0].lower() != 'mmai' or '..' in parts:
+                      raise ValueError('Unexpected path in MMAI release: ' + name)
+              z.extractall(root / 'Mods')
+
+          mod = root / 'Mods/mmai'
+          manifest_file = mod / 'mod.json'
+          if not manifest_file.exists():
+              raise RuntimeError('MMAI mod.json is missing from downloaded release')
+          # Use the official 1.8 release with its unmodified compatibility
+          # declaration. The release asset SHA-256 is pinned above.
+          manifest = json.loads(manifest_file.read_text())
+          compat = manifest.get('compatibility', {})
+          if compat.get('min') != '1.8.0' or compat.get('max') != '1.8.9':
+              raise RuntimeError('Unexpected MMAI 1.8 release compatibility: ' + str(compat))
+          print('Verified native MMAI compatibility:', compat)
+          settings_file = mod / 'config/mmai-settings.json'
+          model_settings = json.loads(settings_file.read_text())
+          if not {'attacker', 'defender'}.issubset(model_settings.get('models', {})):
+              raise RuntimeError('MMAI release must configure attacker and defender models')
+          for role, filename in model_settings['models'].items():
+              candidate = mod / 'models' / filename
+              if not candidate.is_file():
+                  alt = mod / 'models' / filename.replace('.onnx', '-stochastic.onnx')
+                  if not alt.is_file():
+                      raise RuntimeError('No published model for ' + role + ': ' + filename)
+                  model_settings['models'][role] = alt.name
+                  candidate = alt
+              print('MMAI neural model:', role, candidate.name, candidate.stat().st_size)
+          settings_file.write_text(json.dumps(model_settings, indent=2) + '\n')
+
+          # CVcmiTestConfig always uses the separate testModSettings preset,
+          # never the end user's launcher modSettings.json.
+          preset_file = Path.home() / '.config/vcmi/testModSettings.json'
+          preset_file.parent.mkdir(parents=True, exist_ok=True)
+          preset = json.loads(preset_file.read_text()) if preset_file.exists() else {}
+          preset_name = preset.get('activePreset', 'default')
+          preset['activePreset'] = preset_name
+          active = preset.setdefault('presets', {}).setdefault(preset_name, {}).setdefault('mods', ['vcmi', 'vcmi-test'])
+          if 'mmai' not in active:
+              active.append('mmai')
+          preset_file.write_text(json.dumps(preset, indent=2) + '\n')
+          print('CI-only test mod preset:', active)
+          PY
+
+      - name: Run real MMAI neural actions through VCMI battle engine
+        if: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'feature/mmai-') || startsWith(github.head_ref, 'feature/ai-four-policy-integration-')) }}
+        run: |
+          set -euo pipefail
+          cd out/build/linux-gcc-test/bin
+          ulimit -c 0
+          result=0
+          VCMI_AI_MMAI_NEURAL_TEST=1 timeout 300 ./vcmitest \
+            --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle:AIIntegrationNativeBattle.mmaiOppositeSideMetadataIsRejected' \
+            --gtest_output=xml:mmai-real-neural-battle.xml || result=$?
+          if [[ "$result" == 139 ]]; then
+            # A real-model crash is a hard test failure. Record a stack
+            # without uploading a memory dump or publishing model weights.
+            sudo apt-get install -y --no-install-recommends gdb
+            VCMI_AI_MMAI_NEURAL_TEST=1 timeout 180 gdb --quiet --batch \
+              -ex 'set pagination off' -ex 'set print thread-events off' \
+              -ex run -ex 'bt 35' -ex 'thread apply all bt 8' \
+              --args ./vcmitest \
+                --gtest_filter='AIIntegrationNativeBattle.mmai*RealBattle:AIIntegrationNativeBattle.mmaiOppositeSideMetadataIsRejected' || true
+          fi
+          if [[ "$result" != 0 ]]; then
+            exit "$result"
+          fi
+          python3 - <<'PY'
+          from xml.etree import ElementTree as ET
+          root = ET.parse('mmai-real-neural-battle.xml').getroot()
+          cases = list(root.iter('testcase'))
+          expected = {'mmaiWithRealNeuralModelCompletesRealBattle',
+                      'mmaiDefenderNeuralModelCompletesRealBattle',
+                      'mmaiSiegeDefenderNeuralModelCompletesRealBattle',
+                      'mmaiBothNeuralSidesFightRealBattle',
+                      'mmaiOppositeSideMetadataIsRejected',
+                      'mmaiSiegeAttackerAgainstTUMDefenderRealBattle',
+                      'mmaiAttackerAgainstHoMM3DefenderRealBattle',
+                      'mmaiDefenderAgainstHoMM3AttackerRealBattle',
+                      'mmaiAttackerAgainstTUMDefenderRealBattle',
+                      'mmaiDefenderAgainstTUMAttackerRealBattle',
+                      'mmaiStrictNeuralDoesNotCastScriptedHeroSpellRealBattle',
+                      'mmaiRangedAttackerAgainstFHeroes2InfantryRealBattle',
+                      'mmaiDefenderAgainstFHeroes2RangedAttackerRealBattle'}
+          names = {case.get('name') for case in cases}
+          if len(cases) != 13 or names != expected:
+              raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
+          if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
+              raise RuntimeError('An MMAI neural integration test failed or was skipped')
+          print('Verified: twelve model-gated MMAI battle cases plus one negative real-ONNX training-side check; engine siege packets are not necessarily MMAI decisions')
+          PY
 
       - name: Save compiled C++ objects for later develop builds
         if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}

@@ -41,9 +41,10 @@ BAI::BAI(
 	const std::shared_ptr<Environment> & env,
 	const std::shared_ptr<CBattleCallback> & cb,
 	bool enableSpells,
-	bool enableTactics
+	bool enableTactics,
+	bool strictNeural_
 )
-	: model(model), version(version), logger(cb->getPlayerID().value().toString()), env(env), cb(cb), enableSpells(enableSpells), enableTactics(enableTactics)
+	: model(model), version(version), logger(cb->getPlayerID().value().toString()), env(env), cb(cb), enableSpells(enableSpells), enableTactics(enableTactics), strictNeural(strictNeural_)
 {
 }
 
@@ -90,6 +91,8 @@ void BAI::battleStart(
 	state = initState(battle.get());
 	getActionTotalMs = 0;
 	getActionTotalCalls = 0;
+	if(strictNeural && enableSpells)
+		logger.warn("MMAI neural-only: hero spell selection is unsupported by this ONNX action schema; no scripted spellcasting fallback will run");
 }
 
 // XXX: battleEnd() is NOT called by CPlayerInterface (i.e. GUI)
@@ -158,7 +161,10 @@ void BAI::yourTacticPhase(const BattleID & bid, int distance)
 
 bool BAI::maybeCastSpell(const CStack * astack, const BattleID & bid)
 {
-	if(!enableSpells)
+	// Official MMAI models select creature actions, not hero spells. The
+	// BattleEvaluator spell heuristic belongs to legacy hybrid MMAI only.
+	// A strict factory-selected neural policy must not silently use it.
+	if(strictNeural || !enableSpells)
 		return false;
 
 	const auto * hero = battle->battleGetMyHero();
@@ -332,6 +338,8 @@ void BAI::activeStack(const BattleID & bid, const CStack * astack)
 	}
 	catch(const std::exception & e) // NOSONAR
 	{
+		if(strictNeural)
+			throw;
 		logger.error("Falling back to BattleAI due to MMAI error: " + std::string(e.what()));
 		auto evaluator = BattleEvaluator(env, cb, astack, cb->getPlayerID().value(), bid, battle->battleGetMySide(), 1.0f, 2);
 		cb->battleMakeUnitAction(bid, evaluator.selectStackAction(astack));
@@ -352,6 +360,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	// (print warning once, make only fallback actions from there on)
 	if(!inFallback && getActionTotalCalls >= MMAIFallbackTrigger())
 	{
+		if(strictNeural)
+			throw std::runtime_error("MMAI neural policy exceeded its inference budget: scripted fallback disabled");
 		logger.warn("Reached %d predictions, will fall back to BattleAI until this combat ends", MMAIFallbackTrigger());
 		inFallback = true;
 	}

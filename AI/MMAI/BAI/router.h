@@ -13,16 +13,32 @@
 #include "AI/MMAI/common.h" // IWYU pragma: keep
 
 #include "AI/MMAI/schema/base.h"
+#include <stdexcept>
 #include "battle/AutocombatPreferences.h"
 #include "battle/CPlayerBattleCallback.h"
 #include "callback/CBattleGameInterface.h"
 
 namespace MMAI::BAI
 {
+// Production side check extracted so the negative neural-model metadata
+// regression exercises the exact same condition as Router::battleStart.
+// A permissive legacy Router may warn and continue on a mismatch, while
+// factory-selected MMAI must reject it before choosing any unit actions.
+inline bool validateModelSide(Schema::Side trained, Schema::Side actual,
+	bool strictNeural, const std::string & modelkey)
+{
+	if(trained == actual || trained == Schema::Side::BOTH)
+		return true;
+	if(strictNeural)
+		throw std::runtime_error("MMAI: neural model for " + modelkey
+			+ " was trained for an incompatible battle side; refusing unsafe model routing");
+	return false;
+}
+
 class Router : public CBattleGameInterface
 {
 public:
-	Router();
+	explicit Router(bool requireNeuralModel = false);
 	~Router() override;
 
 	Router(const Router &) = delete;
@@ -77,6 +93,7 @@ private:
 	std::shared_ptr<CBattleGameInterface> bai; // calls will be delegated to this object
 
 	AutocombatPreferences autocombatPreferences;
+	bool neuralOnly = false; // Factory-selected MMAI must not masquerade as BattleAI.
 	std::string addrstr = "?";
 	std::string colorname = "?";
 	const std::string basetag = "?";

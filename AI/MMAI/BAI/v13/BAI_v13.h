@@ -20,7 +20,7 @@ namespace MMAI::BAI::V13
 class BAI : public CBattleGameInterface
 {
 public:
-	BAI(Schema::IModel * model, int version, const std::shared_ptr<Environment> & env, const std::shared_ptr<CBattleCallback> & cb, bool enableSpellsUsage);
+	BAI(Schema::IModel * model, int version, const std::shared_ptr<Environment> & env, const std::shared_ptr<CBattleCallback> & cb, bool enableSpellsUsage, bool strictNeural);
 
 	void activeStack(const BattleID & bid, const CStack * stack) override;
 	void actionStarted(const BattleID & bid, const BattleAction & action) override;
@@ -60,6 +60,7 @@ public:
 	const std::shared_ptr<CBattleCallback> cb;
 
 	bool enableSpellsUsage = false;
+	const bool strictNeural;
 
 	// consecutive invalid actions counter
 	int errcounter = 0;

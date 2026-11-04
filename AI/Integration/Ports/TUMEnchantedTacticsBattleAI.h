@@ -51,6 +51,15 @@ public:
 		BattleAction action;
 		if(stack->creatureId() == CreatureID::BALLISTA)
 			action = chooseBallistaShot(*battle, *stack);
+		// Published TUM Hypnotize override: attacking former allies is scored
+		// by damage inflicted + retaliation received, not net exchange.
+		else if(stack->isHypnotized() && stack->unitOwner() != battle->battleGetOwner(stack))
+		{
+			if(const auto attack = chooseHypnotizedAttack(*battle, *stack))
+				action = *attack;
+			else
+				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
+		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
 			&& !battle->battleCanShoot(stack)
 			&& (shouldProtectShooters(*battle, *stack) || shouldHoldFortifiedSiege(*battle, *stack)))
@@ -106,6 +115,79 @@ private:
 			: BattleAction::makeDefend(&stack);
 	}
 
+	// AI Improvements.txt / SPELLS / HYPNOTIZE: attack the original ally
+	// with maximum projected outgoing + incoming damage. VCMI computes
+	// actual legal positions and combat estimates. The closed-source TUM
+	// spell internals are not claimed to have been reproduced.
+	static std::optional<BattleAction> chooseHypnotizedAttack(CPlayerBattleCallback & battle, const CStack & stack)
+	{
+		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		vstd::erase_if(targets, [](const CStack * target)
+		{
+			return !target->alive() || target->isInvincible() || !target->getPosition().isValid();
+		});
+		std::sort(targets.begin(), targets.end(), [](const CStack * lhs, const CStack * rhs)
+		{
+			return lhs->unitId() < rhs->unitId();
+		});
+		const auto score = [&](const CStack & victim, BattleHex origin, int distance, bool shooting)
+		{
+			BattleAttackInfo info(&stack, &victim, distance, shooting);
+			info.attackerPos = origin;
+			DamageEstimation retaliation;
+			const auto damage = battle.battleEstimateDamage(info, &retaliation);
+			const double dealt = std::min(static_cast<double>(victim.getAvailableHealth()),
+				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
+			const double received = shooting ? 0.0 : std::min(static_cast<double>(stack.getAvailableHealth()),
+				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
+		};
+
+		// TUM's published Hypnotize priority applies across all legal attack
+		// types. A legal shot does not automatically outrank a reachable melee
+		// strike whose retaliation makes the combined damage larger.
+		std::optional<BattleAction> bestAction;
+		double bestScore = -std::numeric_limits<double>::infinity();
+		for(const auto * target : targets)
+		{
+			if(!battle.battleCanShoot(&stack, target->getPosition()))
+				continue;
+			const double value = score(*target, stack.getPosition(), 0, true);
+			if(!bestAction || value > bestScore)
+			{
+				bestAction = BattleAction::makeShotAttack(&stack, target);
+				bestScore = value;
+			}
+		}
+		if(!stack.getPosition().isValid())
+			return bestAction;
+
+		const auto reach = battle.getReachability(&stack);
+		auto available = battle.battleGetAvailableHexes(reach, &stack, false);
+		available.sort([](const BattleHex & lhs, const BattleHex & rhs)
+		{
+			return lhs.toInt() < rhs.toInt();
+		});
+		for(const auto * target : targets)
+		{
+			for(const auto & hex : available)
+			{
+				if(!hex.isAvailable())
+					continue;
+				const auto attackedHexes = battle.meleeAttackHexes(&stack, target, hex);
+				if(attackedHexes.empty())
+					continue;
+				const double value = score(*target, hex, reach.distances[hex.toInt()], false);
+				if(!bestAction || value > bestScore)
+				{
+					bestAction = BattleAction::makeMeleeAttack(&stack, attackedHexes.front(), hex);
+					bestScore = value;
+				}
+			}
+		}
+		return bestAction;
+	}
+
 	static bool canReachFriendlyNextTurn(CPlayerBattleCallback & battle,
 		const CStack & enemy, const std::vector<const CStack *> & friends)
 	{
@@ -130,11 +212,16 @@ private:
 		// TUM's published siege adjustment favors remaining behind intact
 		// fortifications. With no disclosed plugin source, model only the
 		// conservative case: a closed/blocked gate and no enemy inside the walls.
+		// A wide defender is sheltered only if both its occupied cells are
+		// inside: a head-only check can hold a unit already straddling a wall.
 		// Never prevent the defender from responding once the gate opens, an
 		// enemy breaches the walls, or a melee enemy is already adjacent.
 		if(active.unitSide() != BattleSide::DEFENDER
 			|| battle.battleGetDefendedTown() == nullptr
-			|| !battle.battleIsInsideWalls(active.getPosition()))
+			|| !Ports::TUM::footprintFullyInsideCastle(active.getHexes(), [&](const BattleHex & hex)
+			{
+				return hex.isValid() && battle.battleIsInsideWalls(hex);
+			}))
 			return false;
 		const auto gate = battle.battleGetGateState();
 		if(gate != EGateState::CLOSED && gate != EGateState::BLOCKED)
@@ -145,8 +232,10 @@ private:
 		return std::none_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
 			return enemy->alive() && enemy->getPosition().isValid()
-				&& (battle.battleIsInsideWalls(enemy->getPosition())
-					|| battle.isMeleeAttackPossible(&active, enemy));
+				&& (Ports::TUM::footprintBreachesCastle(enemy->getHexes(), [&](const BattleHex & hex)
+				{
+					return hex.isValid() && battle.battleIsInsideWalls(hex);
+				}) || battle.isMeleeAttackPossible(&active, enemy));
 		});
 	}
 
@@ -165,13 +254,18 @@ private:
 		{
 			return battle.battleGetOwner(enemy) == PlayerColor::NEUTRAL;
 		});
+		// The published TUM condition is about armies having shooters, not
+		// the ability to fire in this exact activation. A shooter blocked by
+		// adjacent melee is still ranged; our own line must also have ammo
+		// and not be completely disabled by Forgetfulness to benefit from
+		// waiting. Enemy archer classification is intentionally conservative.
 		state.hasShooters = std::any_of(friends.begin(), friends.end(), [&](const CStack * friendly)
 		{
-			return friendly->alive() && battle.battleCanShoot(friendly);
+			return friendly->alive() && friendly->isShooter() && friendly->canShoot();
 		});
 		state.opponentHasShooters = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
-			return enemy->alive() && battle.battleCanShoot(enemy);
+			return enemy->alive() && enemy->isShooter();
 		});
 		if(!state.opponentIsNeutral || !state.hasShooters || state.opponentHasShooters)
 			return false;
