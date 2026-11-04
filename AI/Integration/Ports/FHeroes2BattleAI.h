@@ -184,6 +184,16 @@ private:
 	AutocombatPreferences preferences;
 	bool humanAutocombat = false;
 
+	// Pinned fheroes2 Unit::GetSpeed(false, true) returns STANDING while
+	// Blind or Paralyze prevents a turn. In VCMI NOT_ACTIVE is the
+	// authoritative current incapacitation flag, not raw creature speed.
+	// This projects current state only; it cannot predict future dispels.
+	static int futureThreatSpeed(const CStack & enemy)
+	{
+		return enemy.hasBonusOfType(BonusType::NOT_ACTIVE)
+			? 0 : static_cast<int>(enemy.getMovementRange());
+	}
+
 	static double strength(const battle::Unit & stack)
 	{
 		return static_cast<double>(stack.estimateCombatValue());
@@ -382,7 +392,7 @@ private:
 			if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
 				continue;
 
-			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			const int enemySpeed = futureThreatSpeed(*enemy);
 			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
 				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
 			const Ports::FHeroes2::DistantTarget candidate{
@@ -469,7 +479,7 @@ private:
 					if(!engaged)
 						continue;
 				}
-				const int speed = static_cast<int>(enemy->getMovementRange());
+				const int speed = futureThreatSpeed(*enemy);
 				if(speed <= 0)
 					continue;
 				int distance = GameConstants::BFIELD_SIZE;
@@ -554,7 +564,7 @@ private:
 					for(const auto & shooterHex : friendly->getHexes())
 						nearest = std::min(nearest,
 							static_cast<int>(BattleHex::getDistance(enemyHex, shooterHex)));
-				return nearest <= static_cast<int>(enemy->getMovementRange()) + 1;
+				return nearest <= futureThreatSpeed(*enemy) + 1;
 			});
 			if(!threatened)
 				continue;
@@ -666,9 +676,7 @@ private:
 			// for Blind and Paralyze even when base speed is high. VCMI
 			// NOT_ACTIVE is the native cannot-act projection: adjacent
 			// contact still blocks shooting, but it cannot chase next turn.
-			const bool disabled = enemy.hasBonusOfType(BonusType::NOT_ACTIVE);
-			const int reach = unengagedArcher || disabled ? 1
-				: static_cast<int>(enemy.getMovementRange()) + 1;
+			const int reach = unengagedArcher ? 1 : futureThreatSpeed(enemy) + 1;
 			return distance <= reach;
 		};
 
@@ -681,8 +689,7 @@ private:
 			// Avoid classifying a Blind/Paralyzed enemy's raw creature
 			// speed as a future-turn pursuit threat. This matches the
 			// upstream GetSpeed(false, true) standing-unit gate.
-			const int enemySpeed = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
-				? 0 : static_cast<int>(enemy->getMovementRange());
+			const int enemySpeed = futureThreatSpeed(*enemy);
 			if(enemySpeed > 0 && enemySpeed + 2 >= speed)
 				return std::nullopt;
 		}
