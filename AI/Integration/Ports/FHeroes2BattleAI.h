@@ -154,6 +154,50 @@ private:
 		return Ports::FHeroes2::selectTactics(input);
 	}
 
+	// Pinned fheroes2 meleeUnitOffense advances towards cells under siege
+	// walls when no enemy has a reachable attack position. Heroes II has a
+	// cellsUnderWallsIndexes path policy; VCMI does not supply that list.
+	// Use living garrison footprints as an approximate destination and submit
+	// only a native-reachable head hex. This is NOT equivalent wall pathfinding.
+	static std::optional<BattleAction> approachSiegeWall(CPlayerBattleCallback & battle,
+		const CStack & stack, const BattleHexArray & available,
+		const std::vector<const CStack *> & enemies)
+	{
+		if(stack.unitSide() != BattleSide::ATTACKER || battle.battleGetDefendedTown() == nullptr
+			|| stack.getMovementRange() == 0 || stack.isTurret()
+			|| enemies.empty() || !stack.getPosition().isValid())
+			return std::nullopt;
+
+		const auto distanceToDefenders = [&](const BattleHex & head)
+		{
+			int nearest = GameConstants::BFIELD_SIZE;
+			for(const auto * defender : enemies)
+			{
+				if(!defender->alive() || !defender->getPosition().isValid())
+					continue;
+				for(const auto & from : stack.getHexes(head))
+					for(const auto & to : defender->getHexes())
+						nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(from, to)));
+			}
+			return nearest;
+		};
+		int nearest = distanceToDefenders(stack.getPosition());
+		BattleHex best;
+		for(const auto & hex : available)
+		{
+			if(!hex.isAvailable() || hex == stack.getPosition())
+				continue;
+			const int distance = distanceToDefenders(hex);
+			if(distance < nearest || (distance == nearest && best.isValid() && hex.toInt() < best.toInt()))
+			{
+				best = hex;
+				nearest = distance;
+			}
+		}
+		return best.isValid()
+			? std::optional<BattleAction>(BattleAction::makeMove(&stack, best)) : std::nullopt;
+	}
+
 	// fheroes2 meleeUnitOffense first pursues targets that cannot evade,
 	// then maximizes threat divided by the path distance. Unlike the former
 	// nearest-stack policy, this can pursue a remote archer over nearby bait.
@@ -196,7 +240,11 @@ private:
 			}
 		}
 		if(!destination.isValid())
+		{
+			if(const auto wall = approachSiegeWall(battle, stack, available, enemies))
+				return *wall;
 			return BattleAction::makeDefend(&stack);
+		}
 
 		if(stack.hasBonusOfType(BonusType::FLYING))
 		{
@@ -234,7 +282,11 @@ private:
 			destination = previous;
 		}
 		if(pathSteps.empty())
+		{
+			if(const auto wall = approachSiegeWall(battle, stack, available, enemies))
+				return *wall;
 			return BattleAction::makeDefend(&stack);
+		}
 		// Predecessors arrive from far to near; source visits near to far.
 		std::reverse(pathSteps.begin(), pathSteps.end());
 		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
@@ -621,7 +673,19 @@ private:
 		});
 		std::sort(enemies.begin(), enemies.end(), [](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
 		if(enemies.empty())
+		{
+			// Closed walls can make the garrison temporarily unattackable.
+			// Approach with native WALK, never manufacture a legal attack.
+			if(stack.unitSide() == BattleSide::ATTACKER && battle.battleGetDefendedTown() != nullptr)
+			{
+				const auto defenders = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+				const auto routes = battle.getReachability(&stack);
+				const auto steps = battle.battleGetAvailableHexes(routes, &stack, false);
+				if(const auto wall = approachSiegeWall(battle, stack, steps, defenders))
+					return *wall;
+			}
 			return BattleAction::makeDefend(&stack);
+		}
 		if(const auto retreat = archerRetreat(battle, stack, enemies))
 			return *retreat;
 		if(const auto melee = blockedArcherMelee(battle, stack, enemies))
