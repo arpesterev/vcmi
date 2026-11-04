@@ -180,6 +180,20 @@ pinned fheroes2 `meleeUnitDefense`, not a full source-equivalent port:
 source-specific flank preferences, defensive spacing, kiting and spell-area
 responses remain incomplete.
 
+Pinned fheroes2 `Unit::GetSpeed(false, true)` reports STANDING for
+Blind/Paralyze. This partial VCMI adapter now consistently projects a
+current `NOT_ACTIVE` enemy as having zero future-turn pursuit speed when
+ranking distant targets, avoiding enemy melee contact along a multi-turn path,
+and deciding whether a melee guard should screen a threatened friendly
+shooter. Existing fast-archer retreat uses the same effective speed. Native
+movement and defender spell effects are not modified: adjacent disabled
+stacks can still physically block a shot, and `NOT_ACTIVE` alone does not
+predict whether a spell will expire or be dispelled before the next turn.
+Two targeted native-battle regressions compare live decisions before and
+after a VCMI-authorized Blind, require acceptance of a selected `DEFEND`
+or `WALK`, and complete actual combat. This tests the *projection*, not
+Heroes II combat-engine equivalence.
+
 Not implemented: complete upstream buff/debuff and creature-spell selection,
 retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
