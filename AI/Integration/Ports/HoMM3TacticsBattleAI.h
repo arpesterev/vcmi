@@ -103,8 +103,10 @@ private:
 			};
 			auto afterAttacker = attacker.acquireState();
 			auto afterTarget = target.acquireState();
-			afterTarget->damage(expectedDamage(damage, afterTarget->getAvailableHealth()));
-			afterAttacker->damage(expectedDamage(retaliation, afterAttacker->getAvailableHealth()));
+			int64_t firstHitLoss = expectedDamage(damage, afterTarget->getAvailableHealth());
+			int64_t retaliationLoss = expectedDamage(retaliation, afterAttacker->getAvailableHealth());
+			afterTarget->damage(firstHitLoss);
+			afterAttacker->damage(retaliationLoss);
 			if(afterAttacker->alive() && afterTarget->alive())
 			{
 				BattleAttackInfo second(afterAttacker.get(), afterTarget.get(), 0, false);
