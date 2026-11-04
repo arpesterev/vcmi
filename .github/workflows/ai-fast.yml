@@ -249,6 +249,7 @@ jobs:
                       'RejectsInvalidModelSideMetadata',
                       'RejectsInvalidModelVersionMetadata',
                       'StrictRejectsConfiguredNeuralLoadError',
+                      'StrictLiveBattleRejectsGymResetAndUntrainedRetreat',
                       'LegacyFallbackCannotPoisonStrictModelCache'}
           if {c.get('name') for c in cases} != expected or len(cases) != len(expected):
               raise RuntimeError('MMAI ONNX output contract tests missing: ' + str(cases))

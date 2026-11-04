@@ -20,6 +20,7 @@
 #include "callback/CBattleCallback.h"
 
 #include "AI/MMAI/common.h"
+#include "BAI/nn_model_resolution.h"
 #include "BAI/v15/render_v15.h"
 #include "BAI/v15/verify_v15.h"
 #include "schema/base.h"
@@ -401,6 +402,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	getActionTotalCalls += 1;
 
 	allactions.push_back(a);
+	enforceStrictNNLiveBattleAction(strictNeural, a);
 
 	// battle should have ended instead
 	ASSERT(!resetting, "got activeStack(), but resetting was already true");

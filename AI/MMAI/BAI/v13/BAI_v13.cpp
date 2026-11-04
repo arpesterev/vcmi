@@ -16,6 +16,7 @@
 #include "callback/CBattleCallback.h"
 
 #include "BAI/v13/BAI_v13.h"
+#include "BAI/nn_model_resolution.h"
 #include "BAI/v13/action_v13.h"
 #include "BAI/v13/hexaction_v13.h"
 #include "BAI/v13/hexactmask_v13.h"
@@ -369,6 +370,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 		getActionTotalCalls += 1;
 
 		allactions.push_back(a);
+		enforceStrictNNLiveBattleAction(strictNeural, a);
 
 		if(a == Schema::ACTION_RESET)
 		{
