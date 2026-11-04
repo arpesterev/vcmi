@@ -3418,6 +3418,9 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedDiscountsNonSpellInactiveTargetAndS
 	ASSERT_EQ(before.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(before.target.empty());
 	EXPECT_EQ(before.target.front().unitValue, disabled->unitId());
+	const auto tumBefore = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter, true);
+	ASSERT_EQ(tumBefore.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(tumBefore.target.empty());
 
 	const_cast<CStack *>(disabled)->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::OTHER, 1, BonusSourceID()));
@@ -3429,6 +3432,11 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedDiscountsNonSpellInactiveTargetAndS
 	ASSERT_FALSE(after.target.empty());
 	EXPECT_EQ(after.target.front().unitValue, active->unitId())
 		<< "Non-spell NOT_ACTIVE must receive the source incapacitation penalty";
+	const auto tumAfter = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter, true);
+	ASSERT_EQ(tumAfter.actionType, tumBefore.actionType);
+	ASSERT_FALSE(tumAfter.target.empty());
+	EXPECT_EQ(tumAfter.target.front().unitValue, tumBefore.target.front().unitValue)
+		<< "The separate TUM baseline must not inherit this HoMM3-only scoring change";
 
 	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
 	ASSERT_NE(policy, nullptr);

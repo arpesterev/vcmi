@@ -97,7 +97,7 @@ private:
 			static_cast<double>(std::numeric_limits<int32_t>::max())));
 	}
 
-	static bool isIncapacitated(const CStack & target)
+	static bool isIncapacitated(const CStack & target, bool includeNativeInactive = false)
 	{
 		// HoMM3's army::isIncapacitated includes disables beyond Stone Gaze.
 		// VCMI isFrozen() detects Stone Gaze only; inspect actual spell effects
@@ -110,7 +110,8 @@ private:
 		// abilities or other bonus sources. The HoMM3 isIncapacitated branch
 		// must discount those targets in ranged scoring as well as the threat
 		// projection; spell-only filtering misses that independent state.
-		return target.hasBonusOfType(BonusType::NOT_ACTIVE) || target.isFrozen()
+		// The shared TUM baseline retains its preexisting ranged weighting.
+		return (includeNativeInactive && target.hasBonusOfType(BonusType::NOT_ACTIVE)) || target.isFrozen()
 			|| hasSpell(SpellID(SpellID::BLIND)) || hasSpell(SpellID(SpellID::PARALYZE));
 	}
 
@@ -230,7 +231,7 @@ private:
 	}
 
 	static int32_t rangedScore(CPlayerBattleCallback & battle,
-		const CStack & attacker, const CStack & target)
+		const CStack & attacker, const CStack & target, bool includeNativeInactive)
 	{
 		// Native replacement for getSimpleAttackEffect and enemy target-time lookup.
 		// The original uses its own projected enemy goal, not hex distance.
@@ -241,7 +242,7 @@ private:
 		const int time = std::max(1, (hexDistance + speed - 1) / speed);
 		const bool canRetaliateLater = battle.battleCanAttackUnit(&target, &attacker);
 		return Ports::HoMM3::rangedAttackValue(
-			{effect, isIncapacitated(target), !canRetaliateLater, canRetaliateLater, time}, false);
+			{effect, isIncapacitated(target, includeNativeInactive), !canRetaliateLater, canRetaliateLater, time}, false);
 	}
 
 	static BattleAction moveTowardEnemy(CPlayerBattleCallback & battle, const CStack & stack,
@@ -324,7 +325,7 @@ public:
 		{
 			if(!battle.battleCanShoot(&stack, enemy->getPosition()))
 				continue;
-			const int32_t score = rangedScore(battle, stack, *enemy);
+			const int32_t score = rangedScore(battle, stack, *enemy, !avoidFastDecoys);
 			if(!bestShot || score > bestShotValue)
 			{
 				bestShot = enemy;
