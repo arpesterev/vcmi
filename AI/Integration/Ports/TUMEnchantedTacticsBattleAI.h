@@ -233,7 +233,12 @@ private:
 		// Paralyze and Petrification even when a creature ability applied it.
 		// A disabled neutral must not provoke a pointless melee charge while
 		// friendly shooters can exploit the immobilization.
-		if(enemy.hasBonusOfType(BonusType::NOT_ACTIVE) || enemy.isFrozen())
+		// Native VCMI battleCanAttackUnit rejects siege weapons as melee
+		// attackers. Their geometric footprint/reach can still look dangerous,
+		// but a non-melee unit must not break TUM's neutral shooter screen.
+		// This is a host-engine legality safeguard, not hidden ERA/DLL logic.
+		if(!enemy.isMeleeAttacker()
+			|| enemy.hasBonusOfType(BonusType::NOT_ACTIVE) || enemy.isFrozen())
 			return false;
 		const auto reach = battle.getReachability(&enemy);
 		for(const auto * friendly : friends)

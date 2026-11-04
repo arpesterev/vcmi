@@ -4366,6 +4366,97 @@ TEST_F(AIIntegrationNativeBattle, tumBlindNeutralThreatDoesNotBreakShooterScreen
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// A non-melee native unit may have apparent geometric reach yet cannot
+// execute the melee attack that TUM's published neutral-screen trigger fears.
+// In this modded-creature fixture SIEGE_WEAPON removes melee capability from a
+// neutral Peasant. This is explicit test setup, not an upstream creature rule.
+TEST_F(AIIntegrationNativeBattle, tumNonMeleeNeutralDoesNotBreakShooterScreen)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 80);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	CStack * opponent = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			opponent = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(opponent, nullptr);
+	ASSERT_EQ(battle()->sideToPlayer(BattleSide::DEFENDER), PlayerColor::NEUTRAL);
+	opponent->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED, BonusSource::OTHER, 25, BonusSourceID()));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reach = view->getReachability(opponent);
+	bool geometricallyReachable = false;
+	for(const auto & hex : melee->getAttackableHexes(opponent))
+	{
+		if(hex.isValid() && view->isMeleeAttackPossible(opponent, melee, hex)
+			&& reach.distances[hex.toInt()] <= static_cast<int>(opponent->getMovementRange()))
+			geometricallyReachable = true;
+	}
+	ASSERT_TRUE(geometricallyReachable)
+		<< "The enemy must be able to reach the line if it had melee capability";
+	ASSERT_TRUE(view->battleCanAttackUnit(opponent, melee));
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_NE(callback->action->actionType, EActionType::WAIT)
+		<< "A real fast neutral melee threat must first break the screen";
+	callback->action.reset();
+
+	// CUnitState/Unit::isMeleeAttacker makes SIEGE_WEAPON non-melee;
+	// the callback's battleCanAttackUnit uses the same authoritative rule.
+	opponent->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SIEGE_WEAPON, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_FALSE(opponent->isMeleeAttacker());
+	ASSERT_FALSE(opponent->isShooter());
+	ASSERT_FALSE(view->battleCanAttackUnit(opponent, melee));
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	EXPECT_NE(baseline.actionType, EActionType::WAIT)
+		<< "HoMM3 movement remains independent of TUM's neutral-screen condition";
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::WAIT)
+		<< "Geometric reach without a legal melee attack cannot break TUM's screen";
+	const int meleeId = melee->unitId();
+	policy.reset();
+
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByUnit[meleeId][EActionType::WAIT], 0)
+		<< "The real VCMI server must accept the independently selected WAIT";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumIncapacitatedOnlyShooterCannotHoldMeleeScreen)
 {
 	// AI Improvements.txt explains that melee holds so friendly shooters can
