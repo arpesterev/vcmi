@@ -152,7 +152,7 @@ public:
 		}
 		if(preferences.enableSpellsUsage && !stack->isCatapult() && !stack->isFirstAidTent())
 		{
-			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get()))
+			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get(), stack))
 			{
 				logAi->debug("AI_PORT_SPELL backend=FHeroes2Tactics battle=%d action=%s", battleID.getNum(), spell->toString());
 				cb->battleMakeSpellAction(battleID, *spell);
