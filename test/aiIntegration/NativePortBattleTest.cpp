@@ -4101,21 +4101,33 @@ TEST_F(AIIntegrationNativeBattle, mixedFHeroes2AttackerAgainstTUMDefenderComplet
 	EXPECT_GT(recorder.shots, 0);
 }
 
-// Exercise all six *ordered* source-policy pairings on an identical
-// Archer-versus-Pikeman fixture for three deterministic native RNG seeds.
-// Earlier directed smoke fixtures can use different armies, so do NOT pool
-// their results with this comparison matrix. Three seeds are far too few
-// for a meaningful win-rate confidence interval or AI strength ranking.
-// All decisions, damage and terminal results still come from the real server.
-// Only test seeding and observability change, never the production game RNG.
+// Compare all six ordered source-policy pairings with the SAME real
+// fast-archer/slow-melee threat fixture for three deterministic RNG seeds.
+// The original differential regression already pins HoMM3's legal shot
+// versus fheroes2's safe retreat in this exact opening state. Replaying
+// the full fight captures how that initial difference develops under both
+// side assignments. Three seeds are far too few for a win-rate claim;
+// do not pool results with unrelated smoke fixtures.
+// Only test seeding and observability change, never production game rules.
 #define AI_SEEDED_SOURCE_MATCHUP(testName, attackerPolicy, defenderPolicy, battleRngSeed) \
 TEST_F(AIIntegrationNativeBattle, testName) \
 { \
 	encounterSeed = battleRngSeed; \
-	prepareBattle(CreatureID(2), 20, CreatureID(0), 30); \
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 25); \
 	ASSERT_FALSE(HasFatalFailure()); \
+	battle()->obstacles.clear(); \
+	const CStack * shooter = nullptr; \
+	for(const auto & unit : battle()->stacks) \
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19)) \
+			shooter = unit.get(); \
+	ASSERT_NE(shooter, nullptr); \
+	const BattleHex approachingHex(shooter->getPosition().toInt() + 4); \
+	ASSERT_TRUE(approachingHex.isAvailable()); \
+	ASSERT_EQ(battle()->battleGetUnitByPos(approachingHex), nullptr); \
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(16), approachingHex, 25), nullptr); \
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter); \
 	runToCompletion(std::nullopt, false, attackerPolicy, defenderPolicy, true); \
-	EXPECT_GT(recorder.shots, 0) << "Expected real engine ranged attacks in the comparison"; \
+	EXPECT_GT(recorder.damage, 0) << "Expected engine-applied combat damage"; \
 }
 
 AI_SEEDED_SOURCE_MATCHUP(seed1337HoMM3AgainstFHeroes2, "HoMM3OriginalTactics", "FHeroes2Tactics", 1337)
