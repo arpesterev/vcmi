@@ -3213,6 +3213,91 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraValuesAndExecutesNativeMultiTargetMe
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The original checkAdjacentHexes visits each occupied hex of a wide enemy.
+// In VCMI an attacker may also have several legal aim hexes from one landing;
+// the particular aim changes the engine's splash/breath footprint. This test
+// validates those native alternatives and the selected action on a real server.
+// It does not claim the original HoMM3 evaluates VCMI breath identically.
+TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
+{
+	prepareBattle(CreatureID(134), 24, CreatureID(4), 50); // Red Dragon vs Griffin
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * dragon = nullptr;
+	CStack * griffin = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(134))
+			dragon = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(4))
+			griffin = unit.get();
+	}
+	ASSERT_NE(dragon, nullptr);
+	ASSERT_NE(griffin, nullptr);
+	ASSERT_TRUE(dragon->hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH));
+	ASSERT_TRUE(griffin->doubleWide());
+	ASSERT_EQ(battle()->battleActiveUnit(), dragon);
+
+	// A central, unobstructed wide target must be within the active dragon's
+	// native first-turn reach, rather than relying on scripted movement.
+	const BattleHex nearby( dragon->getPosition().toInt() + 7 );
+	ASSERT_TRUE(nearby.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), nullptr);
+	griffin->setPosition(nearby);
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), griffin);
+	ASSERT_EQ(griffin->getHexes().size(), 2u);
+	for(const auto & occupied : griffin->getHexes())
+		ASSERT_TRUE(occupied.isAvailable());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reach = view->getReachability(dragon);
+	const auto available = view->battleGetAvailableHexes(reach, dragon, false);
+	bool hasMultipleAims = false;
+	for(const auto & hex : available)
+	{
+		if(!hex.isAvailable())
+			continue;
+		hasMultipleAims |= view->meleeAttackHexes(dragon, griffin, hex).size() > 1;
+	}
+	ASSERT_TRUE(hasMultipleAims)
+		<< "A wide target must offer two real melee aim hexes at a legal landing";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, dragon);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto & action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	const BattleHex from = action.target.front().hexValue;
+	const BattleHex aimed = action.target[1].hexValue;
+	const auto legalAims = view->meleeAttackHexes(dragon, griffin, from);
+	EXPECT_NE(std::find(legalAims.begin(), legalAims.end(), aimed), legalAims.end())
+		<< "HoMM3 must submit an engine-approved aim at the wide target";
+	const int64_t before = griffin->getAvailableHealth();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Real VCMI game handler rejected the HoMM3 wide-target melee aim";
+	EXPECT_LT(griffin->getAvailableHealth(), before);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3MeleeEngagesLiveShooterAndCompletesBattle)
 {
 	// A live opposing shooter exercises the pinned getHexAttackValue branch
