@@ -8,6 +8,7 @@
 
 #include "SourceTactics.h"
 #include "FHeroes2SpellPolicy.h"
+#include "FHeroes2ThreatProjection.h"
 #include "../../../lib/CStack.h"
 #include "../../../lib/battle/BattleAction.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
@@ -105,6 +106,37 @@ private:
 			|| defenderHealth != defender.getAvailableHealth())
 			throw std::logic_error("Damage preview modified a live battle unit");
 		return value;
+	}
+
+	// fheroes2 Unit::evaluateThreatForUnit: prefer predicted DAMAGE, not
+	// merely a target's generic army strength. Use native VCMI damage
+	// previews and full occupied footprints, then source movement/turn
+	// penalties and extra-attack/clone priorities.
+	static double sourceThreat(CPlayerBattleCallback & battle,
+		const CStack & actor, const CStack & enemy)
+	{
+		int distance = GameConstants::BFIELD_SIZE;
+		for(const auto & ours : actor.getHexes())
+			for(const auto & theirs : enemy.getHexes())
+				distance = std::min(distance,
+					static_cast<int>(BattleHex::getDistance(ours, theirs)));
+		const bool shooting = enemy.isShooter() && battle.battleCanShoot(&enemy, actor.getPosition());
+		BattleAttackInfo preview(&enemy, &actor, std::max(1, distance), shooting);
+		const auto beforeEnemyHealth = enemy.getAvailableHealth();
+		const auto beforeActorHealth = actor.getAvailableHealth();
+		const auto damage = battle.battleEstimateDamage(preview);
+		if(enemy.getAvailableHealth() != beforeEnemyHealth
+			|| actor.getAvailableHealth() != beforeActorHealth)
+			throw std::logic_error("FHeroes2 potential-damage preview altered live units");
+		const double expected = (static_cast<double>(damage.damage.min)
+			+ static_cast<double>(damage.damage.max)) / 2;
+		return Ports::FHeroes2::evaluateSourceThreat({
+			std::max(0.0, expected),
+			distance, static_cast<int>(enemy.getMovementRange()),
+			enemy.isShooter(), enemy.hasBonusOfType(BonusType::FLYING),
+			actor.isTurret(), enemy.moved(), enemy.isFrozen(),
+			std::max(0, enemy.getTotalAttacks(shooting) - 1), enemy.isClone()
+		});
 	}
 
 	static Ports::FHeroes2::Tactics tactics(CPlayerBattleCallback & battle, const CStack & stack,
@@ -231,7 +263,7 @@ private:
 			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
 				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
 			const Ports::FHeroes2::DistantTarget candidate{
-				std::max(0.0, strength(*enemy)), std::max(1, shortest), cannotEvade,
+				std::max(0.0, sourceThreat(battle, stack, *enemy)), std::max(1, shortest), cannotEvade,
 				static_cast<int>(enemy->unitId())};
 			if(!best || Ports::FHeroes2::preferDistantTarget(candidate, *best))
 			{
