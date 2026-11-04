@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Clone/Mirror Image, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -168,8 +168,9 @@ public:
 			const bool hypnotizeSpell = spell->id == SpellID::HYPNOTIZE;
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
+			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -486,6 +487,28 @@ public:
 								attackingCastle, hasted,
 								old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
 						}
+					}
+				}
+				// Heroes II MIRRORIMAGE becomes native VCMI CLONE. Apply the
+				// pinned 1.0/0.55/0.33 archer/flying/ground source ratio
+				// only when the *projected* battle really creates a new
+				// friendly clone. Never infer success from cast legality,
+				// an existing clone, or a spell effect on the original.
+				if(mirrorImageSpell)
+				{
+					for(const auto * clone : projected->battleGetAllStacks(false))
+					{
+						if(!clone->alive() || !clone->isClone()
+							|| projected->battleGetOwner(clone) != player)
+							continue;
+						const bool newlyCreated = std::none_of(before.begin(), before.end(),
+							[&](const UnitSnapshot & old) { return old.unit->unitId() == clone->unitId(); });
+						if(!newlyCreated)
+							continue;
+						value += static_cast<double>(clone->estimateCombatValue())
+							* Ports::FHeroes2::mirrorImageCloneRatio(
+								clone->isShooter(), clone->hasBonusOfType(BonusType::FLYING),
+								static_cast<int>(clone->getMovementRange()), theirs.averageSpeed(), true);
 					}
 				}
 				if(friendlyHealth <= 0)
