@@ -3216,7 +3216,8 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraRetaliationReachesAdditionalAlliedSt
 	const BattleHex aimed = action.target[1].hexValue;
 	const auto legalAims = view->meleeAttackHexes(cavalier, hydra, from);
 	EXPECT_NE(std::find(legalAims.begin(), legalAims.end(), aimed), legalAims.end());
-	const auto affected = view->getAttackedCreatures(hydra, from, false, hydra->getPosition()).first;
+	const auto affected = view->getAttackedBattleUnits(
+		hydra, cavalier, from, false, hydra->getPosition(), from);
 	EXPECT_NE(std::find(affected.begin(), affected.end(), escort), affected.end())
 		<< "The VCMI Hydra return swing must cover the additional allied stack";
 

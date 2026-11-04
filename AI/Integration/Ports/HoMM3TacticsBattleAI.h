@@ -244,8 +244,12 @@ private:
 			return 0.0;
 
 		double score = 0.0;
-		for(const auto * affected : battle.getAttackedCreatures(
-			&target, from, false, target.getPosition()).first)
+		// The attacker is NOT yet physically at its prospective landing hex.
+		// getAttackedCreatures looks up a live unit at that hex and would
+		// silently return nothing. Use the explicit hypothetical defender
+		// overload, which preserves native splash geometry without moving it.
+		for(const auto * affected : battle.getAttackedBattleUnits(
+			&target, &attacker, from, false, target.getPosition(), from))
 		{
 			const auto * secondary = dynamic_cast<const CStack *>(affected);
 			if(!secondary || secondary == &attacker || secondary == &target || !secondary->alive())
