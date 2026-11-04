@@ -276,6 +276,24 @@ inline double berserkControlRatio(bool lastEnemy, bool shooter, int distanceFrom
 	return shooter ? 0.85 : 0.85 / distanceFromApproachEdge;
 }
 
+// Pinned fheroes2 BattlePlanner::spellEffectValue(MIRRORIMAGE):
+// an archer clone is worth 100% of the source stack; flying and ground
+// melee clones are worth 55% and 33%, respectively. A slow target receives
+// the original fivefold discount. VCMI uses CLONE and must prove that an
+// actual new friendly clone was created before this source value is applied.
+inline double mirrorImageCloneRatio(bool shooter, bool flying, int speed,
+	double enemyAverageSpeed, bool newFriendlyClone)
+{
+	if(speed < 0 || !std::isfinite(enemyAverageSpeed) || enemyAverageSpeed < 0)
+		throw std::invalid_argument("fheroes2 Mirror Image needs valid speeds");
+	if(!newFriendlyClone)
+		return 0.0;
+	double ratio = shooter ? 1.0 : flying ? 0.55 : 0.33;
+	if(speed < enemyAverageSpeed)
+		ratio /= 5.0;
+	return ratio;
+}
+
 // fheroes2 meleeUnitOffense: choose a target that cannot evade engagement
 // before using its threat / path-distance score. VCMI projects the threat
 // with native combat value; this is not the original evaluateThreatForUnit.
