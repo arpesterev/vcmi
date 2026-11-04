@@ -192,13 +192,16 @@ The pinned `type_AI_attack_hex_chooser::getHexAttackValue` also rewards
 attack hexes adjacent to an opposing shooter that was not already engaged.
 The source helper's survivor-health scaling and minimum-one contribution are
 covered by contract tests. A narrow native projection now uses VCMI damage
-estimates (incoming ranged vs melee) as the engagement value, only for
-single-hex moving stacks, and ignores shooters already blocked at their
-current position. A completed melee-versus-shooter battle exercises the real
-engine path. This is NOT the original HoMM3 per-creature combat-value pricing,
-and does not reconstruct the two-hex attacker footprint, complete multi-head
-or breath attacks, or the global enemy-threat map. No reference decision parity
-is claimed for this slice.
+estimates (incoming ranged vs melee) as the engagement value. Both
+occupied hexes of wide attackers and wide shooters are now evaluated; each
+newly engaged shooter contributes at most once, as in the source's shared
+checked mask. Shooters already blocked by the moving stack at its current
+position are excluded. Pure tests cover tail-only and invalid contacts; real
+server battles cover ordinary melee-versus-shooter and a wide Cavalier
+issuing a legal attack against a shooter. This is NOT the original HoMM3
+per-creature combat-value pricing, and does not reconstruct the complete
+multi-head or breath attacks, path-wide threat map, or original threat-array
+scoring. Engine acceptance alone does not prove source decision parity.
 
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
