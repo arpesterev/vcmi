@@ -141,8 +141,6 @@ TEST(MMAINNOutputValidation, RejectsInvalidModelSideMetadata)
 		EXPECT_THROW(parseNNModelSide(value), std::runtime_error);
 }
 
-#endif
-
 TEST(MMAINNOutputValidation, RejectsInvalidModelVersionMetadata)
 {
 	using MMAI::BAI::parseNNModelVersion;
@@ -155,3 +153,5 @@ TEST(MMAINNOutputValidation, RejectsInvalidModelVersionMetadata)
 		"0", "12", "14", "16", "99999999999999999999"})
 		EXPECT_THROW(parseNNModelVersion(value), std::runtime_error);
 }
+
+#endif
