@@ -3220,10 +3220,13 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraValuesAndExecutesNativeMultiTargetMe
 // It does not claim the original HoMM3 evaluates VCMI breath identically.
 TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 {
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=start\n");
+
+	// Keep the first breath melee nonterminal: a massed dragon stack can
+	// eliminate the only defender during the directed action itself, before
+	// the next server-run phase. This test must exercise both phases.
 	prepareBattle(CreatureID(82), 5, CreatureID(4), 50); // Red Dragon (dungeon ID 82) vs Griffin
 	ASSERT_FALSE(HasFatalFailure());
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=prepared\n");
+
 	battle()->obstacles.clear();
 	const CStack * dragon = nullptr;
 	CStack * griffin = nullptr;
@@ -3245,21 +3248,20 @@ TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 	const BattleHex nearby( dragon->getPosition().toInt() + 7 );
 	ASSERT_TRUE(nearby.isAvailable());
 	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), nullptr);
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=reposition\n");
+
 	griffin->setPosition(nearby);
 	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), griffin);
 	ASSERT_EQ(griffin->getHexes().size(), 2u);
 	for(const auto & occupied : griffin->getHexes())
 		ASSERT_TRUE(occupied.isAvailable());
 
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=positioned\n");
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
 	auto callback = std::make_shared<DecisionCallback>(player);
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=callback\n");
+
 	const auto reach = view->getReachability(dragon);
 	const auto available = view->battleGetAvailableHexes(reach, dragon, false);
 	bool hasMultipleAims = false;
@@ -3272,7 +3274,6 @@ TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 	ASSERT_TRUE(hasMultipleAims)
 		<< "A wide target must offer two real melee aim hexes at a legal landing";
 
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=aim-enumerated\n");
 	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
@@ -3284,7 +3285,7 @@ TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
 		battle()->getSideHero(BattleSide::ATTACKER),
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=policy-ready\n");
+
 	policy->activeStack(battleID, dragon);
 	ASSERT_TRUE(callback->action.has_value());
 	const auto & action = *callback->action;
@@ -3296,15 +3297,15 @@ TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 	EXPECT_NE(std::find(legalAims.begin(), legalAims.end(), aimed), legalAims.end())
 		<< "HoMM3 must submit an engine-approved aim at the wide target";
 	const int64_t before = griffin->getAvailableHealth();
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=action-selected\n");
+
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
 		<< "Real VCMI game handler rejected the HoMM3 wide-target melee aim";
 	EXPECT_LT(griffin->getAvailableHealth(), before);
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=server-accepted\n");
+
 	policy.reset();
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=before-completion\n");
+
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
-	std::fprintf(stderr, "HOMM3_AIM_DIAG step=after-completion\n");
+
 	EXPECT_GT(recorder.meleeAttacks, 0);
 	EXPECT_GT(recorder.damage, 0);
 }
