@@ -778,12 +778,36 @@ private:
 			const auto damage = battle.battleEstimateDamage(attack, &retaliation);
 			const double outgoing = (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
 			const double incoming = (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
-			const double difference = outgoing - incoming;
-			if(!bestTarget || difference > bestDamageDifference)
+			// Pinned archerDecision ranks blocked shots by direct damage minus
+			// retaliation. A VCMI archer may additionally have a two-hex melee
+			// strike: check each native legal hit hex so a friendly behind the
+			// primary does not become invisible collateral. This is a native
+			// Heroes III safety extension, not Heroes II attack geometry.
+			for(const auto & hitHex : attackHexes)
 			{
-				bestTarget = enemy;
-				bestTargetHex = attackHexes.front();
-				bestDamageDifference = difference;
+				if(battle.battleGetUnitByPos(hitHex) != enemy)
+					continue;
+				double difference = outgoing - incoming;
+				for(const auto * victim : battle.getAttackedBattleUnits(
+					&stack, enemy, hitHex, false, stack.getPosition()))
+				{
+					if(victim == enemy || victim == &stack)
+						continue;
+					BattleAttackInfo extra(&stack, victim, 0, false);
+					extra.attackerPos = stack.getPosition();
+					const auto estimate = battle.battleEstimateDamage(extra);
+					const double health = std::max(0.0, static_cast<double>(victim->getAvailableHealth()));
+					const double collateral = std::min(health, std::max(0.0,
+						(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
+					difference += battle.battleGetOwner(victim) == battle.battleGetOwner(&stack)
+						? -collateral : collateral;
+				}
+				if(!bestTarget || difference > bestDamageDifference)
+				{
+					bestTarget = enemy;
+					bestTargetHex = hitHex;
+					bestDamageDifference = difference;
+				}
 			}
 		}
 		return bestTarget
