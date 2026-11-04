@@ -6,6 +6,9 @@
 
 #ifdef ENABLE_MMAI
 #include "../../AI/MMAI/BAI/nn_output_validation.h"
+#include "../../AI/MMAI/BAI/nn_v13_action_routing.h"
+
+#include <algorithm>
 
 #include <limits>
 
@@ -34,4 +37,74 @@ TEST(MMAINNOutputValidation, PreservesFiniteOnnxActionDistribution)
 	EXPECT_NO_THROW(validateNNActionDistribution({0.2f, 0.8f}, 1.0f));
 	EXPECT_NO_THROW(validateNNActionDistribution({0.2f, 0.8f}, 0.4f));
 }
+namespace
+{
+struct V13TestSample
+{
+	int index;
+	double confidence;
+	double prob;
+};
+
+V13TestSample v13TestGreedy(const std::vector<float> & probabilities)
+{
+	MMAI::BAI::validateNNActionDistribution(probabilities, 0.0f);
+	const auto best = std::max_element(probabilities.begin(), probabilities.end());
+	return {static_cast<int>(std::distance(probabilities.begin(), best)), 1.0, *best};
+}
+}
+
+TEST(MMAINNOutputValidation, V13SamplesOnlyRequiredHierarchicalHeads)
+{
+	using MMAI::BAI::sampleV13ActionPath;
+	// All unused conditional rows are deliberately invalid. Production V13
+	// may not examine them and must not consume a random draw for them.
+	std::vector<std::vector<float>> hex1(4, {0.0f, 0.0f, 0.0f});
+	hex1[1] = {0.1f, 0.9f, 0.0f};
+	hex1[2] = {0.1f, 0.0f, 0.9f};
+	hex1[3] = {0.0f, 1.0f, 0.0f};
+	std::vector<std::vector<float>> hex2(3, {0.0f, 0.0f, 0.0f});
+	hex2[2] = {0.7f, 0.3f, 0.0f};
+
+	const auto [wait, waitHex1, waitHex2] = sampleV13ActionPath(
+		{1.0f, 0.0f, 0.0f, 0.0f}, hex1, hex2, v13TestGreedy);
+	EXPECT_EQ(wait.index, 0);
+	EXPECT_EQ(waitHex1.index, 0);
+	EXPECT_EQ(waitHex2.index, 0);
+	EXPECT_DOUBLE_EQ(waitHex1.confidence * waitHex2.confidence, 1.0);
+
+	const auto [move, moveHex1, moveHex2] = sampleV13ActionPath(
+		{0.0f, 1.0f, 0.0f, 0.0f}, hex1, hex2, v13TestGreedy);
+	EXPECT_EQ(move.index, 1);
+	EXPECT_EQ(moveHex1.index, 1);
+	EXPECT_EQ(moveHex2.index, 0);
+
+	const auto [amove, amoveHex1, amoveHex2] = sampleV13ActionPath(
+		{0.0f, 0.0f, 1.0f, 0.0f}, hex1, hex2, v13TestGreedy);
+	EXPECT_EQ(amove.index, 2);
+	EXPECT_EQ(amoveHex1.index, 2);
+	EXPECT_EQ(amoveHex2.index, 0);
+
+	const auto [shoot, shootHex1, shootHex2] = sampleV13ActionPath(
+		{0.0f, 0.0f, 0.0f, 1.0f}, hex1, hex2, v13TestGreedy);
+	EXPECT_EQ(shoot.index, 3);
+	EXPECT_EQ(shootHex1.index, 1);
+	EXPECT_EQ(shootHex2.index, 0);
+}
+
+TEST(MMAINNOutputValidation, V13RejectsInvalidRequiredHead)
+{
+	using MMAI::BAI::sampleV13ActionPath;
+	std::vector<std::vector<float>> hex1(4, {0.0f, 0.0f});
+	std::vector<std::vector<float>> hex2(2, {0.0f, 0.0f});
+	hex1[2] = {0.0f, 1.0f};
+
+	// AMOVE cannot proceed with an empty second-hex distribution.
+	EXPECT_THROW(sampleV13ActionPath({0.0f, 0.0f, 1.0f, 0.0f},
+		hex1, hex2, v13TestGreedy), std::runtime_error);
+	// MOVE cannot proceed with an empty first-hex distribution either.
+	EXPECT_THROW(sampleV13ActionPath({0.0f, 1.0f, 0.0f, 0.0f},
+		hex1, hex2, v13TestGreedy), std::runtime_error);
+}
+
 #endif
