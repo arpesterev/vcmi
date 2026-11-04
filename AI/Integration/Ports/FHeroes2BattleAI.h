@@ -662,7 +662,13 @@ private:
 		{
 			const int distance = footprintDistance(position, enemy);
 			const bool unengagedArcher = enemy.isShooter() && !handFighting(enemy);
-			const int reach = unengagedArcher ? 1 : static_cast<int>(enemy.getMovementRange()) + 1;
+			// Pinned fheroes2 Unit::GetSpeed(false, true) reports STANDING
+			// for Blind and Paralyze even when base speed is high. VCMI
+			// NOT_ACTIVE is the native cannot-act projection: adjacent
+			// contact still blocks shooting, but it cannot chase next turn.
+			const bool disabled = enemy.hasBonusOfType(BonusType::NOT_ACTIVE);
+			const int reach = unengagedArcher || disabled ? 1
+				: static_cast<int>(enemy.getMovementRange()) + 1;
 			return distance <= reach;
 		};
 
@@ -672,7 +678,11 @@ private:
 			if(!isThreatened(stack.getPosition(), *enemy))
 				continue;
 			threatened = true;
-			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			// Avoid classifying a Blind/Paralyzed enemy's raw creature
+			// speed as a future-turn pursuit threat. This matches the
+			// upstream GetSpeed(false, true) standing-unit gate.
+			const int enemySpeed = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				? 0 : static_cast<int>(enemy->getMovementRange());
 			if(enemySpeed > 0 && enemySpeed + 2 >= speed)
 				return std::nullopt;
 		}
