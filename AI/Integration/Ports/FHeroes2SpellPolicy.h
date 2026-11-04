@@ -175,7 +175,7 @@ public:
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::TELEPORT && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -185,7 +185,40 @@ public:
 				continue;
 			spells::BattleCast legality(real.get(), hero, spells::Mode::HERO, spell);
 			const auto mechanics = spell->battleMechanics(&legality);
-			for(const auto & target : targets(*mechanics))
+			auto legalTargets = targets(*mechanics);
+			// Source spellTeleportValue considers only the currently active,
+			// non-flying melee stack, and only if it cannot already engage.
+			// VCMI TELEPORT requires a creature and a destination, so the
+			// generic one-target enumerator would never propose it.
+			if(spell->id == SpellID::TELEPORT)
+			{
+				const auto * active = real->battleActiveUnit();
+				const bool eligible = active && real->battleGetOwner(active) == player
+					&& active->alive() && !active->isShooter()
+					&& !active->hasBonusOfType(BonusType::FLYING)
+					&& !active->isHypnotized()
+					&& real->battleGetDefendedTown() == nullptr;
+				if(eligible)
+				{
+					bool alreadyEngaged = false;
+					for(const auto & old : before)
+						if(old.owner != player && old.health > 0)
+							for(const auto & origin : active->getHexes())
+								for(const auto & hostile : old.unit->getHexes())
+									alreadyEngaged |= BattleHex::getDistance(origin, hostile) == 1;
+					if(!alreadyEngaged)
+						for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+						{
+							const BattleHex hex(index);
+							if(!hex.isAvailable())
+								continue;
+							spells::Target target{battle::Destination(active), battle::Destination(hex)};
+							if(mechanics->canBeCastAt(target))
+								legalTargets.push_back(std::move(target));
+						}
+				}
+			}
+			for(const auto & target : legalTargets)
 			{
 				auto projected = std::make_shared<HypotheticBattle>(environment, real);
 				spells::BattleCast cast(projected.get(), hero, spells::Mode::HERO, spell);
@@ -655,6 +688,26 @@ public:
 						}
 					}
 					value += summonedValue * (ours.strength > theirs.strength * 2 ? 0.5 : 1.0);
+				}
+				// Pinned fheroes2 spellTeleportValue uses ten percent of
+				// the active melee stack's strength, but only when moving it
+				// offers an immediate engagement it cannot reach normally.
+				// Require an actual native hypothetical position change.
+				if(spell->id == SpellID::TELEPORT)
+				{
+					const auto * active = real->battleActiveUnit();
+					const auto * after = active ? projected->battleGetUnitByID(active->unitId()) : nullptr;
+					if(active && after && after->getPosition() != active->getPosition())
+					{
+						bool adjacentEnemy = false;
+						for(const auto & old : before)
+							if(old.owner != player && old.health > 0)
+								for(const auto & occupied : after->getHexes())
+									for(const auto & enemyHex : old.unit->getHexes())
+										adjacentEnemy |= BattleHex::getDistance(occupied, enemyHex) == 1;
+						if(adjacentEnemy)
+							value += static_cast<double>(active->estimateCombatValue()) * 0.10;
+					}
 				}
 				if(friendlyHealth <= 0)
 					continue;
