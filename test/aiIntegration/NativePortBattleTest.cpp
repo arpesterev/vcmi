@@ -1470,7 +1470,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesLegalNativeTeleportInRealBattle)
 // VCMI's authoritative server, not the hypothetical scoring model.
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeEarthquakeInSiege)
 {
-	prepareSiege(true, CreatureID(0), 100, CreatureID(2), 100);
+	prepareSiege(true, CreatureID(2), 100, CreatureID(0), 100);
 	ASSERT_FALSE(HasFatalFailure());
 	teachBattleSpell(attackerSideHero, SpellID::EARTHQUAKE, 12);
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "HoMM3OriginalTactics");
