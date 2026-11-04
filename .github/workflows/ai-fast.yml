@@ -245,6 +245,7 @@ jobs:
                       'V13SamplesOnlyRequiredHierarchicalHeads',
                       'V13RejectsInvalidRequiredHead',
                       'V13RejectsJaggedActionTableMetadata',
+                      'V13RejectsOutOfRangeActionTableEntries',
                       'RejectsInvalidModelSideMetadata',
                       'RejectsInvalidModelVersionMetadata',
                       'StrictRejectsConfiguredNeuralLoadError',

@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -15,6 +17,17 @@
 
 namespace MMAI::BAI
 {
+// The ONNX exporter stores action IDs as JSON integers but the V13 dense
+// table is int32_t. Never narrow an out-of-range metadata value into another
+// (potentially legal) VCMI action. -1 and other in-range sentinel values are
+// preserved: validity remains governed by the existing action masks.
+inline std::int32_t checkedV13ActionTableEntry(std::int64_t id)
+{
+	if(id < std::numeric_limits<std::int32_t>::min() || id > std::numeric_limits<std::int32_t>::max())
+		throw std::runtime_error("MMAI V13: action_table entry exceeds signed 32-bit range");
+	return static_cast<std::int32_t>(id);
+}
+
 // V13's action table has three levels: primary action, destination/target
 // hex, and (only for AMOVE) attack hex. WAIT uses neither hex head.
 // Unused ONNX rows may legitimately contain only zero probabilities.

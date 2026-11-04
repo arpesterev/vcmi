@@ -122,6 +122,20 @@ TEST(MMAINNOutputValidation, V13RejectsInvalidRequiredHead)
 		hex1, hex2, v13TestGreedy), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13RejectsOutOfRangeActionTableEntries)
+{
+	using MMAI::BAI::checkedV13ActionTableEntry;
+	using std::numeric_limits;
+	// Exporter-compatible values, including the masked-action sentinel.
+	EXPECT_EQ(checkedV13ActionTableEntry(-1), -1);
+	EXPECT_EQ(checkedV13ActionTableEntry(0), 0);
+	EXPECT_EQ(checkedV13ActionTableEntry(numeric_limits<int32_t>::min()), numeric_limits<int32_t>::min());
+	EXPECT_EQ(checkedV13ActionTableEntry(numeric_limits<int32_t>::max()), numeric_limits<int32_t>::max());
+	// These previously wrapped silently during JSON -> int32_t conversion.
+	EXPECT_THROW(checkedV13ActionTableEntry(numeric_limits<int64_t>::max()), std::runtime_error);
+	EXPECT_THROW(checkedV13ActionTableEntry(numeric_limits<int64_t>::min()), std::runtime_error);
+}
+
 TEST(MMAINNOutputValidation, V13RejectsJaggedActionTableMetadata)
 {
 	using MMAI::BAI::validateV13ActionTableShape;

@@ -270,7 +270,7 @@ Vec3D<int32_t> NNModel::readActionTable() const
 					{
 						throwf("invalid data type: want: %d, got: %d", EI(JsonNode::JsonType::DATA_INTEGER), EI(jv2.getType()));
 					}
-					vec2.push_back(static_cast<int32_t>(jv2.Integer()));
+					vec2.push_back(checkedV13ActionTableEntry(jv2.Integer()));
 				}
 				vec1.emplace_back(vec2);
 			}
