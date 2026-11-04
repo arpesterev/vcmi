@@ -229,6 +229,16 @@ non-friendly-fire vector, VCMI to accept the independent action, and the
 protected unit's real server health to remain unchanged. The splash ability
 is attached only to the test creature, not to any gameplay definitions.
 
+A blocked ranged unit may also carry VCMI's two-hex melee breath bonus.
+The pinned fheroes2 `archerDecision` scores blocked-shooter melee by
+direct hit-point damage minus retaliation; it does not define Heroes III
+breath geometry. This port now checks native secondary victims for each
+legal blocked-archer melee vector, adding inflicted damage and penalizing
+friendly collateral. A native-server fixture with two equal adjacent
+primaries and one allied unit behind the first requires independent
+`WALK_AND_ATTACK`, native acceptance, no friendly damage and completed
+combat. This is a VCMI safety extension, **not** source-parity evidence.
+
 Not implemented: complete upstream buff/debuff and creature-spell selection,
 retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
