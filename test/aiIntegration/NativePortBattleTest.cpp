@@ -3149,6 +3149,70 @@ TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieB
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3HydraValuesAndExecutesNativeMultiTargetMelee)
+{
+	// Pinned ai_tactical.cpp getMultiHeadBonus credits OTHER enemy stacks
+	// reached from a legal attack hex. VCMI supplies the real attack area
+	// and authoritative injury packets; this is not original damage parity.
+	prepareBattle(CreatureID(110), 16, CreatureID(0), 1); // Hydra, Peasant
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * hydra = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(110))
+			hydra = unit.get();
+	ASSERT_NE(hydra, nullptr);
+	ASSERT_TRUE(hydra->hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT));
+	ASSERT_EQ(battle()->battleActiveUnit(), hydra);
+	std::vector<BattleHex> adjacent;
+	for(const auto & hex : hydra->getSurroundingHexes())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+			adjacent.push_back(hex);
+	ASSERT_GE(adjacent.size(), 2u);
+	const CStack * first = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[0], 25);
+	const CStack * second = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[1], 25);
+	ASSERT_NE(first, nullptr);
+	ASSERT_NE(second, nullptr);
+	const int64_t firstBefore = first->getAvailableHealth();
+	const int64_t secondBefore = second->getAvailableHealth();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, hydra);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto & action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	const BattleHex from = action.target.front().hexValue;
+	const BattleHex attacked = action.target[1].hexValue;
+	const auto potential = callback->getBattle(battleID)->getAttackedCreatures(hydra, attacked, false, from).first;
+	EXPECT_NE(std::find(potential.begin(), potential.end(), first), potential.end())
+		<< "HoMM3 should prefer a native attack footprint hitting both close defenders";
+	EXPECT_NE(std::find(potential.begin(), potential.end(), second), potential.end())
+		<< "HoMM3 must score the additional Hydra victim exactly once";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Server rejected HoMM3's real multi-target melee action";
+	EXPECT_LT(first->getAvailableHealth(), firstBefore);
+	EXPECT_LT(second->getAvailableHealth(), secondBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3MeleeEngagesLiveShooterAndCompletesBattle)
 {
 	// A live opposing shooter exercises the pinned getHexAttackValue branch
