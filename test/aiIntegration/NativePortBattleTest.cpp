@@ -3972,6 +3972,92 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 
 
 
+TEST_F(AIIntegrationNativeBattle, tumBlindNeutralThreatDoesNotBreakShooterScreen)
+{
+	// TUM's published neutral-shooter screen waits until enemy melee can
+	// actually threaten the formation. A Blind stack retains geometric reach,
+	// but cannot take its next movement turn. Use an actual neutral opponent
+	// and an actual hero Blind cast, not a fake battle callback or mock action.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 180);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	CStack * opponent = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			opponent = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(opponent, nullptr);
+	ASSERT_EQ(battle()->sideToPlayer(BattleSide::DEFENDER), PlayerColor::NEUTRAL);
+	// A test-only speed effect makes the opponent's unmodified geometric reach
+	// threaten friendly units, so the regression proves the incapacitation gate
+	// rather than merely repeating the existing distant-neutral WAIT fixture.
+	opponent->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED, BonusSource::OTHER, 25, BonusSourceID()));
+	ASSERT_GT(static_cast<int>(opponent->getMovementRange()), 20);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reach = view->getReachability(opponent);
+	bool mayReach = false;
+	for(const auto & hex : melee->getAttackableHexes(opponent))
+	{
+		if(hex.isValid() && view->isMeleeAttackPossible(opponent, melee, hex)
+			&& reach.distances[hex.toInt()] <= static_cast<int>(opponent->getMovementRange()))
+			mayReach = true;
+	}
+	ASSERT_TRUE(mayReach) << "The unblinded neutral must threaten the next turn";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_NE(callback->action->actionType, EActionType::WAIT)
+		<< "Reachable active neutral melee must not trigger the protected WAIT";
+	callback->action.reset();
+
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, opponent));
+	ASSERT_TRUE(opponent->hasBonusOfType(BonusType::NOT_ACTIVE));
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	EXPECT_NE(baseline.actionType, EActionType::WAIT)
+		<< "The HoMM3 movement policy must remain separate from TUM's hold";
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::WAIT)
+		<< "An immobile neutral must not force a melee charge despite its speed";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByPlayer[player][EActionType::WAIT], 0)
+		<< "The actual VCMI server must accept the protective WAIT";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumOutOfAmmoArcherNeverBecomesMeleeShooterGuard)
 {
 	// TUM's published neutral screen is a MELEE tactic. An exhausted archer
