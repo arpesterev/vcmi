@@ -225,6 +225,29 @@ jobs:
             exit 1
           fi
 
+      # A malformed ONNX head must not become a seemingly legal model action.
+      # These contracts run without neural weights, independently of the
+      # official-model native battle gate below.
+      - name: Check V13/V15 MMAI ONNX output safety contracts
+        if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'feature/mmai-') }}
+        run: |
+          set -euo pipefail
+          cd out/build/linux-gcc-test/bin
+          timeout 60 ./vcmitest \
+            --gtest_filter='MMAINNOutputValidation.*' \
+            --gtest_output=xml:mmai-onnx-output-contracts.xml
+          python3 - <<'PY'
+          from xml.etree import ElementTree as ET
+          cases = list(ET.parse('mmai-onnx-output-contracts.xml').getroot().iter('testcase'))
+          expected = {'RejectsInvalidOnnxOutputBeforeGreedyOrSampling',
+                      'PreservesFiniteOnnxActionDistribution'}
+          if {c.get('name') for c in cases} != expected or len(cases) != len(expected):
+              raise RuntimeError('MMAI ONNX output contract tests missing: ' + str(cases))
+          if any(c.find(t) is not None for c in cases for t in ('failure', 'error', 'skipped')):
+              raise RuntimeError('MMAI ONNX output contract test failed or skipped')
+          print('Verified: V13/V15 shared neural output guards reject invalid weights and preserve finite heads')
+          PY
+
       # Only MMAI or four-policy integration PRs download checksum-pinned 1.8 ONNX weights; no
       # binary weights enter this repository, Actions artifacts or release jobs.
       - name: Install verified public MMAI neural pack into isolated CI preset
