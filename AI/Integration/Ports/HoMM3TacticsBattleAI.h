@@ -362,7 +362,13 @@ private:
 			const bool blocked = engagesFootprints(attacker.getHexes(destination), enemy->getHexes());
 			const bool canShoot = enemy->isShooter() && !blocked && battle.battleCanShoot(enemy);
 			const int movement = std::max(0, static_cast<int>(enemy->getMovementRange()));
-			const bool canMelee = distance > 0 && distance <= movement + 1;
+			// A shooter-only war machine or arrow tower is not a melee attacker,
+			// even when its hex borders our prospective landing position. The
+			// source's enemy threat census excludes enemies that cannot attack;
+			// ask VCMI about the actual unit/owner/melee capability before
+			// estimating a hypothetical counterattack. Shooting remains separate.
+			const bool canMelee = distance > 0 && distance <= movement + 1
+				&& battle.battleCanAttackUnit(enemy, &attacker);
 			for(const bool shooting : {false, true})
 			{
 				if((shooting && !canShoot) || (!shooting && !canMelee))
