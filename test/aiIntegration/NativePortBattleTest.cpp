@@ -4242,6 +4242,83 @@ TEST_F(AIIntegrationNativeBattle, tumIncapacitatedOnlyShooterCannotHoldMeleeScre
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// A paralysed neutral next to the allied archer still blocks native shots.
+// TUM's neutral melee screen must not WAIT for a completely blocked shooter.
+TEST_F(AIIntegrationNativeBattle, tumBlockedShooterCannotHoldMeleeScreen)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 40);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * melee = nullptr;
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() != BattleSide::ATTACKER)
+			continue;
+		if(unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		if(unit->creatureId() == CreatureID(2))
+			shooter = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->canShoot());
+	ASSERT_TRUE(battle()->battleCanShoot(shooter));
+	const BattleHex adjacent(shooter->getPosition().toInt() + 1);
+	ASSERT_TRUE(adjacent.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), nullptr);
+	auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent, 5);
+	ASSERT_NE(blocker, nullptr);
+	blocker->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	ASSERT_TRUE(blocker->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(shooter->canShoot());
+	ASSERT_FALSE(battle()->battleCanShoot(shooter))
+		<< "The native adjacent-enemy rule must block shooting";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	for(const auto * target : view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+		if(target->alive())
+			ASSERT_FALSE(view->battleCanShoot(shooter, target->getPosition()));
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_NE(baseline.actionType, EActionType::WAIT);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->toString(), baseline.toString())
+		<< "Do not hold melee when no ranged ally has a legal shot";
+	ASSERT_NE(callback->action->actionType, EActionType::WAIT);
+	battle()->activeStack = melee->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Server rejected the source-controlled melee action";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumOutOfAmmoArcherNeverBecomesMeleeShooterGuard)
 {
 	// TUM's published neutral screen is a MELEE tactic. An exhausted archer

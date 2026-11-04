@@ -298,8 +298,18 @@ private:
 		// classification remains intentionally conservative.
 		state.hasShooters = std::any_of(friends.begin(), friends.end(), [&](const CStack * friendly)
 		{
-			return friendly->alive() && friendly->isShooter() && friendly->canShoot()
-				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE) && !friendly->isFrozen();
+			if(!friendly->alive() || !friendly->isShooter() || !friendly->canShoot()
+				|| friendly->hasBonusOfType(BonusType::NOT_ACTIVE) || friendly->isFrozen())
+				return false;
+			// In VCMI an adjacent opponent can block every shot despite
+			// ammunition and canShoot() remaining true. TUM screening is
+			// useful only while at least one ranged ally can actually fire.
+			// Engine-specific safeguard, not a claimed closed-DLL formula.
+			return std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
+			{
+				return enemy->alive() && enemy->getPosition().isValid()
+					&& battle.battleCanShoot(friendly, enemy->getPosition());
+			});
 		});
 		state.opponentHasShooters = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
