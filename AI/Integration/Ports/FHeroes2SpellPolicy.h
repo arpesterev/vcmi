@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration and limited Cure dispelling (Curse/Blind/Slow), Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, limited Cure dispelling (Curse/Blind/Slow), enemy Haste dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -159,6 +159,7 @@ public:
 			const auto * spell = entry.get();
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
 			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
+			const bool dispelSpell = spell->id == SpellID::DISPEL;
 			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
 			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
@@ -168,7 +169,7 @@ public:
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -234,6 +235,25 @@ public:
 								* Ports::FHeroes2::blessCurseDamageRatio(
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(),
 									counteracting, changed);
+						}
+					}
+					// The pinned fheroes2 spellDispelValue also ranks DISPEL
+					// against beneficial enemy effects. Start with enemy Haste:
+					// reverse its getSpellHasteRatio using *actual* VCMI
+					// pre/post-cast movement. This is deliberately not a
+					// blanket dispel heuristic: other effect combinations
+					// are not yet valued, and no-op casts earn zero.
+					if(dispelSpell && !friendly && after && after->alive() && health == old.health)
+					{
+						const auto haste = Selector::source(BonusSource::SPELL_EFFECT,
+							BonusSourceID(SpellID(SpellID::HASTE)));
+						if(old.unit->hasBonus(haste) && !after->hasBonus(haste))
+						{
+							const int hasted = static_cast<int>(old.unit->getMovementRange());
+							const int restored = static_cast<int>(after->getMovementRange());
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::hasteSpeedRatio(restored, hasted,
+									ours.averageSpeed(), false, old.unit->isShooter(), false);
 						}
 					}
 					// Pinned fheroes2 spellDispelValue also values CURE as removal
