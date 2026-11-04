@@ -3313,7 +3313,7 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedOnlyBallistaCannotProjectMeleeLandi
 // or default AI are changed. A second enemy forces multi-target evaluation.
 TEST_F(AIIntegrationNativeBattle, homm3FreeShootingThreatAndEngineShotAtAdjacentAttacker)
 {
-	prepareBattle(CreatureID(7), 1, CreatureID(2), 25); // Crusader vs Archers
+	prepareBattle(CreatureID(7), 4, CreatureID(2), 25); // Crusaders vs Archers
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 
@@ -3330,9 +3330,17 @@ TEST_F(AIIntegrationNativeBattle, homm3FreeShootingThreatAndEngineShotAtAdjacent
 	ASSERT_NE(archer, nullptr);
 	ASSERT_EQ(battle()->battleActiveUnit(), crusader);
 
-	const BattleHex adjacent(crusader->getPosition().toInt() + 5);
-	ASSERT_TRUE(adjacent.isAvailable());
-	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), nullptr);
+	BattleHex adjacent;
+	for(const auto & candidate : crusader->getPosition().getNeighbouringTiles())
+	{
+		if(candidate.isAvailable() && !battle()->battleGetUnitByPos(candidate))
+		{
+			adjacent = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(adjacent.isValid());
+	ASSERT_EQ(BattleHex::getDistance(adjacent, crusader->getPosition()), 1);
 	archer->setPosition(adjacent);
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
