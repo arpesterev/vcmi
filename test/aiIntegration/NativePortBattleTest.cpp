@@ -855,6 +855,45 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeCurseAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Heroes II assigns positive spellDispelValue to freeing a blind ally even
+// without any missing hit points. Verify the VCMI Cure projection against a
+// *real* enemy Blind, followed by an engine-accepted FHeroes2 Cure and a
+// complete combat. This exercises the existing Cure/Blind branch separately
+// from the already verified Cure/Curse branch.
+TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBlindAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	const auto healthBefore = friendly->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, friendly))
+		<< "The server must apply the initial enemy Blind";
+	const auto blind = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLIND)));
+	ASSERT_TRUE(friendly->hasBonus(blind));
+	ASSERT_TRUE(friendly->isFrozen());
+	ASSERT_EQ(friendly->getAvailableHealth(), healthBefore)
+		<< "Cure must have value from dispelling Blind, not prior injury";
+	teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
+	bool sawNativeDispel = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::CURE).empty())
+			sawNativeDispel |= !friendly->hasBonus(blind) && !friendly->isFrozen();
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::CURE).empty())
+		<< "FHeroes2 must choose Cure for Blind, even without wounded units";
+	EXPECT_TRUE(sawNativeDispel)
+		<< "The real game engine must remove Blind, not just accept Cure";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeStoneSkinAndCompletesBattle)
 {
 	// The source values Stone Skin as a defensive buff. Observe the real
