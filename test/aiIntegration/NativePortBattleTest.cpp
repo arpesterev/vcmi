@@ -434,7 +434,11 @@ protected:
 				entry.second->battleTriggerEffect(trigger.battleID, trigger);
 			++deliveredTriggerEvents;
 		};
-		recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
+		// A directed native spell regression may already observe teleport
+		// movement packets. Preserve the observer while still forwarding
+		// the packet to both real battle policy adapters.
+		const auto priorMovementObserver = recorder.onMovementBeforeApply;
+		recorder.onMovementBeforeApply = [&, priorMovementObserver](const BattleStackMoved & movement)
 		{
 			const auto * movedStack = battle()->battleGetStackByID(movement.stack);
 			ASSERT_NE(movedStack, nullptr) << "Movement callback must see the pre-move live stack";
@@ -442,6 +446,8 @@ protected:
 				entry.second->battleStackMoved(movement.battleID, movedStack,
 					movement.tilesToMove, movement.distance, movement.teleporting);
 			++deliveredMovementEvents;
+			if(priorMovementObserver)
+				priorMovementObserver(movement);
 		};
 		recorder.onRoundBeforeApply = [&](const BattleNextRound & round)
 		{
@@ -1029,6 +1035,29 @@ TEST_F(AIIntegrationNativeBattle, choosesOffensiveMagicAndCompletesTheBattle)
 	EXPECT_GT(heroSpellDecisions, 0);
 	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
 	EXPECT_GT(recorder.spellPackets, 0) << "Native spell packs must reach both AI event adapters";
+}
+
+// Heroes II only values Teleport for an offensive grounded melee creature
+// lacking a current melee attack. VCMI adds the second destination target
+// through teleport.lua. This checks a real server-accepted two-hex target
+// spell and a real teleport movement packet, not just a scalar valuation.
+TEST_F(AIIntegrationNativeBattle, fheroes2TeleportsMeleeTowardEnemyInRealBattle)
+{
+	prepareBattle(CreatureID(0), 100, CreatureID(2), 110);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::TELEPORT, 12);
+	bool sawTeleportMove = false;
+	recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
+	{
+		if(movement.teleporting)
+			sawTeleportMove = true;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::TELEPORT).empty())
+		<< "FHeroes2 must independently choose native two-target Teleport";
+	EXPECT_TRUE(sawTeleportMove)
+		<< "VCMI must apply a genuine teleport movement, not just record a spell decision";
+	EXPECT_GT(recorder.damage, 0);
 }
 
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeHasteAndCompletesBattle)

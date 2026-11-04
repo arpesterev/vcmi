@@ -10,6 +10,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2TeleportPolicy.h"
 #include "FHeroes2DragonSlayer.h"
 #include "FHeroes2DispelValuation.h"
 #include "../../BattleAI/StackWithBonuses.h"
@@ -90,6 +91,33 @@ class FHeroes2SpellPolicy
 		return result;
 	}
 
+	// Lua VCMI teleport.lua adds LOCATION to the CREATURE first target.
+	// The generic target enumerator intentionally only supports one aim.
+	// Enumerate native-legal two-step aims for the currently active troop,
+	// rather than trying an unbounded Cartesian product of all creatures.
+	static std::vector<spells::Target> teleportTargets(const spells::Mechanics & mechanics,
+		const CStack * active)
+	{
+		std::vector<spells::Target> result;
+		if(!active || !active->alive() || !active->getPosition().isValid()
+			|| active->isInvincible())
+			return result;
+		const auto types = mechanics.getTargetTypes();
+		if(types.size() != 2 || types[0] != spells::AimType::CREATURE
+			|| types[1] != spells::AimType::LOCATION)
+			return result;
+		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+		{
+			const BattleHex hex(index);
+			if(!hex.isAvailable() || hex == active->getPosition())
+				continue;
+			spells::Target target{battle::Destination(active), battle::Destination(hex)};
+			if(mechanics.canBeCastAt(target))
+				result.push_back(std::move(target));
+		}
+		return result;
+	}
+
 	static double damageValue(const CStack & unit, int64_t damage, const Army & side)
 	{
 		const double health = static_cast<double>(unit.getAvailableHealth());
@@ -127,7 +155,7 @@ public:
 	}
 
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
-		const Environment * environment)
+		const Environment * environment, const CStack * activeStack = nullptr)
 	{
 		const auto * hero = real->battleGetMyHero();
 		if(!hero || real->battleCanCastSpell(hero, spells::Mode::HERO) != ESpellCastProblem::OK)
@@ -165,6 +193,7 @@ public:
 		{
 			const auto * spell = entry.get();
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
+			const bool teleportSpell = spell->id == SpellID::TELEPORT;
 			const bool summonSpell = spell->id == SpellID::SUMMON_AIR_ELEMENTAL
 				|| spell->id == SpellID::SUMMON_EARTH_ELEMENTAL
 				|| spell->id == SpellID::SUMMON_FIRE_ELEMENTAL
@@ -182,7 +211,7 @@ public:
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !teleportSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -192,7 +221,9 @@ public:
 				continue;
 			spells::BattleCast legality(real.get(), hero, spells::Mode::HERO, spell);
 			const auto mechanics = spell->battleMechanics(&legality);
-			for(const auto & target : targets(*mechanics))
+			const auto legalTargets = teleportSpell
+				? teleportTargets(*mechanics, activeStack) : targets(*mechanics);
+			for(const auto & target : legalTargets)
 			{
 				auto projected = std::make_shared<HypotheticBattle>(environment, real);
 				spells::BattleCast cast(projected.get(), hero, spells::Mode::HERO, spell);
@@ -616,6 +647,56 @@ public:
 								attackingCastle, hasted,
 								old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
 						}
+					}
+				}
+				// Pinned fheroes2 spellTeleportValue considers offensive
+				// teleport ONLY for a ground melee stack lacking an immediate
+				// melee engagement. Native Lua validates wall/moat, two-step
+				// targeting and actual landing; no opponent-target fallback.
+				if(teleportSpell && activeStack && !activeStack->isShooter()
+					&& !activeStack->hasBonusOfType(BonusType::FLYING)
+					&& !activeStack->isHypnotized()
+					&& real->battleGetOwner(activeStack) == player)
+				{
+					bool canMeleeNow = false;
+					const auto reachable = real->getReachability(activeStack);
+					const auto steps = real->battleGetAvailableHexes(reachable, activeStack, false);
+					for(const auto & hex : steps)
+					{
+						if(canMeleeNow || !hex.isAvailable())
+							continue;
+						for(const auto & old : before)
+						{
+							if(old.owner == player || old.health <= 0)
+								continue;
+							if(!real->meleeAttackHexes(activeStack, old.unit, hex).empty())
+							{
+								canMeleeNow = true;
+								break;
+							}
+						}
+					}
+					const auto * simulated = projected->battleGetUnitByID(activeStack->unitId());
+					if(simulated && simulated->alive())
+					{
+						const auto distanceToEnemy = [&](const battle::Unit & unit)
+						{
+							int distance = GameConstants::BFIELD_SIZE;
+							for(const auto & myHex : unit.getHexes())
+								for(const auto & old : before)
+								{
+									if(old.owner == player || old.health <= 0)
+										continue;
+									for(const auto & enemyHex : old.unit->getHexes())
+										distance = std::min(distance,
+											static_cast<int>(BattleHex::getDistance(myHex, enemyHex)));
+								}
+							return distance;
+						};
+						value += Ports::FHeroes2::offensiveTeleportValue(
+							static_cast<double>(activeStack->estimateCombatValue()),
+							true, canMeleeNow, simulated->getPosition() != activeStack->getPosition(),
+							distanceToEnemy(*activeStack), distanceToEnemy(*simulated));
 					}
 				}
 				// Heroes II MIRRORIMAGE becomes native VCMI CLONE. Apply the

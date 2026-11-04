@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2TeleportPolicy.h"
 #include "../AI/Integration/Ports/FHeroes2BerserkOrder.h"
 #include "../AI/Integration/Ports/FHeroes2DragonSlayer.h"
 #include "../AI/Integration/Ports/FHeroes2SiegeGeometry.h"
@@ -27,6 +28,26 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	// Pinned spellTeleportValue: 10% of strength ONLY when a native
+	// two-target cast delivers ground melee next to the opposing troop.
+	require(FHeroes2::offensiveTeleportValue(100, true, false, true, 5, 1) == 10,
+		"Legal offensive teleport receives pinned Bloodlust-ratio score");
+	require(FHeroes2::offensiveTeleportValue(100, false, false, true, 5, 1) == 0,
+		"Do not teleport shooters or flying melee with their own movement");
+	require(FHeroes2::offensiveTeleportValue(100, true, true, true, 5, 1) == 0,
+		"An already reachable melee target cannot justify Teleport");
+	require(FHeroes2::offensiveTeleportValue(100, true, false, false, 5, 1) == 0,
+		"Rejected or resisted Teleport has zero effect value");
+	require(FHeroes2::offensiveTeleportValue(100, true, false, true, 5, 2) == 0,
+		"Teleport must result in immediate adjacency to a living enemy");
+	require(FHeroes2::offensiveTeleportValue(100, true, false, true, 1, 1) == 0,
+		"Already adjacent troops do not gain Teleport benefit");
+	try { FHeroes2::offensiveTeleportValue(-1, true, false, true, 4, 1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::offensiveTeleportValue(std::numeric_limits<double>::infinity(),
+		true, false, true, 4, 1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	const FHeroes2::BerserkCandidate unselected{-1, 0};
 	require(FHeroes2::preferBerserkCandidate({10, 3}, unselected),
 		"First legal Berserk target is accepted");
