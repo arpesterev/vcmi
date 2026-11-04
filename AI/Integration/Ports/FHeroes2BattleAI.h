@@ -8,6 +8,9 @@
 
 #include "SourceTactics.h"
 #include "FHeroes2SpellPolicy.h"
+#include "FHeroes2SiegeGeometry.h"
+
+#include <array>
 #include "FHeroes2RoundLimiter.h"
 
 #include <map>
@@ -302,8 +305,51 @@ private:
 				nearest = distance;
 			}
 		}
-		return best.isValid()
-			? std::optional<BattleAction>(BattleAction::makeMove(&stack, best)) : std::nullopt;
+		if(best.isValid())
+			return BattleAction::makeMove(&stack, best);
+
+		// A closed, fortified garrison may be beyond direct reach. The
+		// source then searches cells under castle walls; VCMI has different
+		// wall geometry, so use its *actual* wall hexes and legal movement.
+		// This is only a fallback after no step toward a living defender.
+		std::vector<BattleHex> wallTargets;
+		for(EWallPart part : {EWallPart::BOTTOM_WALL, EWallPart::BELOW_GATE,
+			EWallPart::GATE, EWallPart::OVER_GATE, EWallPart::UPPER_WALL})
+		{
+			const auto state = battle.battleGetWallState(part);
+			if(state == EWallState::NONE || state == EWallState::DESTROYED)
+				continue;
+			const BattleHex wallHex = battle.wallPartToBattleHex(part);
+			if(wallHex.isAvailable())
+				wallTargets.push_back(wallHex);
+		}
+		if(wallTargets.empty())
+			return std::nullopt;
+
+		const auto wallDistance = [&](const BattleHex & head)
+		{
+			int distance = GameConstants::BFIELD_SIZE;
+			for(const auto & occupied : stack.getHexes(head))
+				for(const auto & wall : wallTargets)
+					distance = std::min(distance, static_cast<int>(BattleHex::getDistance(occupied, wall)));
+			return distance;
+		};
+		const int startingWallDistance = wallDistance(stack.getPosition());
+		const auto reachability = battle.getReachability(&stack);
+		Ports::FHeroes2::SiegeWallApproach bestWall{};
+		bestWall.headHex = -1;
+		for(const auto & hex : available)
+		{
+			if(!hex.isAvailable() || hex == stack.getPosition())
+				continue;
+			const Ports::FHeroes2::SiegeWallApproach candidate{
+				wallDistance(hex), static_cast<int>(reachability.distances[hex.toInt()]), hex.toInt()};
+			if(Ports::FHeroes2::preferSiegeWallStep(candidate, bestWall, startingWallDistance))
+				bestWall = candidate;
+		}
+		if(bestWall.headHex >= 0)
+			return BattleAction::makeMove(&stack, BattleHex(bestWall.headHex));
+		return std::nullopt;
 	}
 
 	// fheroes2 meleeUnitOffense first pursues targets that cannot evade,

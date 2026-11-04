@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2SiegeGeometry.h"
 #include "../AI/Integration/Ports/FHeroes2RoundLimiter.h"
 #include "../AI/Integration/Ports/FHeroes2RetreatDecision.h"
 #include "../AI/Integration/Ports/FHeroes2DispelValuation.h"
@@ -24,6 +25,31 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	// Source meleeUnitOffense fallback: closest legal wall approach after
+	// direct garrison approaches fail, with a stable path-cost tie break.
+	const FHeroes2::SiegeWallApproach noWallCandidate{0, 0, -1};
+	const FHeroes2::SiegeWallApproach oneStepCloser{3, 5, 50};
+	const FHeroes2::SiegeWallApproach stillFarther{5, 1, 70};
+	const FHeroes2::SiegeWallApproach nearerWall{1, 6, 80};
+	require(FHeroes2::preferSiegeWallStep(oneStepCloser, noWallCandidate, 4),
+		"An accessible siege approach must advance toward intact walls");
+	require(!FHeroes2::preferSiegeWallStep(stillFarther, noWallCandidate, 4),
+		"Never move away from or fail to approach an intact wall");
+	require(FHeroes2::preferSiegeWallStep(nearerWall, oneStepCloser, 4),
+		"Prefer a closer wall approach even if the legal movement costs more");
+	require(!FHeroes2::preferSiegeWallStep(oneStepCloser, nearerWall, 4),
+		"Never replace better wall progress with a farther one");
+	require(FHeroes2::preferSiegeWallStep({3, 4, 90}, oneStepCloser, 4),
+		"Source wall traversal prefers shorter movement cost at equal distance");
+	require(FHeroes2::preferSiegeWallStep({3, 5, 40}, oneStepCloser, 4),
+		"Tie resolves by stable native head position");
+	require(!FHeroes2::preferSiegeWallStep({3, 5, 60}, oneStepCloser, 4),
+		"No arbitrary change when an equal-cost route uses a larger head index");
+	try { FHeroes2::preferSiegeWallStep({-1, 1, 0}, noWallCandidate, 4); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::preferSiegeWallStep({2, -1, 0}, noWallCandidate, 4); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 
 	// fheroes2 isLimitOfTurnsExceeded: 50 consecutive round transitions,
 	// not 50 unit activations, and casualties on either side reset the cap.
