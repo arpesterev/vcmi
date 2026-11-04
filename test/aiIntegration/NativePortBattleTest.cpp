@@ -3147,6 +3147,20 @@ TEST_F(AIIntegrationNativeBattle, homm3JousterPrefersLongerEqualValueMeleeRoute)
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3MeleeEngagesLiveShooterAndCompletesBattle)
+{
+	// A live opposing shooter exercises the pinned getHexAttackValue branch
+	// through native VCMI attack positions and damage previews. The source
+	// uses a different per-creature combat-value calculation, so this is
+	// engine-action evidence, NOT a claim of complete HoMM3 score parity.
+	prepareBattle(CreatureID(0), 400, CreatureID(2), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0)
+		<< "The real server must accept melee attacks against the shooter";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 {
 	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
