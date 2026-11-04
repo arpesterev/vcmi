@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, limited Cure dispelling (Curse/Blind/Slow), enemy Haste dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -254,6 +254,23 @@ public:
 							value += static_cast<double>(old.unit->estimateCombatValue())
 								* Ports::FHeroes2::hasteSpeedRatio(restored, hasted,
 									ours.averageSpeed(), false, old.unit->isShooter(), false);
+						}
+						// In the pinned fheroes2 spellDispelValue an enemy's
+						// positive Bless contributes the same spellEffectValue
+						// used for applying Bless. Require the native VCMI
+						// Dispel preview to remove both the spell effect and its
+						// maximum-damage roll. Fixed-damage creatures and no-op
+						// dispels receive no value.
+						const auto bless = Selector::source(BonusSource::SPELL_EFFECT,
+							BonusSourceID(SpellID(SpellID::BLESS)));
+						if(old.unit->unitType() && old.unit->hasBonus(bless) && !after->hasBonus(bless)
+							&& old.unit->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE)
+							&& !after->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE))
+						{
+							const auto * creature = old.unit->unitType();
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::blessCurseDamageRatio(
+									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
 						}
 					}
 					// Pinned fheroes2 spellDispelValue also values CURE as removal
