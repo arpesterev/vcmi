@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration and limited Cure dispelling (Curse/Blind), Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -235,6 +235,30 @@ public:
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(),
 									counteracting, changed);
 						}
+					}
+					// Pinned fheroes2 spellDispelValue also values CURE as removal
+					// of hostile magic, not only recovered hit points. Evaluate only
+					// negative effects that the *native* projected Cure really
+					// removes. Heroes II ratios are projections onto VCMI statuses.
+					if(spell->id == SpellID::CURE && friendly && after && after->alive())
+					{
+						const auto sourceEffect = [](SpellID id)
+						{
+							return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
+						};
+						const auto curse = sourceEffect(SpellID(SpellID::CURSE));
+						if(old.unit->unitType() && old.unit->hasBonus(curse) && !after->hasBonus(curse)
+							&& !after->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE))
+						{
+							const auto * creature = old.unit->unitType();
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::blessCurseDamageRatio(
+									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
+						}
+						const auto blind = sourceEffect(SpellID(SpellID::BLIND));
+						if(old.unit->hasBonus(blind) && !after->hasBonus(blind))
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::blindControlRatio(false, false, true, false, true);
 					}
 					// Pinned fheroes2 spellEffectValue assigns Stone Skin 10% of
 					// allied stack strength. Only accept VCMI's observed defense
