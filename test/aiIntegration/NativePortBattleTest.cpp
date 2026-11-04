@@ -819,6 +819,49 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// A fheroes2 Dispel scores a beneficial enemy Bless through its existing
+// 0.15 spellEffectValue, but only when the real VCMI spell effect and forced
+// maximum-damage roll are removed. Verify the independently selected Dispel
+// in a complete battle. No engine rules or stack outcomes are overridden.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyBlessAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	const auto initialHealth = enemy->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::BLESS, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLESS, enemy))
+		<< "The enemy hero must successfully apply Bless via the game server";
+	const auto bless = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLESS)));
+	ASSERT_TRUE(enemy->hasBonus(bless));
+	ASSERT_TRUE(enemy->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE));
+	ASSERT_EQ(enemy->getAvailableHealth(), initialHealth)
+		<< "The Dispel decision must value removal of a buff, not damage";
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	// VCMI requires Advanced Water Magic to target an enemy with Dispel;
+	// avoid bypassing the real spell legality gate.
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	bool removedRealBless = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			removedRealBless |= !enemy->hasBonus(bless)
+				&& !enemy->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty())
+		<< "FHeroes2 must choose Dispel against a genuinely blessed enemy";
+	EXPECT_TRUE(removedRealBless)
+		<< "The authoritative server must remove native Bless and its damage roll";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // fheroes2 spellDispelValue values removing an enemy's beneficial magic.
 // Dispel must be the policy's own hero decision, remove a real enemy Haste
 // through authoritative server packets and complete combat with damage.
