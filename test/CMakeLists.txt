@@ -199,6 +199,7 @@ if(ENABLE_BATTLE_AI)
 		battleAI/BattleEvaluatorTest.cpp
 		battleAI/SpellTargetsEvaluatorTest.cpp
 		aiIntegration/NativePortBattleTest.cpp
+		aiIntegration/MMAINNOutputValidationTest.cpp
 	)
 endif()
 
