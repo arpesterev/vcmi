@@ -496,7 +496,10 @@ public:
 				// an existing clone, or a spell effect on the original.
 				if(mirrorImageSpell)
 				{
-					for(const auto * clone : projected->battleGetAllStacks(false))
+					// HypotheticBattle creates StackWithBonuses units, not CStack objects.
+					// The legacy CStack-only view is delegated to the live battle and
+					// silently omits newly summoned clones. Query simulated Units.
+					for(const auto * clone : projected->battleGetUnitsIf([](const battle::Unit * unit) { return !unit->isGhost(); }))
 					{
 						if(!clone->alive() || !clone->isClone()
 							|| projected->battleGetOwner(clone) != player)
