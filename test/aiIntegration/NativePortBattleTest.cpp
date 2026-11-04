@@ -3812,6 +3812,97 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
 		<< "TUM ballista must not shoot the only remaining blinded target";
 }
 
+TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsWhenAllTargetsHaveDifferentDisableSources)
+{
+	// TUM: never break Blind, Paralyze or Petrification with a ballista.
+	// Check a mixed native battle with one spell-source and two creature-source
+	// disabilities, so no one invalid source lookup can leave an eligible shot.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 100);
+	setArmy(defenderSideHero, CreatureID(0), 50);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 40));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(2)), CreatureID(0).toCreature(), 30));
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * blind = nullptr;
+	CStack * paralyzed = nullptr;
+	CStack * petrified = nullptr;
+	const CStack * ballista = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->getCount() == 50)
+				blind = unit.get();
+			else if(unit->getCount() == 40)
+				paralyzed = unit.get();
+			else if(unit->getCount() == 30)
+				petrified = unit.get();
+		}
+	}
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_NE(blind, nullptr);
+	ASSERT_NE(paralyzed, nullptr);
+	ASSERT_NE(petrified, nullptr);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blind));
+	const auto disableFromCreature = [](CStack * victim, SpellID spell)
+	{
+		victim->addNewBonus(std::make_shared<Bonus>(
+			BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+			1, BonusSourceID(CreatureID(0)), BonusSubtypeID(spell)));
+	};
+	disableFromCreature(paralyzed, SpellID(SpellID::PARALYZE));
+	disableFromCreature(petrified, SpellID(SpellID::STONE_GAZE));
+	ASSERT_TRUE(blind->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
+		BonusSourceID(SpellID(SpellID::BLIND)))));
+	ASSERT_TRUE(paralyzed->hasBonus(Selector::typeSubtype(
+		BonusType::NOT_ACTIVE, BonusSubtypeID(SpellID(SpellID::PARALYZE)))));
+	ASSERT_TRUE(petrified->hasBonus(Selector::typeSubtype(
+		BonusType::NOT_ACTIVE, BonusSubtypeID(SpellID(SpellID::STONE_GAZE)))));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT)
+		<< "HoMM3 must still select a shot for a meaningful TUM source-rule difference";
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "The TUM ballista must not shoot any of the disabled stacks";
+	const int ballistaId = ballista->unitId();
+	policy.reset();
+	// The native server, not the exploratory callback, must accept DEFEND and
+	// then apply an actual battle result with all effects remaining in play.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByUnit[ballistaId][EActionType::DEFEND], 0)
+		<< "There was no engine-accepted ballista DEFEND";
+	EXPECT_EQ(ballistaShots, 0)
+		<< "The ballista must never wake permanently disabled targets";
+}
+
 TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstRealNeutralStack)
 {
 	// Construct an actual neutral map object, not a player-owned hero whose

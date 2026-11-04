@@ -210,6 +210,14 @@ five independently implemented overrides derived from the documentation:
   with no remaining legal target, it defends instead of waking a disabled
   stack. We check actual VCMI spell-effect bonuses, not `isFrozen()` alone,
   because the latter only detects Stone Gaze.
+- **Arrow towers (blocked at the policy boundary):** VCMI
+  `BattleFlowProcessor::tryMakeAutomaticActionOfRangedUnit` handles
+  CPU-controlled citadel towers before `CBattleGameInterface::activeStack`.
+  A live citadel regression confirmed that a proposed tower action in the
+  experimental adapter is never received as an engine-accepted unit action.
+  The attempted override was reverted. The documented but unpublished TUM
+  tower targeting cannot honestly be claimed as a functioning port without
+  a separate, explicitly scoped engine extension, which this branch forbids.
 - **Shooter protection:** when facing neutral melee-only stacks, allied
   ranged troops still have usable shots, and no neutral stack can reach the
   friendly army in its next movement, the active friendly melee stack first
