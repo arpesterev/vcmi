@@ -89,14 +89,18 @@ private:
 	static bool hasDisabledEffect(const CStack & unit)
 	{
 		// The generic isFrozen() method checks only STONE_GAZE in VCMI.
-		const auto affectedBy = [&](SpellID spell)
+		const auto disabledBy = [&](SpellID spell)
 		{
-			return unit.hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell)));
+			// NOT_ACTIVE subtype identifies Blind, Paralyze or Petrification,
+			// even when a creature ability (not a hero spell) applied it.
+			// Retain spell-source detection for native spell-effect bonuses.
+			return unit.hasBonus(Selector::typeSubtype(BonusType::NOT_ACTIVE, BonusSubtypeID(spell)))
+				|| unit.hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell)));
 		};
 		return !Ports::TUM::ballistaMayTarget(
-			affectedBy(SpellID(SpellID::BLIND)),
-			affectedBy(SpellID(SpellID::PARALYZE)),
-			affectedBy(SpellID(SpellID::STONE_GAZE)));
+			disabledBy(SpellID(SpellID::BLIND)),
+			disabledBy(SpellID(SpellID::PARALYZE)),
+			disabledBy(SpellID(SpellID::STONE_GAZE)));
 	}
 
 	static BattleAction chooseBallistaShot(CPlayerBattleCallback & battle, const CStack & stack)

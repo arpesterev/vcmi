@@ -3674,14 +3674,20 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 }
 TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIsBlind)
 {
-	// TUM AI Improvements.txt excludes disabled ballista targets individually,
-	// not the whole firing action. A still-attackable enemy must be selected.
+	// TUM AI Improvements.txt excludes Blind, Paralyze and Petrification
+	// independently. The latter two can come from creature-source NOT_ACTIVE
+	// effects, not SPELL_EFFECT. Status injection is fixture setup only;
+	// every decision and battle outcome still goes through the real server.
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(0), 60);
 	setArmy(defenderSideHero, CreatureID(0), 50);
 	ASSERT_TRUE(gameHandler->insertNewStack(
-		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 12));
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 40));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(2)), CreatureID(0).toCreature(), 36));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(3)), CreatureID(0).toCreature(), 12));
 	ASSERT_FALSE(HasFatalFailure());
 	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
 	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
@@ -3691,6 +3697,8 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 
 	const CStack * blinded = nullptr;
+	CStack * paralyzed = nullptr;
+	CStack * petrified = nullptr;
 	const CStack * validTarget = nullptr;
 	const CStack * ballista = nullptr;
 	for(const auto & unit : battle()->stacks)
@@ -3699,6 +3707,10 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 		{
 			if(unit->getCount() == 50)
 				blinded = unit.get();
+			else if(unit->getCount() == 40)
+				paralyzed = unit.get();
+			else if(unit->getCount() == 36)
+				petrified = unit.get();
 			else if(unit->getCount() == 12)
 				validTarget = unit.get();
 		}
@@ -3706,11 +3718,25 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 			ballista = unit.get();
 	}
 	ASSERT_NE(blinded, nullptr);
+	ASSERT_NE(paralyzed, nullptr);
+	ASSERT_NE(petrified, nullptr);
 	ASSERT_NE(validTarget, nullptr);
 	ASSERT_NE(ballista, nullptr);
 	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blinded));
 	ASSERT_TRUE(blinded->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
 		BonusSourceID(SpellID(SpellID::BLIND)))));
+	const auto addCreatureDisable = [&](CStack * target, SpellID status)
+	{
+		target->addNewBonus(std::make_shared<Bonus>(
+			BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+			1, BonusSourceID(CreatureID(0)), BonusSubtypeID(status)));
+		EXPECT_TRUE(target->hasBonus(Selector::typeSubtype(
+			BonusType::NOT_ACTIVE, BonusSubtypeID(status))));
+		EXPECT_FALSE(target->hasBonus(Selector::source(
+			BonusSource::SPELL_EFFECT, BonusSourceID(status))));
+	};
+	addCreatureDisable(paralyzed, SpellID(SpellID::PARALYZE));
+	addCreatureDisable(petrified, SpellID(SpellID::STONE_GAZE));
 	ASSERT_TRUE(battle()->battleCanShoot(ballista, validTarget->getPosition()));
 
 	const auto battleID = battle()->getBattleID();
@@ -3734,7 +3760,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 		<< "A blind enemy must not suppress shots at another valid enemy";
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_EQ(callback->action->target.front().unitValue, validTarget->unitId())
-		<< "The TUM ballista must select the unblinded stack, never the disabled one";
+		<< "Ballista must skip blinded, creature-paralyzed and petrified enemies";
 
 	// All subsequent commands still come from actual active-unit events,
 	// and the VCMI engine must accept them and finish this battle.
@@ -3743,7 +3769,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 	EXPECT_GT(ballistaShots, 0);
 	ASSERT_TRUE(firstBallistaShotTarget.has_value()) << "The native battle never accepted a ballista shot";
 	EXPECT_EQ(*firstBallistaShotTarget, validTargetId)
-		<< "The first engine-accepted ballista shot must avoid the blinded enemy";
+		<< "Native ballista shot must not wake any of the three disabled stacks";
 }
 
 TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
