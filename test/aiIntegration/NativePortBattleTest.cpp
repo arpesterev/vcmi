@@ -234,6 +234,7 @@ class AIIntegrationNativeBattle : public BattleTestFixture
 protected:
 	NativeBattleRecorder recorder;
 	std::map<PlayerColor, std::map<EActionType, int>> lastAcceptedActionTypesByPlayer;
+	std::map<int, std::map<EActionType, int>> lastAcceptedActionTypesByUnit;
 	int ballistaDecisions = 0;
 	int ballistaShots = 0;
 	std::optional<int> firstBallistaShotTarget;
@@ -493,6 +494,7 @@ protected:
 		int decisions = 0;
 		std::map<PlayerColor, int> decisionsByPlayer;
 		std::map<PlayerColor, std::map<EActionType, int>> acceptedActionTypesByPlayer;
+		std::map<int, std::map<EActionType, int>> acceptedActionTypesByUnit;
 		std::vector<std::string> recentDecisions;
 		while(recorder.battleResults.empty() && decisions < 512)
 		{
@@ -506,6 +508,7 @@ protected:
 			policies.at(player)->activeStack(battleID, active);
 			ASSERT_TRUE(callback->action.has_value()) << "Backend did not respond to the actual active-stack event";
 			const auto action = *callback->action;
+			const int actingUnitId = active->unitId();
 			// A completed battle alone does not prove the neural side made
 			// meaningful decisions; the scripted opponent could win unaided.
 			const auto & activePolicy = player == attackerPlayer ? attackerAI : defenderAI;
@@ -570,6 +573,7 @@ protected:
 			++decisions;
 			++decisionsByPlayer[player];
 			++acceptedActionTypesByPlayer[player][action.actionType];
+			++acceptedActionTypesByUnit[actingUnitId][action.actionType];
 			if(recorder.battleResults.empty())
 			{
 				for(auto & entry : policies)
@@ -624,6 +628,7 @@ protected:
 		replayedMovementEvents = deliveredMovementEvents;
 		replayedRoundEvents = deliveredRoundEvents;
 		lastAcceptedActionTypesByPlayer = acceptedActionTypesByPlayer;
+		lastAcceptedActionTypesByUnit = acceptedActionTypesByUnit;
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
@@ -3841,6 +3846,81 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 	EXPECT_GT(recorder.shots, 0);
 }
 
+
+
+TEST_F(AIIntegrationNativeBattle, tumOutOfAmmoArcherNeverBecomesMeleeShooterGuard)
+{
+	// TUM's published neutral screen is a MELEE tactic. An exhausted archer
+	// remains a ranged creature even when battleCanShoot() becomes false.
+	// A second archer must still have ammunition so the guard condition
+	// would otherwise be true and the regression would catch an accidental WAIT.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 15));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(2)), CreatureID(2).toCreature(), 9));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 100);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	CStack * exhausted = nullptr;
+	const CStack * armedShooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() != BattleSide::ATTACKER || unit->creatureId() != CreatureID(2))
+			continue;
+		if(unit->getCount() == 9)
+			exhausted = unit.get();
+		else if(unit->getCount() == 15)
+			armedShooter = unit.get();
+	}
+	ASSERT_NE(exhausted, nullptr);
+	ASSERT_NE(armedShooter, nullptr);
+	ASSERT_TRUE(exhausted->isShooter());
+	ASSERT_TRUE(armedShooter->canShoot());
+	ASSERT_GT(exhausted->shots.total(), 0);
+	exhausted->shots.use(exhausted->shots.total());
+	ASSERT_EQ(exhausted->shots.available(), 0);
+	ASSERT_FALSE(exhausted->canShoot());
+	ASSERT_FALSE(battle()->battleCanShoot(exhausted));
+	ASSERT_TRUE(exhausted->isShooter())
+		<< "An exhausted archer must retain its creature's ranged classification";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto playerView = callback->getBattle(battleID);
+	ASSERT_NE(playerView, nullptr);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerView, *exhausted);
+	ASSERT_NE(baseline.actionType, EActionType::WAIT);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, exhausted);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->toString(), baseline.toString())
+		<< "A shooter out of ammunition must retain the explicitly partial HoMM3 policy";
+	EXPECT_NE(callback->action->actionType, EActionType::WAIT);
+
+	const int exhaustedId = exhausted->unitId();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	ASSERT_FALSE(lastAcceptedActionTypesByUnit[exhaustedId].empty())
+		<< "The exhausted archer never acted in an actual VCMI battle";
+	EXPECT_EQ(lastAcceptedActionTypesByUnit[exhaustedId][EActionType::WAIT], 0)
+		<< "The real server must never accept a melee-guard WAIT from this ranged unit";
+}
 
 TEST_F(AIIntegrationNativeBattle, tumDoesNotMistakeForgottenNeutralArcherForMeleeOnly)
 {
