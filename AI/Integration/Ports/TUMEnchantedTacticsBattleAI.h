@@ -61,7 +61,9 @@ public:
 				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
 		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
-			&& !battle->battleCanShoot(stack) && shouldProtectShooters(*battle, *stack))
+			// A ranged creature with no available shot is still a shooter, not
+			// a melee screen. The published hold/fortify overrides govern melee.
+			&& !stack->isShooter() && shouldProtectShooters(*battle, *stack))
 		{
 			// AI Improvements.txt explicitly permits waiting for neutral melee
 			// while friendly shooters work. Preserve the unit's later-turn
@@ -71,7 +73,7 @@ public:
 				: BattleAction::makeWait(stack);
 		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
-			&& !battle->battleCanShoot(stack) && shouldHoldFortifiedSiege(*battle, *stack))
+			&& !stack->isShooter() && shouldHoldFortifiedSiege(*battle, *stack))
 			action = BattleAction::makeDefend(stack);
 		else
 			action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
