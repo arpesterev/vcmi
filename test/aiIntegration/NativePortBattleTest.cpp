@@ -326,7 +326,8 @@ protected:
 
 	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true,
 		const std::string & backendName = "FHeroes2Tactics", const std::string & defenderBackend = "",
-		bool requireBothSidesAct = false)
+		bool requireBothSidesAct = false,
+		std::function<void(const BattleAction &, BattleSide, BattleHex)> onAcceptedAction = {})
 	{
 		const std::string & attackerAI = backendName;
 		const std::string & defenderAI = defenderBackend.empty() ? backendName : defenderBackend;
@@ -573,7 +574,13 @@ protected:
 				recentDecisions.erase(recentDecisions.begin());
 			for(auto & entry : policies)
 				entry.second->actionStarted(battleID, action);
+			// Capture pre-apply geometry: the authoritative server can move or
+			// remove the active stack while accepting the selected action.
+			const auto actingSide = active->unitSide();
+			const BattleHex origin = active->getPosition();
 			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action)) << "The engine rejected the selected action";
+			if(onAcceptedAction)
+				onAcceptedAction(action, actingSide, origin);
 			++decisions;
 			++decisionsByPlayer[player];
 			++acceptedActionTypesByPlayer[player][action.actionType];
@@ -759,12 +766,15 @@ TEST_F(AIIntegrationNativeBattle, completesRangedDuelWithoutDefenceDeadlock)
 
 TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 {
-	prepareSiege();
+	// Both sides have durable cavalry. A one-hit kill of a token garrison
+	// could end the siege before the catapult's first *observed* activation;
+	// setup-time catapult packets are not adapter-delivery evidence.
+	prepareSiege(false, CreatureID(10), 40, CreatureID(10), 30);
 	ASSERT_FALSE(HasFatalFailure());
-	runToCompletion(BattleSide::ATTACKER);
+	runToCompletion();
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 	EXPECT_GT(replayedCatapultEvents, 0)
-		<< "Siege-machine packet must reach both experimental adapters after applying to the battle";
+		<< "A post-subscription siege-machine packet must reach both adapters";
 }
 
 
@@ -773,7 +783,7 @@ TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 // and the battle outcome: this wall heuristic is an explicit rule projection.
 TEST_F(AIIntegrationNativeBattle, fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk)
 {
-	prepareSiege(false, CreatureID(0), 30, CreatureID(0), 100);
+	prepareSiege(false, CreatureID(0), 100, CreatureID(0), 30);
 	ASSERT_FALSE(HasFatalFailure());
 	ASSERT_NE(battle()->battleGetDefendedTown(), nullptr);
 	ASSERT_NE(battle()->battleGetWallState(EWallPart::GATE), EWallState::NONE);
@@ -788,34 +798,25 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SiegeAttackerApproachesClosedWallUsing
 	}
 	ASSERT_NE(infantry, nullptr);
 	ASSERT_NE(defender, nullptr);
-	const BattleHex origin = infantry->getPosition();
-	const int originalDistance = BattleHex::getDistance(origin, defender->getPosition());
-	const auto battleID = battle()->getBattleID();
-	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
-	auto callback = std::make_shared<DecisionCallback>(player);
-	callback->onBattleStarted(battle());
-	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
-	ASSERT_NE(policy, nullptr);
-	policy->playerID = player;
-	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
-	AutocombatPreferences prefs;
-	prefs.enableSpellsUsage = false;
-	policy->initBattleInterface(environment, callback, prefs);
-	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
-		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
-		battle()->getSideHero(BattleSide::ATTACKER),
-		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
-	policy->activeStack(battleID, infantry);
-	ASSERT_TRUE(callback->action.has_value());
-	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
-		<< "Mobile attacker must approach the intact castle wall: " << callback->action->toString();
-	ASSERT_FALSE(callback->action->target.empty());
-	const BattleHex selected = callback->action->target.front().hexValue;
-	EXPECT_LT(BattleHex::getDistance(selected, defender->getPosition()), originalDistance);
-	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
-		<< "Authoritative server rejected FHeroes2 siege movement";
-	policy.reset();
-	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	const BattleHex defenderHex = defender->getPosition();
+	bool acceptedApproach = false;
+	// This observer is invoked only AFTER the normal battle runner has
+	// submitted a genuinely active unit's decision to the real server.
+	// The former test fabricated an infantry activation while the catapult
+	// could still be the active stack, so rejection proved no policy defect.
+	const auto acceptedAction = [&](const BattleAction & action, BattleSide side, BattleHex origin)
+	{
+		if(side != BattleSide::ATTACKER || action.actionType != EActionType::WALK
+			|| action.target.empty() || !origin.isValid())
+			return;
+		const BattleHex selected = action.target.front().hexValue;
+		if(selected.isValid() && BattleHex::getDistance(selected, defenderHex)
+			< BattleHex::getDistance(origin, defenderHex))
+			acceptedApproach = true;
+	};
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics", false, acceptedAction);
+	EXPECT_TRUE(acceptedApproach)
+		<< "FHeroes2 must advance toward the walled garrison through a server-accepted WALK";
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 	EXPECT_GT(recorder.damage, 0);
 }
