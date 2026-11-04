@@ -395,11 +395,19 @@ protected:
 					damageTakenBySide[victim->unitSide()] += injury.damageAmount;
 			}
 		};
-		recorder.onUnitsChangedAfterApply = [&](const BattleUnitsChanged & units)
+		// A directed native regression may subscribe to actual server unit
+		// changes before starting the runner. Preserve that observer while
+		// delivering the same packet to every experimental AI adapter.
+		// Previously this assignment silently replaced the summon observer,
+		// yielding a false-negative even though unit-change packets arrived.
+		const auto priorUnitChangeObserver = recorder.onUnitsChangedAfterApply;
+		recorder.onUnitsChangedAfterApply = [&, priorUnitChangeObserver](const BattleUnitsChanged & units)
 		{
 			for(auto & entry : policies)
 				entry.second->battleUnitsChanged(units.battleID, units.changedStacks);
 			++deliveredUnitChangeEvents;
+			if(priorUnitChangeObserver)
+				priorUnitChangeObserver(units);
 		};
 		recorder.onObstaclesChangedAfterApply = [&](const BattleObstaclesChanged & obstacles)
 		{
