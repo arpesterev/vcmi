@@ -233,6 +233,7 @@ class AIIntegrationNativeBattle : public BattleTestFixture
 {
 protected:
 	NativeBattleRecorder recorder;
+	std::map<PlayerColor, std::map<EActionType, int>> lastAcceptedActionTypesByPlayer;
 	int ballistaDecisions = 0;
 	int ballistaShots = 0;
 	std::optional<int> firstBallistaShotTarget;
@@ -622,6 +623,7 @@ protected:
 			<< "Every round must notify both policies after applying the new round";
 		replayedMovementEvents = deliveredMovementEvents;
 		replayedRoundEvents = deliveredRoundEvents;
+		lastAcceptedActionTypesByPlayer = acceptedActionTypesByPlayer;
 		EXPECT_TRUE(result.winner == BattleSide::ATTACKER || result.winner == BattleSide::DEFENDER);
 		if(expectedWinner)
 		{
@@ -3828,11 +3830,14 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
 	policy->activeStack(battleID, melee);
 	ASSERT_TRUE(callback->action.has_value());
-	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
-		<< "TUM melee must protect friendly shooters before neutral contact";
+	EXPECT_EQ(callback->action->actionType, EActionType::WAIT)
+		<< "TUM melee must preserve its later action while shooters engage neutral melee";
+	EXPECT_FALSE(melee->waited()) << "The first neutral-screening action must be a legal initial WAIT";
 	// In addition to the differential decision above, complete the battle
 	// through the real server. A fabricated winner is never accepted.
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByPlayer[player][EActionType::WAIT], 0)
+		<< "The real server must accept TUM's neutral-screening WAIT, not just a callback proposal";
 	EXPECT_GT(recorder.shots, 0);
 }
 
