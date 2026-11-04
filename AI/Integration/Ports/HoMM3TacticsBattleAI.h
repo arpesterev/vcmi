@@ -166,6 +166,43 @@ private:
 		return pins;
 	}
 
+	// Pinned getMultiHeadBonus / getBreathBonus score damage to OTHER
+	// affected stacks after the primary hit. The exact Heroes III damage
+	// formula cannot be used in VCMI; use its authoritative multi-target
+	// geometry and independent single-target damage previews instead.
+	// This is HoMM3-only: TUM's explicitly composed baseline must not
+	// silently inherit this additional valuation.
+	static double projectedCollateral(CPlayerBattleCallback & battle, const CStack & attacker,
+		const CStack & target, BattleHex from, BattleHex attackTo, int pathCost)
+	{
+		if(!attacker.hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT)
+			&& !attacker.hasBonusOfType(BonusType::THREE_HEADED_ATTACK)
+			&& !attacker.hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH)
+			&& !attacker.hasBonusOfType(BonusType::WIDE_BREATH)
+			&& !attacker.hasBonusOfType(BonusType::PRISM_HEX_ATTACK_BREATH)
+			&& !attacker.hasBonusOfType(BonusType::MULTIHEX_UNIT_ATTACK)
+			&& !attacker.hasBonusOfType(BonusType::MULTIHEX_ENEMY_ATTACK))
+			return 0.0;
+
+		double value = 0.0;
+		// The engine de-duplicates double-wide targets. A direct hit is
+		// already in exchangeValue; never score it as collateral.
+		for(const auto * affected : battle.getAttackedCreatures(&attacker, attackTo, false, from).first)
+		{
+			const auto * secondary = dynamic_cast<const CStack *>(affected);
+			if(!secondary || secondary == &target || secondary == &attacker || !secondary->alive())
+				continue;
+			BattleAttackInfo info(&attacker, secondary, pathCost, false);
+			info.attackerPos = from;
+			const double loss = lossValue(*secondary, battle.battleEstimateDamage(info));
+			value += Ports::HoMM3::collateralStrikeValue(
+				secondary->unitSide() != attacker.unitSide(), loss);
+		}
+		if(!std::isfinite(value))
+			throw std::logic_error("Nonfinite HoMM3 collateral attack projection");
+		return value;
+	}
+
 	static double shooterPinBonus(const CStack & attacker, BattleHex from,
 		const std::vector<ShooterPin> & pins)
 	{
@@ -383,7 +420,9 @@ public:
 				const double landingThreat = avoidFastDecoys ? 0.0
 					: projectedLandingThreat(battle, stack, *enemy, hex, enemies);
 				const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
-					+ shooterPinBonus(stack, hex, shooterPins) + landingThreat;
+					+ shooterPinBonus(stack, hex, shooterPins) + landingThreat
+					+ (avoidFastDecoys ? 0.0 : projectedCollateral(battle, stack, *enemy,
+						hex, attackedHexes.front(), pathCost));
 				if(!target || exchange > bestExchange
 					|| (exchange == bestExchange
 						&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
