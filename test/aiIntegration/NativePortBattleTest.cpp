@@ -1412,6 +1412,51 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBlindAndCompletesBattle)
 // removing Berserker from an allied stack. Verify a real hostile cast and
 // a distinct, independently chosen native Cure: no scripted policy and
 // no score for a resisted or unchanged spell-effect projection.
+// fheroes2's berserkTurn is a special creature turn, not a normal target
+// scorer. An authoritative native Berserk cast must route the active unit
+// through the independent FHeroes2 controller and produce a legal action.
+TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBattleCompletes)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * acting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(acting, nullptr);
+	const auto side = acting->unitSide();
+	auto * caster = side == BattleSide::ATTACKER ? defenderSideHero : attackerSideHero;
+	teachBattleSpell(caster, SpellID::BERSERK, 6);
+	ASSERT_TRUE(castOn(caster, SpellID::BERSERK, acting))
+		<< "A real server spell must apply the controlled-turn status";
+	ASSERT_TRUE(acting->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(side);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), side, false);
+	policy->activeStack(battleID, acting);
+	ASSERT_TRUE(callback->action.has_value()) << "FHeroes2 special turn returned no action";
+	EXPECT_TRUE(callback->action->actionType == EActionType::WALK
+		|| callback->action->actionType == EActionType::WALK_AND_ATTACK
+		|| callback->action->actionType == EActionType::SHOOT
+		|| callback->action->actionType == EActionType::DEFEND)
+		<< "Berserk may only select a native combat/movement action";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected the source-derived Berserk action";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
 {
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);

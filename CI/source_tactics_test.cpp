@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2BerserkOrder.h"
 #include "../AI/Integration/Ports/FHeroes2DragonSlayer.h"
 #include "../AI/Integration/Ports/FHeroes2SiegeGeometry.h"
 #include "../AI/Integration/Ports/FHeroes2RoundLimiter.h"
@@ -26,6 +27,22 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	const FHeroes2::BerserkCandidate unselected{-1, 0};
+	require(FHeroes2::preferBerserkCandidate({10, 3}, unselected),
+		"First legal Berserk target is accepted");
+	require(FHeroes2::preferBerserkCandidate({11, 2}, {10, 3}),
+		"Berserk targets nearest troop instead of highest threat");
+	require(!FHeroes2::preferBerserkCandidate({11, 4}, {10, 3}),
+		"Berserk ignores more distant troops");
+	require(FHeroes2::preferBerserkCandidate({9, 3}, {10, 3}),
+		"Equal distance uses deterministic native unit ID");
+	require(!FHeroes2::preferBerserkCandidate({11, 3}, {10, 3}),
+		"A later higher-ID equal-range troop cannot override selected target");
+	try { FHeroes2::preferBerserkCandidate({-1, 3}, unselected); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::preferBerserkCandidate({3, -1}, unselected); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Pinned spellDragonSlayerValue: no dragons, no native effect, and
 	// mixed enemy armies must receive different priorities.
 	require(FHeroes2::dragonSlayerValue(100, 0, 100, true) == 0,
