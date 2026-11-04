@@ -421,19 +421,29 @@ public:
 				// tactical choices unchanged while this HoMM3 slice evolves.
 				const double landingThreat = avoidFastDecoys ? 0.0
 					: projectedLandingThreat(battle, stack, *enemy, hex, enemies);
-				const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
-					+ shooterPinBonus(stack, hex, shooterPins) + landingThreat
-					+ (avoidFastDecoys ? 0.0 : projectedCollateral(battle, stack, *enemy,
-						hex, attackedHexes.front(), pathCost));
-				if(!target || exchange > bestExchange
-					|| (exchange == bestExchange
-						&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
+				// A wide target can expose several distinct legal hit hexes from
+				// this landing position. Breath/splash depends on WHICH hex is
+				// struck. Pinned checkAdjacentHexes explores each enemy hex;
+				// do not silently score only meleeAttackHexes().front().
+				// TUM intentionally keeps the historical first-aim baseline.
+				for(const auto & aimedHex : attackedHexes)
 				{
-					target = enemy;
-					attackFrom = hex;
-					attackTo = attackedHexes.front();
-					bestExchange = exchange;
-					bestPathCost = pathCost;
+					const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
+						+ shooterPinBonus(stack, hex, shooterPins) + landingThreat
+						+ (avoidFastDecoys ? 0.0 : projectedCollateral(battle, stack, *enemy,
+							hex, aimedHex, pathCost));
+					if(!target || exchange > bestExchange
+						|| (exchange == bestExchange
+							&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
+					{
+						target = enemy;
+						attackFrom = hex;
+						attackTo = aimedHex;
+						bestExchange = exchange;
+						bestPathCost = pathCost;
+					}
+					if(avoidFastDecoys)
+						break;
 				}
 			}
 		}
