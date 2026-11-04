@@ -137,7 +137,7 @@ TEST(MMAINNOutputValidation, RejectsInvalidModelSideMetadata)
 	EXPECT_EQ(parseNNModelSide("2"), Side::BOTH);
 
 	// stoi alone accepted suffixes and out-of-range enum values.
-	for(const std::string & value : {"", "1garbage", "2.0", "-1", "3", "99999999999999999999"})
+	for(const char * value : {"", "1garbage", "2.0", "-1", "3", "99999999999999999999"})
 		EXPECT_THROW(parseNNModelSide(value), std::runtime_error);
 }
 
