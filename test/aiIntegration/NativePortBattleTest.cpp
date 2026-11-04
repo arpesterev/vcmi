@@ -44,6 +44,7 @@ public:
 	explicit DecisionCallback(PlayerColor player) : CBattleCallback(player, nullptr) {}
 	std::optional<BattleAction> action;
 	bool spellAction = false;
+	int surrenderRetreatDecisionRequests = 0;
 
 	// Headless native fixture has no IClient. Returning no surrender/retreat
 	// decision preserves the engine's legal combat path instead of calling
@@ -51,6 +52,7 @@ public:
 	std::optional<BattleAction> makeSurrenderRetreatDecision(const BattleID &,
 		const BattleStateInfoForRetreat &) override
 	{
+		++surrenderRetreatDecisionRequests;
 		return std::nullopt;
 	}
 
@@ -582,6 +584,21 @@ protected:
 		for(const auto & decision : recentDecisions)
 			diagnostics << '\n' << decision;
 		ASSERT_EQ(recorder.battleResults.size(), 1u) << "No unique result after 512 actual activations\n" << diagnostics.str();
+#ifdef ENABLE_MMAI
+		// The V13/V15 strict policies cannot outsource retreat/surrender to
+		// the adventure-layer decision callback. This assertion runs on every
+		// real, server-accepted ONNX combat scenario (including both siege sides).
+		for(const auto side : {BattleSide::ATTACKER, BattleSide::DEFENDER})
+		{
+			const auto & activeBackend = side == BattleSide::ATTACKER ? attackerAI : defenderAI;
+			if(activeBackend == "MMAI")
+			{
+				const auto player = battle()->sideToPlayer(side);
+				EXPECT_EQ(callbacks.at(player)->surrenderRetreatDecisionRequests, 0)
+					<< "Strict MMAI consulted scripted surrender/retreat instead of its ONNX policy";
+			}
+		}
+#endif
 		const auto result = recorder.battleResults.back();
 		EXPECT_GT(decisions, 0);
 		if(attackerAI != defenderAI || requireBothSidesAct)
@@ -4013,6 +4030,8 @@ TEST_F(AIIntegrationNativeBattle, mmaiStrictNeuralDoesNotCastScriptedHeroSpellRe
 	ASSERT_EQ(observer->getBattle(battle()->getBattleID())->battleCanCastSpell(
 		attackerSideHero, spells::Mode::HERO), ESpellCastProblem::OK)
 		<< "The fixture must make the scripted hero-spell fallback possible";
+	ASSERT_TRUE(observer->getBattle(battle()->getBattleID())->battleCanFlee())
+		<< "A legal retreat must be available to exercise strict neural-only routing";
 
 	// Enable autocombat spells on purpose. All actual MMAI unit decisions
 	// must still go through ONNX and be accepted by VCMI's battle engine.
