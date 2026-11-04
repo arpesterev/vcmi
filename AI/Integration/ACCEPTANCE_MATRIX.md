@@ -61,3 +61,7 @@ schema and action identity requirements. All new work goes to draft branches;
 do not change VCMI game rules, default AI, release workflows, or publish
 binaries/models/Actions artifacts. Green build and smoke tests do **not**
 establish upstream-equivalent behavior.
+
+## Experimental integration after merge
+
+Merging these experimental backends into `develop` does **not** certify the requested complete `HoMM3Original`, `FHeroes2`, or `TUMEnchanted` algorithms or a fully neural MMAI spell policy. The factory must keep the distinct partial `*Tactics` identifiers; do not alias the reserved full-port identifiers to them. Existing gameplay rules, default AI, release behavior and save compatibility remain unchanged. Future development must close the independent upstream-reference, gameplay, model and GUI gates listed above before claiming the full four-backend deliverable.
