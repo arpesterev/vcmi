@@ -3331,7 +3331,8 @@ TEST_F(AIIntegrationNativeBattle, homm3FreeShootingThreatAndEngineShotAtAdjacent
 	ASSERT_EQ(battle()->battleActiveUnit(), crusader);
 
 	BattleHex adjacent;
-	for(const auto & candidate : crusader->getPosition().getNeighbouringTiles())
+	const auto neighboringHexes = crusader->getPosition().getNeighbouringTiles();
+	for(const BattleHex candidate : neighboringHexes)
 	{
 		if(candidate.isAvailable() && !battle()->battleGetUnitByPos(candidate))
 		{
