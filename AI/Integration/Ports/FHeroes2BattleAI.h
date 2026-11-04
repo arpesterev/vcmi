@@ -78,7 +78,7 @@ public:
 				const auto heroes = player->getHeroes();
 				const auto towns = player->getTowns();
 				const bool canRehire = heroes.size() > 1 || (!towns.empty()
-					&& !(towns.size() == 1 && hero->visitedTown == towns.front()->id));
+					&& !(towns.size() == 1 && hero->getVisitedTown() == towns.front()));
 				const bool valuableArtifacts = std::any_of(
 					ArtifactUtils::commonWornSlots().begin(), ArtifactUtils::commonWornSlots().end(),
 					[&](const ArtifactPosition & slot) { return hero->getArt(slot) != nullptr; });
