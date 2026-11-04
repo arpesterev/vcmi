@@ -71,8 +71,8 @@ inline int32_t pinnedShooterValue(double rangedUnitValue, double meleeUnitValue,
 		static_cast<double>(std::numeric_limits<int32_t>::max())));
 }
 
-// The pinned findEnemyAttacks builds a threat field from enemies that can
-// actually attack. When projecting it into VCMI, the prospective landing
+// The pinned checkAdjacentHexes consumes a precomputed enemy_attacks[hex]
+// landing-risk field. In the VCMI approximation, the prospective landing
 // cell is still empty, so battleCanShoot(enemy, thatCell) would incorrectly
 // return false. Reproduce the host's blocked-shot / range checks using
 // authoritative unit bonuses and hypothetical cell distance instead.

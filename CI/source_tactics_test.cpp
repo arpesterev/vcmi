@@ -102,8 +102,8 @@ int main()
 		std::array<int, 0>{}, linearDistance),
 		"HoMM3 empty enemy footprint cannot generate score");
 
-	// HoMM3 findEnemyAttacks uses an enemy-threat field; VCMI must not
-	// project an impossible shot onto an empty future landing cell.
+	// Pinned checkAdjacentHexes uses precomputed enemy_attacks[hex]; the
+	// VCMI approximation must not invent a shot at an empty future cell.
 	require(!HoMM3::projectedNativeRangedThreat(true, true, false, true, false, 0, 1),
 		"Ordinary shooter cannot fire through new melee contact");
 	require(HoMM3::projectedNativeRangedThreat(true, true, true, true, false, 0, 1),

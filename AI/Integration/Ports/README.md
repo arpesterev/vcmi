@@ -215,6 +215,17 @@ all possible special attacks or obstacle-aware reachable positions.
 The TUM composition remains unchanged. A two-enemy VCMI battle regression
 exercises this projection and a terminal server battle result.
 
+The bounded HoMM3-only VCMI landing-threat approximation now preserves
+unrestricted `FREE_SHOOTING` threats even when a future attack footprint
+engages the shooter, while respecting native `LIMITED_SHOOTING_RANGE`.
+A real server regression checks ordinary and unrestricted adjacent shot
+legality, an independently selected and accepted HoMM3 melee command,
+observed ranged attacks, damage and a terminal result. Pure tests cover
+restricted/free shooting and shooting-range boundaries. This does not
+reconstruct the original `enemy_attacks` field or prove that the original
+HoMM3 would choose the same attack hex. The TUM-composed baseline is not
+changed by this HoMM3-only projection.
+
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign

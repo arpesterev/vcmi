@@ -3306,7 +3306,7 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedOnlyBallistaCannotProjectMeleeLandi
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
-// The pinned HoMM3 findEnemyAttacks threat map includes ranged enemies,
+// Pinned checkAdjacentHexes consumes a precomputed landing-threat field,
 // but the VCMI projection must not assume that moving next to a shooter
 // always silences it. Actual unrestricted FREE_SHOOTING keeps the native
 // shot legal from adjacent hexes. The bonus is fixture-only; no game rules
