@@ -3220,14 +3220,14 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraValuesAndExecutesNativeMultiTargetMe
 // It does not claim the original HoMM3 evaluates VCMI breath identically.
 TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 {
-	prepareBattle(CreatureID(134), 24, CreatureID(4), 50); // Red Dragon vs Griffin
+	prepareBattle(CreatureID(82), 24, CreatureID(4), 50); // Red Dragon (dungeon ID 82) vs Griffin
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	const CStack * dragon = nullptr;
 	CStack * griffin = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
-		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(134))
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(82))
 			dragon = unit.get();
 		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(4))
 			griffin = unit.get();
