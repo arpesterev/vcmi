@@ -1037,6 +1037,10 @@ private:
 				// unconditionally attacking the first head/tail cell.
 				for(const auto & hitHex : attackedHexes)
 				{
+					// Engine attack candidates must still identify this live
+					// victim in the selected target hex.
+					if(battle.battleGetUnitByPos(hitHex) != enemy)
+						continue;
 					double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
 					const auto collateral = battle.getAttackedBattleUnits(
 						&stack, enemy, hitHex, false, hex);
