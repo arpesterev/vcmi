@@ -10,6 +10,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2EarthquakePolicy.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
 #include "../../../lib/CStack.h"
@@ -158,6 +159,7 @@ public:
 		{
 			const auto * spell = entry.get();
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
+			const bool earthquakeSpell = spell->id == SpellID::EARTHQUAKE;
 			const bool summonSpell = spell->id == SpellID::SUMMON_AIR_ELEMENTAL
 				|| spell->id == SpellID::SUMMON_EARTH_ELEMENTAL
 				|| spell->id == SpellID::SUMMON_FIRE_ELEMENTAL
@@ -174,7 +176,7 @@ public:
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !earthquakeSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -187,9 +189,16 @@ public:
 			for(const auto & target : targets(*mechanics))
 			{
 				auto projected = std::make_shared<HypotheticBattle>(environment, real);
-				spells::BattleCast cast(projected.get(), hero, spells::Mode::HERO, spell);
-				cast.castEval(projected->getServerCallback(), target);
-				checkUnchanged(*real, *hero, mana, before);
+				// The native Earthquake is randomized (2-4 siege points). The
+				// upstream planner values its *expected* wall damage, so
+				// do not use a pseudo-random hypothetical cast to rank it.
+				// The ordinary server remains authoritative over the real cast.
+				if(!earthquakeSpell)
+				{
+					spells::BattleCast cast(projected.get(), hero, spells::Mode::HERO, spell);
+					cast.castEval(projected->getServerCallback(), target);
+					checkUnchanged(*real, *hero, mana, before);
+				}
 
 				double value = 0;
 				int64_t friendlyHealth = 0;
@@ -505,6 +514,42 @@ public:
 								old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
 						}
 					}
+				}
+				if(earthquakeSpell)
+				{
+					const bool attackingCastle = real->battleGetDefendedTown() != nullptr
+						&& real->battleGetMySide() == BattleSide::ATTACKER
+						&& real->hasFortifications();
+					int meleeStacks = 0;
+					double meleeStrength = 0;
+					for(const auto & old : before)
+						if(old.owner == player && old.health > 0
+							&& !old.unit->isShooter()
+							&& !old.unit->hasBonusOfType(BonusType::FLYING)
+							&& !old.unit->isTurret() && !old.unit->isCatapult())
+						{
+							++meleeStacks;
+							meleeStrength += static_cast<double>(old.unit->estimateCombatValue());
+						}
+					int standing = 0;
+					int total = 0;
+					if(attackingCastle)
+						for(const auto part : {EWallPart::KEEP, EWallPart::BOTTOM_WALL,
+							EWallPart::BELOW_GATE, EWallPart::OVER_GATE, EWallPart::UPPER_WALL,
+							EWallPart::GATE})
+						{
+							if(real->battleGetWallState(part) == EWallState::NONE)
+								continue;
+							++total;
+							if(real->battleGetWallState(part) != EWallState::DESTROYED)
+								++standing;
+						}
+					// VCMI catapult.lua rolls normal hit or critical per effect
+					// point; a single expected hit is a conservative proxy.
+					// No chance is assigned if the siege has no standing walls.
+					value += Ports::FHeroes2::earthquakeValue(attackingCastle,
+						meleeStacks, meleeStrength, ours.strength,
+						standing, total, 1.0, theirs.shooters, theirs.strength);
 				}
 				// Heroes II MIRRORIMAGE becomes native VCMI CLONE. Apply the
 				// pinned 1.0/0.55/0.33 archer/flying/ground source ratio
