@@ -938,6 +938,46 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyBloodlustAndCompletesBattl
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The original fheroes2 spellDispelValue counts an enemy's protective
+// Shield as a positive effect to remove. Heroes III/VCMI uses AIR_SHIELD
+// for ranged protection; require an actual spell and mitigation removal,
+// not a synthetic decision or a made-up Heroes II combat rule.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyRangedShieldAndCompletesBattle)
+{
+	prepareBattle(CreatureID(2), 80, CreatureID(2), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	const auto originalHealth = enemy->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::AIR_SHIELD, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::AIR_SHIELD, enemy));
+	const auto airShield = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::AIR_SHIELD)));
+	ASSERT_TRUE(enemy->hasBonus(airShield));
+	ASSERT_TRUE(enemy->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION));
+	ASSERT_EQ(enemy->getAvailableHealth(), originalHealth)
+		<< "Dispel must be selected because of protection, not missing health";
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	bool removedRealProtection = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			removedRealProtection |= !enemy->hasBonus(airShield)
+				&& !enemy->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty())
+		<< "FHeroes2 must independently choose Dispel against ranged protection";
+	EXPECT_TRUE(removedRealProtection)
+		<< "The authoritative server must remove Air Shield's ranged mitigation";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // fheroes2 spellDispelValue values removing an enemy's beneficial magic.
 // Dispel must be the policy's own hero decision, remove a real enemy Haste
 // through authoritative server packets and complete combat with damage.
