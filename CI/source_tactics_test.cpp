@@ -46,6 +46,24 @@ int main()
 	try { preferEqualValueMeleeHex(4, -1, false); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Source getHexAttackValue scales the ranged-versus-melee combat-value
+	// difference by surviving unit-equivalents and never gives less than 1
+	// for a live eligible shooter. Native damage projection is separate.
+	require(HoMM3::pinnedShooterValue(10, 4, 35, 10) == 21,
+		"HoMM3 pinned shooter value must scale by surviving health");
+	require(HoMM3::pinnedShooterValue(10, 4, 37, 10) == 22,
+		"HoMM3 pinned shooter value truncates toward zero like source long cast");
+	require(HoMM3::pinnedShooterValue(4, 10, 35, 10) == 1,
+		"HoMM3 scorer floors nonpositive live shooter contribution at one");
+	require(HoMM3::pinnedShooterValue(10, 4, 0, 10) == 0,
+		"Dead shooter cannot receive suppression credit");
+	require(HoMM3::pinnedShooterValue(1e20, 0, 10, 1) == std::numeric_limits<int32_t>::max(),
+		"Native source projection must not overflow its signed score");
+	try { HoMM3::pinnedShooterValue(10, 4, 10, 0); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::pinnedShooterValue(std::numeric_limits<double>::infinity(), 4, 10, 1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	FHeroes2::TacticsInput input{100, 100, 30, 0, true, false, false};
 	require(selectTactics(input).defensive, "Protect the ranged advantage");
 	input.shootersStrength = 0;
