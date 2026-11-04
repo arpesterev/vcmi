@@ -294,6 +294,22 @@ public:
 								* Ports::FHeroes2::bloodlustAttackRatio(
 									after->getAttack(false), old.unit->getAttack(false));
 						}
+						// Heroes II's positive Shield effect is also counted by
+						// spellDispelValue when dispelling a buffed enemy. VCMI's
+						// analogous ranged protection is AIR_SHIELD, not SHIELD.
+						// Only credit its removal if the native projection actually
+						// clears the spell and the ranged mitigation bonus. Use
+						// OUR archer strength as the threat to the protected enemy.
+						const auto airShield = Selector::source(BonusSource::SPELL_EFFECT,
+							BonusSourceID(SpellID(SpellID::AIR_SHIELD)));
+						if(old.unit->hasBonus(airShield) && !after->hasBonus(airShield)
+							&& old.unit->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION)
+							&& !after->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION))
+						{
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::shieldRangedRatio(
+									ours.shooters, ours.strength, old.unit->isShooter(), true);
+						}
 					}
 					// Pinned fheroes2 spellDispelValue also values CURE as removal
 					// of hostile magic, not only recovered hit points. Evaluate only
