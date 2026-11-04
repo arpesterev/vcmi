@@ -205,6 +205,64 @@ private:
 		return value;
 	}
 
+	// The pinned checkAdjacentHexes subtracts getMultiHeadBonus and
+	// getBreathBonus for a defender which can retaliate. A native VCMI
+	// retaliation may also strike OTHER stacks next to the landing hex.
+	// The ordinary exchangeValue already prices retaliation against the
+	// primary attacker, so only additional victims belong here.
+	// This is a conditional, post-hit damage projection, not a HoMM3 formula.
+	static double projectedRetaliationCollateral(CPlayerBattleCallback & battle,
+		const CStack & attacker, const CStack & target, BattleHex from, int pathCost)
+	{
+		if(!target.hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT)
+			&& !target.hasBonusOfType(BonusType::THREE_HEADED_ATTACK)
+			&& !target.hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH)
+			&& !target.hasBonusOfType(BonusType::WIDE_BREATH)
+			&& !target.hasBonusOfType(BonusType::PRISM_HEX_ATTACK_BREATH)
+			&& !target.hasBonusOfType(BonusType::MULTIHEX_UNIT_ATTACK)
+			&& !target.hasBonusOfType(BonusType::MULTIHEX_ENEMY_ATTACK))
+			return 0.0;
+
+		BattleAttackInfo primary(&attacker, &target, pathCost, false);
+		primary.attackerPos = from;
+		DamageEstimation retaliation;
+		const auto initialHit = battle.battleEstimateDamage(primary, &retaliation);
+		// This also checks the engine's retaliation availability, no-retaliation
+		// attacks and death of the primary target. Do not invent a return hit.
+		if(retaliation.damage.max <= 0)
+			return 0.0;
+
+		// The defender has already taken the first hit before counterattacking.
+		// Model a representative surviving state without modifying the live stack.
+		// VCMI's exact random damage and effects are not reconstructed here.
+		auto afterHit = target.acquireState();
+		int64_t received = initialHit.damage.min
+			+ (initialHit.damage.max - initialHit.damage.min) / 2;
+		received = std::clamp<int64_t>(received, 0, afterHit->getAvailableHealth());
+		afterHit->damage(received);
+		if(!afterHit->alive())
+			return 0.0;
+
+		double score = 0.0;
+		for(const auto * affected : battle.getAttackedCreatures(
+			&target, from, false, target.getPosition()).first)
+		{
+			const auto * secondary = dynamic_cast<const CStack *>(affected);
+			if(!secondary || secondary == &attacker || secondary == &target || !secondary->alive())
+				continue;
+			BattleAttackInfo counter(afterHit.get(), secondary, 0, false);
+			counter.attackerPos = target.getPosition();
+			const double loss = lossValue(*secondary, battle.battleEstimateDamage(counter));
+			// A collateral ally of OUR attacker is bad; a stack still loyal
+			// to the enemy (including under Hypnotize) benefits our exchange.
+			score += Ports::HoMM3::collateralStrikeValue(
+				battle.battleGetOwner(secondary) != battle.battleGetOwner(&attacker), loss);
+		}
+		if(!std::isfinite(score))
+			throw std::logic_error("Nonfinite HoMM3 retaliation collateral projection");
+		return score;
+	}
+
 	static double shooterPinBonus(const CStack & attacker, BattleHex from,
 		const std::vector<ShooterPin> & pins)
 	{
@@ -430,8 +488,9 @@ public:
 				{
 					const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
 						+ shooterPinBonus(stack, hex, shooterPins) + landingThreat
-						+ (avoidFastDecoys ? 0.0 : projectedCollateral(battle, stack, *enemy,
-							hex, aimedHex, pathCost));
+						+ (avoidFastDecoys ? 0.0
+							: projectedCollateral(battle, stack, *enemy, hex, aimedHex, pathCost)
+							+ projectedRetaliationCollateral(battle, stack, *enemy, hex, pathCost));
 					if(!target || exchange > bestExchange
 						|| (exchange == bestExchange
 							&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
