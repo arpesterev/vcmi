@@ -171,7 +171,10 @@ private:
 			// do not reward that physically impossible damage under TUM's
 			// published dealt + received Hypnotize preference.
 			const bool guaranteedKill = static_cast<double>(damage.damage.min) >= targetHealth;
-			const double received = (shooting || guaranteedKill) ? 0.0
+			// A stack that exhausted its counterattacks cannot retaliate, even
+			// if a damage preview reports the hypothetical exchange. Retain
+			// native VCMI's authoritative retaliation eligibility.
+			const double received = (shooting || guaranteedKill || !victim.ableToRetaliate()) ? 0.0
 				: std::min(static_cast<double>(stack.getAvailableHealth()),
 					(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
