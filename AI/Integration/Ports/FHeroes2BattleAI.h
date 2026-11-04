@@ -661,9 +661,14 @@ private:
 		const auto friendlies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
 		const auto handFighting = [&](const CStack & enemy)
 		{
+			// Pinned archerDecision temporarily removes the moving shooter from
+			// the board before evaluating candidate retreat positions. An enemy
+			// archer engaged only by that shooter becomes unengaged when it moves.
+			// Keep other friendly units: they can still hold the enemy in melee.
 			for(const auto * friendly : friendlies)
 			{
-				if(!friendly->alive() || battle.battleGetOwner(friendly) == battle.battleGetOwner(&enemy))
+				if(friendly == &stack || !friendly->alive()
+					|| battle.battleGetOwner(friendly) == battle.battleGetOwner(&enemy))
 					continue;
 				for(const auto & friendlyHex : friendly->getHexes())
 					for(const auto & enemyHex : enemy.getHexes())

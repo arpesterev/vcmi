@@ -3509,6 +3509,84 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideArcherRetreatChecksItsTailFootprin
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 archerDecision evaluates hypothetical retreats with the
+// active shooter temporarily absent from the board. An enemy archer engaged
+// *only* by that moving shooter is therefore no longer a melee pursuer.
+// Its proximity still blocks shots at distance one, while distant native
+// ranged threats must not turn into fictional melee pursuit.
+TEST_F(AIIntegrationNativeBattle, fheroes2ArcherRetreatReleasesEnemyShooterFromHandFighting)
+{
+	prepareBattle(CreatureID(2), 30, CreatureID(2), 4);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	BattleHex blockerHex;
+	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			blockerHex = hex;
+			break;
+		}
+	ASSERT_TRUE(blockerHex.isValid());
+	CStack * blocker = addStack(BattleSide::DEFENDER, CreatureID(2), blockerHex, 4);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_TRUE(blocker->isShooter());
+	ASSERT_EQ(BattleHex::getDistance(shooter->getPosition(), blocker->getPosition()), 1);
+	// Fixture-only bonuses make the enemy's *raw* speed exceed the maximum
+	// possible distance on this board, while the active shooter remains
+	// strictly more than two speed points faster as upstream requires.
+	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::STACKS_SPEED, BonusSource::OTHER, 20, BonusSourceID()));
+	blocker->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::STACKS_SPEED, BonusSource::OTHER, 16, BonusSourceID()));
+	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
+		static_cast<int>(blocker->getMovementRange()) + 2);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	const auto friends = battle()->battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+	ASSERT_EQ(std::count_if(friends.begin(), friends.end(), [&](const CStack * unit)
+	{
+		return unit != shooter && unit->alive();
+	}), 0) << "The moving shooter must be the enemy archer's only melee engagement";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "An archer engaged only by its moving target cannot project long-range melee pursuit: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const auto destination = callback->action->target.front().hexValue;
+	const auto distance = BattleHex::getDistance(destination, blocker->getPosition());
+	EXPECT_GT(distance, 1) << "The escape must unblock the moving shooter's shot";
+	EXPECT_LE(distance, static_cast<int>(blocker->getMovementRange()) + 1)
+		<< "This retreat would be rejected if the enemy archer incorrectly kept melee pursuit";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native VCMI server rejected the source-derived retreat";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDifference)
 {
 	// Pinned fheroes2 archerDecision uses raw outgoing HP damage minus
