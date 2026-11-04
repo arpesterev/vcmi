@@ -3676,6 +3676,105 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 	EXPECT_GT(ballistaDecisions, 0);
 	EXPECT_GT(ballistaShots, 0);
 }
+// The source document requires smart ballista selection without disclosing a
+// numeric formula. Our partial TUM projection must value the *casualties of a
+// legal shot* rather than blindly target the largest whole-stack AI value.
+// Compare both metrics from the same authoritative engine state, then let
+// the server execute its normal ballista activation and finish the battle.
+TEST_F(AIIntegrationNativeBattle, tumBallistaValuesEngineProjectedLoss)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(11), 80);
+	setArmy(defenderSideHero, CreatureID(0), 350);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(11).toCreature(), 8));
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * ballista = nullptr;
+	std::vector<const CStack *> enemies;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			enemies.push_back(unit.get());
+	}
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_EQ(enemies.size(), 2u);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+
+	const CStack * largestStack = nullptr;
+	const CStack * greatestProjectedLoss = nullptr;
+	double greatestRaw = -1;
+	double greatestLoss = -1;
+	for(const auto * enemy : enemies)
+	{
+		ASSERT_TRUE(view->battleCanShoot(ballista, enemy->getPosition()));
+		ASSERT_GT(enemy->getAvailableHealth(), 0);
+		const double raw = static_cast<double>(enemy->estimateCombatValue());
+		BattleAttackInfo info(ballista, enemy, 0, true);
+		info.attackerPos = ballista->getPosition();
+		DamageEstimation retaliation;
+		const auto projected = view->battleEstimateDamage(info, &retaliation);
+		const double expectedCasualties = std::clamp(
+			(static_cast<double>(projected.damage.min) + static_cast<double>(projected.damage.max)) / 2.0,
+			0.0, static_cast<double>(enemy->getAvailableHealth()));
+		const double loss = raw * expectedCasualties / static_cast<double>(enemy->getAvailableHealth());
+		ASSERT_GT(loss, 0) << "Fixture requires a meaningful native ballista shot";
+		if(raw > greatestRaw)
+		{
+			greatestRaw = raw;
+			largestStack = enemy;
+		}
+		if(loss > greatestLoss)
+		{
+			greatestLoss = loss;
+			greatestProjectedLoss = enemy;
+		}
+	}
+	ASSERT_NE(greatestProjectedLoss, nullptr);
+	ASSERT_NE(largestStack, nullptr);
+	ASSERT_NE(greatestProjectedLoss->unitId(), largestStack->unitId())
+		<< "Fixture must distinguish damage-aware selection from raw whole-stack value";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, greatestProjectedLoss->unitId())
+		<< "TUM must aim at the greater engine-projected loss, not the largest original stack";
+	const int expectedTargetID = greatestProjectedLoss->unitId();
+	policy.reset();
+
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(ballistaShots, 0);
+	ASSERT_TRUE(firstBallistaShotTarget.has_value()) << "No actual ballista shot was accepted by VCMI";
+	EXPECT_EQ(*firstBallistaShotTarget, expectedTargetID)
+		<< "The real server must accept the projected-loss target before battle completion";
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIsBlind)
 {
 	// TUM AI Improvements.txt excludes Blind, Paralyze and Petrification
