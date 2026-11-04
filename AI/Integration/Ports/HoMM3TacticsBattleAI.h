@@ -114,38 +114,31 @@ private:
 	// shooters. Cache the native ranged-minus-melee proxy ONCE per active
 	// stack: evaluating damage for every attack-hex/target combination is
 	// unnecessarily expensive, especially with many reachable positions.
-	// A complete source threat field and wide moving-stack geometry remain
-	// unported; this narrow slice scores only newly engaged live shooters.
+	// A complete source threat field and original per-unit valuation remain
+	// unported. Use both native occupied cells for wide moving stacks.
 	struct ShooterPin
 	{
 		BattleHexArray occupied;
 		int32_t value = 0;
 	};
 
-	static bool adjacentTo(BattleHex position, const BattleHexArray & occupied)
+	static bool engagesFootprints(const BattleHexArray & moving, const BattleHexArray & shooter)
 	{
-		return std::any_of(occupied.begin(), occupied.end(), [&](BattleHex cell)
-		{
-			return BattleHex::getDistance(position, cell) == 1;
-		});
+		return Ports::HoMM3::attackFootprintEngagesShooter(moving, shooter,
+			[](BattleHex lhs, BattleHex rhs) { return BattleHex::getDistance(lhs, rhs); });
 	}
 
 	static std::vector<ShooterPin> calculateShooterPins(CPlayerBattleCallback & battle,
 		const CStack & attacker, const std::vector<const CStack *> & enemies)
 	{
 		std::vector<ShooterPin> pins;
-		if(attacker.doubleWide())
-			return pins;
 		for(const auto * enemy : enemies)
 		{
 			if(!enemy->isShooter() || !battle.battleCanShoot(enemy))
 				continue;
 			const auto occupied = enemy->getHexes();
 			const auto original = attacker.getHexes();
-			if(std::any_of(original.begin(), original.end(), [&](BattleHex hex)
-			{
-				return adjacentTo(hex, occupied);
-			}))
+			if(engagesFootprints(original, occupied))
 				continue; // The shooter is already blocked by our stack.
 			const BattleAttackInfo ranged(enemy, &attacker, 0, true);
 			const BattleAttackInfo melee(enemy, &attacker, 0, false);
@@ -159,11 +152,15 @@ private:
 		return pins;
 	}
 
-	static double shooterPinBonus(BattleHex from, const std::vector<ShooterPin> & pins)
+	static double shooterPinBonus(const CStack & attacker, BattleHex from,
+		const std::vector<ShooterPin> & pins)
 	{
+		const auto footprint = attacker.getHexes(from);
 		double value = 0;
+		// Exactly one entry per enemy shooter even when both our head and tail
+		// contact both cells of a wide shooter (source shared checked mask).
 		for(const auto & pin : pins)
-			if(adjacentTo(from, pin.occupied))
+			if(engagesFootprints(footprint, pin.occupied))
 				value += pin.value;
 		return value;
 	}
@@ -307,7 +304,7 @@ public:
 				if(pathCost < 0)
 					continue;
 				const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
-					+ shooterPinBonus(hex, shooterPins);
+					+ shooterPinBonus(stack, hex, shooterPins);
 				if(!target || exchange > bestExchange
 					|| (exchange == bestExchange
 						&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
