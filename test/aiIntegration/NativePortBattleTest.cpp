@@ -1236,6 +1236,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCloneAndCompletesBattle)
 	const auto casterPlayer = battle()->sideToPlayer(BattleSide::ATTACKER);
 	auto probeCallback = std::make_shared<DecisionCallback>(casterPlayer);
 	probeCallback->onBattleStarted(battle());
+	const auto realBattle = probeCallback->getBattle(battle()->getBattleID());
+	ASSERT_NE(realBattle, nullptr);
 	auto probeEnvironment = std::make_shared<NativePortEnvironment>(makeCallback(casterPlayer), probeCallback);
 	const CStack * original = nullptr;
 	for(const auto & unit : battle()->stacks)
@@ -1250,15 +1252,15 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCloneAndCompletesBattle)
 		foundCloneSpell = true;
 		EXPECT_TRUE(entry->isCombat()) << "Clone is not recognized as a combat spell";
 		EXPECT_FALSE(entry->isCreatureAbility()) << "Clone is unexpectedly a creature-only spell";
-		EXPECT_TRUE(entry->canBeCast(probeCallback.get(), spells::Mode::HERO, attackerSideHero))
+		EXPECT_TRUE(entry->canBeCast(realBattle.get(), spells::Mode::HERO, attackerSideHero))
 			<< "Clone cannot be cast by the trained fixture hero";
-		spells::BattleCast legality(probeCallback.get(), attackerSideHero, spells::Mode::HERO, entry.get());
+		spells::BattleCast legality(realBattle.get(), attackerSideHero, spells::Mode::HERO, entry.get());
 		const auto mechanics = entry->battleMechanics(&legality);
 		EXPECT_EQ(mechanics->getTargetTypes().size(), 1u)
 			<< "Clone's targeting shape differs from the current spell enumerator";
 		spells::Target target{battle::Destination(original->getPosition())};
 		EXPECT_TRUE(mechanics->canBeCastAt(target)) << "Native Clone cannot target this Archer";
-		auto simulation = std::make_shared<HypotheticBattle>(probeEnvironment.get(), probeCallback);
+		auto simulation = std::make_shared<HypotheticBattle>(probeEnvironment.get(), realBattle);
 		spells::BattleCast projectedCast(simulation.get(), attackerSideHero, spells::Mode::HERO, entry.get());
 		projectedCast.castEval(simulation->getServerCallback(), target);
 		const auto projected = simulation->battleGetAllStacks(false);
