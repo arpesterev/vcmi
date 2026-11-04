@@ -69,6 +69,14 @@ candidate targets in sorted unit-ID order; original fheroes2 army enumeration
 may differ. This correction has deterministic contract coverage, not a new
 source-equivalence or win-rate claim.
 
+Cautious melee movement now projects the pinned fheroes2
+`findOptimalPositionForSubsequentAttack`: inspect native-reachable steps
+of a multi-turn pursuit, prefer minimal projected enemy melee exposure,
+and choose the farthest step on a risk tie. Its VCMI footprint-distance
+threat bound is not the original Heroes II pathfinder or combat-value
+function, especially around walls and obstacles. Native server evidence
+for this particular change is pending exact-head CI.
+
 Elemental summoning is now an explicit experimental projection of pinned
 fheroes2 `spellSummonValue`: value the newly created or reinforced friendly
 elemental stack in a `HypotheticBattle` preview, halving that value if our

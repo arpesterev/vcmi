@@ -2228,6 +2228,62 @@ TEST_F(AIIntegrationNativeBattle, fheroes2GuardRepositionsFromCoveredWeakShooter
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Source-derived cautious offense must stop before projected next-turn
+// ground-melee exposure. Check an independent choice, the native server
+// acceptance of that movement, and a completed engine battle.
+TEST_F(AIIntegrationNativeBattle, fheroes2CautiousMultiTurnApproachAvoidsNextTurnMeleeThreat)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	const BattleHex origin = infantry->getPosition();
+	const int speed = static_cast<int>(infantry->getMovementRange());
+	ASSERT_GT(speed, 0);
+	const BattleHex guardHex(origin.toInt() + 2 * speed + 1);
+	ASSERT_TRUE(guardHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(guardHex), nullptr);
+	const auto * guard = addStack(BattleSide::DEFENDER, CreatureID(0), guardHex, 35);
+	ASSERT_NE(guard, nullptr);
+	ASSERT_GT(BattleHex::getDistance(origin, guardHex), speed + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Independent cautious offense must approach: " << callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex selected = callback->action->target.front().hexValue;
+	EXPECT_GT(BattleHex::getDistance(selected, origin), 0);
+	EXPECT_LT(BattleHex::getDistance(selected, origin), speed)
+		<< "A full-speed step would enter projected enemy melee reach";
+	EXPECT_GT(BattleHex::getDistance(selected, guardHex), guard->getMovementRange() + 1)
+		<< "Selected cautious step should be beyond next-turn melee reach";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native server rejected the movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);

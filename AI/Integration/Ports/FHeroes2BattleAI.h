@@ -160,7 +160,7 @@ private:
 	// The threat and legal routes are native VCMI projections.
 	static BattleAction approach(CPlayerBattleCallback & battle, const CStack & stack,
 		const ReachabilityInfo & reachability, const BattleHexArray & available,
-		const std::vector<const CStack *> & enemies)
+		const std::vector<const CStack *> & enemies, bool cautious)
 	{
 		BattleHex destination;
 		std::optional<Ports::FHeroes2::DistantTarget> best;
@@ -216,16 +216,73 @@ private:
 			return BattleAction::makeDefend(&stack);
 		}
 
+		// Pinned fheroes2 findOptimalPositionForSubsequentAttack evaluates
+		// each route step, preferring the least exposed step, with farther
+		// progress on a tie. Only submit native-reachable VCMI hexes.
+		std::vector<BattleHex> pathSteps;
 		for(int steps = 0; steps < GameConstants::BFIELD_SIZE && destination.isValid(); ++steps)
 		{
-			if(available.contains(destination))
-				return destination == stack.getPosition() ? BattleAction::makeDefend(&stack) : BattleAction::makeMove(&stack, destination);
+			if(available.contains(destination) && destination != stack.getPosition())
+			{
+				if(!cautious)
+					return BattleAction::makeMove(&stack, destination);
+				pathSteps.push_back(destination);
+			}
 			const auto previous = reachability.predecessors[destination.toInt()];
 			if(previous == destination)
 				break;
 			destination = previous;
 		}
-		return BattleAction::makeDefend(&stack);
+		if(pathSteps.empty())
+			return BattleAction::makeDefend(&stack);
+		// Predecessors arrive from far to near; source visits near to far.
+		std::reverse(pathSteps.begin(), pathSteps.end());
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		BattleHex safest;
+		double lowestThreat = 0;
+		for(const auto & step : pathSteps)
+		{
+			double threat = 0;
+			for(const auto * enemy : enemies)
+			{
+				// Source skips flyers and unengaged archers in the path-risk
+				// sum because changing the melee destination cannot avoid them.
+				if(enemy->hasBonusOfType(BonusType::FLYING))
+					continue;
+				if(enemy->isShooter())
+				{
+					const bool engaged = std::any_of(friends.begin(), friends.end(), [&](const CStack * friendly)
+					{
+						for(const auto & allyHex : friendly->getHexes())
+							for(const auto & enemyHex : enemy->getHexes())
+								if(BattleHex::getDistance(allyHex, enemyHex) == 1)
+									return true;
+						return false;
+					});
+					if(!engaged)
+						continue;
+				}
+				const int speed = static_cast<int>(enemy->getMovementRange());
+				if(speed <= 0)
+					continue;
+				int distance = GameConstants::BFIELD_SIZE;
+				for(const auto & ownHex : stack.getHexes(step))
+					for(const auto & enemyHex : enemy->getHexes())
+						distance = std::min(distance, static_cast<int>(BattleHex::getDistance(ownHex, enemyHex)));
+				// Conservative geometric bound for source
+				// isUnitAbleToApproachPosition. VCMI walls and obstacles may
+				// reduce reach: this is a risk estimate, not an action rule.
+				if(distance <= speed + 1)
+					threat += strength(*enemy);
+			}
+			// Source ties within 0.001 and favors farther path progress.
+			if(!safest.isValid() || threat < lowestThreat || std::fabs(threat - lowestThreat) < 0.001)
+			{
+				lowestThreat = threat;
+				safest = step;
+			}
+		}
+		return safest.isValid() ? BattleAction::makeMove(&stack, safest) : BattleAction::makeDefend(&stack);
 	}
 
 
@@ -654,7 +711,8 @@ private:
 				return *cover;
 			return BattleAction::makeDefend(&stack);
 		}
-		return approach(battle, stack, reachability, available, enemies);
+		return approach(battle, stack, reachability, available, enemies,
+			tactics(battle, stack, enemies).cautiousOffensive);
 	}
 };
 }
