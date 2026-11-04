@@ -10,6 +10,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2DispelValuation.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
 #include "../../../lib/CStack.h"
@@ -320,7 +321,7 @@ public:
 					// of hostile magic, not only recovered hit points. Evaluate only
 					// negative effects that the *native* projected Cure really
 					// removes. Heroes II ratios are projections onto VCMI statuses.
-					if(spell->id == SpellID::CURE && friendly && after && after->alive())
+					if((spell->id == SpellID::CURE || dispelSpell) && friendly && after && after->alive())
 					{
 						const auto sourceEffect = [](SpellID id)
 						{
@@ -370,6 +371,97 @@ public:
 							&& old.unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
 							&& !after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
 							value += static_cast<double>(old.unit->estimateCombatValue()) * 0.85;
+
+						// Native Paralyze is a creature-origin disabling spell;
+						// source spellEffectValue gives 0.85 for multi-stack
+						// Paralyze, conditioned on actual effect removal.
+						const auto paralyze = sourceEffect(SpellID(SpellID::PARALYZE));
+						if(old.unit->hasBonus(paralyze) && !after->hasBonus(paralyze))
+							value += Ports::FHeroes2::dispelledEffectValue(
+								static_cast<double>(old.unit->estimateCombatValue()),
+								0.85, true, true, true);
+					}
+					// Pinned spellDispelValue also SUBTRACTS value when a
+					// broad native Dispel would remove beneficial magic
+					// from our troops, or harmful magic from the enemy.
+					// The existing branches above score removal of enemy
+					// buffs and allied debuffs, not these harmful cases.
+					if(dispelSpell && after && after->alive() && health == old.health)
+					{
+						const auto effect = [](SpellID id)
+						{
+							return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
+						};
+						const double strength = static_cast<double>(old.unit->estimateCombatValue());
+						if(friendly)
+						{
+							if(old.unit->hasBonus(effect(SpellID(SpellID::HASTE)))
+								&& !after->hasBonus(effect(SpellID(SpellID::HASTE))))
+							{
+								const double haste = Ports::FHeroes2::hasteSpeedRatio(
+									static_cast<int>(after->getMovementRange()),
+									static_cast<int>(old.unit->getMovementRange()),
+									theirs.averageSpeed(), false, old.unit->isShooter(), false);
+								value -= strength * haste;
+							}
+							if(old.unit->unitType() && old.unit->hasBonus(effect(SpellID(SpellID::BLESS)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BLESS)))
+								&& old.unit->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE)
+								&& !after->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE))
+							{
+								const auto * creature = old.unit->unitType();
+								value -= strength * Ports::FHeroes2::blessCurseDamageRatio(
+									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
+							}
+							if(old.unit->hasBonus(effect(SpellID(SpellID::STONE_SKIN)))
+								&& !after->hasBonus(effect(SpellID(SpellID::STONE_SKIN))))
+								value -= strength * Ports::FHeroes2::stoneSkinDefenseRatio(
+									after->getDefense(false), old.unit->getDefense(false));
+							if(old.unit->hasBonus(effect(SpellID(SpellID::BLOODLUST)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BLOODLUST))))
+								value -= strength * Ports::FHeroes2::bloodlustAttackRatio(
+									after->getAttack(false), old.unit->getAttack(false));
+							if(old.unit->hasBonus(effect(SpellID(SpellID::AIR_SHIELD)))
+								&& !after->hasBonus(effect(SpellID(SpellID::AIR_SHIELD))))
+								value -= strength * Ports::FHeroes2::shieldRangedRatio(
+									theirs.shooters, theirs.strength, old.unit->isShooter(), true);
+						}
+						else
+						{
+							if(old.unit->unitType()
+								&& old.unit->hasBonus(effect(SpellID(SpellID::CURSE)))
+								&& !after->hasBonus(effect(SpellID(SpellID::CURSE)))
+								&& old.unit->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE)
+								&& !after->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE))
+							{
+								const auto * creature = old.unit->unitType();
+								value -= strength * Ports::FHeroes2::blessCurseDamageRatio(
+									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
+							}
+							if(old.unit->hasBonus(effect(SpellID(SpellID::SLOW)))
+								&& !after->hasBonus(effect(SpellID(SpellID::SLOW)))
+								&& old.position.isValid())
+							{
+								const int distance = old.unit->unitSide() == BattleSide::DEFENDER
+									? old.position.getX()
+									: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
+								value -= strength * Ports::FHeroes2::slowSpeedRatio(
+									static_cast<int>(after->getMovementRange()),
+									static_cast<int>(old.unit->getMovementRange()),
+									ours.averageSpeed(), old.unit->isShooter(), false, false,
+									old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
+							}
+							if(old.unit->hasBonus(effect(SpellID(SpellID::BLIND)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BLIND))))
+								value -= strength * Ports::FHeroes2::blindControlRatio(
+									false, false, true, false, true);
+							if(old.unit->hasBonus(effect(SpellID(SpellID::BERSERK)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BERSERK))))
+								value -= strength * 0.85;
+							if(old.unit->hasBonus(effect(SpellID(SpellID::PARALYZE)))
+								&& !after->hasBonus(effect(SpellID(SpellID::PARALYZE))))
+								value -= strength * 0.85;
+						}
 					}
 					// Pinned fheroes2 spellEffectValue assigns Stone Skin 10% of
 					// allied stack strength. Only accept VCMI's observed defense
