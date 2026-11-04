@@ -187,7 +187,11 @@ private:
 		std::vector<ShooterPin> pins;
 		for(const auto * enemy : enemies)
 		{
-			if(!enemy->isShooter() || !battle.battleCanShoot(enemy))
+			// Pinned getHexAttackValue requires neighbor->canShoot(attacker),
+			// not merely that the shooter can fire at SOME other stack.
+			// An unrelated legal shot must not reward pinning a shooter
+			// that cannot currently shoot our active attacker.
+			if(!enemy->isShooter() || !battle.battleCanShoot(enemy, attacker.getPosition()))
 				continue;
 			const auto occupied = enemy->getHexes();
 			const auto original = attacker.getHexes();
