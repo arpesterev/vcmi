@@ -242,6 +242,7 @@ jobs:
           expected = {'RejectsInvalidOnnxOutputBeforeGreedyOrSampling',
                       'V15RejectsInvalidValueHead',
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
+                      'V15RejectsInactiveGraphActionBeforeServerDispatch',
                       'PreservesFiniteOnnxActionDistribution',
                       'V13SamplesOnlyRequiredHierarchicalHeads',
                       'V13RejectsInvalidRequiredHead',

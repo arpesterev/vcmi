@@ -265,4 +265,23 @@ TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion
 	EXPECT_THROW(requireNNV15ActionActor(missingAction, &unit->cstack), std::runtime_error);
 }
 
+
+TEST(MMAINNOutputValidation, V15RejectsInactiveGraphActionBeforeServerDispatch)
+{
+	using MMAI::BAI::requireNNV15ActiveAction;
+	struct Action
+	{
+		bool isActive = true;
+	};
+
+	auto active = std::make_shared<Action>();
+	EXPECT_NO_THROW(requireNNV15ActiveAction(active));
+
+	active->isActive = false; // stale graph after a battle event
+	EXPECT_THROW(requireNNV15ActiveAction(active), std::runtime_error);
+
+	std::shared_ptr<Action> missing;
+	EXPECT_THROW(requireNNV15ActiveAction(missing), std::runtime_error);
+}
+
 #endif

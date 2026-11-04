@@ -423,7 +423,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 	logger.debug("Received action: " + std::to_string(a));
 	auto action = state->G->getById<N::Action>(a);
-	ASSERT(action->isActive || resetting, "expected active action");
+	requireNNV15ActiveAction(action);
 
 	lastAction = action;
 

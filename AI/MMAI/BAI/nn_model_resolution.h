@@ -42,6 +42,17 @@ inline void requireNNV15ActionActor(const ActionPtr & action, const Stack * acti
 		throw std::runtime_error("MMAI V15: model action has no matching active creature");
 }
 
+
+// A V15 ONNX graph action must still be active in the exact state used
+// for server dispatch. The graph's legal-action mask is not a substitute
+// for a release-build runtime check when asynchronous events invalidate it.
+template<typename ActionPtr>
+inline void requireNNV15ActiveAction(const ActionPtr & action)
+{
+	if(!action || !action->isActive)
+		throw std::runtime_error("MMAI V15: model selected an inactive graph action");
+}
+
 // ACTION_RESET is a gym episode command, not a legal live battle move.
 // The original adapter turns it into a hero retreat to reset training.
 // V15 may legitimately select graph action ID 0, which numerically equals
