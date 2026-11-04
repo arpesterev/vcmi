@@ -64,4 +64,15 @@ inline void enforceStrictNNLiveBattleAction(bool strictNeural, int action)
 		throw std::runtime_error("MMAI: neural model returned training reset during a live battle; refusing scripted retreat");
 }
 
+// A completed ONNX episode must return the gym terminal sentinel, never
+// a regular graph action. The debug-only ASSERT in the battle-end adapters
+// previously disappeared in release builds, silently accepting a broken
+// model/event contract. This is a validation check, not a scripted action.
+inline void requireNNModelTerminalReset(int action)
+{
+	if(action != MMAI::Schema::ACTION_RESET)
+		throw std::runtime_error("MMAI: terminal ONNX observation returned action "
+			+ std::to_string(action) + " instead of ACTION_RESET");
+}
+
 }

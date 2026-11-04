@@ -127,7 +127,7 @@ void BAI::battleEnd(const BattleID & bid, const BattleResult * br, QuestionID qu
 	{
 		logger.debug("Battle ended normally: reporting terminal state, expecting ACTION_RESET");
 		auto a = getNonRenderAction();
-		ASSERT(a == Schema::ACTION_RESET, "expected ACTION_RESET, got: " + std::to_string(EI(a)));
+		requireNNModelTerminalReset(a);
 	}
 
 	if(getActionTotalCalls > 0)

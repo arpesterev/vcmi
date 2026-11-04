@@ -243,6 +243,7 @@ jobs:
                       'V15RejectsInvalidValueHead',
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
+                      'RejectsUnexpectedTerminalOnnxAction',
                       'PreservesFiniteOnnxActionDistribution',
                       'V13SamplesOnlyRequiredHierarchicalHeads',
                       'V13RejectsInvalidRequiredHead',

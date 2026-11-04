@@ -266,6 +266,20 @@ TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion
 }
 
 
+TEST(MMAINNOutputValidation, RejectsUnexpectedTerminalOnnxAction)
+{
+	using MMAI::BAI::requireNNModelTerminalReset;
+	using MMAI::Schema::ACTION_RESET;
+	using MMAI::Schema::ACTION_RETREAT;
+
+	// V15 graph action 0 can be valid during a live battle, but not
+	// after the ONNX model has received the terminal observation.
+	EXPECT_NO_THROW(requireNNModelTerminalReset(ACTION_RESET));
+	EXPECT_THROW(requireNNModelTerminalReset(ACTION_RETREAT), std::runtime_error);
+	EXPECT_THROW(requireNNModelTerminalReset(0), std::runtime_error);
+	EXPECT_THROW(requireNNModelTerminalReset(42), std::runtime_error);
+}
+
 TEST(MMAINNOutputValidation, V15RejectsInactiveGraphActionBeforeServerDispatch)
 {
 	using MMAI::BAI::requireNNV15ActiveAction;
