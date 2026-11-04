@@ -3361,7 +3361,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedFastMeleeNoLongerBlocksArcherRe
 	setArmy(attackerSideHero, CreatureID(19), 30); // Grand Elf
 	setArmy(defenderSideHero, CreatureID(16), 15); // Melee pursuer
 	teachBattleSpell(attackerSideHero, SpellID::BLIND);
-	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::FIRE_MAGIC),
 		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
 	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
@@ -3373,7 +3373,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedFastMeleeNoLongerBlocksArcherRe
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
 			shooter = unit.get();
-		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(16))
 			blindedMelee = unit.get();
 	}
 	ASSERT_NE(shooter, nullptr);
