@@ -3501,7 +3501,7 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 // damage dealt plus retaliation received, rather than normal net exchange.
 TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage)
 {
-	prepareBattle(CreatureID(0), 10, CreatureID(0), 8);
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	const CStack * guard = nullptr;
@@ -3516,7 +3516,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 			positions.push_back(hex);
 	ASSERT_GE(positions.size(), 2u);
-	const CStack * weak = addStack(BattleSide::ATTACKER, CreatureID(0), positions[0], 5);
+	const CStack * weak = addStack(BattleSide::ATTACKER, CreatureID(0), positions[0], 1);
 	const CStack * strong = addStack(BattleSide::ATTACKER, CreatureID(0), positions[1], 80);
 	ASSERT_NE(weak, nullptr);
 	ASSERT_NE(strong, nullptr);
@@ -3533,17 +3533,28 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
+	// The native estimator can describe a retaliation even if the first hit
+	// certainly kills its victim. No such response can occur on the server.
+	BattleAttackInfo lethalHit(guard, weak, 0, false);
+	lethalHit.attackerPos = guard->getPosition();
+	DamageEstimation hypotheticalRetaliation;
+	const auto lethalDamage = view->battleEstimateDamage(lethalHit, &hypotheticalRetaliation);
+	ASSERT_GE(static_cast<double>(lethalDamage.damage.min),
+		static_cast<double>(weak->getAvailableHealth()))
+		<< "A real guaranteed lethal strike is required for this regression";
 	const auto score = [&](const CStack * target)
 	{
 		BattleAttackInfo info(guard, target, 0, false);
 		info.attackerPos = guard->getPosition();
 		DamageEstimation retaliation;
 		const auto damage = view->battleEstimateDamage(info, &retaliation);
-		return AIIntegration::Ports::TUM::hypnotizedAttackDamageSum(
-			std::min(static_cast<double>(target->getAvailableHealth()),
-				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0),
-			std::min(static_cast<double>(guard->getAvailableHealth()),
-				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0));
+		const double health = static_cast<double>(target->getAvailableHealth());
+		const double dealt = std::min(health,
+			(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
+		const double received = static_cast<double>(damage.damage.min) >= health ? 0.0
+			: std::min(static_cast<double>(guard->getAvailableHealth()),
+				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+		return AIIntegration::Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
 	};
 	ASSERT_GT(score(strong), score(weak))
 		<< "A dangerous original ally must outrank a weak target in summed damage";
