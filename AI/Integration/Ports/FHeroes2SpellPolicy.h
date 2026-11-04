@@ -21,7 +21,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration and limited Cure dispelling (Curse/Blind), Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration and limited Cure dispelling (Curse/Blind/Slow), Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -254,6 +254,24 @@ public:
 							value += static_cast<double>(old.unit->estimateCombatValue())
 								* Ports::FHeroes2::blessCurseDamageRatio(
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
+						}
+						// fheroes2 spellDispelValue values removing hostile Slow even
+						// from an unwounded ally. Compute the reversed Slow mobility
+						// loss using the *observed* restored VCMI movement range.
+						// No change from a resisted or already-cleared effect scores zero.
+						const auto slow = sourceEffect(SpellID(SpellID::SLOW));
+						if(old.unit->hasBonus(slow) && !after->hasBonus(slow) && old.position.isValid())
+						{
+							const int slowedSpeed = static_cast<int>(old.unit->getMovementRange());
+							const int restoredSpeed = static_cast<int>(after->getMovementRange());
+							const int distance = old.unit->unitSide() == BattleSide::DEFENDER
+								? old.position.getX()
+								: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
+							value += static_cast<double>(old.unit->estimateCombatValue())
+								* Ports::FHeroes2::slowSpeedRatio(
+									restoredSpeed, slowedSpeed, ours.averageSpeed(),
+									old.unit->isShooter(), false, false,
+									old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
 						}
 						const auto blind = sourceEffect(SpellID(SpellID::BLIND));
 						if(old.unit->hasBonus(blind) && !after->hasBonus(blind))
