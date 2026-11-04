@@ -42,8 +42,10 @@ Schema::Action BAI::getNonRenderAction()
 
 	const auto * s = state.get();
 	auto action = model->getAction(s);
+	unsigned renderRequests = 0;
 	while(action == Schema::ACTION_RENDER_ANSI)
 	{
+		requireStrictNNRenderProgress(strictNeural, ++renderRequests);
 		logger.debug("Got a RENDER action");
 		if(state->supdata->ansiRender.empty())
 		{
@@ -94,6 +96,10 @@ void BAI::battleEnd(const BattleID & bid, const BattleResult * br, QuestionID qu
 	catch(const std::exception & e)
 	{
 		logger.error("MMAI error on battle end: " + std::string(e.what()));
+		// An invalid terminal observation is a broken ONNX/event contract.
+		// Strict neural callers must see the failure, not a successful end.
+		if(strictNeural)
+			throw;
 		return;
 	}
 

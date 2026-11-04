@@ -8,6 +8,7 @@
 
 #include "schema/base.h"
 #include <exception>
+#include <cstddef>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -62,6 +63,19 @@ inline void enforceStrictNNLiveBattleAction(bool strictNeural, int action)
 {
 	if(strictNeural && action == MMAI::Schema::ACTION_RESET)
 		throw std::runtime_error("MMAI: neural model returned training reset during a live battle; refusing scripted retreat");
+}
+
+// The V13/V15 gym interfaces can ask for ANSI rendering repeatedly. Strict
+// neural combat is not an interactive training renderer: a broken model that
+// returns ACTION_RENDER_ANSI forever must not hang the battle server. Preserve
+// upstream unlimited rendering for explicit non-strict gym/hybrid callers.
+inline constexpr unsigned STRICT_NN_RENDER_REQUEST_LIMIT = 16;
+
+inline void requireStrictNNRenderProgress(bool strictNeural, unsigned renderRequests)
+{
+	if(strictNeural && renderRequests > STRICT_NN_RENDER_REQUEST_LIMIT)
+		throw std::runtime_error("MMAI: neural model repeatedly requested ANSI render without a battle action ("
+			+ std::to_string(renderRequests) + " requests); refusing unbounded inference");
 }
 
 // A completed ONNX episode must return the gym terminal sentinel, never

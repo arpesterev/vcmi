@@ -55,8 +55,10 @@ Schema::Action BAI::getNonRenderAction()
 
 	const auto * s = state.get();
 	auto action = model->getAction(s);
+	unsigned renderRequests = 0;
 	while(action == Schema::ACTION_RENDER_ANSI)
 	{
+		requireStrictNNRenderProgress(strictNeural, ++renderRequests);
 		logger.debug("Got a RENDER action");
 		if(state->supdata->ansiRender.empty())
 		{

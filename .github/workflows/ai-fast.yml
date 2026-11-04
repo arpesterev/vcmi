@@ -244,6 +244,7 @@ jobs:
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
                       'RejectsUnexpectedTerminalOnnxAction',
+                      'StrictNeuralRejectsRepeatedAnsiRenderRequests',
                       'PreservesFiniteOnnxActionDistribution',
                       'V13SamplesOnlyRequiredHierarchicalHeads',
                       'V13RejectsInvalidRequiredHead',

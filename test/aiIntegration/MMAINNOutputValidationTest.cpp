@@ -298,4 +298,27 @@ TEST(MMAINNOutputValidation, V15RejectsInactiveGraphActionBeforeServerDispatch)
 	EXPECT_THROW(requireNNV15ActiveAction(missing), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, StrictNeuralRejectsRepeatedAnsiRenderRequests)
+{
+	using MMAI::BAI::requireStrictNNRenderProgress;
+	using MMAI::BAI::STRICT_NN_RENDER_REQUEST_LIMIT;
+
+	// A renderer request is an observation protocol step, not a VCMI
+	// battle action. A neural model stuck in it must fail closed.
+	EXPECT_NO_THROW(requireStrictNNRenderProgress(true, 0));
+	for(unsigned n = 1; n <= STRICT_NN_RENDER_REQUEST_LIMIT; ++n)
+		EXPECT_NO_THROW(requireStrictNNRenderProgress(true, n));
+	try
+	{
+		requireStrictNNRenderProgress(true, STRICT_NN_RENDER_REQUEST_LIMIT + 1);
+		FAIL() << "Strict neural policy accepted unbounded render requests";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("ANSI render"), std::string::npos);
+	}
+	// Keep the source training/hybrid renderer's unrestricted semantics.
+	EXPECT_NO_THROW(requireStrictNNRenderProgress(false, STRICT_NN_RENDER_REQUEST_LIMIT + 1));
+}
+
 #endif
