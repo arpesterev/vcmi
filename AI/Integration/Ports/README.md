@@ -227,8 +227,9 @@ five independently implemented overrides derived from the documentation:
   completed result. Presence of enemy shooters is checked using
   the native ranged-unit classification, not immediate `battleCanShoot()`:
   an archer under Forgetfulness is still an enemy shooter for this conservative
-  interpretation of the published TUM rule. Friendly shooters need remaining
-  usable shots, even if their current firing line is blocked. An out-of-ammo
+  interpretation of the published TUM rule. Friendly shooters must be able to
+  act and have at least one legal VCMI shot against a live enemy; otherwise a
+  melee guard does not wait for a firing line that cannot shoot. An out-of-ammo
   archer remains a ranged creature, never a melee screen merely because
   `battleCanShoot()` is false. A native exhausted-archer encounter now checks
   the first TUM decision against the partial HoMM3 baseline and records
@@ -254,6 +255,10 @@ five independently implemented overrides derived from the documentation:
   not TUM's unpublished damage simulator. A live Hypnotize regression with
   legal ranged and melee alternatives checks that the higher-scoring action
   is accepted by the game server and the battle reaches an actual result.
+  If the minimum projected first-strike damage kills the target, the scorer
+  assigns zero retaliation rather than valuing a counterstrike that the
+  real server cannot execute. A native Hypnotize battle checks this guaranteed
+  lethal bound and an engine-accepted subsequent attack.
 - **Fortified siege defense:** melee defenders entirely inside castle walls
   hold while the gate remains closed or blocked and no enemy has breached
   the walls or reached melee. They resume normal actions after a breach
