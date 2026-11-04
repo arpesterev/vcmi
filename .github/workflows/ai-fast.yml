@@ -196,7 +196,7 @@ jobs:
           missing = sorted(set(expected) - set(recorded))
           if missing:
               raise SystemExit("Missing engine-backed seeded matchup evidence: " + ", ".join(missing))
-          print("AI_SOURCE_POLICY_SEEDED_MATRIX seeds=1337,2027,2029 fixture=archer20_vs_pikeman30 trials=18")
+          print("AI_SOURCE_POLICY_SEEDED_MATRIX seeds=1337,2027,2029 fixture=grand_elf25_vs_dwarves25x2 trials=18")
           for a, b in pairs:
               samples = [recorded[f"seed{seed}{a}Against{b}"] for seed in seeds]
               wins = sum(sample["winner"] == "attacker" for sample in samples)
