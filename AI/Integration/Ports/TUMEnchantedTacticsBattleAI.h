@@ -117,9 +117,21 @@ private:
 			if(!enemy->alive() || enemy->isInvincible() || hasDisabledEffect(*enemy)
 				|| !battle.battleCanShoot(&stack, enemy->getPosition()))
 				continue;
-			// TUM's unpublished tower/ballista target weighting cannot be
-			// reconstructed from a compiled plugin; this is a VCMI projection.
-			const double value = static_cast<double>(enemy->estimateCombatValue());
+			// The unpublished TUM targeting formula is unavailable. Score the
+			// expected combat value actually removed by a native VCMI shot,
+			// not the untouched stack's entire strength. This is a bounded
+			// engine-specific projection, not an ERA/DLL-equivalent formula.
+			BattleAttackInfo info(&stack, enemy, 0, true);
+			info.attackerPos = stack.getPosition();
+			DamageEstimation retaliation;
+			const auto damage = battle.battleEstimateDamage(info, &retaliation);
+			const double health = static_cast<double>(enemy->getAvailableHealth());
+			if(health <= 0)
+				continue;
+			const double expectedDamage = (static_cast<double>(damage.damage.min)
+				+ static_cast<double>(damage.damage.max)) / 2.0;
+			const double value = static_cast<double>(enemy->estimateCombatValue())
+				* std::clamp(expectedDamage, 0.0, health) / health;
 			if(!selected || value > bestValue)
 			{
 				selected = enemy;
