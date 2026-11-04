@@ -64,6 +64,30 @@ int main()
 	try { HoMM3::pinnedShooterValue(std::numeric_limits<double>::infinity(), 4, 10, 1); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// HoMM3 checkAdjacentHexes evaluates BOTH attacker's occupied hexes and
+	// shares its visited-shooter mask. Physical contact on a wide tail must
+	// count, while a nonadjacent head alone does not. A wide shooter may also
+	// be engaged at its tail; its two cells never imply two separate shooters.
+	const auto linearDistance = [](int lhs, int rhs) { return std::abs(lhs - rhs); };
+	require(HoMM3::attackFootprintEngagesShooter(std::array<int, 2>{2, 5},
+		std::array<int, 1>{6}, linearDistance),
+		"HoMM3 wide attacker must count shooter blocked by its trailing hex");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 1>{2},
+		std::array<int, 1>{6}, linearDistance),
+		"HoMM3 head-only contact cannot invent shooter engagement");
+	require(HoMM3::attackFootprintEngagesShooter(std::array<int, 1>{5},
+		std::array<int, 2>{6, 7}, linearDistance),
+		"HoMM3 shooter tail contact must count");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 2>{2, 3},
+		std::array<int, 2>{6, 7}, linearDistance),
+		"HoMM3 distant footprints do not pin shooters");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 0>{},
+		std::array<int, 1>{6}, linearDistance),
+		"HoMM3 empty attack footprint cannot pin a shooter");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 2>{2, 5},
+		std::array<int, 0>{}, linearDistance),
+		"HoMM3 empty enemy footprint cannot generate score");
+
 	FHeroes2::TacticsInput input{100, 100, 30, 0, true, false, false};
 	require(selectTactics(input).defensive, "Protect the ranged advantage");
 	input.shootersStrength = 0;
