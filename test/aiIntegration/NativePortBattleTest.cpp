@@ -511,8 +511,10 @@ protected:
 			// meaningful decisions; the scripted opponent could win unaided.
 			const auto & activePolicy = player == attackerPlayer ? attackerAI : defenderAI;
 			if(activePolicy == "MMAI")
+			{
 				EXPECT_NE(action.actionType, EActionType::RETREAT)
 					<< "Strict ONNX inference must not translate a training reset into live hero retreat";
+			}
 			if(activePolicy == "MMAI" && !callback->spellAction)
 			{
 				// VCMI MMAI's published v13/v15 backends handle first aid,
