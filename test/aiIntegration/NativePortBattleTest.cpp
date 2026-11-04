@@ -4291,8 +4291,12 @@ TEST_F(AIIntegrationNativeBattle, tumBlockedShooterCannotHoldMeleeScreen)
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
 	for(const auto * target : view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+	{
 		if(target->alive())
+		{
 			ASSERT_FALSE(view->battleCanShoot(shooter, target->getPosition()));
+		}
+	}
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
 	ASSERT_NE(baseline.actionType, EActionType::WAIT);
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
