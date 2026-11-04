@@ -180,6 +180,17 @@ pinned fheroes2 `meleeUnitDefense`, not a full source-equivalent port:
 source-specific flank preferences, defensive spacing, kiting and spell-area
 responses remain incomplete.
 
+Pinned fheroes2 `archerDecision` temporarily removes the *moving archer*
+from the board when evaluating candidate retreats. Thus an enemy archer that
+was in melee **only** with the departing archer must be evaluated as an
+unengaged ranged unit for its future melee reach; otherwise its raw speed
+falsely turns it into a long-range ground pursuer. The VCMI projection now
+excludes the moving stack from enemy hand-fighting classification while
+retaining engagements with other friendly stacks. Direct adjacency still
+blocks shooting. A test with deliberately elevated, fixture-only speeds
+checks the independent native movement selection and server acceptance.
+This does not model the Heroes II pathfinder or alter Heroes III rules.
+
 Pinned fheroes2 `Unit::GetSpeed(false, true)` reports STANDING for
 Blind/Paralyze. This partial VCMI adapter now consistently projects a
 current `NOT_ACTIVE` enemy as having zero future-turn pursuit speed when
