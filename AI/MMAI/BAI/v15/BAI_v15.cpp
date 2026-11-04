@@ -309,27 +309,33 @@ namespace
 {
 	BattleAction ToBattleAction(const CPlayerBattleCallback & battle, const ActionPtr & a, const CStack * acstack)
 	{
+		// The ONNX head chooses an action node, but an event/state adapter
+		// mismatch can invalidate its actor or target before conversion.
+		// assert() disappears in release builds: reject such actions instead
+		// of dereferencing null or sending a different command to the server.
+		if(!a || !acstack || !a->by || &a->by->cstack != acstack)
+			throw std::runtime_error("MMAI V15: model action has no matching active creature");
+
 		switch(a->actionType)
 		{
 			case AT::WAIT:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(!acstack->waitedThisRound());
+				if(acstack->waitedThisRound())
+					throw std::runtime_error("MMAI V15: model selected WAIT for a creature that already waited");
 				return BattleAction::makeWait(acstack);
 			case AT::DEFEND:
-				assert(a->by && &a->by->cstack == acstack);
 				return BattleAction::makeDefend(acstack);
 			case AT::MOVE:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(a->endsAt.size() > 0);
-				return BattleAction::makeMove(acstack, a->endsAt.at(0)->bhex);
+				if(a->endsAt.empty() || !a->endsAt.front())
+					throw std::runtime_error("MMAI V15: model MOVE action has no destination");
+				return BattleAction::makeMove(acstack, a->endsAt.front()->bhex);
 			case AT::AMOVE:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(a->endsAt.size() > 0);
-				assert(a->target && battle.isMeleeAttackPossible(acstack, &a->target->cstack, a->endsAt.front()->bhex));
+				if(a->endsAt.empty() || !a->endsAt.front() || !a->target ||
+				   !battle.isMeleeAttackPossible(acstack, &a->target->cstack, a->endsAt.front()->bhex))
+					throw std::runtime_error("MMAI V15: model AMOVE action has no legal melee target");
 				return BattleAction::makeMeleeAttack(acstack, &a->target->cstack, a->endsAt.front()->bhex);
 			case AT::SHOOT:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(a->target && battle.battleCanShoot(acstack, a->target->cstack.getPosition()));
+				if(!a->target || !battle.battleCanShoot(acstack, a->target->cstack.getPosition()))
+					throw std::runtime_error("MMAI V15: model SHOOT action has no legal ranged target");
 				return BattleAction::makeShotAttack(acstack, &a->target->cstack);
 			default:
 				throwf("Unexpected action type: %1%", EI(a->actionType));
