@@ -1274,6 +1274,45 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBlindAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 spellDispelValue assigns a positive source value to
+// removing Berserker from an allied stack. Verify a real hostile cast and
+// a distinct, independently chosen native Cure: no scripted policy and
+// no score for a resisted or unchanged spell-effect projection.
+TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	const auto healthBefore = friendly->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::BERSERK, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BERSERK, friendly))
+		<< "The original debuff must be applied by the real server";
+	const auto berserk = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BERSERK)));
+	ASSERT_TRUE(friendly->hasBonus(berserk));
+	ASSERT_TRUE(friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	ASSERT_EQ(friendly->getAvailableHealth(), healthBefore)
+		<< "There must be no missing health to explain Cure's selection";
+	teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
+	bool sawNativeControlRestoration = false;
+	recorder.onSpellAfterApply = [&](const BattleSpellCast &)
+	{
+		if(!recorder.castsOf(SpellID::CURE).empty())
+			sawNativeControlRestoration |= !friendly->hasBonus(berserk)
+				&& !friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::CURE).empty())
+		<< "Source-derived FHeroes2 must independently select Cure for Berserk";
+	EXPECT_TRUE(sawNativeControlRestoration)
+		<< "The real engine must remove Berserk control, not merely accept Cure";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // fheroes2 spellDispelValue recognizes Slow as harmful magic. A real Cure
 // must restore mobility, even when an allied flying stack has taken no damage.
 TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeSlowAndCompletesBattle)

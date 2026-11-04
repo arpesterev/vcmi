@@ -357,6 +357,19 @@ public:
 						if(old.unit->hasBonus(blind) && !after->hasBonus(blind))
 							value += static_cast<double>(old.unit->estimateCombatValue())
 								* Ports::FHeroes2::blindControlRatio(false, false, true, false, true);
+						// Pinned fheroes2 spellDispelValue also restores allies
+						// affected by hostile Berserker. Its spellEffectValue
+						// assigns 85% of stack strength to this loss of control.
+						// Cure must actually remove both the spell and VCMI's
+						// ATTACKS_NEAREST_CREATURE behavior; merely permitting a
+						// cast or having an unrelated Berserk-like bonus scores zero.
+						// Heroes II Berserker and Heroes III Berserk do not have
+						// identical targeting or movement rules.
+						const auto berserk = sourceEffect(SpellID(SpellID::BERSERK));
+						if(old.unit->hasBonus(berserk) && !after->hasBonus(berserk)
+							&& old.unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
+							&& !after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+							value += static_cast<double>(old.unit->estimateCombatValue()) * 0.85;
 					}
 					// Pinned fheroes2 spellEffectValue assigns Stone Skin 10% of
 					// allied stack strength. Only accept VCMI's observed defense
