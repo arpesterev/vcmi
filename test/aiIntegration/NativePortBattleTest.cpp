@@ -1354,6 +1354,46 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeSlowAndCompletesBattle)
 		<< "The game engine must restore the unit's movement range";
 	EXPECT_GT(recorder.damage, 0);
 }
+// fheroes2 spellDispelValue considers *friendly* negative magic, not only
+// enemy positive effects. Verify an independent hero Dispel cast restores
+// Slow from an unwounded stack through actual server effect packets.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelsFriendlySlowAndCompletesBattle)
+{
+	prepareBattle(CreatureID(4), 80, CreatureID(4), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(4))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	ASSERT_TRUE(friendly->hasBonusOfType(BonusType::FLYING));
+	const auto originalSpeed = friendly->getMovementRange();
+	const auto originalHealth = friendly->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::SLOW, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::SLOW, friendly))
+		<< "The real enemy hero must apply Slow to the flying ally";
+	const auto slow = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::SLOW)));
+	ASSERT_TRUE(friendly->hasBonus(slow));
+	ASSERT_LT(friendly->getMovementRange(), originalSpeed);
+	ASSERT_EQ(friendly->getAvailableHealth(), originalHealth)
+		<< "The Dispel priority must value a debuff, not pre-existing damage";
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	bool observedNativeSpeedRecovery = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			observedNativeSpeedRecovery |= !friendly->hasBonus(slow)
+				&& friendly->getMovementRange() == originalSpeed;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty())
+		<< "FHeroes2 must select Dispel for a real Slow, not just lost HP";
+	EXPECT_TRUE(observedNativeSpeedRecovery)
+		<< "The game engine must restore the unit's movement range";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeStoneSkinAndCompletesBattle)
 {

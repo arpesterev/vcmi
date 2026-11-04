@@ -1,5 +1,6 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
 #include "../AI/Integration/Ports/FHeroes2RetreatDecision.h"
+#include "../AI/Integration/Ports/FHeroes2DispelValuation.h"
 
 #include <array>
 #include <iostream>
@@ -71,6 +72,24 @@ int main()
 	withdrawal.canSurrender = false;
 	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
 		"Native inability to surrender always wins over a proposed surrender");
+
+	// Pinned spellDispelValue considers ALL affected sides, including
+	// losses from stripping friendly buffs or enemy debuffs.
+	require(FHeroes2::dispelledEffectValue(100, 0.8, true, true, true) == 80,
+		"Removing harmful friendly Blind is valuable");
+	require(FHeroes2::dispelledEffectValue(100, 0.1, false, false, true) == 10,
+		"Removing helpful enemy Stone Skin is valuable");
+	require(FHeroes2::dispelledEffectValue(100, 0.1, true, false, true) == -10,
+		"Removing friendly Bloodlust has a tactical cost");
+	require(FHeroes2::dispelledEffectValue(100, 0.8, false, true, true) == -80,
+		"Dispel must not undo enemy Blind for free");
+	require(FHeroes2::dispelledEffectValue(100, 0.8, true, true, false) == 0,
+		"Already-cleared or immune effects never earn Dispel value");
+	try { FHeroes2::dispelledEffectValue(-1, 0.8, true, true, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::dispelledEffectValue(1,
+		std::numeric_limits<double>::infinity(), true, true, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 
 	for(int difficulty = 0; difficulty < 2; ++difficulty)
 		for(int incapacitated = 0; incapacitated < 2; ++incapacitated)
