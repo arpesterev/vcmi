@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2EarthquakePolicy.h"
 
 #include <array>
 #include <iostream>
@@ -21,6 +22,26 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	// Pinned Earthquake formula requires fortress, ground melee, standing
+	// walls and enemy ranged strength. No spell is spent when any is absent.
+	const double expectedEarthquake = FHeroes2::earthquakeValue(true, 2, 50, 100,
+		4, 4, 1, 100, 100);
+	require(expectedEarthquake == 10, "Source wall breaker prioritizes grounded melee against shooters");
+	require(FHeroes2::earthquakeValue(false, 2, 50, 100, 4, 4, 1, 100, 100) == 0,
+		"Earthquake is not an open-field spell");
+	require(FHeroes2::earthquakeValue(true, 0, 0, 100, 4, 4, 1, 100, 100) == 0,
+		"Ranged-only and flying-only armies cannot justify Earthquake");
+	require(FHeroes2::earthquakeValue(true, 2, 50, 100, 0, 4, 1, 100, 100) == 0,
+		"Destroyed walls make Earthquake useless");
+	require(FHeroes2::earthquakeValue(true, 2, 50, 100, 4, 4, 1, 0, 100) == 0,
+		"The source discounts Earthquake completely without enemy shooters");
+	require(FHeroes2::earthquakeValue(true, 2, 50, 100, 2, 4, 1, 100, 100)
+		== expectedEarthquake / 2, "Fewer standing wall targets reduce expected value");
+	try { FHeroes2::earthquakeValue(true, 2, 50, 100, 5, 4, 1, 100, 100); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::earthquakeValue(true, 2, 50, 100, 4, 4, 1,
+		std::numeric_limits<double>::infinity(), 100); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 
 	for(int difficulty = 0; difficulty < 2; ++difficulty)
 		for(int incapacitated = 0; incapacitated < 2; ++incapacitated)
