@@ -3221,7 +3221,7 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraValuesAndExecutesNativeMultiTargetMe
 TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 {
 	std::fprintf(stderr, "HOMM3_AIM_DIAG step=start\n");
-	prepareBattle(CreatureID(82), 24, CreatureID(4), 50); // Red Dragon (dungeon ID 82) vs Griffin
+	prepareBattle(CreatureID(82), 5, CreatureID(4), 50); // Red Dragon (dungeon ID 82) vs Griffin
 	ASSERT_FALSE(HasFatalFailure());
 	std::fprintf(stderr, "HOMM3_AIM_DIAG step=prepared\n");
 	battle()->obstacles.clear();
