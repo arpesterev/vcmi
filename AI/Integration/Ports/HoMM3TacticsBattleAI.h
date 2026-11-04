@@ -270,7 +270,16 @@ public:
 			const int ownSpeed = static_cast<int>(stack.getMovementRange());
 			int slowestEnemySpeed = std::numeric_limits<int>::max();
 			for(const auto * enemy : enemies)
+			{
+				// A siege weapon is not the slower mobile stack described in
+				// TUM's anti-distraction rule. Otherwise its near-zero speed
+				// can misclassify every nearby fast creature as bait.
+				// An incapacitated enemy likewise cannot currently move.
+				if(enemy->hasBonusOfType(BonusType::SIEGE_WEAPON)
+					|| enemy->hasBonusOfType(BonusType::NOT_ACTIVE) || enemy->isFrozen())
+					continue;
 				slowestEnemySpeed = std::min(slowestEnemySpeed, static_cast<int>(enemy->getMovementRange()));
+			}
 			auto targets = enemies;
 			vstd::erase_if(targets, [&](const CStack * enemy)
 			{
@@ -288,7 +297,8 @@ public:
 				return Ports::TUM::ignoreNearbyFastDecoyForMovement(
 					ownSpeed, static_cast<int>(enemy->getMovementRange()), slowestEnemySpeed, distance);
 			});
-			if(!targets.empty() && targets.size() < enemies.size())
+			if(slowestEnemySpeed != std::numeric_limits<int>::max()
+				&& !targets.empty() && targets.size() < enemies.size())
 			{
 				const auto alternate = moveTowardEnemy(battle, stack, reach, available, targets);
 				if(alternate.actionType != EActionType::DEFEND)
