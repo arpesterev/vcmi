@@ -10,6 +10,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2Earthquake.h"
 #include "FHeroes2DispelValuation.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
@@ -175,7 +176,7 @@ public:
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::TELEPORT && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::TELEPORT && spell->id != SpellID::EARTHQUAKE && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -708,6 +709,46 @@ public:
 						if(adjacentEnemy)
 							value += static_cast<double>(active->estimateCombatValue()) * 0.10;
 					}
+				}
+				// Pinned spellEarthquakeValue: only an attacking ground
+				// melee army against intact fortifications and enemy
+				// shooters justifies damaging castle structures. VCMI
+				// supplies wall topology, legal targets and resolution.
+				if(spell->id == SpellID::EARTHQUAKE
+					&& real->battleGetMySide() == BattleSide::ATTACKER
+					&& real->battleGetDefendedTown() != nullptr)
+				{
+					int groundMeleeUnits = 0;
+					double groundMeleeStrength = 0;
+					for(const auto & old : before)
+					{
+						if(old.owner != player || old.health <= 0
+							|| old.unit->isShooter()
+							|| old.unit->hasBonusOfType(BonusType::FLYING))
+							continue;
+						++groundMeleeUnits;
+						groundMeleeStrength += static_cast<double>(old.unit->estimateCombatValue());
+					}
+					int intactWalls = 0;
+					int totalWalls = 0;
+					for(EWallPart part : {EWallPart::KEEP, EWallPart::BOTTOM_TOWER,
+						EWallPart::BOTTOM_WALL, EWallPart::BELOW_GATE,
+						EWallPart::OVER_GATE, EWallPart::UPPER_WALL,
+						EWallPart::UPPER_TOWER, EWallPart::GATE})
+					{
+						const auto state = real->battleGetWallState(part);
+						if(state == EWallState::NONE)
+							continue;
+						++totalWalls;
+						if(state != EWallState::DESTROYED)
+							++intactWalls;
+					}
+					// Heroes II and III have different earthquake damage
+					// ranges; treat one native wall hit as a unit-valued
+					// opportunity. The server owns the random damage roll.
+					value += Ports::FHeroes2::earthquakePriority(
+						groundMeleeUnits, groundMeleeStrength, ours.strength,
+						theirs.shooters, theirs.strength, intactWalls, totalWalls, 1.0);
 				}
 				if(friendlyHealth <= 0)
 					continue;
