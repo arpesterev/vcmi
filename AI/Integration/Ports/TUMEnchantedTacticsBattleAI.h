@@ -61,8 +61,17 @@ public:
 				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
 		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
-			&& !battle->battleCanShoot(stack)
-			&& (shouldProtectShooters(*battle, *stack) || shouldHoldFortifiedSiege(*battle, *stack)))
+			&& !battle->battleCanShoot(stack) && shouldProtectShooters(*battle, *stack))
+		{
+			// AI Improvements.txt explicitly permits waiting for neutral melee
+			// while friendly shooters work. Preserve the unit's later-turn
+			// option instead of spending its first activation on Defend.
+			// A unit that has already waited must not issue a second WAIT.
+			action = stack->waited() ? BattleAction::makeDefend(stack)
+				: BattleAction::makeWait(stack);
+		}
+		else if(!stack->isCatapult() && !stack->isFirstAidTent()
+			&& !battle->battleCanShoot(stack) && shouldHoldFortifiedSiege(*battle, *stack))
 			action = BattleAction::makeDefend(stack);
 		else
 			action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
