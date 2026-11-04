@@ -19,6 +19,7 @@ struct WithdrawalContext
 	double enemyStrength = 0;
 	double difficultyRatio = 100.0 / 7.5; // pinned source NORMAL
 	bool humanController = false;
+	bool considerRetreat = false; // pinned analyzeBattleState: few slots or a fully lost stack
 	bool canFlee = false;
 	bool canSurrender = false;
 	bool canAffordSurrender = false;
@@ -36,7 +37,7 @@ inline Withdrawal decideWithdrawal(const WithdrawalContext & state)
 		|| !std::isfinite(state.difficultyRatio) || state.friendlyStrength < 0
 		|| state.enemyStrength < 0 || state.difficultyRatio <= 0 || state.primarySkillTotal < 0)
 		throw std::invalid_argument("FHeroes2 withdrawal requires finite nonnegative strengths and skills");
-	if(state.humanController || state.enemyStrength == 0
+	if(state.humanController || !state.considerRetreat || state.enemyStrength == 0
 		|| state.friendlyStrength * state.difficultyRatio >= state.enemyStrength)
 		return Withdrawal::FIGHT;
 	if(!state.valuableArtifacts && (!state.canRehire || state.primarySkillTotal < 10))
