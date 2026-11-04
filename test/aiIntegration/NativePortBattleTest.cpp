@@ -593,7 +593,7 @@ protected:
 			const auto & activeBackend = side == BattleSide::ATTACKER ? attackerAI : defenderAI;
 			if(activeBackend == "MMAI")
 			{
-				const auto player = battle()->sideToPlayer(side);
+				const auto player = side == BattleSide::ATTACKER ? attackerPlayer : defenderPlayer;
 				EXPECT_EQ(callbacks.at(player)->surrenderRetreatDecisionRequests, 0)
 					<< "Strict MMAI consulted scripted surrender/retreat instead of its ONNX policy";
 			}
