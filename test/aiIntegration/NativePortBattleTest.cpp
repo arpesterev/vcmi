@@ -98,10 +98,12 @@ public:
 	int obstacleChangePackets = 0;
 	int catapultEventPackets = 0;
 	int gateChangePackets = 0;
+	int triggerEffectPackets = 0;
 	std::function<void(const BattleUnitsChanged &)> onUnitsChangedAfterApply;
 	std::function<void(const BattleObstaclesChanged &)> onObstaclesChangedAfterApply;
 	std::function<void(const CatapultAttack &)> onCatapultAfterApply;
-	std::function<void(const BattleUpdateGateState &)> onGateChangedAfterApply;
+	std::function<void(const BattleUpdateGateState &)> onGateChangedBeforeApply;
+	std::function<void(const BattleTriggerEffect &)> onTriggerBeforeApply;
 	std::function<void(const BattleResult &)> onResultBeforeApply;
 	std::function<void(const BattleStackMoved &)> onMovementBeforeApply;
 	std::function<void(const BattleNextRound &)> onRoundBeforeApply;
@@ -120,6 +122,20 @@ public:
 		{
 			if(onResultBeforeApply)
 				onResultBeforeApply(*result);
+		}
+		// Native client's ApplyFirst visitor dispatches gate and one-shot
+		// creature effects before mutating the authoritative battle state.
+		if(const auto * gate = dynamic_cast<const BattleUpdateGateState *>(&pack))
+		{
+			++gateChangePackets;
+			if(onGateChangedBeforeApply)
+				onGateChangedBeforeApply(*gate);
+		}
+		if(const auto * trigger = dynamic_cast<const BattleTriggerEffect *>(&pack))
+		{
+			++triggerEffectPackets;
+			if(onTriggerBeforeApply)
+				onTriggerBeforeApply(*trigger);
 		}
 		// The client delivers movements and the first round notification before
 		// the server packet changes its authoritative battle state.
@@ -150,9 +166,9 @@ public:
 				onInjuriesBeforeApply(*injuries);
 		}
 		RecordingGameServer::applyPack(pack);
-		// Match the real client packet visitor: structural, obstacle, siege,
-		// and gate notifications run after the authoritative packet applies.
-		// These matter for summoned units, clone visibility and siege routing.
+		// Match the real client packet visitor: structural, obstacle and siege
+		// notifications run after the authoritative packet applies. This
+		// matters for summoned units, clone visibility and siege routing.
 		if(const auto * units = dynamic_cast<const BattleUnitsChanged *>(&pack))
 		{
 			++unitChangePackets;
@@ -170,12 +186,6 @@ public:
 			++catapultEventPackets;
 			if(onCatapultAfterApply)
 				onCatapultAfterApply(*catapult);
-		}
-		if(const auto * gate = dynamic_cast<const BattleUpdateGateState *>(&pack))
-		{
-			++gateChangePackets;
-			if(onGateChangedAfterApply)
-				onGateChangedAfterApply(*gate);
 		}
 		// ApplyClientNetPackVisitor::visitBattleNextRound fires after the
 		// round packet is applied, paired with its pre-apply callback above.
@@ -331,6 +341,7 @@ protected:
 		const int obstaclesBeforeEventSubscription = recorder.obstacleChangePackets;
 		const int catapultsBeforeEventSubscription = recorder.catapultEventPackets;
 		const int gatesBeforeEventSubscription = recorder.gateChangePackets;
+		const int triggersBeforeEventSubscription = recorder.triggerEffectPackets;
 		const int64_t damageBeforeEventSubscription = recorder.damage;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
@@ -369,6 +380,7 @@ protected:
 		int deliveredObstacleChangeEvents = 0;
 		int deliveredCatapultEvents = 0;
 		int deliveredGateChangeEvents = 0;
+		int deliveredTriggerEvents = 0;
 		// Record damage received by each side from actual engine injury packets.
 		// This is deliberately NOT labelled "damage dealt": friendly fire,
 		// spell effects and retaliation can make that attribution misleading.
@@ -401,11 +413,17 @@ protected:
 				entry.second->battleCatapultAttacked(catapult.battleID, catapult);
 			++deliveredCatapultEvents;
 		};
-		recorder.onGateChangedAfterApply = [&](const BattleUpdateGateState & gate)
+		recorder.onGateChangedBeforeApply = [&](const BattleUpdateGateState & gate)
 		{
 			for(auto & entry : policies)
 				entry.second->battleGateStateChanged(gate.battleID, gate.state);
 			++deliveredGateChangeEvents;
+		};
+		recorder.onTriggerBeforeApply = [&](const BattleTriggerEffect & trigger)
+		{
+			for(auto & entry : policies)
+				entry.second->battleTriggerEffect(trigger.battleID, trigger);
+			++deliveredTriggerEvents;
 		};
 		recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
 		{
@@ -584,7 +602,9 @@ protected:
 		EXPECT_EQ(deliveredCatapultEvents, recorder.catapultEventPackets - catapultsBeforeEventSubscription)
 			<< "Every native catapult event must reach both source-policy adapters";
 		EXPECT_EQ(deliveredGateChangeEvents, recorder.gateChangePackets - gatesBeforeEventSubscription)
-			<< "Every native gate change must reach both source-policy adapters";
+			<< "Every native gate change must reach both source-policy adapters before state application";
+		EXPECT_EQ(deliveredTriggerEvents, recorder.triggerEffectPackets - triggersBeforeEventSubscription)
+			<< "Every native one-shot creature effect must reach both source-policy adapters before state application";
 		replayedUnitChangeEvents = deliveredUnitChangeEvents;
 		replayedCatapultEvents = deliveredCatapultEvents;
 		EXPECT_EQ(deliveredAttackEvents,
@@ -612,7 +632,8 @@ protected:
 		recorder.onUnitsChangedAfterApply = {};
 		recorder.onObstaclesChangedAfterApply = {};
 		recorder.onCatapultAfterApply = {};
-		recorder.onGateChangedAfterApply = {};
+		recorder.onGateChangedBeforeApply = {};
+		recorder.onTriggerBeforeApply = {};
 		recorder.onAttackBeforeApply = {};
 		recorder.onInjuriesBeforeApply = {};
 		recorder.onSpellAfterApply = {};
@@ -654,6 +675,7 @@ protected:
 			<< " native_obstacle_change_events=" << deliveredObstacleChangeEvents
 			<< " native_catapult_events=" << deliveredCatapultEvents
 			<< " native_gate_change_events=" << deliveredGateChangeEvents
+			<< " native_trigger_events=" << deliveredTriggerEvents
 			<< " native_attack_events=" << deliveredAttackEvents
 			<< " native_injury_events=" << deliveredInjuryEvents
 			<< " native_spell_events=" << deliveredSpellEvents
