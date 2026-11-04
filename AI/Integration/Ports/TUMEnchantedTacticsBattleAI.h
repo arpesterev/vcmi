@@ -163,10 +163,17 @@ private:
 			info.attackerPos = origin;
 			DamageEstimation retaliation;
 			const auto damage = battle.battleEstimateDamage(info, &retaliation);
-			const double dealt = std::min(static_cast<double>(victim.getAvailableHealth()),
+			const double targetHealth = static_cast<double>(victim.getAvailableHealth());
+			const double dealt = std::min(targetHealth,
 				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
-			const double received = shooting ? 0.0 : std::min(static_cast<double>(stack.getAvailableHealth()),
-				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+			// A target guaranteed to die from the first hit cannot retaliate.
+			// Damage estimation may still return a hypothetical counterstrike;
+			// do not reward that physically impossible damage under TUM's
+			// published dealt + received Hypnotize preference.
+			const bool guaranteedKill = static_cast<double>(damage.damage.min) >= targetHealth;
+			const double received = (shooting || guaranteedKill) ? 0.0
+				: std::min(static_cast<double>(stack.getAvailableHealth()),
+					(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
 		};
 
