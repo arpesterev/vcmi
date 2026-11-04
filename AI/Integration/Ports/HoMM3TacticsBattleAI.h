@@ -71,7 +71,8 @@ private:
 	}
 
 	static double exchangeValue(CPlayerBattleCallback & battle, const CStack & attacker,
-		const CStack & target, BattleHex from, bool shooting, int distance)
+		const CStack & target, BattleHex from, bool shooting, int distance,
+		bool projectSecondMeleeStrike = false)
 	{
 		const auto oldAttackerHealth = attacker.getAvailableHealth();
 		const auto oldTargetHealth = target.getAvailableHealth();
@@ -81,11 +82,47 @@ private:
 		info.attackerPos = from;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
-		const double score = lossValue(target, damage)
+		double score = lossValue(target, damage)
 			- (shooting ? 0 : lossValue(attacker, retaliation));
+
+		// Pinned type_AI_combat_parameters::simulateAttack performs a second
+		// creatureTwoAttacks melee strike AFTER the defender's first retaliation,
+		// provided both stacks survive. Native battleEstimateDamage estimates
+		// only one strike. Replay its representative first-hit/retaliation
+		// losses on detached unit states before pricing the second VCMI hit.
+		// The preview is approximate: random rolls, on-hit effects, first
+		// strike and any further modded attacks are not reconstructed here.
+		// TUM's explicitly composed partial HoMM3 baseline is unchanged.
+		if(projectSecondMeleeStrike && !shooting && attacker.getTotalAttacks(false) > 1)
+		{
+			const auto expectedDamage = [](const DamageEstimation & estimate, int64_t available)
+			{
+				const int64_t middle = estimate.damage.min
+					+ (estimate.damage.max - estimate.damage.min) / 2;
+				return std::clamp<int64_t>(middle, 0, available);
+			};
+			auto afterAttacker = attacker.acquireState();
+			auto afterTarget = target.acquireState();
+			afterTarget->damage(expectedDamage(damage, afterTarget->getAvailableHealth()));
+			afterAttacker->damage(expectedDamage(retaliation, afterAttacker->getAvailableHealth()));
+			if(afterAttacker->alive() && afterTarget->alive())
+			{
+				BattleAttackInfo second(afterAttacker.get(), afterTarget.get(), 0, false);
+				second.attackerPos = from;
+				const auto estimate = battle.battleEstimateDamage(second);
+				const auto additional = expectedDamage(estimate, afterTarget->getAvailableHealth());
+				// Price incremental casualties against the ORIGINAL combat value
+				// and HP. Do not count the first-hit losses a second time.
+				if(oldTargetHealth > 0)
+					score += static_cast<double>(target.estimateCombatValue())
+						* static_cast<double>(additional) / static_cast<double>(oldTargetHealth);
+			}
+		}
 		if(oldAttackerHealth != attacker.getAvailableHealth() || oldTargetHealth != target.getAvailableHealth()
 			|| oldAttackerPosition != attacker.getPosition() || oldTargetPosition != target.getPosition())
 			throw std::logic_error("HoMM3 tactical preview changed a live battle stack");
+		if(!std::isfinite(score))
+			throw std::logic_error("Nonfinite HoMM3 sequential attack projection");
 		return score;
 	}
 
@@ -490,7 +527,7 @@ public:
 				// TUM intentionally keeps the historical first-aim baseline.
 				for(const auto & aimedHex : attackedHexes)
 				{
-					const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
+					const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost, !avoidFastDecoys)
 						+ shooterPinBonus(stack, hex, shooterPins) + landingThreat
 						+ (avoidFastDecoys ? 0.0
 							: projectedCollateral(battle, stack, *enemy, hex, aimedHex, pathCost)
