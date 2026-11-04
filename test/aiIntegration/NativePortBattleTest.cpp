@@ -897,6 +897,23 @@ TEST_F(AIIntegrationNativeBattle, choosesOffensiveMagicAndCompletesTheBattle)
 	EXPECT_GT(recorder.spellPackets, 0) << "Native spell packs must reach both AI event adapters";
 }
 
+// fheroes2 Earthquake considers surviving castle walls, ground-melee force
+// and enemy shooters. The actual castle is damaged by native VCMI siege
+// packets. Source valuation cannot be accepted based on a fake projected hit.
+TEST_F(AIIntegrationNativeBattle, fheroes2EarthquakeUsesNativeWallsAndCompletesSiege)
+{
+	prepareSiege(false, CreatureID(2), 70, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_TRUE(battle()->hasFortifications());
+	teachBattleSpell(attackerSideHero, SpellID::EARTHQUAKE, 12);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::EARTHQUAKE).empty())
+		<< "The source policy should independently cast Earthquake against a defended shooter garrison";
+	EXPECT_FALSE(recorder.catapultAttacks.empty())
+		<< "Authoritative VCMI siege effects must actually occur";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeHasteAndCompletesBattle)
 {
 	// The source-derived Haste speed valuation uses VCMI's projected
