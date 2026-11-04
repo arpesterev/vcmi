@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2RetreatDecision.h"
 
 #include <array>
 #include <iostream>
@@ -21,6 +22,50 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+
+	// fheroes2 BattlePlanner::planUnitTurn: surrender/retreat policy is
+	// driven by the ratio, hero value, rehire viability and legal options.
+	FHeroes2::WithdrawalContext withdrawal;
+	withdrawal.friendlyStrength = 10;
+	withdrawal.enemyStrength = 150;
+	withdrawal.canFlee = true;
+	withdrawal.canSurrender = true;
+	withdrawal.canAffordSurrender = true;
+	withdrawal.canRehire = true;
+	withdrawal.primarySkillTotal = 10;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::RETREAT,
+		"Experienced, rehirable hero retreats from hopeless battle");
+	withdrawal.canFlee = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::SURRENDER,
+		"When fleeing is forbidden, affordable surrender saves an experienced hero");
+	withdrawal.canAffordSurrender = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Never submit an unaffordable surrender");
+	withdrawal.canAffordSurrender = true;
+	withdrawal.primarySkillTotal = 9;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Nonvaluable inexperienced hero does not surrender");
+	withdrawal.valuableArtifacts = true;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::SURRENDER,
+		"An artifact-bearing hero is preserved even below ten skill points");
+	withdrawal.valuableArtifacts = false;
+	withdrawal.primarySkillTotal = 10;
+	withdrawal.canRehire = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Do not sacrifice the last irreplaceable hero just to surrender");
+	withdrawal.canRehire = true;
+	withdrawal.humanController = true;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Never force human autocombat to withdraw");
+	withdrawal.humanController = false;
+	withdrawal.friendlyStrength = 20;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"A non-hopeless battle is fought");
+	withdrawal.friendlyStrength = 10;
+	withdrawal.enemyStrength = 200;
+	withdrawal.canSurrender = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Native inability to surrender always wins over a proposed surrender");
 
 	for(int difficulty = 0; difficulty < 2; ++difficulty)
 		for(int incapacitated = 0; incapacitated < 2; ++incapacitated)
