@@ -220,7 +220,11 @@ five independently implemented overrides derived from the documentation:
   the native ranged-unit classification, not immediate `battleCanShoot()`:
   an archer under Forgetfulness is still an enemy shooter for this conservative
   interpretation of the published TUM rule. Friendly shooters need remaining
-  usable shots, even if their current firing line is blocked. Movement reach
+  usable shots, even if their current firing line is blocked. An out-of-ammo
+  archer remains a ranged creature, never a melee screen merely because
+  `battleCanShoot()` is false. A native exhausted-archer encounter now checks
+  the first TUM decision against the partial HoMM3 baseline and records
+  actions actually accepted by the VCMI server. Movement reach
   is evaluated with VCMI pathfinding. The documented exception for
   neutral-controlled armies outside siege applies.
 - **Fast-stack decoys:** when no immediate melee attack or ranged shot is
