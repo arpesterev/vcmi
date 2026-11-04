@@ -110,44 +110,62 @@ private:
 			|| hasSpell(SpellID(SpellID::PARALYZE));
 	}
 
-	// Source getHexAttackValue rewards an attack hex that pins previously
-	// unengaged opposing shooters. The original uses HoMM3 per-creature
-	// combat values; VCMI has different combat rules, so estimate the loss
-	// of an incoming shot versus an incoming melee hit on the moving stack.
-	// Only single-hex attackers are supported here: wide-unit tail geometry
-	// and combined enemy-threat fields still require their own source port.
-	static double shooterPinBonus(CPlayerBattleCallback & battle, const CStack & attacker,
-		BattleHex from, const std::vector<const CStack *> & enemies)
+	// Source getHexAttackValue rewards an attack hex that pins opposing
+	// shooters. Cache the native ranged-minus-melee proxy ONCE per active
+	// stack: evaluating damage for every attack-hex/target combination is
+	// unnecessarily expensive, especially with many reachable positions.
+	// A complete source threat field and wide moving-stack geometry remain
+	// unported; this narrow slice scores only newly engaged live shooters.
+	struct ShooterPin
 	{
-		if(attacker.doubleWide() || !from.isValid())
-			return 0;
-		double bonus = 0;
+		BattleHexArray occupied;
+		int32_t value = 0;
+	};
+
+	static bool adjacentTo(BattleHex position, const BattleHexArray & occupied)
+	{
+		return std::any_of(occupied.begin(), occupied.end(), [&](BattleHex cell)
+		{
+			return BattleHex::getDistance(position, cell) == 1;
+		});
+	}
+
+	static std::vector<ShooterPin> calculateShooterPins(CPlayerBattleCallback & battle,
+		const CStack & attacker, const std::vector<const CStack *> & enemies)
+	{
+		std::vector<ShooterPin> pins;
+		if(attacker.doubleWide())
+			return pins;
 		for(const auto * enemy : enemies)
 		{
 			if(!enemy->isShooter() || !battle.battleCanShoot(enemy))
 				continue;
 			const auto occupied = enemy->getHexes();
-			const auto adjacent = [&](BattleHex cell)
-			{
-				return std::any_of(occupied.begin(), occupied.end(), [&](BattleHex occupiedCell)
-				{
-					return BattleHex::getDistance(cell, occupiedCell) == 1;
-				});
-			};
-			if(!adjacent(from))
-				continue;
 			const auto original = attacker.getHexes();
-			if(std::any_of(original.begin(), original.end(), adjacent))
-				continue; // Already engaged: no newly suppressed shot.
+			if(std::any_of(original.begin(), original.end(), [&](BattleHex hex)
+			{
+				return adjacentTo(hex, occupied);
+			}))
+				continue; // The shooter is already blocked by our stack.
 			const BattleAttackInfo ranged(enemy, &attacker, 0, true);
 			const BattleAttackInfo melee(enemy, &attacker, 0, false);
 			const double rangedValue = lossValue(attacker, battle.battleEstimateDamage(ranged));
 			const double meleeValue = lossValue(attacker, battle.battleEstimateDamage(melee));
-			// Values are for the surviving stack as a whole, not the original
-			// per-creature values. One effective stack is the native projection.
-			bonus += Ports::HoMM3::pinnedShooterValue(rangedValue, meleeValue, 1, 1);
+			// These damage-derived values cover the surviving stack as a whole,
+			// unlike HoMM3's per-unit value. One effective native stack unit.
+			pins.push_back({occupied, Ports::HoMM3::pinnedShooterValue(
+				rangedValue, meleeValue, 1, 1)});
 		}
-		return bonus;
+		return pins;
+	}
+
+	static double shooterPinBonus(BattleHex from, const std::vector<ShooterPin> & pins)
+	{
+		double value = 0;
+		for(const auto & pin : pins)
+			if(adjacentTo(from, pin.occupied))
+				value += pin.value;
+		return value;
 	}
 
 	static int32_t rangedScore(CPlayerBattleCallback & battle,
@@ -261,6 +279,8 @@ public:
 		auto available = battle.battleGetAvailableHexes(reach, &stack, false);
 		available.sort([](const BattleHex & lhs, const BattleHex & rhs) { return lhs.toInt() < rhs.toInt(); });
 
+		const auto shooterPins = calculateShooterPins(battle, stack, enemies);
+
 		const CStack * target = nullptr;
 		BattleHex attackFrom;
 		BattleHex attackTo;
@@ -283,7 +303,7 @@ public:
 				if(pathCost < 0)
 					continue;
 				const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
-					+ shooterPinBonus(battle, stack, hex, enemies);
+					+ shooterPinBonus(hex, shooterPins);
 				if(!target || exchange > bestExchange
 					|| (exchange == bestExchange
 						&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
