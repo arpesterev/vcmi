@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2Earthquake.h"
 #include "../AI/Integration/Ports/FHeroes2DispelValuation.h"
 
 #include <array>
@@ -22,6 +23,21 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+
+	// Pinned Earthquake can only justify spending mana against a siege
+	// with actual ground melee and surviving walls, particularly archers.
+	require(FHeroes2::earthquakePriority(1, 100, 100, 50, 100, 3, 6, 1) == 5,
+		"Source Earthquake needs grounded melee, wall targets and enemy ranged threat");
+	require(FHeroes2::earthquakePriority(0, 0, 100, 50, 100, 3, 6, 1) == 0,
+		"All-flying/ranged army cannot justify Earthquake");
+	require(FHeroes2::earthquakePriority(1, 100, 100, 0, 100, 3, 6, 1) == 0,
+		"No opposing shooters yields zero Earthquake priority");
+	require(FHeroes2::earthquakePriority(1, 100, 100, 50, 100, 0, 6, 1) == 0,
+		"Already-destroyed walls earn no Earthquake score");
+	require(FHeroes2::earthquakePriority(1, 100, 100, 50, 100, 3, 6, 0) == 0,
+		"No projected wall damage must earn no mana priority");
+	try { FHeroes2::earthquakePriority(1, 100, 100, 50, 100, 7, 6, 1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 	// Pinned spellDispelValue considers ALL affected sides, including
 	// losses from stripping friendly buffs or enemy debuffs.
 	require(FHeroes2::dispelledEffectValue(100, 0.8, true, true, true) == 80,
