@@ -1452,6 +1452,33 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeRangedShieldAndCompletesBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Native fheroes2 offensive Teleport must issue a real two-target spell
+// and finish an authoritative VCMI battle without a scripted AI fallback.
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesLegalNativeTeleportInRealBattle)
+{
+	prepareBattle(CreatureID(0), 100, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::TELEPORT, 12);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::TELEPORT).empty())
+		<< "The native two-target Teleport was not selected and accepted";
+	EXPECT_GT(recorder.damage, 0);
+}
+
+// Source Earthquake is an offensive siege spell for a ground melee army
+// opposing ranged defenders. Its wall damage and final result belong to
+// VCMI's authoritative server, not the hypothetical scoring model.
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeEarthquakeInSiege)
+{
+	prepareSiege(true, CreatureID(0), 100, CreatureID(2), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::EARTHQUAKE, 12);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::EARTHQUAKE).empty())
+		<< "Native Earthquake was never selected in the walled ranged siege";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 {
 	// Source-derived 10% Bloodlust valuation must be gated on a real
