@@ -8,6 +8,7 @@
 
 #include "SourceTactics.h"
 #include "FHeroes2SpellPolicy.h"
+#include "FHeroes2BerserkOrder.h"
 #include "FHeroes2SiegeGeometry.h"
 
 #include <array>
@@ -810,8 +811,100 @@ private:
 		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
 	}
 
+	// Pinned fheroes2 berserkTurn does not evaluate the strategic target
+	// list: a Berserk-controlled creature attacks the nearest accessible
+	// unit, including an ally, or approaches that unit on a future turn.
+	// Native VCMI action legality is always checked by the authoritative
+	// server, and our planner uses only the observed battlefield.
+	static BattleAction chooseBerserkAction(CPlayerBattleCallback & battle, const CStack & stack)
+	{
+		struct Candidate
+		{
+			const CStack * unit;
+			Ports::FHeroes2::BerserkCandidate priority;
+		};
+		std::vector<Candidate> sorted;
+		for(const auto * other : battle.battleGetAllStacks())
+		{
+			if(other == &stack || !other->alive() || other->isInvincible()
+				|| !other->getPosition().isValid())
+				continue;
+			int nearest = GameConstants::BFIELD_SIZE;
+			for(const auto & a : stack.getHexes())
+				for(const auto & b : other->getHexes())
+					nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(a, b)));
+			sorted.push_back({other, {static_cast<int>(other->unitId()), nearest}});
+		}
+		std::sort(sorted.begin(), sorted.end(), [](const Candidate & a, const Candidate & b)
+		{
+			return Ports::FHeroes2::preferBerserkCandidate(a.priority, b.priority);
+		});
+		if(sorted.empty())
+			return BattleAction::makeDefend(&stack);
+
+		if(stack.isShooter() && battle.battleCanShoot(&stack))
+			for(const auto & candidate : sorted)
+				if(battle.battleCanShoot(&stack, candidate.unit->getPosition()))
+					return BattleAction::makeShotAttack(&stack, candidate.unit);
+
+		const auto routes = battle.getReachability(&stack);
+		auto available = battle.battleGetAvailableHexes(routes, &stack, false);
+		available.sort([](const BattleHex & a, const BattleHex & b) { return a.toInt() < b.toInt(); });
+		for(const auto & candidate : sorted)
+		{
+			int shortest = GameConstants::BFIELD_SIZE;
+			BattleHex from;
+			BattleHex targetHex;
+			for(const auto & hex : available)
+			{
+				if(!hex.isAvailable())
+					continue;
+				const auto attacked = battle.meleeAttackHexes(&stack, candidate.unit, hex);
+				const int cost = static_cast<int>(routes.distances[hex.toInt()]);
+				if(!attacked.empty() && cost < shortest)
+				{
+					shortest = cost;
+					from = hex;
+					targetHex = attacked.front();
+				}
+			}
+			if(from.isValid() && targetHex.isValid())
+				return BattleAction::makeMeleeAttack(&stack, targetHex, from);
+		}
+
+		const auto * nearestUnit = sorted.front().unit;
+		int startingDistance = GameConstants::BFIELD_SIZE;
+		for(const auto & a : stack.getHexes())
+			for(const auto & b : nearestUnit->getHexes())
+				startingDistance = std::min(startingDistance, static_cast<int>(BattleHex::getDistance(a, b)));
+		BattleHex best;
+		int bestDistance = startingDistance;
+		int bestCost = GameConstants::BFIELD_SIZE;
+		for(const auto & hex : available)
+		{
+			if(!hex.isAvailable() || hex == stack.getPosition())
+				continue;
+			int remaining = GameConstants::BFIELD_SIZE;
+			for(const auto & a : stack.getHexes(hex))
+				for(const auto & b : nearestUnit->getHexes())
+					remaining = std::min(remaining, static_cast<int>(BattleHex::getDistance(a, b)));
+			const int cost = static_cast<int>(routes.distances[hex.toInt()]);
+			if(remaining < bestDistance || (remaining == bestDistance && cost < bestCost))
+			{
+				best = hex;
+				bestDistance = remaining;
+				bestCost = cost;
+			}
+		}
+		return best.isValid() ? BattleAction::makeMove(&stack, best)
+			: BattleAction::makeDefend(&stack);
+	}
+
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
 	{
+		// Berserk is a special creature turn, preceding normal tactical AI.
+		if(stack.hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+			return chooseBerserkAction(battle, stack);
 		if(stack.isCatapult())
 			return battle.getAttackableWallParts().empty() ? BattleAction::makeDefend(&stack) : BattleAction::makeCatapultShot(&stack);
 		if(stack.isFirstAidTent())
