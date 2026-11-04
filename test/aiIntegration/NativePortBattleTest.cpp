@@ -94,6 +94,14 @@ public:
 	int spellPackets = 0;
 	int movementPackets = 0;
 	int roundPackets = 0;
+	int unitChangePackets = 0;
+	int obstacleChangePackets = 0;
+	int catapultEventPackets = 0;
+	int gateChangePackets = 0;
+	std::function<void(const BattleUnitsChanged &)> onUnitsChangedAfterApply;
+	std::function<void(const BattleObstaclesChanged &)> onObstaclesChangedAfterApply;
+	std::function<void(const CatapultAttack &)> onCatapultAfterApply;
+	std::function<void(const BattleUpdateGateState &)> onGateChangedAfterApply;
 	std::function<void(const BattleResult &)> onResultBeforeApply;
 	std::function<void(const BattleStackMoved &)> onMovementBeforeApply;
 	std::function<void(const BattleNextRound &)> onRoundBeforeApply;
@@ -142,6 +150,33 @@ public:
 				onInjuriesBeforeApply(*injuries);
 		}
 		RecordingGameServer::applyPack(pack);
+		// Match the real client packet visitor: structural, obstacle, siege,
+		// and gate notifications run after the authoritative packet applies.
+		// These matter for summoned units, clone visibility and siege routing.
+		if(const auto * units = dynamic_cast<const BattleUnitsChanged *>(&pack))
+		{
+			++unitChangePackets;
+			if(onUnitsChangedAfterApply)
+				onUnitsChangedAfterApply(*units);
+		}
+		if(const auto * obstacles = dynamic_cast<const BattleObstaclesChanged *>(&pack))
+		{
+			++obstacleChangePackets;
+			if(onObstaclesChangedAfterApply)
+				onObstaclesChangedAfterApply(*obstacles);
+		}
+		if(const auto * catapult = dynamic_cast<const CatapultAttack *>(&pack))
+		{
+			++catapultEventPackets;
+			if(onCatapultAfterApply)
+				onCatapultAfterApply(*catapult);
+		}
+		if(const auto * gate = dynamic_cast<const BattleUpdateGateState *>(&pack))
+		{
+			++gateChangePackets;
+			if(onGateChangedAfterApply)
+				onGateChangedAfterApply(*gate);
+		}
 		// ApplyClientNetPackVisitor::visitBattleNextRound fires after the
 		// round packet is applied, paired with its pre-apply callback above.
 		if(const auto * round = dynamic_cast<const BattleNextRound *>(&pack))
@@ -198,6 +233,8 @@ protected:
 	int mmaiAutomaticDecisions = 0;
 	int replayedMovementEvents = 0;
 	int replayedRoundEvents = 0;
+	int replayedUnitChangeEvents = 0;
+	int replayedCatapultEvents = 0;
 	int encounterSeed = seed; // Fixture-only RNG input for reproducible directed matchups.
 
 #ifdef ENABLE_MMAI
@@ -290,6 +327,10 @@ protected:
 		const int spellsBeforeEventSubscription = recorder.spellPackets;
 		const int movesBeforeEventSubscription = recorder.movementPackets;
 		const int roundsBeforeEventSubscription = recorder.roundPackets;
+		const int unitsBeforeEventSubscription = recorder.unitChangePackets;
+		const int obstaclesBeforeEventSubscription = recorder.obstacleChangePackets;
+		const int catapultsBeforeEventSubscription = recorder.catapultEventPackets;
+		const int gatesBeforeEventSubscription = recorder.gateChangePackets;
 		const int64_t damageBeforeEventSubscription = recorder.damage;
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		const auto battleID = battle()->getBattleID();
@@ -324,6 +365,10 @@ protected:
 		int deliveredMovementEvents = 0;
 		int deliveredRoundFirstEvents = 0;
 		int deliveredRoundEvents = 0;
+		int deliveredUnitChangeEvents = 0;
+		int deliveredObstacleChangeEvents = 0;
+		int deliveredCatapultEvents = 0;
+		int deliveredGateChangeEvents = 0;
 		// Record damage received by each side from actual engine injury packets.
 		// This is deliberately NOT labelled "damage dealt": friendly fire,
 		// spell effects and retaliation can make that attribution misleading.
@@ -337,6 +382,30 @@ protected:
 				if(victim)
 					damageTakenBySide[victim->unitSide()] += injury.damageAmount;
 			}
+		};
+		recorder.onUnitsChangedAfterApply = [&](const BattleUnitsChanged & units)
+		{
+			for(auto & entry : policies)
+				entry.second->battleUnitsChanged(units.battleID, units.changedStacks);
+			++deliveredUnitChangeEvents;
+		};
+		recorder.onObstaclesChangedAfterApply = [&](const BattleObstaclesChanged & obstacles)
+		{
+			for(auto & entry : policies)
+				entry.second->battleObstaclesChanged(obstacles.battleID, obstacles.change);
+			++deliveredObstacleChangeEvents;
+		};
+		recorder.onCatapultAfterApply = [&](const CatapultAttack & catapult)
+		{
+			for(auto & entry : policies)
+				entry.second->battleCatapultAttacked(catapult.battleID, catapult);
+			++deliveredCatapultEvents;
+		};
+		recorder.onGateChangedAfterApply = [&](const BattleUpdateGateState & gate)
+		{
+			for(auto & entry : policies)
+				entry.second->battleGateStateChanged(gate.battleID, gate.state);
+			++deliveredGateChangeEvents;
 		};
 		recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
 		{
@@ -508,6 +577,16 @@ protected:
 		EXPECT_EQ(damageTakenBySide[BattleSide::ATTACKER] + damageTakenBySide[BattleSide::DEFENDER],
 			recorder.damage - damageBeforeEventSubscription)
 			<< "Per-side pre-apply injury evidence must reconcile with engine-applied damage";
+		EXPECT_EQ(deliveredUnitChangeEvents, recorder.unitChangePackets - unitsBeforeEventSubscription)
+			<< "Every native unit change must reach both source-policy adapters after state application";
+		EXPECT_EQ(deliveredObstacleChangeEvents, recorder.obstacleChangePackets - obstaclesBeforeEventSubscription)
+			<< "Every native obstacle change must reach both source-policy adapters";
+		EXPECT_EQ(deliveredCatapultEvents, recorder.catapultEventPackets - catapultsBeforeEventSubscription)
+			<< "Every native catapult event must reach both source-policy adapters";
+		EXPECT_EQ(deliveredGateChangeEvents, recorder.gateChangePackets - gatesBeforeEventSubscription)
+			<< "Every native gate change must reach both source-policy adapters";
+		replayedUnitChangeEvents = deliveredUnitChangeEvents;
+		replayedCatapultEvents = deliveredCatapultEvents;
 		EXPECT_EQ(deliveredAttackEvents,
 			recorder.shots + recorder.meleeAttacks - attacksBeforeEventSubscription)
 			<< "Every attack after policy subscription must traverse both source-policy event adapters";
@@ -530,6 +609,10 @@ protected:
 		}
 		ASSERT_TRUE(battleEndDelivered) << "The terminal event was not delivered with live battle state";
 		recorder.onResultBeforeApply = {};
+		recorder.onUnitsChangedAfterApply = {};
+		recorder.onObstaclesChangedAfterApply = {};
+		recorder.onCatapultAfterApply = {};
+		recorder.onGateChangedAfterApply = {};
 		recorder.onAttackBeforeApply = {};
 		recorder.onInjuriesBeforeApply = {};
 		recorder.onSpellAfterApply = {};
@@ -567,6 +650,10 @@ protected:
 			<< " activations=" << decisions << " damage=" << recorder.damage
 			<< " attacker_damage_taken=" << damageTakenBySide[BattleSide::ATTACKER]
 			<< " defender_damage_taken=" << damageTakenBySide[BattleSide::DEFENDER]
+			<< " native_unit_change_events=" << deliveredUnitChangeEvents
+			<< " native_obstacle_change_events=" << deliveredObstacleChangeEvents
+			<< " native_catapult_events=" << deliveredCatapultEvents
+			<< " native_gate_change_events=" << deliveredGateChangeEvents
 			<< " native_attack_events=" << deliveredAttackEvents
 			<< " native_injury_events=" << deliveredInjuryEvents
 			<< " native_spell_events=" << deliveredSpellEvents
@@ -646,6 +733,8 @@ TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(BattleSide::ATTACKER);
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
+	EXPECT_GT(replayedCatapultEvents, 0)
+		<< "Siege-machine packet must reach both experimental adapters after applying to the battle";
 }
 
 TEST_F(AIIntegrationNativeBattle, fheroes2CastleGarrisonHoldsItsMeleeLineForShooters)
@@ -1294,6 +1383,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCloneAndCompletesBattle)
 		<< "FHeroes2 must select a native Clone from an observed projection";
 	EXPECT_TRUE(sawNativeClone)
 		<< "The VCMI server must create an actual friendly clone";
+	EXPECT_GT(replayedUnitChangeEvents, 0)
+		<< "Clone creation must notify both experimental adapters through the native unit-change event";
 	EXPECT_GT(recorder.damage, 0);
 }
 
