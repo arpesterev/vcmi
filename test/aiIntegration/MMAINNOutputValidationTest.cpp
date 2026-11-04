@@ -136,9 +136,22 @@ TEST(MMAINNOutputValidation, RejectsInvalidModelSideMetadata)
 	EXPECT_EQ(parseNNModelSide("1"), Side::RIGHT);
 	EXPECT_EQ(parseNNModelSide("2"), Side::BOTH);
 
-	// stoi alone accepted suffixes and out-of-range enum values.
-	for(const char * value : {"", "1garbage", "2.0", "-1", "3", "99999999999999999999"})
+	// The model role must be exact, unsigned and within the known side enum.
+	for(const char * value : {"", "1garbage", "2.0", "-1", "3", " 0", "+1", "0\n", "99999999999999999999"})
 		EXPECT_THROW(parseNNModelSide(value), std::runtime_error);
 }
 
 #endif
+
+TEST(MMAINNOutputValidation, RejectsInvalidModelVersionMetadata)
+{
+	using MMAI::BAI::parseNNModelVersion;
+	EXPECT_EQ(parseNNModelVersion("13"), 13);
+	EXPECT_EQ(parseNNModelVersion("15"), 15);
+
+	// The factory used stoi, which accepted a valid prefix ("15bad")
+	// and deferred unsupported-version errors until after the metadata parse.
+	for(const char * value : {"", "15bad", "13.0", " 15", "+15", "-13",
+		"0", "12", "14", "16", "99999999999999999999"})
+		EXPECT_THROW(parseNNModelVersion(value), std::runtime_error);
+}

@@ -8,31 +8,42 @@
 #pragma once
 
 #include "schema/base.h"
+#include <charconv>
 #include <stdexcept>
 #include <string>
 
 namespace MMAI::BAI
 {
-// Both schema versions advertise their trained battle side via ONNX custom
-// metadata. Do not silently accept partial strings (std::stoi("0broken"))
-// or unknown values as valid roles. Reject before the first server action.
+// ONNX version and side are exact decimal metadata fields. std::stoi()
+// accepts whitespace, signs and suffixes, so use from_chars for a fully
+// consumed, nonnegative decimal value before constructing any NN policy.
+inline int parseNNMetadataDecimal(const std::string & value, const char * field)
+{
+	int parsed = -1;
+	if(value.empty())
+		throw std::runtime_error(std::string("MMAI: invalid ONNX ") + field + " metadata: empty");
+
+	const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+	if(error != std::errc{} || end != value.data() + value.size() || parsed < 0)
+		throw std::runtime_error(std::string("MMAI: invalid ONNX ") + field + " metadata: expected unsigned decimal integer");
+
+	return parsed;
+}
+
+inline int parseNNModelVersion(const std::string & value)
+{
+	const int version = parseNNMetadataDecimal(value, "version");
+	if(version != 13 && version != 15)
+		throw std::runtime_error("MMAI: unsupported ONNX model schema version: " + std::to_string(version));
+	return version;
+}
+
 inline Schema::Side parseNNModelSide(const std::string & value)
 {
-	std::size_t consumed = 0;
-	int side = -1;
-	try
-	{
-		side = std::stoi(value, &consumed);
-	}
-	catch(const std::exception &)
-	{
-		throw std::runtime_error("MMAI: invalid ONNX model side metadata: not an integer");
-	}
-
-	if(consumed != value.size() ||
-		(side != static_cast<int>(Schema::Side::LEFT) &&
-		 side != static_cast<int>(Schema::Side::RIGHT) &&
-		 side != static_cast<int>(Schema::Side::BOTH)))
+	const int side = parseNNMetadataDecimal(value, "side");
+	if(side != static_cast<int>(Schema::Side::LEFT) &&
+	   side != static_cast<int>(Schema::Side::RIGHT) &&
+	   side != static_cast<int>(Schema::Side::BOTH))
 		throw std::runtime_error("MMAI: invalid ONNX model side metadata: unsupported side");
 
 	return static_cast<Schema::Side>(side);
