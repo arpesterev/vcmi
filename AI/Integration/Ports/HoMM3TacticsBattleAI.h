@@ -279,7 +279,11 @@ public:
 		auto available = battle.battleGetAvailableHexes(reach, &stack, false);
 		available.sort([](const BattleHex & lhs, const BattleHex & rhs) { return lhs.toInt() < rhs.toInt(); });
 
-		const auto shooterPins = calculateShooterPins(battle, stack, enemies);
+		// TUM explicitly invokes this baseline with avoidFastDecoys=true.
+		// Keep that independent experimental backend's existing decisions
+		// unchanged while validating this HoMM3-only attack-position slice.
+		const auto shooterPins = avoidFastDecoys ? std::vector<ShooterPin>{}
+			: calculateShooterPins(battle, stack, enemies);
 
 		const CStack * target = nullptr;
 		BattleHex attackFrom;
