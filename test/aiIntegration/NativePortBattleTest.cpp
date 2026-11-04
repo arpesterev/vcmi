@@ -843,6 +843,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyHasteAndCompletesBattle)
 	ASSERT_EQ(enemy->getAvailableHealth(), baseHealth)
 		<< "Dispel must be valued as magic removal, not damage";
 	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	// Basic Water Magic marks Dispel as a smart *friendly-only* spell in
+	// native VCMI. Advanced Water Magic enables deliberate enemy targeting.
+	// The first CI fixture failed because it omitted this real rule gate.
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
 	bool sawNativeDispel = false;
 	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
