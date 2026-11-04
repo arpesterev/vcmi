@@ -2973,7 +2973,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeBreathMeleeChoosesAndExecutesSec
 
 	BattleHex front;
 	BattleHex behind;
-	for(const auto & nearby : attacker->getPosition().getNeighbouringTiles())
+	const BattleHex attackerPosition = attacker->getPosition();
+	for(const auto & nearby : attackerPosition.getNeighbouringTiles())
 	{
 		if(!nearby.isAvailable() || battle()->battleGetUnitByPos(nearby))
 			continue;
