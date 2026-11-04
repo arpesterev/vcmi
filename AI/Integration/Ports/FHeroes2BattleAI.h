@@ -664,9 +664,9 @@ private:
 			return BattleAction::makeHeal(&stack);
 
 		// Pinned fheroes2 analyzeBattleState and archerDecision examine the
-		// *whole living enemy force*, even when siege walls or temporary
-		// shooting restrictions block an attack right now. Filtering it by
-		// native attack legality corrupts the stance and escape risk.
+		// *whole living enemy force*, regardless of whether this particular
+		// creature can target every enemy. Source force evaluation and
+		// source attack-target eligibility are independent decisions.
 		auto allEnemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 		vstd::erase_if(allEnemies, [](const CStack * enemy)
 		{
@@ -674,8 +674,9 @@ private:
 		});
 		std::sort(allEnemies.begin(), allEnemies.end(),
 			[](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
-		// Keep a separate VCMI-eligible set for selecting attack targets.
-		// The native server, not the Heroes II heuristic, decides legality.
+		// Keep a separate VCMI targetable set. battleCanAttackUnit checks
+		// melee capability, NOT current-turn reachability; only the native
+		// route/attack queries and the server prove a chosen action legal.
 		auto enemies = allEnemies;
 		vstd::erase_if(enemies, [&](const CStack * enemy)
 		{
@@ -689,8 +690,8 @@ private:
 			return *retreat;
 		if(enemies.empty())
 		{
-			// Closed walls can make the garrison temporarily unattackable.
-			// Approach with native WALK, never manufacture a legal attack.
+			// A unit with no targetable enemy may still be able to approach
+			// the living garrison. Use native WALK, never invent an attack.
 			if(stack.unitSide() == BattleSide::ATTACKER && battle.battleGetDefendedTown() != nullptr)
 			{
 				const auto defenders = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
