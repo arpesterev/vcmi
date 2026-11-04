@@ -819,6 +819,44 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// fheroes2 spellDispelValue values removing an enemy's beneficial magic.
+// Dispel must be the policy's own hero decision, remove a real enemy Haste
+// through authoritative server packets and complete combat with damage.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelsEnemyHasteAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	const auto baseSpeed = enemy->getMovementRange();
+	const auto baseHealth = enemy->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::HASTE, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HASTE, enemy))
+		<< "The server must actually give the enemy Haste";
+	const auto haste = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::HASTE)));
+	ASSERT_TRUE(enemy->hasBonus(haste));
+	ASSERT_GT(enemy->getMovementRange(), baseSpeed);
+	ASSERT_EQ(enemy->getAvailableHealth(), baseHealth)
+		<< "Dispel must be valued as magic removal, not damage";
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	bool sawNativeDispel = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			sawNativeDispel |= !enemy->hasBonus(haste) && enemy->getMovementRange() == baseSpeed;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty())
+		<< "FHeroes2 must choose Dispel against the real enemy Haste";
+	EXPECT_TRUE(sawNativeDispel)
+		<< "The authoritative engine must restore enemy movement, not just log a cast";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // This is a real Cure cast, not a manufactured healing score. fheroes2's
 // spellDispelValue assigns positive value to dispelling harmful magic.
 // Restore a cursed but initially unwounded friendly stack and verify the
