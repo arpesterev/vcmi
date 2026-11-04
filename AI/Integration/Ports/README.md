@@ -212,8 +212,11 @@ five independently implemented overrides derived from the documentation:
   because the latter only detects Stone Gaze.
 - **Shooter protection:** when facing neutral melee-only stacks, allied
   ranged troops still have usable shots, and no neutral stack can reach the
-  friendly army in its next movement, the active friendly melee stack defends
-  instead of rushing forward. Presence of enemy shooters is checked using
+  friendly army in its next movement, the active friendly melee stack first
+  **waits** (if it has not already waited), then defends on a second safe
+  activation instead of rushing forward. This preserves a legal later-turn
+  response; the native neutral battle asserts an engine-accepted WAIT and a
+  completed result. Presence of enemy shooters is checked using
   the native ranged-unit classification, not immediate `battleCanShoot()`:
   an archer under Forgetfulness is still an enemy shooter for this conservative
   interpretation of the published TUM rule. Friendly shooters need remaining
