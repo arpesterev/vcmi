@@ -1,0 +1,63 @@
+name: Client UI compile checks
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'client/windows/**'
+      - 'lib/callback/CGameInfoCallback.*'
+      - '.github/workflows/client-ui-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client-linux:
+    name: Compile VCMI client (no packaging)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: 'true'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install client dependencies
+        run: source CI/before_install/linux_qt6.sh
+
+      - name: Restore compiled objects (read-only)
+        uses: actions/cache/restore@v6
+        with:
+          path: .ccache
+          key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcmi-ai-ubuntu2404-gcc14-v1-
+
+      - name: Enable compiler cache
+        run: |
+          sudo apt-get install -y --no-install-recommends ccache
+          ccache --max-size=2G
+
+      - name: Configure client-only build
+        run: >-
+          cmake -DENABLE_CCACHE:BOOL=ON
+          -DENABLE_MMAI:BOOL=OFF
+          -DENABLE_TEST:BOOL=OFF
+          -DENABLE_EDITOR:BOOL=OFF
+          -DENABLE_LAUNCHER:BOOL=OFF
+          -DCMAKE_C_COMPILER=gcc-14
+          -DCMAKE_CXX_COMPILER=g++-14
+          --preset linux-gcc-test
+
+      - name: Compile client
+        run: cmake --build --preset linux-gcc-test --target vcmiclient --parallel 3
