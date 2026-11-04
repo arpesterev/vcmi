@@ -1299,7 +1299,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
 		<< "There must be no missing health to explain Cure's selection";
 	teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
 	bool sawNativeControlRestoration = false;
-	recorder.onSpellAfterApply = [&](const BattleSpellCast &)
+	// Like the existing Cure/Blind/Slow regressions, inspect after the
+	// injury/effect packet has applied. BattleSpellCast arrives earlier
+	// than the status-removal packet on the authoritative server.
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
 	{
 		if(!recorder.castsOf(SpellID::CURE).empty())
 			sawNativeControlRestoration |= !friendly->hasBonus(berserk)
