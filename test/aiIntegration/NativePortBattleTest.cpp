@@ -3306,6 +3306,95 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedOnlyBallistaCannotProjectMeleeLandi
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// The pinned HoMM3 findEnemyAttacks threat map includes ranged enemies,
+// but the VCMI projection must not assume that moving next to a shooter
+// always silences it. Actual unrestricted FREE_SHOOTING keeps the native
+// shot legal from adjacent hexes. The bonus is fixture-only; no game rules
+// or default AI are changed. A second enemy forces multi-target evaluation.
+TEST_F(AIIntegrationNativeBattle, homm3FreeShootingThreatAndEngineShotAtAdjacentAttacker)
+{
+	prepareBattle(CreatureID(7), 1, CreatureID(2), 25); // Crusader vs Archers
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+
+	const CStack * crusader = nullptr;
+	CStack * archer = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(7))
+			crusader = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+	}
+	ASSERT_NE(crusader, nullptr);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), crusader);
+
+	const BattleHex adjacent(crusader->getPosition().toInt() + 5);
+	ASSERT_TRUE(adjacent.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), nullptr);
+	archer->setPosition(adjacent);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->isMeleeAttackPossible(archer, crusader));
+	ASSERT_FALSE(view->battleCanShoot(archer, crusader->getPosition()))
+		<< "Ordinary adjacent Archer must be blocked from shooting";
+
+	archer->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::FREE_SHOOTING, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(archer->canShootBlocked());
+	ASSERT_TRUE(view->battleCanShoot(archer, crusader->getPosition()))
+		<< "Engine must permit unrestricted free shooting against an adjacent foe";
+	ASSERT_TRUE(AIIntegration::Ports::HoMM3::projectedNativeRangedThreat(
+		view->battleCanShoot(archer), true, archer->canShootBlocked(),
+		true, false, 0, 1))
+		<< "The source-inspired native threat projection must retain the adjacent shot";
+
+	BattleHex extra;
+	for(int i = 0; i < GameConstants::BFIELD_SIZE; ++i)
+	{
+		const BattleHex candidate(i);
+		if(candidate.isAvailable() && !battle()->battleGetUnitByPos(candidate)
+			&& BattleHex::getDistance(candidate, crusader->getPosition()) >= 7
+			&& BattleHex::getDistance(candidate, archer->getPosition()) >= 5)
+		{
+			extra = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(extra.isValid());
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), extra, 1), nullptr);
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, crusader);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK)
+		<< "HoMM3 must independently select a legal native melee command";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Real VCMI server rejected the free-shooting encounter command";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0)
+		<< "The real native Archer must take its permitted free shot";
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
 	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
