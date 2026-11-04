@@ -606,7 +606,11 @@ Ort::Value NNModel::toTensor(const std::string & name, std::vector<T> & vec, con
 	// Create a memory-owning tensor then copy data
 	auto res = Ort::Value::CreateTensor<T>(container->allocator, shape.data(), shape.size());
 	T * dst = res.template GetTensorMutableData<T>();
-	std::memcpy(dst, vec.data(), vec.size() * sizeof(T));
+	// V13 may have no links of a given type. C++ does not guarantee that
+	// a zero-byte memcpy with vec.data() == nullptr is valid; V15 already
+	// guards this case. Keep the ONNX tensor shape and contents unchanged.
+	if(!vec.empty())
+		std::memcpy(dst, vec.data(), vec.size() * sizeof(T));
 	return res;
 }
 
