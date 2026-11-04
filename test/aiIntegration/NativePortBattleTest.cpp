@@ -3258,6 +3258,58 @@ TEST_F(AIIntegrationNativeBattle, homm3TwoEnemyThreatProjectsIntoNativeMeleeBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3BlindEnemyDoesNotProjectAFalseLandingThreat)
+{
+	// Pinned HoMM3 findEnemyAttacks excludes incapacitated stacks. Apply
+	// Blind through VCMI's real spell handler, then demand an independent
+	// HoMM3 melee command accepted by the game server and a terminal fight.
+	// This is not proof of equality with retail HoMM3's threat values.
+	prepareBattle(CreatureID(10), 24, CreatureID(2), 16);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	const BattleHex adjacentHex(cavalier->getPosition().toInt() + 5);
+	ASSERT_TRUE(adjacentHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacentHex), nullptr);
+	const auto * disabledEnemy = addStack(BattleSide::DEFENDER, CreatureID(0), adjacentHex, 6);
+	ASSERT_NE(disabledEnemy, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, disabledEnemy))
+		<< "The real game server must apply Blind before policy evaluation";
+	ASSERT_TRUE(disabledEnemy->hasBonusOfType(BonusType::NOT_ACTIVE));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, cavalier);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "The partial HoMM3 policy must independently choose native melee";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected the HoMM3 decision with a genuinely blinded enemy";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 {
 	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
