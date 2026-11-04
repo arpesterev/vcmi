@@ -106,12 +106,21 @@ private:
 		{
 			return target.hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell)));
 		};
-		// VCMI NOT_ACTIVE also represents disables originating from creature
-		// abilities or other bonus sources. The HoMM3 isIncapacitated branch
-		// must discount those targets in ranged scoring as well as the threat
-		// projection; spell-only filtering misses that independent state.
+		// Pinned army::isIncapacitated checks exactly spell influences
+		// 62 (Blind), 70 (Stone Gaze) and 74 (Paralyze). VCMI NOT_ACTIVE
+		// carries that spell ID as its subtype, including when a creature
+		// ability rather than a hero spell produced the effect. Never treat
+		// unrelated NOT_ACTIVE subtypes as HoMM3 incapacitation.
+		const auto hasNativeDisable = [&](SpellID spell)
+		{
+			return target.hasBonus(Selector::typeSubtype(BonusType::NOT_ACTIVE, BonusSubtypeID(spell)));
+		};
+		const bool sourceDisablingStatus = includeNativeInactive
+			&& (hasNativeDisable(SpellID(SpellID::BLIND))
+				|| hasNativeDisable(SpellID(SpellID::STONE_GAZE))
+				|| hasNativeDisable(SpellID(SpellID::PARALYZE)));
 		// The shared TUM baseline retains its preexisting ranged weighting.
-		return (includeNativeInactive && target.hasBonusOfType(BonusType::NOT_ACTIVE)) || target.isFrozen()
+		return sourceDisablingStatus || target.isFrozen()
 			|| hasSpell(SpellID(SpellID::BLIND)) || hasSpell(SpellID(SpellID::PARALYZE));
 	}
 

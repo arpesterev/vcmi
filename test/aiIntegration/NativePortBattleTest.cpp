@@ -3376,7 +3376,7 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedDiscountsNonSpellInactiveTargetAndS
 {
 	// Pinned ai_tactical.cpp getRangedAttackValue discounts stacks for which
 	// army::isIncapacitated() is true. VCMI can carry NOT_ACTIVE from a
-	// non-spell source. Inject that native bonus only into the fixture;
+	// non-spell source, with the native Paralyze subtype. Inject this only into the fixture;
 	// do not claim that a particular creature ability was exercised here.
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
@@ -3423,8 +3423,11 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedDiscountsNonSpellInactiveTargetAndS
 	ASSERT_FALSE(tumBefore.target.empty());
 
 	const_cast<CStack *>(disabled)->addNewBonus(std::make_shared<Bonus>(
-		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::OTHER, 1, BonusSourceID()));
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::OTHER, 1,
+		BonusSourceID(), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
 	ASSERT_TRUE(disabled->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(disabled->hasBonus(Selector::typeSubtype(BonusType::NOT_ACTIVE,
+		BonusSubtypeID(SpellID(SpellID::PARALYZE)))));
 	ASSERT_FALSE(disabled->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
 		BonusSourceID(SpellID(SpellID::BLIND)))));
 	const auto after = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
