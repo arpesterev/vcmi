@@ -819,6 +819,42 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCurseAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// This is a real Cure cast, not a manufactured healing score. fheroes2's
+// spellDispelValue assigns positive value to dispelling harmful magic.
+// Restore a cursed but initially unwounded friendly stack and verify the
+// native VCMI status actually disappears after the effect packets.
+TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeCurseAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	teachBattleSpell(defenderSideHero, SpellID::CURSE, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::CURSE, friendly))
+		<< "The server must apply the initial enemy Curse";
+	const auto cursed = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::CURSE)));
+	ASSERT_TRUE(friendly->hasBonus(cursed));
+	ASSERT_TRUE(friendly->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
+	teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
+	bool sawNativeDispel = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::CURE).empty())
+			sawNativeDispel |= !friendly->hasBonus(cursed)
+				&& !friendly->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::CURE).empty())
+		<< "Source-derived Cure priority must select a real hero spell";
+	EXPECT_TRUE(sawNativeDispel)
+		<< "The game engine must remove the hostile spell, not just report a cast";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeStoneSkinAndCompletesBattle)
 {
 	// The source values Stone Skin as a defensive buff. Observe the real
