@@ -9,6 +9,7 @@
 
 #include <stdexcept>
 #include <tuple>
+#include <type_traits>
 #include <vector>
 
 namespace MMAI::BAI
@@ -29,7 +30,7 @@ auto sampleV13ActionPath(
 	SampleFn sample)
 {
 	const auto action = sample(mainProbabilities);
-	using Sample = decltype(action);
+	using Sample = std::remove_cv_t<decltype(action)>;
 	const Sample unused{0, 1.0, 1.0}; // neutral probability/confidence for absent heads
 	auto firstHex = unused;
 	auto secondHex = unused;
