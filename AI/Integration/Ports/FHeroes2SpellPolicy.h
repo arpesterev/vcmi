@@ -169,6 +169,10 @@ public:
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
+			// Temporary diagnostics for the real-battle Clone regression.
+			if(mirrorImageSpell)
+				logAi->warn("AI_CLONE_PROBE phase=candidate combat=%d ability=%d canCast=%d",
+					spell->isCombat(), spell->isCreatureAbility(), spell->canBeCast(real.get(), spells::Mode::HERO, hero));
 			if(!spell->isCombat() || spell->isCreatureAbility()
 				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
@@ -180,6 +184,8 @@ public:
 				continue;
 			spells::BattleCast legality(real.get(), hero, spells::Mode::HERO, spell);
 			const auto mechanics = spell->battleMechanics(&legality);
+			if(mirrorImageSpell)
+				logAi->warn("AI_CLONE_PROBE phase=targets count=%zu", targets(*mechanics).size());
 			for(const auto & target : targets(*mechanics))
 			{
 				auto projected = std::make_shared<HypotheticBattle>(environment, real);
@@ -496,6 +502,8 @@ public:
 				// an existing clone, or a spell effect on the original.
 				if(mirrorImageSpell)
 				{
+					logAi->warn("AI_CLONE_PROBE phase=projected known=%zu visible=%zu real=%zu",
+						projected->stackStates.size(), projected->battleGetAllStacks(false).size(), before.size());
 					for(const auto * clone : projected->battleGetAllStacks(false))
 					{
 						if(!clone->alive() || !clone->isClone()
