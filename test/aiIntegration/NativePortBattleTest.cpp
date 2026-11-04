@@ -1264,11 +1264,20 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCloneAndCompletesBattle)
 		spells::BattleCast projectedCast(simulation.get(), attackerSideHero, spells::Mode::HERO, entry.get());
 		projectedCast.castEval(simulation->getServerCallback(), target);
 		const auto projected = simulation->battleGetAllStacks(false);
+		std::ostringstream cloneProbe;
+		for(const auto & [id, state] : simulation->stackStates)
+			cloneProbe << " state[id=" << id << " clone=" << state->isClone()
+				<< " alive=" << state->alive() << " ownerIsCaster="
+				<< (simulation->battleGetOwner(state.get()) == casterPlayer) << "]";
+		for(const auto * unit : projected)
+			cloneProbe << " visible[id=" << unit->unitId() << " clone=" << unit->isClone()
+				<< " alive=" << unit->alive() << " ownerIsCaster="
+				<< (simulation->battleGetOwner(unit) == casterPlayer) << "]";
 		const auto cloneCount = std::count_if(projected.begin(), projected.end(),
 			[&](const auto * unit) { return unit->alive() && unit->isClone() && simulation->battleGetOwner(unit) == casterPlayer; });
 		EXPECT_GT(cloneCount, 0)
 			<< "Clone projection produced no friendly clone; mutated unit states: " << simulation->stackStates.size()
-			<< ", visible stacks: " << projected.size();
+			<< ", visible stacks: " << projected.size() << "; " << cloneProbe.str();
 	}
 	EXPECT_TRUE(foundCloneSpell) << "No native Clone spell registered";
 	bool sawNativeClone = false;
