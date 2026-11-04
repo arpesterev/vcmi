@@ -2,7 +2,7 @@ name: Fast AI checks
 
 on:
   pull_request:
-    branches: [develop, 'feature/ai-event-adapters-20261031']
+    branches: [develop, 'feature/ai-event-adapters-20261031', 'feature/fheroes2-native-summon-20261104']
   push:
     branches: [develop]
 
