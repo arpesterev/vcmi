@@ -4101,11 +4101,12 @@ TEST_F(AIIntegrationNativeBattle, mixedFHeroes2AttackerAgainstTUMDefenderComplet
 	EXPECT_GT(recorder.shots, 0);
 }
 
-// Repeat all six *ordered* source-policy pairings with two independent
-// reproducible native RNG seeds. Together with the existing seed-1337
-// fixtures this provides three observations per pairing, but no confidence
-// interval or win-rate claim: army composition, layout and source/host rules
-// remain fixed. Every action and result still goes through the real server.
+// Exercise all six *ordered* source-policy pairings on an identical
+// Grand-Elf-versus-Pikeman fixture for three deterministic native RNG seeds.
+// Earlier directed smoke fixtures can use different armies, so do NOT pool
+// their results with this comparison matrix. Three seeds are far too few
+// for a meaningful win-rate confidence interval or AI strength ranking.
+// All decisions, damage and terminal results still come from the real server.
 // Only test seeding and observability change, never the production game RNG.
 #define AI_SEEDED_SOURCE_MATCHUP(testName, attackerPolicy, defenderPolicy, battleRngSeed) \
 TEST_F(AIIntegrationNativeBattle, testName) \
@@ -4117,6 +4118,12 @@ TEST_F(AIIntegrationNativeBattle, testName) \
 	EXPECT_GT(recorder.shots, 0) << "Expected real engine ranged attacks in the comparison"; \
 }
 
+AI_SEEDED_SOURCE_MATCHUP(seed1337HoMM3AgainstFHeroes2, "HoMM3OriginalTactics", "FHeroes2Tactics", 1337)
+AI_SEEDED_SOURCE_MATCHUP(seed1337FHeroes2AgainstHoMM3, "FHeroes2Tactics", "HoMM3OriginalTactics", 1337)
+AI_SEEDED_SOURCE_MATCHUP(seed1337HoMM3AgainstTUM, "HoMM3OriginalTactics", "TUMEnchantedTactics", 1337)
+AI_SEEDED_SOURCE_MATCHUP(seed1337TUMAgainstHoMM3, "TUMEnchantedTactics", "HoMM3OriginalTactics", 1337)
+AI_SEEDED_SOURCE_MATCHUP(seed1337FHeroes2AgainstTUM, "FHeroes2Tactics", "TUMEnchantedTactics", 1337)
+AI_SEEDED_SOURCE_MATCHUP(seed1337TUMAgainstFHeroes2, "TUMEnchantedTactics", "FHeroes2Tactics", 1337)
 AI_SEEDED_SOURCE_MATCHUP(seed2027HoMM3AgainstFHeroes2, "HoMM3OriginalTactics", "FHeroes2Tactics", 2027)
 AI_SEEDED_SOURCE_MATCHUP(seed2027FHeroes2AgainstHoMM3, "FHeroes2Tactics", "HoMM3OriginalTactics", 2027)
 AI_SEEDED_SOURCE_MATCHUP(seed2027HoMM3AgainstTUM, "HoMM3OriginalTactics", "TUMEnchantedTactics", 2027)
