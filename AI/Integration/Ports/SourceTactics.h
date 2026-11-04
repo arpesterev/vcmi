@@ -71,6 +71,23 @@ inline int32_t pinnedShooterValue(double rangedUnitValue, double meleeUnitValue,
 		static_cast<double>(std::numeric_limits<int32_t>::max())));
 }
 
+// The pinned findEnemyAttacks builds a threat field from enemies that can
+// actually attack. When projecting it into VCMI, the prospective landing
+// cell is still empty, so battleCanShoot(enemy, thatCell) would incorrectly
+// return false. Reproduce the host's blocked-shot / range checks using
+// authoritative unit bonuses and hypothetical cell distance instead.
+// This is VCMI shot legality, not a recovered Heroes III valuation.
+inline bool projectedNativeRangedThreat(bool canShootNow, bool newContact,
+	bool canShootBlocked, bool canShootAdjacent, bool hasRangeLimit,
+	int shootingRange, int distance)
+{
+	if(shootingRange < 0 || distance < 0)
+		throw std::invalid_argument("HoMM3 ranged threat needs nonnegative range and distance");
+	return canShootNow
+		&& (!newContact || (canShootBlocked && canShootAdjacent))
+		&& (!hasRangeLimit || distance <= shootingRange);
+}
+
 // checkAdjacentHexes uses the lower enemy_attacks score for two occupied
 // hexes. Native projected incoming-damage scores are negative (danger).
 inline double moreExposedFootprintThreat(double head, double tail)
