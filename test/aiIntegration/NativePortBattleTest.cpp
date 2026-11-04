@@ -2980,7 +2980,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeBreathMeleeChoosesAndExecutesSec
 		const auto dir = BattleHex::mutualPosition(attacker->getPosition(), nearby);
 		if(dir == BattleHex::NONE)
 			continue;
-		const auto rear = nearby.cloneInDirection(dir);
+		const auto rear = nearby.cloneInDirection(dir, false);
 		if(rear.isAvailable() && !battle()->battleGetUnitByPos(rear))
 		{
 			front = nearby;
