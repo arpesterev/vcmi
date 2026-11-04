@@ -8,6 +8,11 @@
 
 #include "SourceTactics.h"
 #include "FHeroes2SpellPolicy.h"
+#include "FHeroes2RetreatDecision.h"
+#include "../../../lib/CPlayerState.h"
+#include "../../../lib/entities/artifact/ArtifactUtils.h"
+#include "../../../lib/mapObjects/CGHeroInstance.h"
+#include "../../../lib/mapObjects/CGTownInstance.h"
 #include "../../../lib/CStack.h"
 #include "../../../lib/battle/BattleAction.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
@@ -28,6 +33,7 @@ public:
 		cb = std::move(callback);
 		env = std::move(environment);
 		preferences = {};
+		humanAutocombat = false;
 		logAi->info("AI_SOURCE_POLICY backend=FHeroes2Tactics source=0dbfe9f386f33c2500842f4a59cd284d7f03d541 partial=true projection=VCMI");
 	}
 
@@ -35,6 +41,7 @@ public:
 	{
 		initBattleInterface(std::move(environment), std::move(callback));
 		preferences = prefs;
+		humanAutocombat = true;
 	}
 
 	void yourTacticPhase(const BattleID & battleID, int) override
@@ -51,6 +58,65 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		if(!human && !humanAutocombat && env && env->game())
+		{
+			const auto * hero = battle->battleGetMyHero();
+			const auto * player = hero ? env->game()->tryGetPlayerState(hero->getOwner()) : nullptr;
+			if(hero && player && !player->isHuman())
+			{
+				double ourStrength = 0;
+				double enemyStrength = 0;
+				int initialFriendlySlots = 0;
+				bool fullyLostStack = false;
+				for(const auto * unit : battle->battleGetAllStacks())
+				{
+					if(unit->unitSide() == battle->battleGetMySide()
+						&& (unit->getCount() > 0 || unit->getKilled() > 0))
+					{
+						++initialFriendlySlots;
+						fullyLostStack |= unit->getCount() == 0 && unit->getKilled() > 0;
+					}
+					if(!unit->alive() || unit->isInvincible())
+						continue;
+					if(battle->battleGetOwner(unit) == hero->getOwner())
+						ourStrength += strength(*unit);
+					else
+						enemyStrength += strength(*unit);
+				}
+				const auto heroes = player->getHeroes();
+				const auto towns = player->getTowns();
+				const bool canRehire = heroes.size() > 1 || (!towns.empty()
+					&& !(towns.size() == 1 && hero->getVisitedTown() == towns.front()));
+				const bool valuableArtifacts = std::any_of(
+					ArtifactUtils::commonWornSlots().begin(), ArtifactUtils::commonWornSlots().end(),
+					[&](const ArtifactPosition & slot) { return hero->getArt(slot) != nullptr; });
+				const int primarySkillTotal = hero->getPrimSkillLevel(PrimarySkill::ATTACK)
+					+ hero->getPrimSkillLevel(PrimarySkill::DEFENSE)
+					+ hero->getPrimSkillLevel(PrimarySkill::SPELL_POWER)
+					+ hero->getPrimSkillLevel(PrimarySkill::KNOWLEDGE);
+				const bool canFlee = battle->battleCanFlee();
+				const bool canSurrender = battle->battleCanSurrender(hero->getOwner());
+				const int surrenderCost = canSurrender ? battle->battleGetSurrenderCost() : -1;
+				const bool affordable = surrenderCost >= 0
+					&& env->game()->getResource(hero->getOwner(), GameResID::GOLD) >= surrenderCost;
+				// Source NORMAL difficulty ratio. No hidden-map intelligence:
+				// only the current battle, owned hero and owned player economy.
+				const Ports::FHeroes2::WithdrawalContext context{ourStrength, enemyStrength, 100.0 / 7.5,
+					false, initialFriendlySlots < 4 || fullyLostStack, canFlee, canSurrender,
+					affordable, valuableArtifacts, canRehire, primarySkillTotal};
+				switch(Ports::FHeroes2::decideWithdrawal(context))
+				{
+					case Ports::FHeroes2::Withdrawal::RETREAT:
+						cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(battle->battleGetMySide()));
+						return;
+					case Ports::FHeroes2::Withdrawal::SURRENDER:
+						cb->battleMakeUnitAction(battleID, BattleAction::makeSurrender(battle->battleGetMySide()));
+						return;
+					case Ports::FHeroes2::Withdrawal::FIGHT:
+						break;
+				}
+			}
+		}
 		if(preferences.enableSpellsUsage && !stack->isCatapult() && !stack->isFirstAidTent())
 		{
 			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get()))
@@ -71,6 +137,7 @@ private:
 	std::shared_ptr<CBattleCallback> cb;
 	std::shared_ptr<Environment> env;
 	AutocombatPreferences preferences;
+	bool humanAutocombat = false;
 
 	static double strength(const battle::Unit & stack)
 	{
