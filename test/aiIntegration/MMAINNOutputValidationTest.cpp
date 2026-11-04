@@ -30,6 +30,19 @@ TEST(MMAINNOutputValidation, RejectsInvalidOnnxOutputBeforeGreedyOrSampling)
 	EXPECT_THROW(validateNNActionDistribution({0.3f, 0.7f}, -1.0f), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V15RejectsInvalidValueHead)
+{
+	using MMAI::BAI::validateNNValueEstimate;
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float inf = std::numeric_limits<float>::infinity();
+	EXPECT_THROW(validateNNValueEstimate(nan), std::runtime_error);
+	EXPECT_THROW(validateNNValueEstimate(inf), std::runtime_error);
+	EXPECT_THROW(validateNNValueEstimate(-inf), std::runtime_error);
+	EXPECT_NO_THROW(validateNNValueEstimate(-1.0f));
+	EXPECT_NO_THROW(validateNNValueEstimate(0.0f));
+	EXPECT_NO_THROW(validateNNValueEstimate(1.0f));
+}
+
 TEST(MMAINNOutputValidation, PreservesFiniteOnnxActionDistribution)
 {
 	using MMAI::BAI::validateNNActionDistribution;
