@@ -2951,6 +2951,98 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 }
 
 
+// Pinned fheroes2 optimalAttackVector and doubleCellAttackValue consider
+// the creature behind the primary melee victim. In Heroes III the source
+// geometry is different; native VCMI TWO_HEX_ATTACK_BREATH owns both the
+// secondary victim and any friendly-fire effects. This is a real server
+// decision, not a mock evaluation of the original Heroes II rules.
+TEST_F(AIIntegrationNativeBattle, fheroes2NativeBreathMeleeChoosesAndExecutesSecondaryHit)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * attacker = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			attacker = unit.get();
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
+	attacker->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::TWO_HEX_ATTACK_BREATH, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(attacker->hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH));
+
+	BattleHex front;
+	BattleHex behind;
+	for(const auto & nearby : attacker->getPosition().getNeighbouringTiles())
+	{
+		if(!nearby.isAvailable() || battle()->battleGetUnitByPos(nearby))
+			continue;
+		const auto dir = BattleHex::mutualPosition(attacker->getPosition(), nearby);
+		if(dir == BattleHex::NONE)
+			continue;
+		const auto rear = nearby.cloneInDirection(dir);
+		if(rear.isAvailable() && !battle()->battleGetUnitByPos(rear))
+		{
+			front = nearby;
+			behind = rear;
+			break;
+		}
+	}
+	ASSERT_TRUE(front.isValid());
+	ASSERT_TRUE(behind.isValid());
+	const auto * primary = addStack(BattleSide::DEFENDER, CreatureID(0), front, 1);
+	const auto * secondary = addStack(BattleSide::DEFENDER, CreatureID(0), behind, 30);
+	ASSERT_NE(primary, nullptr);
+	ASSERT_NE(secondary, nullptr);
+	const auto expectedSplash = battle()->getAttackedBattleUnits(
+		attacker, primary, front, false, attacker->getPosition());
+	ASSERT_TRUE(std::any_of(expectedSplash.begin(), expectedSplash.end(),
+		[&](const auto * unit) { return unit->unitId() == secondary->unitId(); }))
+		<< "Native VCMI must recognize the secondary creature in the breath path";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, attacker);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "FHeroes2 must independently select a legal native melee attack";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const auto & action = *callback->action;
+	const BattleHex from = action.target[0].hexValue;
+	const BattleHex aimedHex = action.target[1].hexValue;
+	const auto * aimedUnit = battle()->battleGetUnitByPos(aimedHex);
+	ASSERT_NE(aimedUnit, nullptr);
+	const auto affected = battle()->getAttackedBattleUnits(attacker, aimedUnit, aimedHex, false, from);
+	EXPECT_FALSE(affected.empty())
+		<< "The source-derived position and strike vector should reach a secondary native target";
+	bool nativeMultipleHit = false;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(!attack.shot() && attack.bsa.size() > 1)
+			nativeMultipleHit = true;
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "VCMI rejected FHeroes2's breath-position melee action";
+	EXPECT_TRUE(nativeMultipleHit)
+		<< "The authoritative server must actually hit multiple creatures, not just preview them";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 {
 	// Original fheroes2 archerDecision accounts for multiple area victims.
