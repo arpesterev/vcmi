@@ -3700,7 +3700,8 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedAttackDoesNotRewardExhaustedRetal
 	ASSERT_NE(guard, nullptr);
 
 	std::vector<BattleHex> positions;
-	for(const auto & hex : guard->getPosition().getNeighbouringTiles())
+	const auto neighbouringHexes = guard->getPosition().getNeighbouringTiles();
+	for(const auto & hex : neighbouringHexes)
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 			positions.push_back(hex);
 	ASSERT_GE(positions.size(), 2u);
