@@ -51,6 +51,8 @@ public:
 		BattleAction action;
 		if(stack->creatureId() == CreatureID::BALLISTA)
 			action = chooseBallistaShot(*battle, *stack);
+		else if(stack->isTurret())
+			action = chooseArrowTowerShot(*battle, *stack);
 		// Published TUM Hypnotize override: attacking former allies is scored
 		// by damage inflicted + retaliation received, not net exchange.
 		else if(stack->isHypnotized() && stack->unitOwner() != battle->battleGetOwner(stack))
@@ -128,6 +130,39 @@ private:
 		}
 		return selected ? BattleAction::makeShotAttack(&stack, selected)
 			: BattleAction::makeDefend(&stack);
+	}
+
+	// AI Improvements.txt reports smarter arrow-tower targeting but does not
+	// disclose its scoring algorithm. This is an independent VCMI projection,
+	// not an ERA/DLL reconstruction: suppress enemy ranged fire first, then
+	// select the highest-combat-value target among legal shots.
+	static BattleAction chooseArrowTowerShot(CPlayerBattleCallback & battle, const CStack & tower)
+	{
+		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		std::sort(targets.begin(), targets.end(), [](const CStack * a, const CStack * b)
+		{
+			return a->unitId() < b->unitId();
+		});
+		const CStack * best = nullptr;
+		bool bestShooter = false;
+		double bestValue = -1;
+		for(const auto * enemy : targets)
+		{
+			if(!enemy->alive() || enemy->isInvincible() || !enemy->getPosition().isValid()
+				|| !battle.battleCanShoot(&tower, enemy->getPosition()))
+				continue;
+			const bool armedShooter = enemy->isShooter() && enemy->canShoot();
+			const double value = static_cast<double>(enemy->estimateCombatValue());
+			if(!best || (armedShooter && !bestShooter)
+				|| (armedShooter == bestShooter && value > bestValue))
+			{
+				best = enemy;
+				bestShooter = armedShooter;
+				bestValue = value;
+			}
+		}
+		return best ? BattleAction::makeShotAttack(&tower, best)
+			: BattleAction::makeDefend(&tower);
 	}
 
 	// AI Improvements.txt / SPELLS / HYPNOTIZE: attack the original ally

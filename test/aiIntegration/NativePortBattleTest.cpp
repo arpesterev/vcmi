@@ -3373,6 +3373,83 @@ TEST_F(AIIntegrationNativeBattle, tumWideSiegeDefenderHoldsOnlyWhenBothOccupiedC
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 }
 
+TEST_F(AIIntegrationNativeBattle, tumArrowTowerPrefersArmedShooterInRealCitadelSiege)
+{
+	// Upstream only documents a smarter tower, not its closed-source target
+	// formula. Assert a different, explicitly native target choice and an
+	// engine-accepted turret shot in a siege created by the VCMI game server.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 500);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 30));
+	const auto * town = findFirst<CGTownInstance>();
+	ASSERT_NE(town, nullptr);
+	if(town->fortificationsLevel().wallsHealth <= 0)
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
+	if(town->fortificationsLevel().citadelHealth <= 0)
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CITADEL, true));
+	ASSERT_GT(town->fortificationsLevel().citadelHealth, 0);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 60));
+	const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
+	gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
+		attackerSideHero, nullptr, layout, town);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * turret = nullptr;
+	const CStack * melee = nullptr;
+	const CStack * archer = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
+			turret = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+	}
+	ASSERT_NE(turret, nullptr) << "The native citadel must produce a tower";
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_TRUE(archer->canShoot());
+	ASSERT_TRUE(battle()->battleCanShoot(turret, archer->getPosition()));
+	ASSERT_TRUE(battle()->battleCanShoot(turret, melee->getPosition()));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *turret);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+	EXPECT_EQ(baseline.target.front().unitValue, melee->unitId())
+		<< "Fixture must contrast baseline scoring with the shooter-first TUM projection";
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, turret);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, archer->unitId());
+	const int turretId = turret->unitId();
+	policy.reset();
+	// The exploratory callback above is not a real attack. The authoritative
+	// server must separately accept a tower shot and apply a battle result.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByUnit[turretId][EActionType::SHOOT], 0);
+	EXPECT_GT(recorder.shots, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsFinishesMixedFastAndSlowEnemyBattle)
 {
 	// Mix one faster flyer with slower infantry so the movement-only

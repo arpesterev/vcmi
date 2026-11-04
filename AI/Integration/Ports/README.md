@@ -227,6 +227,11 @@ five independently implemented overrides derived from the documentation:
   actions actually accepted by the VCMI server. Movement reach
   is evaluated with VCMI pathfinding. The documented exception for
   neutral-controlled armies outside siege applies.
+- **Arrow towers:** in actual citadel siege, the native projection first
+  selects a currently armed enemy shooter with a legal attack, then chooses
+  the highest combat-value eligible target. A real-server regression compares
+  it with partial HoMM3 and checks an engine-accepted turret shot. Upstream
+  does not disclose its tower aiming formula: this is not source equivalence.
 - **Fast-stack decoys:** when no immediate melee attack or ranged shot is
   available, prefer an accessible slower enemy over a nearby enemy that is
   at least two speed points faster than the acting melee stack and located
