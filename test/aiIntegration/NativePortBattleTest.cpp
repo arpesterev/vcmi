@@ -3234,6 +3234,28 @@ TEST_F(AIIntegrationNativeBattle, homm3WideCavalierUsesNativeAttackGeometryAgain
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, homm3TwoEnemyThreatProjectsIntoNativeMeleeBattle)
+{
+	// A nearby melee enemy plus a ranged opponent exercise the landing
+	// threat evaluation before the server accepts native commands. This
+	// proves neither exact source threat values nor decision parity.
+	prepareBattle(CreatureID(10), 24, CreatureID(2), 16);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	const BattleHex adjacentEnemy(cavalier->getPosition().toInt() + 5);
+	ASSERT_TRUE(adjacentEnemy.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacentEnemy), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), adjacentEnemy, 6), nullptr);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 {
 	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);

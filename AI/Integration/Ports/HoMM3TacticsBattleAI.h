@@ -165,6 +165,59 @@ private:
 		return value;
 	}
 
+
+	// Source checkAdjacentHexes adds the precomputed enemy_attacks[hex].
+	// VCMI projection: strongest POSSIBLE next action by any other enemy.
+	// Distances bound reach but do not reconstruct the original threat field.
+	// Primary target's immediate retaliation is in exchangeValue, so skip it.
+	static double projectedCellThreat(CPlayerBattleCallback & battle,
+		const CStack & attacker, const CStack & primaryTarget, BattleHex destination,
+		BattleHex cell, const std::vector<const CStack *> & enemies)
+	{
+		double worstLoss = 0;
+		for(const auto * enemy : enemies)
+		{
+			if(enemy == &primaryTarget || !enemy->alive()
+				|| enemy->isCatapult() || enemy->isFirstAidTent())
+				continue;
+			int distance = std::numeric_limits<int>::max();
+			for(const auto & enemyHex : enemy->getHexes())
+				distance = std::min(distance, BattleHex::getDistance(cell, enemyHex));
+			if(distance == std::numeric_limits<int>::max())
+				continue;
+			// If our future footprint pins a shooter it cannot shoot us.
+			const bool blocked = engagesFootprints(attacker.getHexes(destination), enemy->getHexes());
+			const bool canShoot = enemy->isShooter() && !blocked && battle.battleCanShoot(enemy);
+			const int movement = std::max(0, static_cast<int>(enemy->getMovementRange()));
+			const bool canMelee = distance > 0 && distance <= movement + 1;
+			for(const bool shooting : {false, true})
+			{
+				if((shooting && !canShoot) || (!shooting && !canMelee))
+					continue;
+				BattleAttackInfo info(enemy, &attacker, 0, shooting);
+				info.defenderPos = destination;
+				worstLoss = std::max(worstLoss, lossValue(attacker, battle.battleEstimateDamage(info)));
+			}
+		}
+		return -worstLoss;
+	}
+
+	static double projectedLandingThreat(CPlayerBattleCallback & battle,
+		const CStack & attacker, const CStack & primaryTarget, BattleHex destination,
+		const std::vector<const CStack *> & enemies)
+	{
+		const auto occupied = attacker.getHexes(destination);
+		if(occupied.empty())
+			return 0;
+		const double head = projectedCellThreat(battle, attacker, primaryTarget,
+			destination, occupied.front(), enemies);
+		if(occupied.size() == 1)
+			return head;
+		const double tail = projectedCellThreat(battle, attacker, primaryTarget,
+			destination, occupied.back(), enemies);
+		return Ports::HoMM3::moreExposedFootprintThreat(head, tail);
+	}
+
 	static int32_t rangedScore(CPlayerBattleCallback & battle,
 		const CStack & attacker, const CStack & target)
 	{
@@ -303,8 +356,13 @@ public:
 				const int pathCost = reach.distances[hex.toInt()];
 				if(pathCost < 0)
 					continue;
+				// Source-inspired signed threat field. The TUM backend
+				// composes this baseline with avoidFastDecoys=true; keep its
+				// tactical choices unchanged while this HoMM3 slice evolves.
+				const double landingThreat = avoidFastDecoys ? 0.0
+					: projectedLandingThreat(battle, stack, *enemy, hex, enemies);
 				const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost)
-					+ shooterPinBonus(stack, hex, shooterPins);
+					+ shooterPinBonus(stack, hex, shooterPins) + landingThreat;
 				if(!target || exchange > bestExchange
 					|| (exchange == bestExchange
 						&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))

@@ -88,6 +88,17 @@ int main()
 		std::array<int, 0>{}, linearDistance),
 		"HoMM3 empty enemy footprint cannot generate score");
 
+	// Source checkAdjacentHexes combines a wide stack's per-cell threats
+	// using min, so the more exposed cell dominates, not their average.
+	require(HoMM3::moreExposedFootprintThreat(-50, -10) == -50,
+		"HoMM3 wide attacker must retain head-cell risk");
+	require(HoMM3::moreExposedFootprintThreat(-5, -70) == -70,
+		"HoMM3 wide attacker must retain tail-cell risk");
+	require(HoMM3::moreExposedFootprintThreat(0, 0) == 0,
+		"HoMM3 empty threat must be neutral");
+	try { HoMM3::moreExposedFootprintThreat(std::numeric_limits<double>::quiet_NaN(), -1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	FHeroes2::TacticsInput input{100, 100, 30, 0, true, false, false};
 	require(selectTactics(input).defensive, "Protect the ranged advantage");
 	input.shootersStrength = 0;

@@ -71,6 +71,15 @@ inline int32_t pinnedShooterValue(double rangedUnitValue, double meleeUnitValue,
 		static_cast<double>(std::numeric_limits<int32_t>::max())));
 }
 
+// checkAdjacentHexes uses the lower enemy_attacks score for two occupied
+// hexes. Native projected incoming-damage scores are negative (danger).
+inline double moreExposedFootprintThreat(double head, double tail)
+{
+	if(!std::isfinite(head) || !std::isfinite(tail))
+		throw std::invalid_argument("HoMM3 landing threat must be finite");
+	return std::min(head, tail);
+}
+
 struct RangedTarget
 {
 	int32_t attackEffect = 0;

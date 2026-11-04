@@ -203,6 +203,18 @@ per-creature combat-value pricing, and does not reconstruct the complete
 multi-head or breath attacks, path-wide threat map, or original threat-array
 scoring. Engine acceptance alone does not prove source decision parity.
 
+The next independent HoMM3-only slice projects the signed landing-risk term
+of the source `checkAdjacentHexes`: for a legal melee destination, native
+damage previews approximate the strongest next attack from another enemy.
+Reach uses a hex-distance upper bound, not a real enemy path; shooter status
+uses currently legal native shooting. Primary-target direct retaliation is
+already accounted for separately. For a wide stack, the more exposed cell
+dominates via the source's `min(enemy_attacks[head], enemy_attacks[tail])`.
+This is NOT an accurate reconstruction of HoMM3's precomputed threat field,
+all possible special attacks or obstacle-aware reachable positions.
+The TUM composition remains unchanged. A two-enemy VCMI battle regression
+exercises this projection and a terminal server battle result.
+
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign
