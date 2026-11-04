@@ -3072,6 +3072,87 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// The pinned type_AI_combat_parameters::simulateAttack executes a second
+// creatureTwoAttacks melee strike only when both stacks survive the first
+// hit and the intervening retaliation. The VCMI projection must be used for
+// choosing a legal attack; the server itself proves the second strike exists.
+// This is not a claim of damage or decision parity with retail Heroes III.
+TEST_F(AIIntegrationNativeBattle, homm3CrusaderSecondStrikeSurvivesRetaliationAndExecutes)
+{
+	prepareBattle(CreatureID(7), 6, CreatureID(6), 6); // Crusaders vs Swordsmen
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+
+	const CStack * crusaders = nullptr;
+	CStack * swordsmen = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(7))
+			crusaders = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(6))
+			swordsmen = unit.get();
+	}
+	ASSERT_NE(crusaders, nullptr);
+	ASSERT_NE(swordsmen, nullptr);
+	ASSERT_GT(crusaders->getTotalAttacks(false), 1)
+		<< "The regression requires a real native two-strike creature";
+	ASSERT_EQ(battle()->battleActiveUnit(), crusaders);
+
+	const BattleHex nearby(crusaders->getPosition().toInt() + 5);
+	ASSERT_TRUE(nearby.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), nullptr);
+	swordsmen->setPosition(nearby);
+	const int64_t before = swordsmen->getAvailableHealth();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	BattleAttackInfo first(crusaders, swordsmen, 0, false);
+	const auto firstEstimate = view->battleEstimateDamage(first);
+	ASSERT_LT(firstEstimate.damage.max, before)
+		<< "The first predicted hit must leave a defender for the second strike";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, crusaders);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK)
+		<< "The source-derived sequential projection must select legal native melee";
+	ASSERT_GE(action.target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(action.target[1].hexValue), swordsmen);
+
+	int crusaderStrikes = 0;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.stackAttacking == static_cast<ui32>(crusaders->unitId())
+			&& !attack.shot() && !attack.counter())
+			++crusaderStrikes;
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "The real VCMI server rejected the Crusaders' double strike";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(crusaderStrikes, 2)
+		<< "The engine must execute both Crusader hits after the first retaliation";
+	EXPECT_LT(swordsmen->getAvailableHealth(), before);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
 	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
