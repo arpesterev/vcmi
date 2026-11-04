@@ -3521,6 +3521,10 @@ TEST_F(AIIntegrationNativeBattle, homm3WideCavalierUsesNativeAttackGeometryAgain
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
+	// Pinned getHexAttackValue checks the shooter's ability to fire at
+	// THIS active attacker, not just a generic legal shot in the battle.
+	ASSERT_TRUE(view->battleCanShoot(closerShooter, cavalier->getPosition()))
+		<< "This native shooter-pin fixture must exercise the target-specific source gate";
 	const auto reach = view->getReachability(cavalier);
 	const auto available = view->battleGetAvailableHexes(reach, cavalier, false);
 	bool legalContact = false;
