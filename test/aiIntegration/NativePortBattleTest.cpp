@@ -1223,6 +1223,31 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned Heroes II MIRRORIMAGE evaluates the newly created duplicate,
+// with an archery-specific source ratio. VCMI's CLONE is the native
+// projection. No mock spawn or substituted spell decision is allowed.
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeCloneAndCompletesBattle)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::CLONE, 20);
+	bool sawNativeClone = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(recorder.castsOf(SpellID::CLONE).empty())
+			return;
+		for(const auto & unit : battle()->stacks)
+			if(unit->alive() && unit->unitSide() == BattleSide::ATTACKER && unit->isClone())
+				sawNativeClone = true;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::CLONE).empty())
+		<< "FHeroes2 must select a native Clone from an observed projection";
+	EXPECT_TRUE(sawNativeClone)
+		<< "The VCMI server must create an actual friendly clone";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeHypnotizeAndCompletesBattle)
 {
 	// Keep a second defending stack alive: an effective control transfer
