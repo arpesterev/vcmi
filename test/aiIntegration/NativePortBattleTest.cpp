@@ -4102,7 +4102,7 @@ TEST_F(AIIntegrationNativeBattle, mixedFHeroes2AttackerAgainstTUMDefenderComplet
 }
 
 // Exercise all six *ordered* source-policy pairings on an identical
-// Grand-Elf-versus-Pikeman fixture for three deterministic native RNG seeds.
+// Archer-versus-Pikeman fixture for three deterministic native RNG seeds.
 // Earlier directed smoke fixtures can use different armies, so do NOT pool
 // their results with this comparison matrix. Three seeds are far too few
 // for a meaningful win-rate confidence interval or AI strength ranking.
