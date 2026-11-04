@@ -13,6 +13,7 @@
 #include "common.h"
 #include "filesystem/Filesystem.h"
 #include "nn_model_v13.h"
+#include "BAI/nn_model_metadata.h"
 #include "BAI/nn_output_validation.h"
 #include "BAI/nn_v13_action_routing.h"
 #include "schema/base.h"
@@ -229,21 +230,10 @@ Schema::Side NNModel::readSide() const
 	 * Battlefield side the model was trained on (see Schema::Side enum).
 	 *
 	 */
-	Schema::Side res;
 	Ort::AllocatedStringPtr v = container->metadata.LookupCustomMetadataMapAllocated("side", container->allocator);
 	if(!v)
 		throw std::runtime_error("metadata error: side: no such key");
-	std::string vs(v.get());
-	try
-	{
-		res = static_cast<Schema::Side>(std::stoi(vs));
-	}
-	catch(...)
-	{
-		throw std::runtime_error("metadata error: side: not an int");
-	}
-
-	return res;
+	return parseNNModelSide(v.get());
 }
 
 Vec3D<int32_t> NNModel::readActionTable() const
@@ -433,6 +423,8 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 		throwf("getAction: anycast failed: %s", err);
 
 	const auto * sup = std::any_cast<const MMAI::Schema::V13::ISupplementaryData *>(any);
+	if(!sup)
+		throwf("getAction: null supplementary data");
 
 	if(sup->getIsBattleEnded())
 	{

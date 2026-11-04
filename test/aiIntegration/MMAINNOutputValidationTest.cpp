@@ -6,6 +6,7 @@
 
 #ifdef ENABLE_MMAI
 #include "../../AI/MMAI/BAI/nn_output_validation.h"
+#include "../../AI/MMAI/BAI/nn_model_metadata.h"
 #include "../../AI/MMAI/BAI/nn_v13_action_routing.h"
 
 #include <algorithm>
@@ -124,6 +125,20 @@ TEST(MMAINNOutputValidation, V13RejectsJaggedActionTableMetadata)
 	EXPECT_THROW(validateV13ActionTableShape(table), std::runtime_error);
 	table[2][164].push_back(0);
 	EXPECT_NO_THROW(validateV13ActionTableShape(table));
+}
+
+
+TEST(MMAINNOutputValidation, RejectsInvalidModelSideMetadata)
+{
+	using MMAI::BAI::parseNNModelSide;
+	using MMAI::Schema::Side;
+	EXPECT_EQ(parseNNModelSide("0"), Side::LEFT);
+	EXPECT_EQ(parseNNModelSide("1"), Side::RIGHT);
+	EXPECT_EQ(parseNNModelSide("2"), Side::BOTH);
+
+	// stoi alone accepted suffixes and out-of-range enum values.
+	for(const std::string & value : {"", "1garbage", "2.0", "-1", "3", "99999999999999999999"})
+		EXPECT_THROW(parseNNModelSide(value), std::runtime_error);
 }
 
 #endif

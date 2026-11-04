@@ -9,6 +9,7 @@
  */
 
 #include "nn_model_v15.h"
+#include "BAI/nn_model_metadata.h"
 #include "BAI/nn_output_validation.h"
 
 #include "schema/base.h"
@@ -317,18 +318,7 @@ Schema::Side NNModel::readSide() const
 	 *
 	 * Battlefield side the model was trained on (see Schema::Side enum).
 	 */
-	Schema::Side res;
-	const auto vs = readMetadata(container, "side");
-	try
-	{
-		res = static_cast<Schema::Side>(std::stoi(vs));
-	}
-	catch(...)
-	{
-		throw std::runtime_error("metadata error: side: not an int");
-	}
-
-	return res;
+	return parseNNModelSide(readMetadata(container, "side"));
 }
 
 std::vector<NNModel::NodeInputSpec> NNModel::readNodeOrder() const
