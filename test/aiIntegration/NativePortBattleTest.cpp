@@ -4768,7 +4768,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelArrowTowerSendsNativeShotBeforeCompl
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(0), 160);
 	ASSERT_TRUE(gameHandler->insertNewStack(
-		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 40));
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 160));
 	const auto * town = findFirst<CGTownInstance>();
 	ASSERT_NE(town, nullptr);
 	if(town->fortificationsLevel().wallsHealth <= 0)
@@ -4824,7 +4824,30 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelArrowTowerSendsNativeShotBeforeCompl
 		}
 	}
 	ASSERT_NE(expected, nullptr) << "Native arrow tower must have a legal target";
+	// The documented Blind/Paralyze/Petrification target exclusion belongs
+	// specifically to TUM's BALLISTA. Do not accidentally propagate it to
+	// arrow towers. Two equal peasant stacks give the independent partial
+	// HoMM3 ranged scorer a meaningful alternative when one is Blinded.
+	CStack * disabledTowerTarget = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitId() == expected->unitId())
+			disabledTowerTarget = unit.get();
+	}
+	ASSERT_NE(disabledTowerTarget, nullptr);
+	disabledTowerTarget->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::SPELL_EFFECT,
+		1, BonusSourceID(SpellID(SpellID::BLIND)), BonusSubtypeID(SpellID(SpellID::BLIND))));
+	ASSERT_TRUE(disabledTowerTarget->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(view->battleCanShoot(tower, expected->getPosition()))
+		<< "A native tower shot must remain legal against the disabled target";
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT)
+		<< "The independent HoMM3 shooter must retain an ordinary legal target";
+	ASSERT_FALSE(baseline.target.empty());
+	EXPECT_NE(baseline.target.front().unitValue, expected->unitId())
+		<< "The partial HoMM3 scorer should downrank an incapacitated target";
+
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
