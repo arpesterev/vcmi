@@ -580,6 +580,29 @@ private:
 		if(totalShooterStrength <= 0)
 			return std::nullopt;
 
+		// Pinned fheroes2 analyzeBattleState sets _avoidStackingUnits when
+		// active area-shot archers make up more than 10% of enemy strength.
+		// Its meleeUnitDefense then looks one more cell away when screening
+		// friendly archers. VCMI SHOOTS_ALL_ADJACENT is only a native splash
+		// projection, not an assertion that Heroes II and III area shots agree.
+		// In particular, incapacitated or engaged enemy shooters do not
+		// project a ranged splash shot for this turn.
+		double enemyStrength = 0;
+		double areaShotStrength = 0;
+		for(const auto * enemy : enemies)
+		{
+			if(!enemy->alive())
+				continue;
+			const double value = strength(*enemy);
+			enemyStrength += value;
+			if(enemy->isShooter() && enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
+				&& battle.battleCanShoot(enemy))
+				areaShotStrength += value;
+		}
+		const bool avoidSplashGrouping = enemyStrength > 0
+			&& areaShotStrength / enemyStrength > 0.1;
+		const int coverGap = avoidSplashGrouping ? 2 : 1;
+
 		BattleHex bestCoverHex;
 		double bestCoverValue = -std::numeric_limits<double>::infinity();
 		int bestTravel = GameConstants::BFIELD_SIZE;
@@ -610,7 +633,7 @@ private:
 			// Treat its current screen as a zero-travel candidate, then
 			// compare every reachable cover using the same source-derived
 			// archer-strength / travel-penalty ranking.
-			if(distanceToShooter(stack.getPosition(), *friendly) == 1)
+			if(distanceToShooter(stack.getPosition(), *friendly) == coverGap)
 			{
 				const double value = strength(*friendly);
 				if(value > bestCoverValue)
@@ -625,7 +648,7 @@ private:
 			for(const auto & hex : available)
 			{
 				if(!hex.isAvailable() || hex == stack.getPosition()
-					|| distanceToShooter(hex, *friendly) != 1)
+					|| distanceToShooter(hex, *friendly) != coverGap)
 					continue;
 				const int travel = reachability.distances[hex.toInt()];
 				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))
