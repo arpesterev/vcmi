@@ -718,6 +718,9 @@ Ort::Value NNModel::toTensor(const std::string & name, std::vector<T> & vec, con
 
 	if(numel != vec.size())
 		throwf("toTensor: %s: numel check failed: want: %d, have: %d", name, numel, vec.size());
+	// Graph encoder failures must not turn into undefined neural decisions.
+	if constexpr(std::is_same_v<T, float>)
+		validateNNObservationValues(vec, name);
 
 	// Create a memory-owning tensor then copy data
 	auto res = Ort::Value::CreateTensor<T>(container->allocator, shape.data(), shape.size());
