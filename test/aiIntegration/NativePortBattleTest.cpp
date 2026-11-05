@@ -5500,6 +5500,89 @@ TEST_F(AIIntegrationNativeBattle, tumBlindNeutralThreatDoesNotBreakShooterScreen
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// TUM's published neutral screen may WAIT on its first safe activation and
+// DEFEND only on the delayed second activation. Test both real server commands:
+// a one-shot proposal does not establish that the WAIT/DEFEND sequence is legal.
+// Permanent creature-source Paralyze is fixture setup, not an ability proc.
+TEST_F(AIIntegrationNativeBattle, tumNeutralScreenWaitThenDefendAreBothAcceptedByServer)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 180);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	CStack * opponent = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			opponent = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(opponent, nullptr);
+	// Ensure there is a genuine geometric next-turn threat absent the disable.
+	opponent->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED, BonusSource::OTHER, 25, BonusSourceID()));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reach = view->getReachability(opponent);
+	bool canThreaten = false;
+	for(const auto & hex : melee->getAttackableHexes(opponent))
+	{
+		if(hex.isValid() && view->isMeleeAttackPossible(opponent, melee, hex)
+			&& reach.distances[hex.toInt()] <= static_cast<int>(opponent->getMovementRange()))
+		{
+			canThreaten = true;
+		}
+	}
+	ASSERT_TRUE(canThreaten) << "The neutral would reach our line without Paralyze";
+	opponent->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	ASSERT_TRUE(opponent->hasBonusOfType(BonusType::NOT_ACTIVE));
+
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_NE(baseline.actionType, EActionType::WAIT);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::WAIT);
+	const int meleeId = melee->unitId();
+	policy.reset();
+
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	ASSERT_TRUE(lastFirstAcceptedActionTypeByUnit.contains(meleeId));
+	EXPECT_EQ(lastFirstAcceptedActionTypeByUnit.at(meleeId), EActionType::WAIT)
+		<< "The real server must accept WAIT before the delayed action";
+	EXPECT_GT(lastAcceptedActionTypesByUnit[meleeId][EActionType::DEFEND], 0)
+		<< "The same stack must legally DEFEND after its first WAIT while the screen remains safe";
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // A non-melee native unit may have apparent geometric reach yet cannot
 // execute the melee attack that TUM's published neutral-screen trigger fears.
 // In this modded-creature fixture SIEGE_WEAPON removes melee capability from a
