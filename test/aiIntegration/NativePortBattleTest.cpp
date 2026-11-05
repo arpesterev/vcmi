@@ -5244,7 +5244,9 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 // magically travel across the field during the target-value preview.
 TEST_F(AIIntegrationNativeBattle, homm3RangedStationaryEnemyUsesNativeLegalShot)
 {
-	prepareBattle(CreatureID(2), 60, CreatureID(0), 35);
+	// Leave the defending Peasants alive after the first shot so the full
+	// native server loop, not only the opening command, finishes the fight.
+	prepareBattle(CreatureID(2), 12, CreatureID(0), 35);
 	ASSERT_FALSE(HasFatalFailure());
 	const CStack * archer = nullptr;
 	CStack * grounded = nullptr;
