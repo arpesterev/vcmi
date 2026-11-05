@@ -3273,6 +3273,87 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeThirdMeleeStrikeExecutesWithoutExtr
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Pinned retail simulateAttack prices only one ranged strike. VCMI's actual
+// makeRangedAttack supports additional shots and spends ammunition on each.
+// Confirm that the HoMM3-only projection chooses a legal real engine shot,
+// while the authoritative server independently proves the second volley.
+// This is native host-engine behavior, not source-identical Heroes III AI.
+TEST_F(AIIntegrationNativeBattle, homm3MarksmenExecuteTwoNativeShotsAfterIndependentDecision)
+{
+	prepareBattle(CreatureID(3), 12, CreatureID(6), 20); // Marksmen vs Swordsmen
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * marksmen = nullptr;
+	CStack * swordsmen = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			marksmen = unit.get();
+		else
+			swordsmen = unit.get();
+	}
+	ASSERT_NE(marksmen, nullptr);
+	ASSERT_NE(swordsmen, nullptr);
+	ASSERT_EQ(marksmen->getTotalAttacks(true), 2);
+	ASSERT_GE(marksmen->shots.available(), 2);
+	battle()->activeStack = marksmen->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(marksmen, swordsmen->getPosition()));
+	const int64_t beforeMarksmen = marksmen->getAvailableHealth();
+	const int64_t beforeSwordsmen = swordsmen->getAvailableHealth();
+	BattleAttackInfo first(marksmen, swordsmen, 0, true);
+	const auto estimate = view->battleEstimateDamage(first);
+	ASSERT_GT(estimate.damage.min, 0);
+	ASSERT_LT(estimate.damage.max * 2, beforeSwordsmen)
+		<< "Both modelled ranged hits must have a live target";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, marksmen);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::SHOOT)
+		<< "HoMM3OriginalTactics must independently select the ranged attack";
+	ASSERT_FALSE(action.target.empty());
+	EXPECT_EQ(action.target[0].hexValue, swordsmen->getPosition());
+	EXPECT_EQ(marksmen->getAvailableHealth(), beforeMarksmen);
+	EXPECT_EQ(swordsmen->getAvailableHealth(), beforeSwordsmen);
+
+	int shotPackets = 0;
+	const auto marksmenID = static_cast<ui32>(marksmen->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(packet.stackAttacking == marksmenID && packet.shot() && !packet.counter())
+			++shotPackets;
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "The VCMI server rejected HoMM3's selected double-shot attack";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(shotPackets, 2) << "The actual server must fire both Marksman volleys";
+	EXPECT_LT(swordsmen->getAvailableHealth(), beforeSwordsmen);
+	EXPECT_EQ(marksmen->getAvailableHealth(), beforeMarksmen);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 1);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // The pinned simulateAttack subtracts casualties before retaliation,
 // even for a single-blow melee attacker. Native VCMI battleEstimateDamage
 // already provides a post-hit damage interval in that case. Confirm this
