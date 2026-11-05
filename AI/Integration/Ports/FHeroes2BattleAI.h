@@ -644,8 +644,11 @@ private:
 				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				totalShooterStrength += strength(*friendly);
 		}
-		if(totalShooterStrength <= 0)
-			return std::nullopt;
+		// Do not return just because the mobile-shooter sum is zero.
+		// Pinned meleeUnitDefense still visits individual immobile friendly
+		// archers as cover candidates, with a zero distance penalty (notably
+		// possible behind castle towers). No shooter means the loop below
+		// naturally yields no candidate.
 
 		// Pinned fheroes2 analyzeBattleState sets _avoidStackingUnits when
 		// active area-shot archers make up more than 10% of enemy strength.
