@@ -3952,6 +3952,14 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherValuesRangedRetaliation)
 		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION, BonusSource::CREATURE_ABILITY,
 		1, BonusSourceID(CreatureID(2))));
 	ASSERT_TRUE(retaliator->hasBonusOfType(BonusType::RANGED_RETALIATION));
+	// VCMI battleMatchOwner compares a defender's original battle side,
+	// so a normal former ally cannot return fire on its hypnotized side.
+	// Give this fixture native Berserk targeting too: the actual server
+	// then permits ranged retaliation. This is not a natural TUM proc.
+	retaliator->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::ATTACKS_NEAREST_CREATURE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(2))));
+	ASSERT_TRUE(retaliator->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
 	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
 	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, archer));
 	ASSERT_TRUE(archer->isHypnotized());
