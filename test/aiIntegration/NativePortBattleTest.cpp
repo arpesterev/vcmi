@@ -3650,6 +3650,132 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MeleeSplashChoosesActualNativeMultiTar
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveArcherUnblockValuesNativeMultiTargetMelee)
+{
+	// Pinned ai_battle.cpp::meleeUnitDefense uses BestAttackOutcome when
+	// freeing a shooter. Its optimalAttackValue/Vector includes the other
+	// creatures struck by a Hydra-style attack. Native VCMI owns the attack
+	// geometry: the fixture grants the special ability to one live stack
+	// without modifying creature definitions or gameplay rules.
+	prepareBattle(CreatureID(1), 100, CreatureID(0), 45);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * guard = nullptr;
+	CStack * strongBlocker = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(1))
+			guard = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			strongBlocker = unit.get();
+	}
+	ASSERT_NE(guard, nullptr);
+	ASSERT_NE(strongBlocker, nullptr);
+	ASSERT_FALSE(guard->isShooter());
+	const BattleHex center(GameConstants::BFIELD_SIZE / 2);
+	const BattleHex shooterHex(center.toInt() + 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex strongHex(shooterHex.toInt() + 1);
+	const BattleHex weakHex(shooterHex.toInt() - 1);
+	const BattleHex secondaryHex(shooterHex.toInt() - 2);
+	for(const auto & hex : {center, shooterHex, strongHex, weakHex, secondaryHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr)
+			<< "Directed unblock regression requires unobstructed native cells";
+	}
+	guard->setPosition(center);
+	strongBlocker->setPosition(strongHex);
+	const CStack * archer = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 120);
+	const CStack * weakBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), weakHex, 20);
+	const CStack * secondary = addStack(BattleSide::DEFENDER, CreatureID(0), secondaryHex, 70);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(weakBlocker, nullptr);
+	ASSERT_NE(secondary, nullptr);
+	ASSERT_TRUE(archer->isShooter());
+	ASSERT_EQ(BattleHex::getDistance(shooterHex, strongHex), 1);
+	ASSERT_EQ(BattleHex::getDistance(shooterHex, weakHex), 1);
+	ASSERT_GT(BattleHex::getDistance(shooterHex, secondaryHex), 1)
+		<< "Secondary victim must not itself qualify as an archer blocker";
+	ASSERT_FALSE(battle()->battleCanShoot(archer));
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, guard);
+		return callback->action;
+	};
+
+	const auto ordinary = decide();
+	ASSERT_TRUE(ordinary.has_value());
+	ASSERT_EQ(ordinary->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(ordinary->target.size(), 2u);
+	EXPECT_EQ(battle()->battleGetUnitByPos(ordinary->target[1].hexValue), strongBlocker)
+		<< "Without area melee the stronger archer blocker should be attacked";
+
+	guard->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::ATTACKS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(guard->hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT));
+	const auto routes = battle()->getReachability(guard);
+	const auto available = battle()->battleGetAvailableHexes(routes, guard, false);
+	bool nativeMultiVictimVectorExists = false;
+	for(const auto & from : available)
+	{
+		if(!from.isAvailable() || battle()->meleeAttackHexes(guard, weakBlocker, from).empty())
+			continue;
+		const auto victims = battle()->getAttackedBattleUnits(
+			guard, weakBlocker, weakHex, false, from);
+		nativeMultiVictimVectorExists |= std::find(victims.begin(), victims.end(), secondary)
+			!= victims.end();
+	}
+	ASSERT_TRUE(nativeMultiVictimVectorExists)
+		<< "The fixture must have a reachable real area attack on the second victim";
+
+	const auto chosen = decide();
+	ASSERT_TRUE(chosen.has_value());
+	ASSERT_EQ(chosen->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Defensive FHeroes2 should still free the blocked shooter by melee";
+	ASSERT_GE(chosen->target.size(), 2u);
+	const BattleHex from = chosen->target[0].hexValue;
+	const BattleHex aimed = chosen->target[1].hexValue;
+	EXPECT_EQ(battle()->battleGetUnitByPos(aimed), weakBlocker)
+		<< "Including native secondary damage must change the independent blocker choice";
+	const auto selectedVictims = battle()->getAttackedBattleUnits(
+		guard, weakBlocker, aimed, false, from);
+	EXPECT_NE(std::find(selectedVictims.begin(), selectedVictims.end(), secondary),
+		selectedVictims.end()) << "The selected attack must include a real second victim";
+	std::vector<int> injured;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		for(const auto & hit : attack.bsa)
+			if(hit.damageAmount > 0 && std::find(injured.begin(), injured.end(),
+				hit.stackAttacked) == injured.end())
+				injured.push_back(hit.stackAttacked);
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *chosen))
+		<< "Authoritative VCMI rejected the source-derived unblock vector";
+	EXPECT_NE(std::find(injured.begin(), injured.end(), weakBlocker->unitId()), injured.end());
+	EXPECT_NE(std::find(injured.begin(), injured.end(), secondary->unitId()), injured.end())
+		<< "A native melee splash must injure the non-blocking secondary target";
+	recorder.onAttackBeforeApply = {};
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 {
 	// Original fheroes2 archerDecision accounts for multiple area victims.
