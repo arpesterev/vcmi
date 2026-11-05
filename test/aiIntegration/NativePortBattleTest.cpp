@@ -4129,6 +4129,26 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherValuesRangedRetaliation)
 	counter.attackerPos = retaliator->getPosition();
 	const auto counterEstimate = view->battleEstimateDamage(counter, nullptr);
 	ASSERT_GT(counterEstimate.damage.min, 0);
+	// The server processes first-shot losses before a ranged return shot.
+	// Prove that a copy of the actual target, after the guaranteed minimum
+	// shot damage, has less counterfire than the untouched live stack.
+	// This is also a guard against preview mutating the authoritative state.
+	const auto originalRetaliatorHealth = retaliator->getAvailableHealth();
+	BattleAttackInfo firstShot(archer, retaliator, 0, true);
+	firstShot.attackerPos = archer->getPosition();
+	const auto firstShotEstimate = view->battleEstimateDamage(firstShot, nullptr);
+	ASSERT_GT(firstShotEstimate.damage.min, 0);
+	auto survivor = retaliator->acquireState();
+	survivor->damage(firstShotEstimate.damage.min);
+	ASSERT_TRUE(survivor->alive());
+	ASSERT_LT(survivor->getAvailableHealth(), originalRetaliatorHealth);
+	BattleAttackInfo survivorCounter(survivor.get(), archer, 0, true);
+	survivorCounter.attackerPos = retaliator->getPosition();
+	const auto survivorEstimate = view->battleEstimateDamage(survivorCounter, nullptr);
+	ASSERT_LT(survivorEstimate.damage.max, counterEstimate.damage.max)
+		<< "The fixture must expose casualty-sensitive native ranged retaliation";
+	EXPECT_EQ(retaliator->getAvailableHealth(), originalRetaliatorHealth)
+		<< "Ranged retaliation preview may not injure the live target";
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *archer);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(baseline.target.empty());
@@ -4152,6 +4172,8 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherValuesRangedRetaliation)
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_EQ(callback->action->target.front().unitValue, retaliator->unitId())
 		<< "TUM should reward the incoming ranged countershot";
+	EXPECT_EQ(retaliator->getAvailableHealth(), originalRetaliatorHealth)
+		<< "Independent TUM scoring must not mutate the enemy's live stack";
 	bool serverCounterShot = false;
 	const int retaliatorId = retaliator->unitId();
 	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
