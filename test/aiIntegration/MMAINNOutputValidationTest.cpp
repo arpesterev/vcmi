@@ -528,6 +528,33 @@ TEST(MMAINNOutputValidation, V13RejectsIllegalTargetBeforeEngineDispatch)
 	}
 }
 
+TEST(MMAINNOutputValidation, V13RejectsReplacedShootHexTargetBeforeDispatch)
+{
+	using MMAI::BAI::requireNNV13SelectedShootHexTarget;
+	struct Stack { int id; };
+	const Stack original{1};
+	const Stack replacement{2};
+
+	// Both pointers may identify still-living stacks, and the original
+	// stack may remain shootable *elsewhere*. V13's model chose the old
+	// hex, not a permission to follow that stack to a new position.
+	EXPECT_NO_THROW(requireNNV13SelectedShootHexTarget(&original, &original));
+	EXPECT_THROW(requireNNV13SelectedShootHexTarget(&original, &replacement), std::runtime_error);
+	EXPECT_THROW(requireNNV13SelectedShootHexTarget(&original, static_cast<const Stack *>(nullptr)), std::runtime_error);
+	EXPECT_THROW(requireNNV13SelectedShootHexTarget(static_cast<const Stack *>(nullptr), &replacement), std::runtime_error);
+	EXPECT_THROW(requireNNV13SelectedShootHexTarget(static_cast<const Stack *>(nullptr), static_cast<const Stack *>(nullptr)), std::runtime_error);
+
+	try
+	{
+		requireNNV13SelectedShootHexTarget(&original, &replacement);
+		FAIL() << "V13 silently redirected an ONNX-selected SHOOT hex";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("V13: model SHOOT selected hex"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V13RejectsMoveOutsideLiveEngineReachability)
 {
 	using MMAI::BAI::requireNNV13LegalMove;
