@@ -139,10 +139,16 @@ class FHeroes2SpellPolicy
 		if(damage <= 0 || health <= 0)
 			return 0;
 		const double strength = static_cast<double>(unit.estimateCombatValue());
+		// Pinned fheroes2 spellDamageValue uses effective speed to
+		// prioritize removing dangerous units. VCMI Blind can leave a
+		// positive raw movement range despite NOT_ACTIVE.
 		if(static_cast<double>(damage) >= health)
-			return strength + side.strength * (unit.getMovementRange() > side.averageSpeed() ? 0.07 : 0.035);
+			return strength + side.strength * (actingSpeed(unit) > side.averageSpeed() ? 0.07 : 0.035);
 		double fraction = static_cast<double>(damage) / health;
-		if(unit.isFrozen())
+		// Source isImmovable penalizes partially damaging an incapacitated
+		// enemy: survivors wake up. VCMI isFrozen() only denotes Stone Gaze;
+		// native Blind/Paralyze instead expose NOT_ACTIVE.
+		if(unit.isFrozen() || unit.hasBonusOfType(BonusType::NOT_ACTIVE))
 			fraction += fraction - 1;
 		return strength * fraction;
 	}

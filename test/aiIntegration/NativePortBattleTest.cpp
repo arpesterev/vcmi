@@ -2227,6 +2227,76 @@ TEST_F(AIIntegrationNativeBattle, resurrectionUsesRealCasualtiesAndCompletesBatt
 	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
 }
 
+// Pinned spellDamageValue penalizes partial damage to immovable units.
+// A genuine VCMI Blind sets NOT_ACTIVE but not isFrozen() (Stone Gaze).
+// The independent FHeroes2 spell decision must not wake the blinded
+// enemy when the same real Magic Arrow can hit an active one.
+TEST_F(AIIntegrationNativeBattle, fheroes2MagicArrowAvoidsWakingBlindedEnemy)
+{
+	prepareBattle(CreatureID(0), 25, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * blinded = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			blinded = unit.get();
+	ASSERT_NE(blinded, nullptr);
+	const BattleHex otherHex(blinded->getPosition().toInt() + GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(otherHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(otherHex), nullptr);
+	const CStack * other = addStack(BattleSide::DEFENDER, CreatureID(0), otherHex, 80);
+	ASSERT_NE(other, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blinded));
+	ASSERT_TRUE(blinded->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_FALSE(blinded->isFrozen());
+	ASSERT_GT(blinded->getMovementRange(), 0u);
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 6);
+	// Real round change restores spell availability after the setup cast.
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	for(int i = 0; i < 12 && active && active->unitSide() != BattleSide::ATTACKER; ++i)
+	{
+		ASSERT_TRUE(defend(active));
+		active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	}
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto blindedHP = blinded->getAvailableHealth();
+	const auto otherHP = other->getAvailableHealth();
+	auto observer = std::make_shared<DecisionCallback>(player);
+	observer->onBattleStarted(battle());
+	auto ai = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(ai, nullptr);
+	ai->playerID = player;
+	auto env = std::make_shared<NativePortEnvironment>(makeCallback(player), observer);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = true;
+	ai->initBattleInterface(env, observer, prefs);
+	ai->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	ai->activeStack(battleID, active);
+	ASSERT_TRUE(observer->action.has_value());
+	ASSERT_TRUE(observer->spellAction) << "Expected independent FHeroes2 hero spell";
+	const auto action = *observer->action;
+	ASSERT_EQ(action.spell, SpellID(SpellID::MAGIC_ARROW));
+	EXPECT_TRUE(std::any_of(action.target.begin(), action.target.end(), [&](const auto & aim)
+	{
+		return aim.unitValue == other->unitId() || aim.hexValue == other->getPosition();
+	})) << "Magic Arrow must select the active enemy: " << action.toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action));
+	ASSERT_EQ(recorder.castsOf(SpellID::MAGIC_ARROW).size(), 1u);
+	EXPECT_EQ(blinded->getAvailableHealth(), blindedHP);
+	EXPECT_LT(other->getAvailableHealth(), otherHP);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatPreservesForgottenArcherStrength)
 {
 	// fheroes2's spell-conservation threshold uses strategic archer strength,
