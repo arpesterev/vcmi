@@ -135,6 +135,29 @@ int main()
 	try { HoMM3::projectedNativeRangedThreat(true, false, false, false, false, 0, -1); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// VCMI battleCanShoot queries the OLD board. When our mobile blocker
+	// leaves a normal archer, the future threat must reappear only if no
+	// independent hostile stack still pins it. A new landing next to the
+	// same archer or an out-of-range target remains safe from that shot.
+	require(HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, false),
+		"Moving the sole melee blocker away reopens the archer's shot");
+	require(!HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, true),
+		"A second blocker keeps the archer pinned after the mover leaves");
+	require(!HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, false, false),
+		"A shot cannot appear if the moving unit was not the blocker");
+	require(!HoMM3::projectedShooterReadyAfterMoverLeaves(false, false, true, false),
+		"No ammunition or disabled shooting cannot be revived by movement");
+	require(HoMM3::projectedShooterReadyAfterMoverLeaves(true, true, false, false),
+		"An already legal shot remains legal before hypothetical contact checks");
+	require(!HoMM3::projectedNativeRangedThreat(
+		HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, false),
+		true, false, false, false, 0, 1),
+		"Unpinning does not allow a normal archer to shoot a newly adjacent target");
+	require(!HoMM3::projectedNativeRangedThreat(
+		HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, false),
+		false, false, false, true, 2, 3),
+		"A recovered archer still obeys its native limited shooting range");
+
 	// Source checkAdjacentHexes combines a wide stack's per-cell threats
 	// using min, so the more exposed cell dominates, not their average.
 	require(HoMM3::moreExposedFootprintThreat(-50, -10) == -50,
