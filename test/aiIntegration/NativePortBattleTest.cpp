@@ -4883,6 +4883,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeMeleeFirstStrikePrecedesOwnHit)
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
+	BattleAttackInfo counterPreview(defender, attacker, 0, false);
+	counterPreview.attackerPos = defender->getPosition();
+	counterPreview.defenderPos = attacker->getPosition();
+	EXPECT_GT(view->battleEstimateDamage(counterPreview).damage.min, 0)
+		<< "The fixture must actually expose the attacker to a damaging preemptive hit";
 	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
