@@ -93,7 +93,7 @@ public:
 private:
 	std::shared_ptr<CBattleCallback> cb;
 
-	static bool hasDisabledEffect(const CStack & unit)
+	static bool hasDisabledEffect(const battle::Unit & unit)
 	{
 		// The generic isFrozen() method checks only STONE_GAZE in VCMI.
 		const auto disabledBy = [&](SpellID spell)
@@ -147,6 +147,24 @@ private:
 				|| (preserveDisabledTargets && hasDisabledEffect(*enemy))
 				|| !battle.battleCanShoot(&stack, enemy->getPosition()))
 				continue;
+			// TUM forbids ballista attacks against disabled enemies. VCMI
+			// can give a ballista an area shot via mod bonuses: aiming beside
+			// Blind/Paralyze/Petrification would still wake that disabled unit.
+			// Use the engine's ACTUAL affected-unit list, not distance guesses,
+			// before considering this otherwise-legal shot. Arrow towers do
+			// not inherit the published ballista-only prohibition.
+			if(preserveDisabledTargets)
+			{
+				const auto impacted = battle.getAttackedBattleUnits(
+					&stack, enemy, enemy->getPosition(), true);
+				if(std::any_of(impacted.begin(), impacted.end(),
+					[&](const battle::Unit * hit)
+					{
+						return hit && battle.battleGetOwner(hit) != battle.battleGetOwner(&stack)
+							&& hasDisabledEffect(*hit);
+					}))
+					continue;
+			}
 			// VCMI resolves ranged FIRST_STRIKE retaliation before the siege
 			// machine fires its opening shot. A guaranteed lethal countershot
 			// therefore leaves no volley to value. This is a host-engine safety

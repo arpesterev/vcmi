@@ -5714,6 +5714,132 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 		<< "Native ballista shot must not wake any of the three disabled stacks";
 }
 
+// The TUM ballista must not wake an incapacitated enemy indirectly when
+// VCMI grants it a real SHOOTS_ALL_ADJACENT attack. The vanilla ballista is
+// single-target, so the area bonus is an explicit mod-capability fixture.
+// Native impact geometry, an independent HoMM3 choice, an accepted ballista
+// shot and the completed server battle are all checked.
+TEST_F(AIIntegrationNativeBattle, tumBallistaAvoidsNativeSplashOntoParalyzedEnemy)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 70);
+	setArmy(defenderSideHero, CreatureID(0), 1);
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	CStack * ballista = nullptr;
+	const CStack * safe = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER
+			&& unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER
+			&& unit->creatureId() == CreatureID(0))
+			safe = unit.get();
+	}
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_NE(safe, nullptr);
+	ballista->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SHOOTS_ALL_ADJACENT,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(ballista->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+
+	BattleHex clusterHex;
+	BattleHex disabledHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE && !clusterHex.isValid(); ++index)
+	{
+		const BattleHex candidate(index);
+		if(!candidate.isAvailable() || candidate.getX() < 8 || candidate.getX() > 11
+			|| battle()->battleGetUnitByPos(candidate)
+			|| BattleHex::getDistance(candidate, safe->getPosition()) < 5)
+			continue;
+		for(const auto & neighbour : candidate.getNeighbouringTiles())
+		{
+			if(neighbour.isAvailable() && !battle()->battleGetUnitByPos(neighbour)
+				&& BattleHex::getDistance(neighbour, safe->getPosition()) >= 4)
+			{
+				clusterHex = candidate;
+				disabledHex = neighbour;
+				break;
+			}
+		}
+	}
+	ASSERT_TRUE(clusterHex.isValid());
+	ASSERT_TRUE(disabledHex.isValid());
+	const CStack * valuable = addStack(BattleSide::DEFENDER, CreatureID(0), clusterHex, 250);
+	CStack * disabled = addStack(BattleSide::DEFENDER, CreatureID(0), disabledHex, 1);
+	ASSERT_NE(valuable, nullptr);
+	ASSERT_NE(disabled, nullptr);
+	disabled->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	ASSERT_TRUE(disabled->hasBonusOfType(BonusType::NOT_ACTIVE));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(ballista, valuable->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(ballista, safe->getPosition()));
+	const auto hitsDisabled = [&](const CStack * target)
+	{
+		const auto hits = view->getAttackedBattleUnits(
+			ballista, target, target->getPosition(), true);
+		return std::any_of(hits.begin(), hits.end(), [&](const battle::Unit * hit)
+		{
+			return hit && hit->unitId() == disabled->unitId();
+		});
+	};
+	ASSERT_TRUE(hitsDisabled(valuable))
+		<< "The engine must confirm splash from the valuable shot onto Paralyze";
+	ASSERT_FALSE(hitsDisabled(safe))
+		<< "The alternate native shot must leave Paralyze untouched";
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+	ASSERT_EQ(baseline.target.front().unitValue, valuable->unitId())
+		<< "The fixture must distinguish the partial HoMM3 decision from TUM";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, safe->unitId())
+		<< "TUM must reject a ballista shot that would wake Paralyze via native splash";
+	const auto disabledHealthBefore = disabled->getAvailableHealth();
+	battle()->activeStack = ballista->unitId();
+	const int shotsBefore = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player,
+		*callback->action)) << "Server rejected the independently selected safe shot";
+	EXPECT_GT(recorder.shots, shotsBefore);
+	EXPECT_EQ(disabled->getAvailableHealth(), disabledHealthBefore)
+		<< "The actual engine shot must not wake the disabled neighbour";
+	std::cout << "AI_TUM_SPLASH_GUARD homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
 {
 	startRecordedGame();
