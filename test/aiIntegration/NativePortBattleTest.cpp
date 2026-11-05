@@ -297,11 +297,11 @@ protected:
 	}
 
 	void prepareSiege(bool includeDefenderShooter = false, CreatureID defenderType = CreatureID(0),
-		int defenderCount = 30)
+		int defenderCount = 30, CreatureID attackerType = CreatureID(10), int attackerCount = 30)
 	{
 		startRecordedGame();
 		ASSERT_FALSE(HasFatalFailure());
-		setArmy(attackerSideHero, CreatureID(10), 30);
+		setArmy(attackerSideHero, attackerType, attackerCount);
 		ASSERT_FALSE(HasFatalFailure());
 		const auto * town = findFirst<CGTownInstance>();
 		ASSERT_NE(town, nullptr);
@@ -326,7 +326,8 @@ protected:
 
 	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true,
 		const std::string & backendName = "FHeroes2Tactics", const std::string & defenderBackend = "",
-		bool requireBothSidesAct = false)
+		bool requireBothSidesAct = false,
+		std::function<void(const BattleAction &, BattleSide, BattleHex)> onAcceptedAction = {})
 	{
 		const std::string & attackerAI = backendName;
 		const std::string & defenderAI = defenderBackend.empty() ? backendName : defenderBackend;
@@ -395,11 +396,19 @@ protected:
 					damageTakenBySide[victim->unitSide()] += injury.damageAmount;
 			}
 		};
-		recorder.onUnitsChangedAfterApply = [&](const BattleUnitsChanged & units)
+		// A directed native regression may subscribe to actual server unit
+		// changes before starting the runner. Preserve that observer while
+		// delivering the same packet to every experimental AI adapter.
+		// Previously this assignment silently replaced the summon observer,
+		// yielding a false-negative even though unit-change packets arrived.
+		const auto priorUnitChangeObserver = recorder.onUnitsChangedAfterApply;
+		recorder.onUnitsChangedAfterApply = [&, priorUnitChangeObserver](const BattleUnitsChanged & units)
 		{
 			for(auto & entry : policies)
 				entry.second->battleUnitsChanged(units.battleID, units.changedStacks);
 			++deliveredUnitChangeEvents;
+			if(priorUnitChangeObserver)
+				priorUnitChangeObserver(units);
 		};
 		recorder.onObstaclesChangedAfterApply = [&](const BattleObstaclesChanged & obstacles)
 		{
@@ -425,7 +434,11 @@ protected:
 				entry.second->battleTriggerEffect(trigger.battleID, trigger);
 			++deliveredTriggerEvents;
 		};
-		recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
+		// A directed native spell regression may already observe teleport
+		// movement packets. Preserve the observer while still forwarding
+		// the packet to both real battle policy adapters.
+		const auto priorMovementObserver = recorder.onMovementBeforeApply;
+		recorder.onMovementBeforeApply = [&, priorMovementObserver](const BattleStackMoved & movement)
 		{
 			const auto * movedStack = battle()->battleGetStackByID(movement.stack);
 			ASSERT_NE(movedStack, nullptr) << "Movement callback must see the pre-move live stack";
@@ -433,6 +446,8 @@ protected:
 				entry.second->battleStackMoved(movement.battleID, movedStack,
 					movement.tilesToMove, movement.distance, movement.teleporting);
 			++deliveredMovementEvents;
+			if(priorMovementObserver)
+				priorMovementObserver(movement);
 		};
 		recorder.onRoundBeforeApply = [&](const BattleNextRound & round)
 		{
@@ -565,7 +580,13 @@ protected:
 				recentDecisions.erase(recentDecisions.begin());
 			for(auto & entry : policies)
 				entry.second->actionStarted(battleID, action);
+			// Capture pre-apply geometry: the authoritative server can move or
+			// remove the active stack while accepting the selected action.
+			const auto actingSide = active->unitSide();
+			const BattleHex origin = active->getPosition();
 			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action)) << "The engine rejected the selected action";
+			if(onAcceptedAction)
+				onAcceptedAction(action, actingSide, origin);
 			++decisions;
 			++decisionsByPlayer[player];
 			++acceptedActionTypesByPlayer[player][action.actionType];
@@ -694,6 +715,140 @@ protected:
 	}
 };
 
+// fheroes2 BattlePlanner::isLimitOfTurnsExceeded: an attacking AI retreats
+// after 50 consecutive *actual* VCMI rounds without casualties. The fixture
+// deliberately makes both armies DEFEND for the preceding rounds, so it can
+// exercise this rare stalemate without changing combat stats or fabricating
+// round events. The policy's final RETREAT must be accepted by the server.
+TEST_F(AIIntegrationNativeBattle, fheroes2RetreatsAfterFiftyRealDeathlessRounds)
+{
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->tacticDistance, 0);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanFlee()) << "The source policy may only retreat when VCMI permits it";
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	// Direct AI registration uses the two-argument overload. The three-
+	// argument variant is reserved for human-invoked autocombat in VCMI.
+	policy->initBattleInterface(environment, callback);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	const auto initialRound = battle()->battleGetRound();
+	ASSERT_GE(initialRound, 0);
+
+	for(int elapsed = 0; elapsed <= 50; ++elapsed)
+	{
+		ASSERT_TRUE(recorder.battleResults.empty()) << "Battle ended without the source AI retreat";
+		ASSERT_EQ(battle()->battleGetRound(), initialRound + elapsed)
+			<< "Count engine rounds, not callbacks or unit activations";
+		const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+		ASSERT_NE(active, nullptr);
+		ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER)
+			<< "This scenario requires a faster attacking Grand Elf";
+		for(const auto & unit : battle()->stacks)
+			EXPECT_EQ(unit->getKilled(), 0) << "This is a deathless-round regression";
+		callback->action.reset();
+		policy->activeStack(battleID, active);
+		ASSERT_TRUE(callback->action.has_value());
+		if(elapsed < 50)
+		{
+			EXPECT_NE(callback->action->actionType, EActionType::RETREAT)
+				<< "The native port must not retreat before the source's 50-round limit";
+			// Apply genuine defending actions for all stacks and advance via
+			// the authoritative server instead of forging round packets.
+			endRound();
+			ASSERT_FALSE(HasFatalFailure());
+			continue;
+		}
+
+		EXPECT_EQ(callback->action->actionType, EActionType::RETREAT)
+			<< "The source cap must produce a native retreat instead of another DEFEND";
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+			<< "VCMI rejected the source-derived retreat";
+		ASSERT_EQ(recorder.battleResults.size(), 1u);
+		EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
+		if(recorder.battleResults.back().questionID != QuestionID::NONE)
+		{
+			ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		}
+		EXPECT_TRUE(gameState()->currentBattles.empty()) << "Native retreat result not applied to adventure state";
+		EXPECT_EQ(recorder.acceptedResults, 1);
+	}
+	callback->onBattleEnded(battleID);
+}
+
+// A human player's auto-combat installs its battle AI using the three-
+// argument overload (CPlayerInterface::prepareAutoFightingAI). Its inherited
+// CBattleGameInterface::human flag defaults to false, so guarding only that
+// flag would incorrectly force a human hero to retreat after 50 quiet rounds.
+// Verify the human-origin path using native, not fabricated, round transitions.
+TEST_F(AIIntegrationNativeBattle, fheroes2AutocombatDoesNotForceHumanRetreat)
+{
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+
+	for(int elapsed = 0; elapsed <= 50; ++elapsed)
+	{
+		ASSERT_TRUE(recorder.battleResults.empty());
+		const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+		ASSERT_NE(active, nullptr);
+		ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+		callback->action.reset();
+		policy->activeStack(battleID, active);
+		ASSERT_TRUE(callback->action.has_value());
+		EXPECT_NE(callback->action->actionType, EActionType::RETREAT)
+			<< "Human autocombat must not silently retreat on deathless round " << elapsed;
+		if(elapsed < 50)
+		{
+			endRound();
+			ASSERT_FALSE(HasFatalFailure());
+		}
+	}
+	// The policy's non-retreat action must be acceptable to the VCMI server.
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	// This real shot may immediately eliminate the opposing army; otherwise
+	// continue the same battle to its terminal result. Never require a living
+	// defender after a legitimate server-accepted non-retreat command.
+	if(recorder.battleResults.empty())
+		runToCompletion();
+	else
+	{
+		const auto & result = recorder.battleResults.front();
+		EXPECT_EQ(result.winner, BattleSide::ATTACKER);
+		if(result.questionID != QuestionID::NONE)
+		{
+			ASSERT_TRUE(gameHandler->answerQuestion(result.questionID, 0, player));
+		}
+		EXPECT_TRUE(gameState()->currentBattles.empty());
+		EXPECT_EQ(recorder.acceptedResults, 1);
+	}
+}
+
 TEST_F(AIIntegrationNativeBattle, completesMeleeBattleThroughFactory)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
@@ -751,12 +906,59 @@ TEST_F(AIIntegrationNativeBattle, completesRangedDuelWithoutDefenceDeadlock)
 
 TEST_F(AIIntegrationNativeBattle, completesFortifiedTownBattle)
 {
-	prepareSiege();
+	// Both sides have durable cavalry. A one-hit kill of a token garrison
+	// could end the siege before the catapult's first *observed* activation;
+	// setup-time catapult packets are not adapter-delivery evidence.
+	prepareSiege(false, CreatureID(10), 40, CreatureID(10), 30);
 	ASSERT_FALSE(HasFatalFailure());
-	runToCompletion(BattleSide::ATTACKER);
+	runToCompletion();
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 	EXPECT_GT(replayedCatapultEvents, 0)
-		<< "Siege-machine packet must reach both experimental adapters after applying to the battle";
+		<< "A post-subscription siege-machine packet must reach both adapters";
+}
+
+
+// The pinned Heroes II policy moves towards castle-wall approach cells when
+// no garrison unit is reachable. Only the VCMI server establishes legality
+// and the battle outcome: this wall heuristic is an explicit rule projection.
+TEST_F(AIIntegrationNativeBattle, fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk)
+{
+	prepareSiege(false, CreatureID(0), 100, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_NE(battle()->battleGetDefendedTown(), nullptr);
+	ASSERT_NE(battle()->battleGetWallState(EWallPart::GATE), EWallState::NONE);
+	const CStack * infantry = nullptr;
+	const CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			defender = unit.get();
+	}
+	ASSERT_NE(infantry, nullptr);
+	ASSERT_NE(defender, nullptr);
+	const BattleHex defenderHex = defender->getPosition();
+	bool acceptedApproach = false;
+	// This observer is invoked only AFTER the normal battle runner has
+	// submitted a genuinely active unit's decision to the real server.
+	// The former test fabricated an infantry activation while the catapult
+	// could still be the active stack, so rejection proved no policy defect.
+	const auto acceptedAction = [&](const BattleAction & action, BattleSide side, BattleHex origin)
+	{
+		if(side != BattleSide::ATTACKER || action.actionType != EActionType::WALK
+			|| action.target.empty() || !origin.isValid())
+			return;
+		const BattleHex selected = action.target.front().hexValue;
+		if(selected.isValid() && BattleHex::getDistance(selected, defenderHex)
+			< BattleHex::getDistance(origin, defenderHex))
+			acceptedApproach = true;
+	};
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics", false, acceptedAction);
+	EXPECT_TRUE(acceptedApproach)
+		<< "FHeroes2 must advance toward the walled garrison through a server-accepted WALK";
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+	EXPECT_GT(recorder.damage, 0);
 }
 
 TEST_F(AIIntegrationNativeBattle, fheroes2CastleGarrisonHoldsItsMeleeLineForShooters)
@@ -833,6 +1035,46 @@ TEST_F(AIIntegrationNativeBattle, choosesOffensiveMagicAndCompletesTheBattle)
 	EXPECT_GT(heroSpellDecisions, 0);
 	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
 	EXPECT_GT(recorder.spellPackets, 0) << "Native spell packs must reach both AI event adapters";
+}
+
+// Heroes II only values Teleport for an offensive grounded melee creature
+// lacking a current melee attack. VCMI adds the second destination target
+// through teleport.lua. This checks a real server-accepted two-hex target
+// spell and a real teleport movement packet, not just a scalar valuation.
+TEST_F(AIIntegrationNativeBattle, fheroes2TeleportsMeleeTowardEnemyInRealBattle)
+{
+	prepareBattle(CreatureID(0), 100, CreatureID(2), 110);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::TELEPORT, 12);
+	bool sawTeleportMove = false;
+	recorder.onMovementBeforeApply = [&](const BattleStackMoved & movement)
+	{
+		if(movement.teleporting)
+			sawTeleportMove = true;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::TELEPORT).empty())
+		<< "FHeroes2 must independently choose native two-target Teleport";
+	EXPECT_TRUE(sawTeleportMove)
+		<< "VCMI must apply a genuine teleport movement, not just record a spell decision";
+	EXPECT_GT(recorder.damage, 0);
+}
+
+// fheroes2 Earthquake considers surviving castle walls, ground-melee force
+// and enemy shooters. The actual castle is damaged by native VCMI siege
+// packets. Source valuation cannot be accepted based on a fake projected hit.
+TEST_F(AIIntegrationNativeBattle, fheroes2EarthquakeUsesNativeWallsAndCompletesSiege)
+{
+	prepareSiege(false, CreatureID(2), 70, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_TRUE(battle()->hasFortifications());
+	teachBattleSpell(attackerSideHero, SpellID::EARTHQUAKE, 12);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::EARTHQUAKE).empty())
+		<< "The source policy should independently cast Earthquake against a defended shooter garrison";
+	EXPECT_FALSE(recorder.catapultAttacks.empty())
+		<< "Authoritative VCMI siege effects must actually occur";
+	EXPECT_GT(recorder.damage, 0);
 }
 
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeHasteAndCompletesBattle)
@@ -1212,6 +1454,93 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBlindAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 spellDispelValue assigns a positive source value to
+// removing Berserker from an allied stack. Verify a real hostile cast and
+// a distinct, independently chosen native Cure: no scripted policy and
+// no score for a resisted or unchanged spell-effect projection.
+// fheroes2's berserkTurn is a special creature turn, not a normal target
+// scorer. An authoritative native Berserk cast must route the active unit
+// through the independent FHeroes2 controller and produce a legal action.
+TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBattleCompletes)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * acting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(acting, nullptr);
+	const auto side = acting->unitSide();
+	auto * caster = side == BattleSide::ATTACKER ? defenderSideHero : attackerSideHero;
+	teachBattleSpell(caster, SpellID::BERSERK, 6);
+	ASSERT_TRUE(castOn(caster, SpellID::BERSERK, acting))
+		<< "A real server spell must apply the controlled-turn status";
+	ASSERT_TRUE(acting->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(side);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), side, false);
+	policy->activeStack(battleID, acting);
+	ASSERT_TRUE(callback->action.has_value()) << "FHeroes2 special turn returned no action";
+	EXPECT_TRUE(callback->action->actionType == EActionType::WALK
+		|| callback->action->actionType == EActionType::WALK_AND_ATTACK
+		|| callback->action->actionType == EActionType::SHOOT
+		|| callback->action->actionType == EActionType::DEFEND)
+		<< "Berserk may only select a native combat/movement action";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected the source-derived Berserk action";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	const auto healthBefore = friendly->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::BERSERK, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BERSERK, friendly))
+		<< "The original debuff must be applied by the real server";
+	const auto berserk = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BERSERK)));
+	ASSERT_TRUE(friendly->hasBonus(berserk));
+	ASSERT_TRUE(friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	ASSERT_EQ(friendly->getAvailableHealth(), healthBefore)
+		<< "There must be no missing health to explain Cure's selection";
+	teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
+	bool sawNativeControlRestoration = false;
+	// Like the existing Cure/Blind/Slow regressions, inspect after the
+	// injury/effect packet has applied. BattleSpellCast arrives earlier
+	// than the status-removal packet on the authoritative server.
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::CURE).empty())
+			sawNativeControlRestoration |= !friendly->hasBonus(berserk)
+				&& !friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::CURE).empty())
+		<< "Source-derived FHeroes2 must independently select Cure for Berserk";
+	EXPECT_TRUE(sawNativeControlRestoration)
+		<< "The real engine must remove Berserk control, not merely accept Cure";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // fheroes2 spellDispelValue recognizes Slow as harmful magic. A real Cure
 // must restore mobility, even when an allied flying stack has taken no damage.
 TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeSlowAndCompletesBattle)
@@ -1250,6 +1579,46 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeSlowAndCompletesBattle)
 		<< "The game engine must restore the unit's movement range";
 	EXPECT_GT(recorder.damage, 0);
 }
+// fheroes2 spellDispelValue considers *friendly* negative magic, not only
+// enemy positive effects. Verify an independent hero Dispel cast restores
+// Slow from an unwounded stack through actual server effect packets.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelsFriendlySlowAndCompletesBattle)
+{
+	prepareBattle(CreatureID(4), 80, CreatureID(4), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(4))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	ASSERT_TRUE(friendly->hasBonusOfType(BonusType::FLYING));
+	const auto originalSpeed = friendly->getMovementRange();
+	const auto originalHealth = friendly->getAvailableHealth();
+	teachBattleSpell(defenderSideHero, SpellID::SLOW, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::SLOW, friendly))
+		<< "The real enemy hero must apply Slow to the flying ally";
+	const auto slow = Selector::source(
+		BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::SLOW)));
+	ASSERT_TRUE(friendly->hasBonus(slow));
+	ASSERT_LT(friendly->getMovementRange(), originalSpeed);
+	ASSERT_EQ(friendly->getAvailableHealth(), originalHealth)
+		<< "The Dispel priority must value a debuff, not pre-existing damage";
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	bool observedNativeSpeedRecovery = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			observedNativeSpeedRecovery |= !friendly->hasBonus(slow)
+				&& friendly->getMovementRange() == originalSpeed;
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty())
+		<< "FHeroes2 must select Dispel for a real Slow, not just lost HP";
+	EXPECT_TRUE(observedNativeSpeedRecovery)
+		<< "The game engine must restore the unit's movement range";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeStoneSkinAndCompletesBattle)
 {
@@ -1308,6 +1677,31 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeRangedShieldAndCompletesBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Source spellDragonSlayerValue must never waste mana on a non-dragon
+// army. Heroes III uses its own Slayer target classifications and bonus.
+TEST_F(AIIntegrationNativeBattle, fheroes2CastsNativeSlayerAgainstDragonAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 100, CreatureID(132), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::SLAYER, 6);
+	const CStack * buffed = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			buffed = unit.get();
+	ASSERT_NE(buffed, nullptr);
+	bool nativeSlayerApplied = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::SLAYER).empty())
+			nativeSlayerApplied |= buffed->hasBonusOfType(BonusType::SLAYER);
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::SLAYER).empty())
+		<< "Source-derived Dragon Slayer must produce a real hero cast against dragons";
+	EXPECT_TRUE(nativeSlayerApplied) << "The server must apply the native Slayer effect";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 {
 	// Source-derived 10% Bloodlust valuation must be gated on a real
@@ -1331,6 +1725,35 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBloodlustAndCompletesBattle)
 	EXPECT_FALSE(recorder.castsOf(SpellID::BLOODLUST).empty())
 		<< "FHeroes2 must select Bloodlust without the scripted BattleAI";
 	EXPECT_TRUE(observedRealMeleeGain) << "Native Bloodlust must improve melee attack";
+	EXPECT_GT(recorder.damage, 0);
+}
+
+// fheroes2 spellSummonValue values the actual summoned troop, with a
+// reduction when already overwhelming the defender. This native VCMI
+// projection must create elemental stacks through the server, rather than
+// merely recording the spell choice in the decision callback.
+TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeElementalSummonAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 60, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::SUMMON_AIR_ELEMENTAL, 12);
+	bool sawNativeElemental = false;
+	recorder.onUnitsChangedAfterApply = [&](const BattleUnitsChanged &)
+	{
+		for(const auto & unit : battle()->stacks)
+		{
+			if(unit->alive() && unit->unitSide() == BattleSide::ATTACKER
+				&& unit->creatureId() == CreatureID(CreatureID::AIR_ELEMENTAL))
+				sawNativeElemental = true;
+		}
+	};
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::SUMMON_AIR_ELEMENTAL).empty())
+		<< "The independent source-policy must select the elemental summon";
+	EXPECT_TRUE(sawNativeElemental)
+		<< "The game server must create a living elemental stack";
+	EXPECT_GT(replayedUnitChangeEvents, 0)
+		<< "Summon insertion must be delivered through native unit-change events";
 	EXPECT_GT(recorder.damage, 0);
 }
 
@@ -2194,6 +2617,62 @@ TEST_F(AIIntegrationNativeBattle, fheroes2GuardRepositionsFromCoveredWeakShooter
 		<< "The chosen cover must protect the more valuable archer";
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "The native engine rejected the selected new cover position";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
+// Source-derived cautious offense must stop before projected next-turn
+// ground-melee exposure. Check an independent choice, the native server
+// acceptance of that movement, and a completed engine battle.
+TEST_F(AIIntegrationNativeBattle, fheroes2CautiousMultiTurnApproachAvoidsNextTurnMeleeThreat)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	const BattleHex origin = infantry->getPosition();
+	const int speed = static_cast<int>(infantry->getMovementRange());
+	ASSERT_GT(speed, 0);
+	const BattleHex guardHex(origin.toInt() + 2 * speed + 1);
+	ASSERT_TRUE(guardHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(guardHex), nullptr);
+	const auto * guard = addStack(BattleSide::DEFENDER, CreatureID(0), guardHex, 35);
+	ASSERT_NE(guard, nullptr);
+	ASSERT_GT(BattleHex::getDistance(origin, guardHex), speed + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, infantry);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Independent cautious offense must approach: " << callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex selected = callback->action->target.front().hexValue;
+	EXPECT_GT(BattleHex::getDistance(selected, origin), 0);
+	EXPECT_LT(BattleHex::getDistance(selected, origin), speed)
+		<< "A full-speed step would enter projected enemy melee reach";
+	EXPECT_GT(BattleHex::getDistance(selected, guardHex), guard->getMovementRange() + 1)
+		<< "Selected cautious step should be beyond next-turn melee reach";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native server rejected the movement";
 	policy.reset();
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.damage, 0);

@@ -69,6 +69,30 @@ candidate targets in sorted unit-ID order; original fheroes2 army enumeration
 may differ. This correction has deterministic contract coverage, not a new
 source-equivalence or win-rate claim.
 
+Siege assault now projects pinned fheroes2 `meleeUnitOffense`'s
+last-resort advance towards walls when no enemy attack position is reachable.
+Heroes II targets cells beneath walls; VCMI uses a nearest-garrison-footprint
+approximation and native reachable head hexes. The Heroes III wall geometry
+and siege rules differ, so this is not exact Heroes II pathfinding. Native
+siege action acceptance and result require exact-head server CI confirmation.
+
+Cautious melee movement now projects the pinned fheroes2
+`findOptimalPositionForSubsequentAttack`: inspect native-reachable steps
+of a multi-turn pursuit, prefer minimal projected enemy melee exposure,
+and choose the farthest step on a risk tie. Its VCMI footprint-distance
+threat bound is not the original Heroes II pathfinder or combat-value
+function, especially around walls and obstacles. Native server evidence
+for this particular change is pending exact-head CI.
+
+Elemental summoning is now an explicit experimental projection of pinned
+fheroes2 `spellSummonValue`: value the newly created or reinforced friendly
+elemental stack in a `HypotheticBattle` preview, halving that value if our
+army is already more than twice as strong. The VCMI server must accept the
+hero spell, create the elemental and deliver unit-change events in the
+native regression. This uses Heroes III elemental placement, spell cost
+and creature strength, **not** a claim of identical Heroes II summoning.
+The live regression is unverified until its exact-head CI run succeeds.
+
 Spell selection also values the pinned `getSpellDisruptingRayRatio`
 (0.2 of target strength for a full defense reduction, with the source's
 weaker-army discount). VCMI's hypothetical cast supplies the actual target

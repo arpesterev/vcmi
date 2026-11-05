@@ -1,4 +1,12 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2EarthquakePolicy.h"
+#include "../AI/Integration/Ports/FHeroes2TeleportPolicy.h"
+#include "../AI/Integration/Ports/FHeroes2BerserkOrder.h"
+#include "../AI/Integration/Ports/FHeroes2DragonSlayer.h"
+#include "../AI/Integration/Ports/FHeroes2SiegeGeometry.h"
+#include "../AI/Integration/Ports/FHeroes2RoundLimiter.h"
+#include "../AI/Integration/Ports/FHeroes2RetreatDecision.h"
+#include "../AI/Integration/Ports/FHeroes2DispelValuation.h"
 
 #include <array>
 #include <iostream>
@@ -21,6 +29,197 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	// Pinned Earthquake formula requires fortress, ground melee, standing
+	// walls and enemy ranged strength. No spell is spent when any is absent.
+	const double expectedEarthquake = FHeroes2::earthquakeValue(true, 2, 50, 100,
+		4, 4, 1, 100, 100);
+	require(expectedEarthquake == 10, "Source wall breaker prioritizes grounded melee against shooters");
+	require(FHeroes2::earthquakeValue(false, 2, 50, 100, 4, 4, 1, 100, 100) == 0,
+		"Earthquake is not an open-field spell");
+	require(FHeroes2::earthquakeValue(true, 0, 0, 100, 4, 4, 1, 100, 100) == 0,
+		"Ranged-only and flying-only armies cannot justify Earthquake");
+	require(FHeroes2::earthquakeValue(true, 2, 50, 100, 0, 4, 1, 100, 100) == 0,
+		"Destroyed walls make Earthquake useless");
+	require(FHeroes2::earthquakeValue(true, 2, 50, 100, 4, 4, 1, 0, 100) == 0,
+		"The source discounts Earthquake completely without enemy shooters");
+	require(FHeroes2::earthquakeValue(true, 2, 50, 100, 2, 4, 1, 100, 100)
+		== expectedEarthquake / 2, "Fewer standing wall targets reduce expected value");
+	try { FHeroes2::earthquakeValue(true, 2, 50, 100, 5, 4, 1, 100, 100); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::earthquakeValue(true, 2, 50, 100, 4, 4, 1,
+		std::numeric_limits<double>::infinity(), 100); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// Pinned spellTeleportValue: 10% of strength ONLY when a native
+	// two-target cast delivers ground melee next to the opposing troop.
+	require(FHeroes2::offensiveTeleportValue(100, true, false, true, 5, 1) == 10,
+		"Legal offensive teleport receives pinned Bloodlust-ratio score");
+	require(FHeroes2::offensiveTeleportValue(100, false, false, true, 5, 1) == 0,
+		"Do not teleport shooters or flying melee with their own movement");
+	require(FHeroes2::offensiveTeleportValue(100, true, true, true, 5, 1) == 0,
+		"An already reachable melee target cannot justify Teleport");
+	require(FHeroes2::offensiveTeleportValue(100, true, false, false, 5, 1) == 0,
+		"Rejected or resisted Teleport has zero effect value");
+	require(FHeroes2::offensiveTeleportValue(100, true, false, true, 5, 2) == 0,
+		"Teleport must result in immediate adjacency to a living enemy");
+	require(FHeroes2::offensiveTeleportValue(100, true, false, true, 1, 1) == 0,
+		"Already adjacent troops do not gain Teleport benefit");
+	try { FHeroes2::offensiveTeleportValue(-1, true, false, true, 4, 1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::offensiveTeleportValue(std::numeric_limits<double>::infinity(),
+		true, false, true, 4, 1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	const FHeroes2::BerserkCandidate unselected{-1, 0};
+	require(FHeroes2::preferBerserkCandidate({10, 3}, unselected),
+		"First legal Berserk target is accepted");
+	require(FHeroes2::preferBerserkCandidate({11, 2}, {10, 3}),
+		"Berserk targets nearest troop instead of highest threat");
+	require(!FHeroes2::preferBerserkCandidate({11, 4}, {10, 3}),
+		"Berserk ignores more distant troops");
+	require(FHeroes2::preferBerserkCandidate({9, 3}, {10, 3}),
+		"Equal distance uses deterministic native unit ID");
+	require(!FHeroes2::preferBerserkCandidate({11, 3}, {10, 3}),
+		"A later higher-ID equal-range troop cannot override selected target");
+	try { FHeroes2::preferBerserkCandidate({-1, 3}, unselected); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::preferBerserkCandidate({3, -1}, unselected); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// Pinned spellDragonSlayerValue: no dragons, no native effect, and
+	// mixed enemy armies must receive different priorities.
+	require(FHeroes2::dragonSlayerValue(100, 0, 100, true) == 0,
+		"Dragon Slayer has no value without living dragons");
+	require(FHeroes2::dragonSlayerValue(100, 100, 100, false) == 0,
+		"An immune/already-affected stack must not consume mana");
+	require(FHeroes2::dragonSlayerValue(100, 100, 100, true) == 10,
+		"All-dragon enemy army retains source Bloodlust-like base value");
+	require(FHeroes2::dragonSlayerValue(100, 50, 100, true) == 5,
+		"Half-dragon enemy army halves the valuation");
+	require(FHeroes2::dragonSlayerValue(100, 50, 200, true) == 2.5,
+		"Threat from other enemy stacks lowers Dragon Slayer priority");
+	try { FHeroes2::dragonSlayerValue(100, 150, 100, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::dragonSlayerValue(100,
+		std::numeric_limits<double>::infinity(), 100, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// Source meleeUnitOffense fallback: closest legal wall approach after
+	// direct garrison approaches fail, with a stable path-cost tie break.
+	const FHeroes2::SiegeWallApproach noWallCandidate{0, 0, -1};
+	const FHeroes2::SiegeWallApproach oneStepCloser{3, 5, 50};
+	const FHeroes2::SiegeWallApproach stillFarther{5, 1, 70};
+	const FHeroes2::SiegeWallApproach nearerWall{1, 6, 80};
+	require(FHeroes2::preferSiegeWallStep(oneStepCloser, noWallCandidate, 4),
+		"An accessible siege approach must advance toward intact walls");
+	require(!FHeroes2::preferSiegeWallStep(stillFarther, noWallCandidate, 4),
+		"Never move away from or fail to approach an intact wall");
+	require(FHeroes2::preferSiegeWallStep(nearerWall, oneStepCloser, 4),
+		"Prefer a closer wall approach even if the legal movement costs more");
+	require(!FHeroes2::preferSiegeWallStep(oneStepCloser, nearerWall, 4),
+		"Never replace better wall progress with a farther one");
+	require(FHeroes2::preferSiegeWallStep({3, 4, 90}, oneStepCloser, 4),
+		"Source wall traversal prefers shorter movement cost at equal distance");
+	require(FHeroes2::preferSiegeWallStep({3, 5, 40}, oneStepCloser, 4),
+		"Tie resolves by stable native head position");
+	require(!FHeroes2::preferSiegeWallStep({3, 5, 60}, oneStepCloser, 4),
+		"No arbitrary change when an equal-cost route uses a larger head index");
+	try { FHeroes2::preferSiegeWallStep({-1, 1, 0}, noWallCandidate, 4); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::preferSiegeWallStep({2, -1, 0}, noWallCandidate, 4); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+
+	// fheroes2 isLimitOfTurnsExceeded: 50 consecutive round transitions,
+	// not 50 unit activations, and casualties on either side reset the cap.
+	FHeroes2::DeathlessRoundLimiter stale;
+	require(!stale.observe(-1, 0, 0), "Tactics phase must not consume the round limit");
+	require(!stale.observe(0, 0, 0), "First battle round establishes the baseline");
+	for(int round = 1; round < 50; ++round)
+		require(!stale.observe(round, 0, 0), "Retreat must not trigger before 50 deathless rounds");
+	require(stale.remainingRounds() == 1, "One remaining deathless transition at round 49");
+	require(stale.observe(50, 0, 0), "50th deathless round must trigger source stalemate policy");
+	require(stale.observe(50, 0, 0), "Same-round reactivation must not clear the stalemate");
+	require(!stale.observe(51, 1, 0), "New attacker casualties reset the stalemate");
+	require(stale.remainingRounds() == 50, "Casualty reset must restore complete horizon");
+	for(int round = 52; round < 101; ++round)
+		require(!stale.observe(round, 1, 0), "Casualty reset must preserve full 50-round horizon");
+	require(stale.observe(101, 1, 0), "Stalemate restarts after a casualty reset");
+	require(!stale.observe(102, 1, 1), "Defender casualties also reset source stalemate");
+	require(!stale.observe(104, 1, 1), "Discontinuous round observations reset the counter");
+	require(stale.remainingRounds() == 50, "A missing round cannot count as no losses");
+	stale.reset();
+	require(!stale.observe(0, 0, 0), "A new battle must discard an exhausted previous counter");
+	require(stale.remainingRounds() == 50, "New battle starts with full horizon");
+
+
+
+	// fheroes2 BattlePlanner::planUnitTurn: surrender/retreat policy is
+	// driven by the ratio, hero value, rehire viability and legal options.
+	FHeroes2::WithdrawalContext withdrawal;
+	withdrawal.friendlyStrength = 10;
+	withdrawal.enemyStrength = 150;
+	withdrawal.considerRetreat = true;
+	withdrawal.canFlee = true;
+	withdrawal.canSurrender = true;
+	withdrawal.canAffordSurrender = true;
+	withdrawal.canRehire = true;
+	withdrawal.primarySkillTotal = 10;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::RETREAT,
+		"Experienced, rehirable hero retreats from hopeless battle");
+	withdrawal.canFlee = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::SURRENDER,
+		"When fleeing is forbidden, affordable surrender saves an experienced hero");
+	withdrawal.canAffordSurrender = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Never submit an unaffordable surrender");
+	withdrawal.canAffordSurrender = true;
+	withdrawal.primarySkillTotal = 9;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Nonvaluable inexperienced hero does not surrender");
+	withdrawal.valuableArtifacts = true;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::SURRENDER,
+		"An artifact-bearing hero is preserved even below ten skill points");
+	withdrawal.valuableArtifacts = false;
+	withdrawal.primarySkillTotal = 10;
+	withdrawal.canRehire = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Do not sacrifice the last irreplaceable hero just to surrender");
+	withdrawal.canRehire = true;
+	withdrawal.humanController = true;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Never force human autocombat to withdraw");
+	withdrawal.humanController = false;
+	withdrawal.considerRetreat = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"The source only considers retreat when its army has few slots or loses one");
+	withdrawal.considerRetreat = true;
+	withdrawal.friendlyStrength = 20;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"A non-hopeless battle is fought");
+	withdrawal.friendlyStrength = 10;
+	withdrawal.enemyStrength = 200;
+	withdrawal.canSurrender = false;
+	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
+		"Native inability to surrender always wins over a proposed surrender");
+
+	// Pinned spellDispelValue considers ALL affected sides, including
+	// losses from stripping friendly buffs or enemy debuffs.
+	require(FHeroes2::dispelledEffectValue(100, 0.8, true, true, true) == 80,
+		"Removing harmful friendly Blind is valuable");
+	require(FHeroes2::dispelledEffectValue(100, 0.1, false, false, true) == 10,
+		"Removing helpful enemy Stone Skin is valuable");
+	require(FHeroes2::dispelledEffectValue(100, 0.1, true, false, true) == -10,
+		"Removing friendly Bloodlust has a tactical cost");
+	require(FHeroes2::dispelledEffectValue(100, 0.8, false, true, true) == -80,
+		"Dispel must not undo enemy Blind for free");
+	require(FHeroes2::dispelledEffectValue(100, 0.8, true, true, false) == 0,
+		"Already-cleared or immune effects never earn Dispel value");
+	try { FHeroes2::dispelledEffectValue(-1, 0.8, true, true, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::dispelledEffectValue(1,
+		std::numeric_limits<double>::infinity(), true, true, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 
 	for(int difficulty = 0; difficulty < 2; ++difficulty)
 		for(int incapacitated = 0; incapacitated < 2; ++incapacitated)

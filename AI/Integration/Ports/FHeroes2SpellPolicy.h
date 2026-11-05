@@ -10,6 +10,10 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2EarthquakePolicy.h"
+#include "FHeroes2TeleportPolicy.h"
+#include "FHeroes2DragonSlayer.h"
+#include "FHeroes2DispelValuation.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
 #include "../../../lib/CStack.h"
@@ -21,7 +25,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Clone/Mirror Image, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Covers damage, restoration, native elemental summoning, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Clone/Mirror Image, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -88,6 +92,33 @@ class FHeroes2SpellPolicy
 		return result;
 	}
 
+	// Lua VCMI teleport.lua adds LOCATION to the CREATURE first target.
+	// The generic target enumerator intentionally only supports one aim.
+	// Enumerate native-legal two-step aims for the currently active troop,
+	// rather than trying an unbounded Cartesian product of all creatures.
+	static std::vector<spells::Target> teleportTargets(const spells::Mechanics & mechanics,
+		const CStack * active)
+	{
+		std::vector<spells::Target> result;
+		if(!active || !active->alive() || !active->getPosition().isValid()
+			|| active->isInvincible())
+			return result;
+		const auto types = mechanics.getTargetTypes();
+		if(types.size() != 2 || types[0] != spells::AimType::CREATURE
+			|| types[1] != spells::AimType::LOCATION)
+			return result;
+		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+		{
+			const BattleHex hex(index);
+			if(!hex.isAvailable() || hex == active->getPosition())
+				continue;
+			spells::Target target{battle::Destination(active), battle::Destination(hex)};
+			if(mechanics.canBeCastAt(target))
+				result.push_back(std::move(target));
+		}
+		return result;
+	}
+
 	static double damageValue(const CStack & unit, int64_t damage, const Army & side)
 	{
 		const double health = static_cast<double>(unit.getAvailableHealth());
@@ -125,7 +156,7 @@ public:
 	}
 
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
-		const Environment * environment)
+		const Environment * environment, const CStack * activeStack = nullptr)
 	{
 		const auto * hero = real->battleGetMyHero();
 		if(!hero || real->battleCanCastSpell(hero, spells::Mode::HERO) != ESpellCastProblem::OK)
@@ -151,6 +182,11 @@ public:
 		{
 			return old.owner != player && old.health > 0;
 		});
+		double enemyDragonStrength = 0;
+		for(const auto & old : before)
+			if(old.owner != player && old.health > 0
+				&& old.unit->hasBonusOfType(BonusType::DRAGON_NATURE))
+				enemyDragonStrength += static_cast<double>(old.unit->estimateCombatValue());
 		std::optional<BattleAction> best;
 		double bestValue = 0;
 
@@ -158,9 +194,16 @@ public:
 		{
 			const auto * spell = entry.get();
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
+			const bool earthquakeSpell = spell->id == SpellID::EARTHQUAKE;
+			const bool teleportSpell = spell->id == SpellID::TELEPORT;
+			const bool summonSpell = spell->id == SpellID::SUMMON_AIR_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_EARTH_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_FIRE_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_WATER_ELEMENTAL;
 			const bool speedSpell = spell->id == SpellID::HASTE || spell->id == SpellID::SLOW;
 			const bool dispelSpell = spell->id == SpellID::DISPEL;
 			const bool defenseSpell = spell->id == SpellID::DISRUPTING_RAY;
+			const bool dragonSlayerSpell = spell->id == SpellID::SLAYER;
 			const bool damageRangeSpell = spell->id == SpellID::BLESS || spell->id == SpellID::CURSE;
 			const bool defenseBuff = spell->id == SpellID::STONE_SKIN;
 			const bool attackBuff = spell->id == SpellID::BLOODLUST;
@@ -170,7 +213,7 @@ public:
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !speedSpell && !defenseSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !teleportSpell && !earthquakeSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -180,12 +223,18 @@ public:
 				continue;
 			spells::BattleCast legality(real.get(), hero, spells::Mode::HERO, spell);
 			const auto mechanics = spell->battleMechanics(&legality);
-			for(const auto & target : targets(*mechanics))
+			const auto legalTargets = teleportSpell
+				? teleportTargets(*mechanics, activeStack) : targets(*mechanics);
+			for(const auto & target : legalTargets)
 			{
 				auto projected = std::make_shared<HypotheticBattle>(environment, real);
-				spells::BattleCast cast(projected.get(), hero, spells::Mode::HERO, spell);
-				cast.castEval(projected->getServerCallback(), target);
-				checkUnchanged(*real, *hero, mana, before);
+				// Earthquake is randomized; rank expected wall damage.
+				if(!earthquakeSpell)
+				{
+					spells::BattleCast cast(projected.get(), hero, spells::Mode::HERO, spell);
+					cast.castEval(projected->getServerCallback(), target);
+					checkUnchanged(*real, *hero, mana, before);
+				}
 
 				double value = 0;
 				int64_t friendlyHealth = 0;
@@ -198,11 +247,24 @@ public:
 						friendlyHealth += health;
 					if(health < old.health)
 						value += (friendly ? -1 : 1) * damageValue(*old.unit, old.health - health, friendly ? ours : theirs);
-					else if(health > old.health && after && !after->isClone())
+					else if(health > old.health && after && !after->isClone() && !summonSpell)
 					{
 						const double restored = static_cast<double>(after->estimateCombatValue())
 							* static_cast<double>(health - old.health) / static_cast<double>(health);
 						value += friendly ? restored : -restored;
+					}
+					// Pinned spellDragonSlayerValue only values this buff when
+					// enemy dragons exist. VCMI's SLAYER is a target-dependent
+					// creature bonus, so require a newly applied real native
+					// hypothetical effect, not a guessed damage increase.
+					if(dragonSlayerSpell && friendly && after && after->alive()
+						&& health == old.health)
+					{
+						const bool nativeEffectGained = after->hasBonusOfType(BonusType::SLAYER)
+							&& !old.unit->hasBonusOfType(BonusType::SLAYER);
+						value += Ports::FHeroes2::dragonSlayerValue(
+							static_cast<double>(old.unit->estimateCombatValue()),
+							enemyDragonStrength, theirs.strength, nativeEffectGained);
 					}
 					// Pinned fheroes2 values Disrupting Ray against enemy defense.
 					// Use VCMI's post-cast defense to exclude immunity, minimum-
@@ -316,7 +378,7 @@ public:
 					// of hostile magic, not only recovered hit points. Evaluate only
 					// negative effects that the *native* projected Cure really
 					// removes. Heroes II ratios are projections onto VCMI statuses.
-					if(spell->id == SpellID::CURE && friendly && after && after->alive())
+					if((spell->id == SpellID::CURE || dispelSpell) && friendly && after && after->alive())
 					{
 						const auto sourceEffect = [](SpellID id)
 						{
@@ -353,6 +415,110 @@ public:
 						if(old.unit->hasBonus(blind) && !after->hasBonus(blind))
 							value += static_cast<double>(old.unit->estimateCombatValue())
 								* Ports::FHeroes2::blindControlRatio(false, false, true, false, true);
+						// Pinned fheroes2 spellDispelValue also restores allies
+						// affected by hostile Berserker. Its spellEffectValue
+						// assigns 85% of stack strength to this loss of control.
+						// Cure must actually remove both the spell and VCMI's
+						// ATTACKS_NEAREST_CREATURE behavior; merely permitting a
+						// cast or having an unrelated Berserk-like bonus scores zero.
+						// Heroes II Berserker and Heroes III Berserk do not have
+						// identical targeting or movement rules.
+						const auto berserk = sourceEffect(SpellID(SpellID::BERSERK));
+						if(old.unit->hasBonus(berserk) && !after->hasBonus(berserk)
+							&& old.unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
+							&& !after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+							value += static_cast<double>(old.unit->estimateCombatValue()) * 0.85;
+
+						// Native Paralyze is a creature-origin disabling spell;
+						// source spellEffectValue gives 0.85 for multi-stack
+						// Paralyze, conditioned on actual effect removal.
+						const auto paralyze = sourceEffect(SpellID(SpellID::PARALYZE));
+						if(old.unit->hasBonus(paralyze) && !after->hasBonus(paralyze))
+							value += Ports::FHeroes2::dispelledEffectValue(
+								static_cast<double>(old.unit->estimateCombatValue()),
+								0.85, true, true, true);
+					}
+					// Pinned spellDispelValue also SUBTRACTS value when a
+					// broad native Dispel would remove beneficial magic
+					// from our troops, or harmful magic from the enemy.
+					// The existing branches above score removal of enemy
+					// buffs and allied debuffs, not these harmful cases.
+					if(dispelSpell && after && after->alive() && health == old.health)
+					{
+						const auto effect = [](SpellID id)
+						{
+							return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
+						};
+						const double strength = static_cast<double>(old.unit->estimateCombatValue());
+						if(friendly)
+						{
+							if(old.unit->hasBonus(effect(SpellID(SpellID::HASTE)))
+								&& !after->hasBonus(effect(SpellID(SpellID::HASTE))))
+							{
+								const double haste = Ports::FHeroes2::hasteSpeedRatio(
+									static_cast<int>(after->getMovementRange()),
+									static_cast<int>(old.unit->getMovementRange()),
+									theirs.averageSpeed(), false, old.unit->isShooter(), false);
+								value -= strength * haste;
+							}
+							if(old.unit->unitType() && old.unit->hasBonus(effect(SpellID(SpellID::BLESS)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BLESS)))
+								&& old.unit->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE)
+								&& !after->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE))
+							{
+								const auto * creature = old.unit->unitType();
+								value -= strength * Ports::FHeroes2::blessCurseDamageRatio(
+									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
+							}
+							if(old.unit->hasBonus(effect(SpellID(SpellID::STONE_SKIN)))
+								&& !after->hasBonus(effect(SpellID(SpellID::STONE_SKIN))))
+								value -= strength * Ports::FHeroes2::stoneSkinDefenseRatio(
+									after->getDefense(false), old.unit->getDefense(false));
+							if(old.unit->hasBonus(effect(SpellID(SpellID::BLOODLUST)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BLOODLUST))))
+								value -= strength * Ports::FHeroes2::bloodlustAttackRatio(
+									after->getAttack(false), old.unit->getAttack(false));
+							if(old.unit->hasBonus(effect(SpellID(SpellID::AIR_SHIELD)))
+								&& !after->hasBonus(effect(SpellID(SpellID::AIR_SHIELD))))
+								value -= strength * Ports::FHeroes2::shieldRangedRatio(
+									theirs.shooters, theirs.strength, old.unit->isShooter(), true);
+						}
+						else
+						{
+							if(old.unit->unitType()
+								&& old.unit->hasBonus(effect(SpellID(SpellID::CURSE)))
+								&& !after->hasBonus(effect(SpellID(SpellID::CURSE)))
+								&& old.unit->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE)
+								&& !after->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE))
+							{
+								const auto * creature = old.unit->unitType();
+								value -= strength * Ports::FHeroes2::blessCurseDamageRatio(
+									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
+							}
+							if(old.unit->hasBonus(effect(SpellID(SpellID::SLOW)))
+								&& !after->hasBonus(effect(SpellID(SpellID::SLOW)))
+								&& old.position.isValid())
+							{
+								const int distance = old.unit->unitSide() == BattleSide::DEFENDER
+									? old.position.getX()
+									: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
+								value -= strength * Ports::FHeroes2::slowSpeedRatio(
+									static_cast<int>(after->getMovementRange()),
+									static_cast<int>(old.unit->getMovementRange()),
+									ours.averageSpeed(), old.unit->isShooter(), false, false,
+									old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
+							}
+							if(old.unit->hasBonus(effect(SpellID(SpellID::BLIND)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BLIND))))
+								value -= strength * Ports::FHeroes2::blindControlRatio(
+									false, false, true, false, true);
+							if(old.unit->hasBonus(effect(SpellID(SpellID::BERSERK)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BERSERK))))
+								value -= strength * 0.85;
+							if(old.unit->hasBonus(effect(SpellID(SpellID::PARALYZE)))
+								&& !after->hasBonus(effect(SpellID(SpellID::PARALYZE))))
+								value -= strength * 0.85;
+						}
 					}
 					// Pinned fheroes2 spellEffectValue assigns Stone Skin 10% of
 					// allied stack strength. Only accept VCMI's observed defense
@@ -489,6 +655,92 @@ public:
 						}
 					}
 				}
+				// Pinned fheroes2 spellTeleportValue considers offensive
+				// teleport ONLY for a ground melee stack lacking an immediate
+				// melee engagement. Native Lua validates wall/moat, two-step
+				// targeting and actual landing; no opponent-target fallback.
+				if(teleportSpell && activeStack && !activeStack->isShooter()
+					&& !activeStack->hasBonusOfType(BonusType::FLYING)
+					&& !activeStack->isHypnotized()
+					&& real->battleGetOwner(activeStack) == player)
+				{
+					bool canMeleeNow = false;
+					const auto reachable = real->getReachability(activeStack);
+					const auto steps = real->battleGetAvailableHexes(reachable, activeStack, false);
+					for(const auto & hex : steps)
+					{
+						if(canMeleeNow || !hex.isAvailable())
+							continue;
+						for(const auto & old : before)
+						{
+							if(old.owner == player || old.health <= 0)
+								continue;
+							if(!real->meleeAttackHexes(activeStack, old.unit, hex).empty())
+							{
+								canMeleeNow = true;
+								break;
+							}
+						}
+					}
+					const auto * simulated = projected->battleGetUnitByID(activeStack->unitId());
+					if(simulated && simulated->alive())
+					{
+						const auto distanceToEnemy = [&](const battle::Unit & unit)
+						{
+							int distance = GameConstants::BFIELD_SIZE;
+							for(const auto & myHex : unit.getHexes())
+								for(const auto & old : before)
+								{
+									if(old.owner == player || old.health <= 0)
+										continue;
+									for(const auto & enemyHex : old.unit->getHexes())
+										distance = std::min(distance,
+											static_cast<int>(BattleHex::getDistance(myHex, enemyHex)));
+								}
+							return distance;
+						};
+						value += Ports::FHeroes2::offensiveTeleportValue(
+							static_cast<double>(activeStack->estimateCombatValue()),
+							true, canMeleeNow, simulated->getPosition() != activeStack->getPosition(),
+							distanceToEnemy(*activeStack), distanceToEnemy(*simulated));
+					}
+				}
+				if(earthquakeSpell)
+				{
+					const bool attackingCastle = real->battleGetDefendedTown() != nullptr
+						&& real->battleGetMySide() == BattleSide::ATTACKER
+						&& real->hasFortifications();
+					int meleeStacks = 0;
+					double meleeStrength = 0;
+					for(const auto & old : before)
+						if(old.owner == player && old.health > 0
+							&& !old.unit->isShooter()
+							&& !old.unit->hasBonusOfType(BonusType::FLYING)
+							&& !old.unit->isTurret() && !old.unit->isCatapult())
+						{
+							++meleeStacks;
+							meleeStrength += static_cast<double>(old.unit->estimateCombatValue());
+						}
+					int standing = 0;
+					int total = 0;
+					if(attackingCastle)
+						for(const auto part : {EWallPart::KEEP, EWallPart::BOTTOM_WALL,
+							EWallPart::BELOW_GATE, EWallPart::OVER_GATE, EWallPart::UPPER_WALL,
+							EWallPart::GATE})
+						{
+							if(real->battleGetWallState(part) == EWallState::NONE)
+								continue;
+							++total;
+							if(real->battleGetWallState(part) != EWallState::DESTROYED)
+								++standing;
+						}
+					// VCMI catapult.lua rolls normal hit or critical per effect
+					// point; a single expected hit is a conservative proxy.
+					// No chance is assigned if the siege has no standing walls.
+					value += Ports::FHeroes2::earthquakeValue(attackingCastle,
+						meleeStacks, meleeStrength, ours.strength,
+						standing, total, 1.0, theirs.shooters, theirs.strength);
+				}
 				// Heroes II MIRRORIMAGE becomes native VCMI CLONE. Apply the
 				// pinned 1.0/0.55/0.33 archer/flying/ground source ratio
 				// only when the *projected* battle really creates a new
@@ -513,6 +765,39 @@ public:
 								clone->isShooter(), clone->hasBonusOfType(BonusType::FLYING),
 								static_cast<int>(clone->getMovementRange()), theirs.averageSpeed(), true);
 					}
+				}
+				// Pinned fheroes2 spellSummonValue counts the combat strength of
+				// newly summoned troops and halves it when already overwhelming
+				// the enemy. Use the *native simulated* new/augmented stacks:
+				// a legal spell with no actual spawn must score zero. Heroes III
+				// elemental placement, combat strength and reinforcement rules
+				// belong to VCMI, not to the Heroes II battle simulator.
+				if(summonSpell)
+				{
+					double summonedValue = 0;
+					for(const auto * unit : projected->battleGetUnitsIf([](const battle::Unit * u) { return !u->isGhost(); }))
+					{
+						if(!unit->alive() || unit->isClone() || projected->battleGetOwner(unit) != player)
+							continue;
+						const auto prior = std::find_if(before.begin(), before.end(), [&](const UnitSnapshot & old)
+						{
+							return old.unit->unitId() == unit->unitId();
+						});
+						if(prior == before.end())
+						{
+							summonedValue += static_cast<double>(unit->estimateCombatValue());
+						}
+						else if(prior->unit->unitSlot() == SlotID::SUMMONED_SLOT_PLACEHOLDER
+							&& unit->getAvailableHealth() > prior->health)
+						{
+							// Some VCMI summon configurations reinforce the original
+							// elemental stack instead of creating a second unit ID.
+							const double newHealth = static_cast<double>(unit->getAvailableHealth());
+							summonedValue += static_cast<double>(unit->estimateCombatValue())
+								* (newHealth - static_cast<double>(prior->health)) / newHealth;
+						}
+					}
+					value += summonedValue * (ours.strength > theirs.strength * 2 ? 0.5 : 1.0);
 				}
 				if(friendlyHealth <= 0)
 					continue;

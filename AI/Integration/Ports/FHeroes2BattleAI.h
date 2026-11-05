@@ -8,6 +8,18 @@
 
 #include "SourceTactics.h"
 #include "FHeroes2SpellPolicy.h"
+#include "FHeroes2BerserkOrder.h"
+#include "FHeroes2SiegeGeometry.h"
+
+#include <array>
+#include "FHeroes2RoundLimiter.h"
+
+#include <map>
+#include "FHeroes2RetreatDecision.h"
+#include "../../../lib/CPlayerState.h"
+#include "../../../lib/entities/artifact/ArtifactUtils.h"
+#include "../../../lib/mapObjects/CGHeroInstance.h"
+#include "../../../lib/mapObjects/CGTownInstance.h"
 #include "../../../lib/CStack.h"
 #include "../../../lib/battle/BattleAction.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
@@ -28,6 +40,7 @@ public:
 		cb = std::move(callback);
 		env = std::move(environment);
 		preferences = {};
+		humanAutocombat = false;
 		logAi->info("AI_SOURCE_POLICY backend=FHeroes2Tactics source=0dbfe9f386f33c2500842f4a59cd284d7f03d541 partial=true projection=VCMI");
 	}
 
@@ -35,6 +48,7 @@ public:
 	{
 		initBattleInterface(std::move(environment), std::move(callback));
 		preferences = prefs;
+		humanAutocombat = true;
 	}
 
 	void yourTacticPhase(const BattleID & battleID, int) override
@@ -51,9 +65,94 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		// fheroes2 exits an AI attacker's battle after 50 consecutive
+		// rounds with no deaths. VCMI must authorize retreat, and a
+		// human-controlled autobattle must never lose its hero this way.
+		// This is evaluated before another spell or unit action.
+		if(!human && !humanAutocombat && battle->battleGetMySide() == BattleSide::ATTACKER)
+		{
+			uint64_t attackerDeaths = 0;
+			uint64_t defenderDeaths = 0;
+			for(const CStack * unit : battle->battleGetAllStacks())
+			{
+				const auto killed = static_cast<uint64_t>(std::max(0, unit->getKilled()));
+				if(unit->unitSide() == BattleSide::ATTACKER)
+					attackerDeaths += killed;
+				else if(unit->unitSide() == BattleSide::DEFENDER)
+					defenderDeaths += killed;
+			}
+			auto & limiter = stalemateByBattle[battleID.getNum()];
+			if(limiter.observe(battle->battleGetRound(), attackerDeaths, defenderDeaths)
+				&& battle->battleGetMyHero() && battle->battleCanFlee())
+			{
+				logAi->info("AI_PORT_STALEMATE backend=FHeroes2Tactics battle=%d rounds=%u action=RETREAT",
+					battleID.getNum(), Ports::FHeroes2::DeathlessRoundLimiter::MAX_ROUNDS_WITHOUT_DEATHS);
+				cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(BattleSide::ATTACKER));
+				return;
+			}
+		}
+		if(!human && !humanAutocombat && env && env->game())
+		{
+			const auto * hero = battle->battleGetMyHero();
+			const auto * player = hero ? env->game()->tryGetPlayerState(hero->getOwner()) : nullptr;
+			if(hero && player && !player->isHuman())
+			{
+				double ourStrength = 0;
+				double enemyStrength = 0;
+				int initialFriendlySlots = 0;
+				bool fullyLostStack = false;
+				for(const auto * unit : battle->battleGetAllStacks())
+				{
+					if(unit->unitSide() == battle->battleGetMySide()
+						&& (unit->getCount() > 0 || unit->getKilled() > 0))
+					{
+						++initialFriendlySlots;
+						fullyLostStack |= unit->getCount() == 0 && unit->getKilled() > 0;
+					}
+					if(!unit->alive() || unit->isInvincible())
+						continue;
+					if(battle->battleGetOwner(unit) == hero->getOwner())
+						ourStrength += strength(*unit);
+					else
+						enemyStrength += strength(*unit);
+				}
+				const auto heroes = player->getHeroes();
+				const auto towns = player->getTowns();
+				const bool canRehire = heroes.size() > 1 || (!towns.empty()
+					&& !(towns.size() == 1 && hero->getVisitedTown() == towns.front()));
+				const bool valuableArtifacts = std::any_of(
+					ArtifactUtils::commonWornSlots().begin(), ArtifactUtils::commonWornSlots().end(),
+					[&](const ArtifactPosition & slot) { return hero->getArt(slot) != nullptr; });
+				const int primarySkillTotal = hero->getPrimSkillLevel(PrimarySkill::ATTACK)
+					+ hero->getPrimSkillLevel(PrimarySkill::DEFENSE)
+					+ hero->getPrimSkillLevel(PrimarySkill::SPELL_POWER)
+					+ hero->getPrimSkillLevel(PrimarySkill::KNOWLEDGE);
+				const bool canFlee = battle->battleCanFlee();
+				const bool canSurrender = battle->battleCanSurrender(hero->getOwner());
+				const int surrenderCost = canSurrender ? battle->battleGetSurrenderCost() : -1;
+				const bool affordable = surrenderCost >= 0
+					&& env->game()->getResource(hero->getOwner(), GameResID::GOLD) >= surrenderCost;
+				// Source NORMAL difficulty ratio. No hidden-map intelligence:
+				// only the current battle, owned hero and owned player economy.
+				const Ports::FHeroes2::WithdrawalContext context{ourStrength, enemyStrength, 100.0 / 7.5,
+					false, initialFriendlySlots < 4 || fullyLostStack, canFlee, canSurrender,
+					affordable, valuableArtifacts, canRehire, primarySkillTotal};
+				switch(Ports::FHeroes2::decideWithdrawal(context))
+				{
+					case Ports::FHeroes2::Withdrawal::RETREAT:
+						cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(battle->battleGetMySide()));
+						return;
+					case Ports::FHeroes2::Withdrawal::SURRENDER:
+						cb->battleMakeUnitAction(battleID, BattleAction::makeSurrender(battle->battleGetMySide()));
+						return;
+					case Ports::FHeroes2::Withdrawal::FIGHT:
+						break;
+				}
+			}
+		}
 		if(preferences.enableSpellsUsage && !stack->isCatapult() && !stack->isFirstAidTent())
 		{
-			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get()))
+			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get(), stack))
 			{
 				logAi->debug("AI_PORT_SPELL backend=FHeroes2Tactics battle=%d action=%s", battleID.getNum(), spell->toString());
 				cb->battleMakeSpellAction(battleID, *spell);
@@ -67,10 +166,23 @@ public:
 		cb->battleMakeUnitAction(battleID, action);
 	}
 
+void battleStart(const BattleID & battleID, const CCreatureSet *, const CCreatureSet *,
+		int3, const CGHeroInstance *, const CGHeroInstance *, BattleSide, bool) override
+	{
+		stalemateByBattle[battleID.getNum()].reset();
+	}
+
+	void battleEnd(const BattleID & battleID, const BattleResult *, QuestionID) override
+	{
+		stalemateByBattle.erase(battleID.getNum());
+	}
+
 private:
+	std::map<int32_t, Ports::FHeroes2::DeathlessRoundLimiter> stalemateByBattle;
 	std::shared_ptr<CBattleCallback> cb;
 	std::shared_ptr<Environment> env;
 	AutocombatPreferences preferences;
+	bool humanAutocombat = false;
 
 	static double strength(const battle::Unit & stack)
 	{
@@ -154,13 +266,100 @@ private:
 		return Ports::FHeroes2::selectTactics(input);
 	}
 
+	// Pinned fheroes2 meleeUnitOffense advances towards cells under siege
+	// walls when no enemy has a reachable attack position. Heroes II has a
+	// cellsUnderWallsIndexes path policy; VCMI does not supply that list.
+	// Use living garrison footprints as an approximate destination and submit
+	// only a native-reachable head hex. This is NOT equivalent wall pathfinding.
+	static std::optional<BattleAction> approachSiegeWall(CPlayerBattleCallback & battle,
+		const CStack & stack, const BattleHexArray & available,
+		const std::vector<const CStack *> & enemies)
+	{
+		if(stack.unitSide() != BattleSide::ATTACKER || battle.battleGetDefendedTown() == nullptr
+			|| stack.getMovementRange() == 0 || stack.isTurret()
+			|| enemies.empty() || !stack.getPosition().isValid())
+			return std::nullopt;
+
+		const auto distanceToDefenders = [&](const BattleHex & head)
+		{
+			int nearest = GameConstants::BFIELD_SIZE;
+			for(const auto * defender : enemies)
+			{
+				if(!defender->alive() || !defender->getPosition().isValid())
+					continue;
+				for(const auto & from : stack.getHexes(head))
+					for(const auto & to : defender->getHexes())
+						nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(from, to)));
+			}
+			return nearest;
+		};
+		int nearest = distanceToDefenders(stack.getPosition());
+		BattleHex best;
+		for(const auto & hex : available)
+		{
+			if(!hex.isAvailable() || hex == stack.getPosition())
+				continue;
+			const int distance = distanceToDefenders(hex);
+			if(distance < nearest || (distance == nearest && best.isValid() && hex.toInt() < best.toInt()))
+			{
+				best = hex;
+				nearest = distance;
+			}
+		}
+		if(best.isValid())
+			return BattleAction::makeMove(&stack, best);
+
+		// A closed, fortified garrison may be beyond direct reach. The
+		// source then searches cells under castle walls; VCMI has different
+		// wall geometry, so use its *actual* wall hexes and legal movement.
+		// This is only a fallback after no step toward a living defender.
+		std::vector<BattleHex> wallTargets;
+		for(EWallPart part : {EWallPart::BOTTOM_WALL, EWallPart::BELOW_GATE,
+			EWallPart::GATE, EWallPart::OVER_GATE, EWallPart::UPPER_WALL})
+		{
+			const auto state = battle.battleGetWallState(part);
+			if(state == EWallState::NONE || state == EWallState::DESTROYED)
+				continue;
+			const BattleHex wallHex = battle.wallPartToBattleHex(part);
+			if(wallHex.isAvailable())
+				wallTargets.push_back(wallHex);
+		}
+		if(wallTargets.empty())
+			return std::nullopt;
+
+		const auto wallDistance = [&](const BattleHex & head)
+		{
+			int distance = GameConstants::BFIELD_SIZE;
+			for(const auto & occupied : stack.getHexes(head))
+				for(const auto & wall : wallTargets)
+					distance = std::min(distance, static_cast<int>(BattleHex::getDistance(occupied, wall)));
+			return distance;
+		};
+		const int startingWallDistance = wallDistance(stack.getPosition());
+		const auto reachability = battle.getReachability(&stack);
+		Ports::FHeroes2::SiegeWallApproach bestWall{};
+		bestWall.headHex = -1;
+		for(const auto & hex : available)
+		{
+			if(!hex.isAvailable() || hex == stack.getPosition())
+				continue;
+			const Ports::FHeroes2::SiegeWallApproach candidate{
+				wallDistance(hex), static_cast<int>(reachability.distances[hex.toInt()]), hex.toInt()};
+			if(Ports::FHeroes2::preferSiegeWallStep(candidate, bestWall, startingWallDistance))
+				bestWall = candidate;
+		}
+		if(bestWall.headHex >= 0)
+			return BattleAction::makeMove(&stack, BattleHex(bestWall.headHex));
+		return std::nullopt;
+	}
+
 	// fheroes2 meleeUnitOffense first pursues targets that cannot evade,
 	// then maximizes threat divided by the path distance. Unlike the former
 	// nearest-stack policy, this can pursue a remote archer over nearby bait.
 	// The threat and legal routes are native VCMI projections.
 	static BattleAction approach(CPlayerBattleCallback & battle, const CStack & stack,
 		const ReachabilityInfo & reachability, const BattleHexArray & available,
-		const std::vector<const CStack *> & enemies)
+		const std::vector<const CStack *> & enemies, bool cautious)
 	{
 		BattleHex destination;
 		std::optional<Ports::FHeroes2::DistantTarget> best;
@@ -196,7 +395,11 @@ private:
 			}
 		}
 		if(!destination.isValid())
+		{
+			if(const auto wall = approachSiegeWall(battle, stack, available, enemies))
+				return *wall;
 			return BattleAction::makeDefend(&stack);
+		}
 
 		if(stack.hasBonusOfType(BonusType::FLYING))
 		{
@@ -216,16 +419,77 @@ private:
 			return BattleAction::makeDefend(&stack);
 		}
 
+		// Pinned fheroes2 findOptimalPositionForSubsequentAttack evaluates
+		// each route step, preferring the least exposed step, with farther
+		// progress on a tie. Only submit native-reachable VCMI hexes.
+		std::vector<BattleHex> pathSteps;
 		for(int steps = 0; steps < GameConstants::BFIELD_SIZE && destination.isValid(); ++steps)
 		{
-			if(available.contains(destination))
-				return destination == stack.getPosition() ? BattleAction::makeDefend(&stack) : BattleAction::makeMove(&stack, destination);
+			if(available.contains(destination) && destination != stack.getPosition())
+			{
+				if(!cautious)
+					return BattleAction::makeMove(&stack, destination);
+				pathSteps.push_back(destination);
+			}
 			const auto previous = reachability.predecessors[destination.toInt()];
 			if(previous == destination)
 				break;
 			destination = previous;
 		}
-		return BattleAction::makeDefend(&stack);
+		if(pathSteps.empty())
+		{
+			if(const auto wall = approachSiegeWall(battle, stack, available, enemies))
+				return *wall;
+			return BattleAction::makeDefend(&stack);
+		}
+		// Predecessors arrive from far to near; source visits near to far.
+		std::reverse(pathSteps.begin(), pathSteps.end());
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		BattleHex safest;
+		double lowestThreat = 0;
+		for(const auto & step : pathSteps)
+		{
+			double threat = 0;
+			for(const auto * enemy : enemies)
+			{
+				// Source skips flyers and unengaged archers in the path-risk
+				// sum because changing the melee destination cannot avoid them.
+				if(enemy->hasBonusOfType(BonusType::FLYING))
+					continue;
+				if(enemy->isShooter())
+				{
+					const bool engaged = std::any_of(friends.begin(), friends.end(), [&](const CStack * friendly)
+					{
+						for(const auto & allyHex : friendly->getHexes())
+							for(const auto & enemyHex : enemy->getHexes())
+								if(BattleHex::getDistance(allyHex, enemyHex) == 1)
+									return true;
+						return false;
+					});
+					if(!engaged)
+						continue;
+				}
+				const int speed = static_cast<int>(enemy->getMovementRange());
+				if(speed <= 0)
+					continue;
+				int distance = GameConstants::BFIELD_SIZE;
+				for(const auto & ownHex : stack.getHexes(step))
+					for(const auto & enemyHex : enemy->getHexes())
+						distance = std::min(distance, static_cast<int>(BattleHex::getDistance(ownHex, enemyHex)));
+				// Conservative geometric bound for source
+				// isUnitAbleToApproachPosition. VCMI walls and obstacles may
+				// reduce reach: this is a risk estimate, not an action rule.
+				if(distance <= speed + 1)
+					threat += strength(*enemy);
+			}
+			// Source ties within 0.001 and favors farther path progress.
+			if(!safest.isValid() || threat < lowestThreat || std::fabs(threat - lowestThreat) < 0.001)
+			{
+				lowestThreat = threat;
+				safest = step;
+			}
+		}
+		return safest.isValid() ? BattleAction::makeMove(&stack, safest) : BattleAction::makeDefend(&stack);
 	}
 
 
@@ -547,26 +811,144 @@ private:
 		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
 	}
 
+	// Pinned fheroes2 berserkTurn does not evaluate the strategic target
+	// list: a Berserk-controlled creature attacks the nearest accessible
+	// unit, including an ally, or approaches that unit on a future turn.
+	// Native VCMI action legality is always checked by the authoritative
+	// server, and our planner uses only the observed battlefield.
+	static BattleAction chooseBerserkAction(CPlayerBattleCallback & battle, const CStack & stack)
+	{
+		struct Candidate
+		{
+			const CStack * unit;
+			Ports::FHeroes2::BerserkCandidate priority;
+		};
+		std::vector<Candidate> sorted;
+		for(const auto * other : battle.battleGetAllStacks())
+		{
+			if(other == &stack || !other->alive() || other->isInvincible()
+				|| !other->getPosition().isValid())
+				continue;
+			int nearest = GameConstants::BFIELD_SIZE;
+			for(const auto & a : stack.getHexes())
+				for(const auto & b : other->getHexes())
+					nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(a, b)));
+			sorted.push_back({other, {static_cast<int>(other->unitId()), nearest}});
+		}
+		std::sort(sorted.begin(), sorted.end(), [](const Candidate & a, const Candidate & b)
+		{
+			return Ports::FHeroes2::preferBerserkCandidate(a.priority, b.priority);
+		});
+		if(sorted.empty())
+			return BattleAction::makeDefend(&stack);
+
+		if(stack.isShooter() && battle.battleCanShoot(&stack))
+			for(const auto & candidate : sorted)
+				if(battle.battleCanShoot(&stack, candidate.unit->getPosition()))
+					return BattleAction::makeShotAttack(&stack, candidate.unit);
+
+		const auto routes = battle.getReachability(&stack);
+		auto available = battle.battleGetAvailableHexes(routes, &stack, false);
+		available.sort([](const BattleHex & a, const BattleHex & b) { return a.toInt() < b.toInt(); });
+		for(const auto & candidate : sorted)
+		{
+			int shortest = GameConstants::BFIELD_SIZE;
+			BattleHex from;
+			BattleHex targetHex;
+			for(const auto & hex : available)
+			{
+				if(!hex.isAvailable())
+					continue;
+				const auto attacked = battle.meleeAttackHexes(&stack, candidate.unit, hex);
+				const int cost = static_cast<int>(routes.distances[hex.toInt()]);
+				if(!attacked.empty() && cost < shortest)
+				{
+					shortest = cost;
+					from = hex;
+					targetHex = attacked.front();
+				}
+			}
+			if(from.isValid() && targetHex.isValid())
+				return BattleAction::makeMeleeAttack(&stack, targetHex, from);
+		}
+
+		const auto * nearestUnit = sorted.front().unit;
+		int startingDistance = GameConstants::BFIELD_SIZE;
+		for(const auto & a : stack.getHexes())
+			for(const auto & b : nearestUnit->getHexes())
+				startingDistance = std::min(startingDistance, static_cast<int>(BattleHex::getDistance(a, b)));
+		BattleHex best;
+		int bestDistance = startingDistance;
+		int bestCost = GameConstants::BFIELD_SIZE;
+		for(const auto & hex : available)
+		{
+			if(!hex.isAvailable() || hex == stack.getPosition())
+				continue;
+			int remaining = GameConstants::BFIELD_SIZE;
+			for(const auto & a : stack.getHexes(hex))
+				for(const auto & b : nearestUnit->getHexes())
+					remaining = std::min(remaining, static_cast<int>(BattleHex::getDistance(a, b)));
+			const int cost = static_cast<int>(routes.distances[hex.toInt()]);
+			if(remaining < bestDistance || (remaining == bestDistance && cost < bestCost))
+			{
+				best = hex;
+				bestDistance = remaining;
+				bestCost = cost;
+			}
+		}
+		return best.isValid() ? BattleAction::makeMove(&stack, best)
+			: BattleAction::makeDefend(&stack);
+	}
+
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
 	{
+		// Berserk is a special creature turn, preceding normal tactical AI.
+		if(stack.hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+			return chooseBerserkAction(battle, stack);
 		if(stack.isCatapult())
 			return battle.getAttackableWallParts().empty() ? BattleAction::makeDefend(&stack) : BattleAction::makeCatapultShot(&stack);
 		if(stack.isFirstAidTent())
 			return BattleAction::makeHeal(&stack);
 
-		auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		// Pinned fheroes2 analyzeBattleState and archerDecision examine the
+		// *whole living enemy force*, regardless of whether this particular
+		// creature can target every enemy. Source force evaluation and
+		// source attack-target eligibility are independent decisions.
+		auto allEnemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		vstd::erase_if(allEnemies, [](const CStack * enemy)
+		{
+			return !enemy->alive() || enemy->isInvincible();
+		});
+		std::sort(allEnemies.begin(), allEnemies.end(),
+			[](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
+		// Keep a separate VCMI targetable set. battleCanAttackUnit checks
+		// melee capability, NOT current-turn reachability; only the native
+		// route/attack queries and the server prove a chosen action legal.
+		auto enemies = allEnemies;
 		vstd::erase_if(enemies, [&](const CStack * enemy)
 		{
-			// Ranged-only war machines cannot pass the melee eligibility check.
-			return !enemy->alive() || enemy->isInvincible()
-				|| (!battle.battleCanShoot(&stack, enemy->getPosition())
-					&& !battle.battleCanAttackUnit(&stack, enemy));
+			return !battle.battleCanShoot(&stack, enemy->getPosition())
+				&& !battle.battleCanAttackUnit(&stack, enemy);
 		});
-		std::sort(enemies.begin(), enemies.end(), [](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
-		if(enemies.empty())
-			return BattleAction::makeDefend(&stack);
-		if(const auto retreat = archerRetreat(battle, stack, enemies))
+		// Source archerDecision assesses retreat before testing whether a
+		// legal shot or melee target exists. A blocked shooter must still
+		// consider the movement threats of otherwise inaccessible enemies.
+		if(const auto retreat = archerRetreat(battle, stack, allEnemies))
 			return *retreat;
+		if(enemies.empty())
+		{
+			// A unit with no targetable enemy may still be able to approach
+			// the living garrison. Use native WALK, never invent an attack.
+			if(stack.unitSide() == BattleSide::ATTACKER && battle.battleGetDefendedTown() != nullptr)
+			{
+				const auto defenders = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+				const auto routes = battle.getReachability(&stack);
+				const auto steps = battle.battleGetAvailableHexes(routes, &stack, false);
+				if(const auto wall = approachSiegeWall(battle, stack, steps, defenders))
+					return *wall;
+			}
+			return BattleAction::makeDefend(&stack);
+		}
 		if(const auto melee = blockedArcherMelee(battle, stack, enemies))
 			return *melee;
 
@@ -648,13 +1030,15 @@ private:
 					+ " occupant=" + (occupant ? std::to_string(occupant->unitId()) : "none"));
 			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
-		if(tactics(battle, stack, enemies).defensive)
+		const auto stance = tactics(battle, stack, allEnemies);
+		if(stance.defensive)
 		{
-			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, enemies))
+			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
 				return *cover;
 			return BattleAction::makeDefend(&stack);
 		}
-		return approach(battle, stack, reachability, available, enemies);
+		return approach(battle, stack, reachability, available, enemies,
+			stance.cautiousOffensive);
 	}
 };
 }
