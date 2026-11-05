@@ -4605,6 +4605,82 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 
 
 
+// A ballista's native SHOOTER and legal-fire flags must not turn it into
+// the "friendly archers" that justify TUM's neutral-melee screening rule.
+// The machine remains controlled by its separate, documented ballista policy.
+// This is a VCMI-specific interpretation, not a recovered hidden ERA rule.
+TEST_F(AIIntegrationNativeBattle, tumBallistaAloneDoesNotMakeMeleeWaitForShooters)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 80);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	const CStack * ballista = nullptr;
+	const CStack * opponent = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER
+			&& unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			opponent = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_NE(opponent, nullptr);
+	ASSERT_TRUE(ballista->isShooter())
+		<< "Ballista must be a native ranged stack to expose the false screen";
+	ASSERT_TRUE(ballista->hasBonusOfType(BonusType::SIEGE_WEAPON))
+		<< "The VCMI war-machine classifier must cover this ballista";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(ballista, opponent->getPosition()))
+		<< "The machine must actually have a legal shot against the neutral";
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_EQ(baseline.actionType, EActionType::WALK)
+		<< "The independent baseline must approach the distant neutral";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->toString(), baseline.toString())
+		<< "Only a siege machine can shoot, so TUM must use its explicit partial HoMM3 base";
+	battle()->activeStack = melee->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI server rejected TUM's infantry movement";
+	EXPECT_GT(recorder.movementPackets, 0);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBlindNeutralThreatDoesNotBreakShooterScreen)
 {
 	// TUM's published neutral-shooter screen waits until enemy melee can
