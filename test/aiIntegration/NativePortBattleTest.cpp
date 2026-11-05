@@ -4024,8 +4024,10 @@ TEST_F(AIIntegrationNativeBattle, mmaiFirstAidWithoutWoundsUsesEngineAutoHealRea
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->isFirstAidTent())
 			foundTent = true;
 		else if(unit->unitSide() == BattleSide::ATTACKER && unit->alive())
+		{
 			EXPECT_EQ(unit->getFirstHPleft(), unit->getMaxHealth())
 				<< "The first aid scenario must start with no wounded allies";
+		}
 	}
 	ASSERT_TRUE(foundTent) << "The artifact did not install the actual first aid tent";
 	runToCompletion(std::nullopt, false, "MMAI", "HoMM3OriginalTactics");
