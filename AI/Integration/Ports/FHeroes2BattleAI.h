@@ -8,6 +8,7 @@
 
 #include "SourceTactics.h"
 #include "FHeroes2SpellPolicy.h"
+#include "FHeroes2ThreatProjection.h"
 #include "FHeroes2BerserkOrder.h"
 #include "FHeroes2SiegeGeometry.h"
 
@@ -187,6 +188,42 @@ private:
 	static double strength(const battle::Unit & stack)
 	{
 		return static_cast<double>(stack.estimateCombatValue());
+	}
+
+	// The pinned source ranks *threat to this acting stack*, rather than
+	// unconditioned creature strength, in distant-target pursuit. Native
+	// VCMI owns attack damage and available footprints; the source-distance
+	// modifiers are preserved, while special monster abilities remain a
+	// documented approximation.
+	static double threatAgainst(CPlayerBattleCallback & battle, const CStack & attacker,
+		const CStack & defender)
+	{
+		int distance = GameConstants::BFIELD_SIZE;
+		for(const auto & from : attacker.getHexes())
+			for(const auto & to : defender.getHexes())
+				distance = std::min(distance, static_cast<int>(BattleHex::getDistance(from, to)));
+		distance = std::max(1, distance);
+
+		const bool shooter = attacker.isShooter() && battle.battleCanShoot(&attacker);
+		const BattleAttackInfo preview(&attacker, &defender, distance, shooter);
+		DamageEstimation retaliation;
+		const auto estimate = battle.battleEstimateDamage(preview, &retaliation);
+		const auto average = [](const DamageEstimation & value) -> double
+		{
+			return (static_cast<double>(value.damage.min)
+				+ static_cast<double>(value.damage.max)) / 2.0;
+		};
+		const Ports::FHeroes2::ThreatProjection params{
+			average(estimate), shooter ? 0.0 : average(retaliation),
+			std::max(1.0, static_cast<double>(attacker.getAvailableHealth())),
+			distance, static_cast<int>(attacker.getMovementRange()),
+			attacker.getTotalAttacks(shooter), shooter,
+			attacker.hasBonusOfType(BonusType::FLYING), defender.isTurret(),
+			attacker.isClone(),
+			attacker.unitOwner() == battle.battleGetOwner(&defender),
+			attacker.unitOwner() != battle.battleGetOwner(&attacker),
+			attacker.isFrozen(), attacker.moved()};
+		return std::max(0.0, Ports::FHeroes2::projectRelativeThreat(params));
 	}
 
 	static double lossValue(const battle::Unit & stack, const DamageEstimation & estimate)
@@ -386,7 +423,7 @@ private:
 			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
 				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
 			const Ports::FHeroes2::DistantTarget candidate{
-				std::max(0.0, strength(*enemy)), std::max(1, shortest), cannotEvade,
+				threatAgainst(battle, *enemy, stack), std::max(1, shortest), cannotEvade,
 				static_cast<int>(enemy->unitId())};
 			if(!best || Ports::FHeroes2::preferDistantTarget(candidate, *best))
 			{
