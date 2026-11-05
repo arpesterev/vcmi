@@ -3664,6 +3664,179 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeRangedFirstStrikeExecutesBeforeOpen
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Retail simulateAttack predicts first melee hit -> retaliation -> second hit.
+// VCMI's damageTypeMelee FIRST_STRIKE reverses the first two steps. The
+// HoMM3-only detached-state projection must account for this native rule,
+// then submit its own legal action and observe the server's actual packets.
+// The synthetic bonus does NOT imply that retail Heroes III has FIRST_STRIKE.
+TEST_F(AIIntegrationNativeBattle, homm3NativeMeleeFirstStrikeCountersBeforeCrusaderOpening)
+{
+	prepareBattle(CreatureID(7), 6, CreatureID(6), 6); // Crusaders vs Swordsmen
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * crusaders = nullptr;
+	CStack * swordsmen = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			crusaders = unit.get();
+		else
+			swordsmen = unit.get();
+	}
+	ASSERT_NE(crusaders, nullptr);
+	ASSERT_NE(swordsmen, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), crusaders);
+	const BattleHex adjacent(crusaders->getPosition().toInt() + 5);
+	ASSERT_TRUE(adjacent.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(adjacent), nullptr);
+	swordsmen->setPosition(adjacent);
+	swordsmen->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(6)),
+		BonusSubtypeID(BonusCustomSubtype::damageTypeMelee)));
+	ASSERT_TRUE(swordsmen->hasBonus(Selector::typeSubtype(
+		BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee)));
+	ASSERT_GT(crusaders->getTotalAttacks(false), 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanAttackUnit(swordsmen, crusaders));
+	ASSERT_TRUE(swordsmen->ableToRetaliate());
+	ASSERT_FALSE(view->isLongWeaponAttack(crusaders, swordsmen, crusaders->getPosition()));
+	BattleAttackInfo firstCounter(swordsmen, crusaders, 0, false);
+	firstCounter.attackerPos = swordsmen->getPosition();
+	firstCounter.defenderPos = crusaders->getPosition();
+	const auto initialDamage = view->battleEstimateDamage(firstCounter);
+	ASSERT_GT(initialDamage.damage.min, 0);
+	auto surviving = crusaders->acquireState();
+	int64_t firstLoss = initialDamage.damage.min
+		+ (initialDamage.damage.max - initialDamage.damage.min) / 2;
+	firstLoss = std::clamp<int64_t>(firstLoss, 0, surviving->getAvailableHealth());
+	surviving->damage(firstLoss);
+	ASSERT_TRUE(surviving->alive());
+	ASSERT_LT(surviving->getCount(), crusaders->getCount());
+	const auto beforeAttacker = crusaders->getAvailableHealth();
+	const auto beforeDefender = swordsmen->getAvailableHealth();
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, crusaders);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), swordsmen);
+	EXPECT_EQ(crusaders->getAvailableHealth(), beforeAttacker);
+	EXPECT_EQ(swordsmen->getAvailableHealth(), beforeDefender);
+
+	std::vector<int> attackOrder;
+	const auto crusaderID = static_cast<ui32>(crusaders->unitId());
+	const auto swordsmanID = static_cast<ui32>(swordsmen->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(!packet.shot()
+			&& (packet.stackAttacking == swordsmanID || packet.stackAttacking == crusaderID))
+			attackOrder.push_back(static_cast<int>(packet.stackAttacking));
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected a native HoMM3 melee decision against FIRST_STRIKE";
+	recorder.onAttackBeforeApply = {};
+	ASSERT_GE(attackOrder.size(), 2u);
+	EXPECT_EQ(attackOrder[0], static_cast<int>(swordsmanID))
+		<< "The engine must execute the defender's preemptive counterattack first";
+	EXPECT_EQ(attackOrder[1], static_cast<int>(crusaderID))
+		<< "Only the surviving attacker may deliver its opening blow";
+	EXPECT_LT(crusaders->getAvailableHealth(), beforeAttacker);
+	EXPECT_LT(swordsmen->getAvailableHealth(), beforeDefender);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
+// A melee-only FIRST_STRIKE must not fire before a ranged attack.
+// Even with RANGED_RETALIATION, the server first resolves the attacking shot.
+// This exercises the subtype distinction used by the HoMM3-only projection.
+TEST_F(AIIntegrationNativeBattle, homm3MeleeOnlyFirstStrikeDoesNotPreemptRangedAttack)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(2), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			shooter = unit.get();
+		else
+			defender = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(defender, nullptr);
+	defender->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	defender->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2)),
+		BonusSubtypeID(BonusCustomSubtype::damageTypeMelee)));
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(shooter, defender->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(defender, shooter->getPosition()));
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	EXPECT_EQ(callback->action->target.front().unitValue, defender->unitId());
+	std::vector<int> orderedVictims;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & hit)
+	{
+		if(!hit.shot())
+			return;
+		for(const auto & victim : hit.bsa)
+			if(victim.stackAttacked == shooter->unitId() || victim.stackAttacked == defender->unitId())
+				orderedVictims.push_back(victim.stackAttacked);
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	recorder.onAttackBeforeApply = {};
+	ASSERT_GE(orderedVictims.size(), 2u);
+	EXPECT_EQ(orderedVictims[0], defender->unitId())
+		<< "The shooter's opening hit comes before a melee-only FIRST_STRIKE";
+	EXPECT_EQ(orderedVictims[1], shooter->unitId())
+		<< "RANGED_RETALIATION remains legal but follows the first shot";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Independent real-server confirmation that RANGED_RETALIATION causes a
 // countershot, instead of trusting a generic damage preview or a fake model.
 TEST_F(AIIntegrationNativeBattle, homm3RangedRetaliationExecutesOnNativeServer)
