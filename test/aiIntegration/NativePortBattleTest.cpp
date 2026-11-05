@@ -2170,6 +2170,14 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedShooterStopsAnchoringDefensiveS
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	// The same upstream analyzeBattleState ranged classification controls
+	// spell-conservation thresholds as well as unit defensive stance.
+	// Observe the actual native battle before and after server-applied Blind.
+	auto observer = std::make_shared<DecisionCallback>(player);
+	observer->onBattleStarted(battle());
+	const auto playerView = observer->getBattle(battleID);
+	ASSERT_NE(playerView, nullptr);
+	ASSERT_GT(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, true), 0);
 	const auto choose = [&]() -> std::optional<BattleAction>
 	{
 		auto callback = std::make_shared<DecisionCallback>(player);
@@ -2200,6 +2208,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedShooterStopsAnchoringDefensiveS
 	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, shooter));
 	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::NOT_ACTIVE));
 	ASSERT_TRUE(shooter->isShooter());
+	EXPECT_DOUBLE_EQ(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, true), 0.0)
+		<< "Blinded archer must not inflate native spell-threat ranged strength";
 	ASSERT_GT(shooter->getMovementRange(), 0u)
 		<< "Fixture must reproduce nonzero VCMI raw speed while blinded";
 	ASSERT_EQ(battle()->battleActiveUnit(), guard);
