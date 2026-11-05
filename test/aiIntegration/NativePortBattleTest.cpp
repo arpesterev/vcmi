@@ -5313,12 +5313,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeFirstStrikeRangedCounterPrecedes
  // melee-only FIRST_STRIKE bonus as permission for a preemptive countershot.
  // Two symmetric ranged retaliators make this a policy-choice regression:
  // spurious first-fire pricing would incorrectly switch away from the first.
-TEST_F(AIIntegrationNativeBattle, fheroes2MeleeOnlyFirstStrikeCannotPreemptRangedShot)
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedFirstStrikeCannotPreemptRangedShot)
 {
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(2), 12);
 	setArmy(defenderSideHero, CreatureID(2), 35);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
 	ASSERT_TRUE(gameHandler->insertNewStack(
 		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 35));
 	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
@@ -5423,6 +5424,38 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MeleeOnlyFirstStrikeCannotPreemptRange
 	EXPECT_EQ(shooter->getAvailableHealth(), shooterHealth);
 	EXPECT_EQ(chosen->getAvailableHealth(), targetHealth);
 
+	// Heroes II has no FIRST_STRIKE; the native VCMI processor allows
+	// ranged FIRST_STRIKE only while the defender can act. Before Blind,
+	// this must change FHeroes2's choice. A real server Blind must reverse
+	// that choice without modifying either stack during damage preview.
+	chosen->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2)),
+		BonusCustomSubtype::damageTypeRanged));
+	ASSERT_TRUE(chosen->hasBonus(
+		Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged)));
+	callback->action.reset();
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_NE(callback->action->target.front().unitValue, baselineTarget)
+		<< "An active native FIRST_STRIKE ranged counter must reduce the expected shot value";
+
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, chosen))
+		<< "The status change must come from the authoritative spell processor";
+	ASSERT_TRUE(chosen->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	callback->action.reset();
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, baselineTarget)
+		<< "VCMI cannot preemptively return fire while the defender is Blind";
+	EXPECT_EQ(shooter->getAvailableHealth(), shooterHealth);
+	EXPECT_EQ(chosen->getAvailableHealth(), targetHealth);
+
 	std::vector<ui32> shotOrder;
 	std::vector<bool> counters;
 	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
@@ -5434,11 +5467,15 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MeleeOnlyFirstStrikeCannotPreemptRange
 		}
 	};
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
-	ASSERT_GE(shotOrder.size(), 2u);
-	EXPECT_EQ(shotOrder[0], shooter->unitId());
-	EXPECT_FALSE(counters[0]);
-	EXPECT_EQ(shotOrder[1], chosen->unitId());
-	EXPECT_TRUE(counters[1]);
+	ASSERT_FALSE(shotOrder.empty());
+	EXPECT_EQ(shotOrder.front(), shooter->unitId())
+		<< "Server must execute the shooter's attack before any return fire from a blinded target";
+	EXPECT_FALSE(counters.front());
+	if(shotOrder.size() > 1)
+	{
+		EXPECT_EQ(shotOrder[1], chosen->unitId());
+		EXPECT_TRUE(counters[1]);
+	}
 	recorder.onAttackBeforeApply = {};
 	policy.reset();
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
