@@ -4101,12 +4101,23 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathScoresAndHitsNativeSecondar
 		<< "Hypnotized TUM must prefer an actual two-victim breath strike";
 	std::cout << "AI_TUM_HYPNOTIZE_MELEE_SPLASH homm3=" << baseline.toString()
 		<< " tum=" << callback->action->toString() << '\n';
-	const int64_t totalHealthBefore =
-		front->getAvailableHealth() + rear->getAvailableHealth();
+	// Observe the actual BattleAttack packet before its damage applies.
+	// A lethal action may end the entire battle and invalidate CStack pointers.
+	const int frontId = front->unitId();
+	const int rearId = rear->unitId();
+	std::set<int> nativeHitIds;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		for(const auto & injury : attack.bsa)
+			if(injury.damageAmount > 0
+				&& (injury.stackAttacked == frontId || injury.stackAttacked == rearId))
+				nativeHitIds.insert(injury.stackAttacked);
+	};
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Authoritative VCMI rejected the independent TUM multihex melee attack";
-	EXPECT_LT(front->getAvailableHealth() + rear->getAvailableHealth(), totalHealthBefore)
-		<< "Native melee attack must actually damage the former allied line";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(nativeHitIds.size(), 2u)
+		<< "Real server damage must include both the primary and secondary former ally";
 	policy.reset();
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
 	EXPECT_GT(recorder.meleeAttacks, 0);
