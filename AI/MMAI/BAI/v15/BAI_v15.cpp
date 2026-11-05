@@ -193,21 +193,13 @@ std::shared_ptr<BattleAction> BAI::maybeBuildAutoAction(const CStack * astack, c
 {
 	if(astack->creatureId() == CreatureID::FIRST_AID_TENT)
 	{
-		const CStack * target = nullptr;
-		auto maxdmg = 0;
-		for(const auto * stack : battle->battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
-		{
-			auto dmg = stack->getMaxHealth() - stack->getFirstHPleft();
-			if(dmg <= maxdmg)
-				continue;
-			maxdmg = static_cast<int>(dmg);
-			target = stack;
-		}
-
-		if(target)
-		{
-			return std::make_shared<BattleAction>(BattleAction::makeHeal(astack, target));
-		}
+		// Keep military-machine turns outside neural inference even when every
+		// allied stack has full health. VCMI HealAction::findMostWounded
+		// selects only an actually healable target, taking spell immunity into
+		// account. The old max-missing-HP shortcut could select an immune
+		// target or return no action and incorrectly enter the ONNX policy.
+		// This is an engine-owned automatic action, not a neural decision.
+		return std::make_shared<BattleAction>(BattleAction::makeHeal(astack));
 	}
 	else if(astack->creatureId() == CreatureID::CATAPULT)
 	{
