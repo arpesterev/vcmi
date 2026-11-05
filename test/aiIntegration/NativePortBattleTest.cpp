@@ -1157,8 +1157,14 @@ TEST_F(AIIntegrationNativeBattle, fheroes2HasteDoesNotRewardBlindedArcherSpeed)
 	ASSERT_GT(shooter->getMovementRange(), 0u)
 		<< "Native blinded stack must retain raw speed to exercise the regression";
 	ASSERT_EQ(battle()->battleActiveUnit(), active);
+	const int64_t activeHealthBefore = active->getAvailableHealth();
+	const int64_t shooterHealthBefore = shooter->getAvailableHealth();
 	const auto after = decide();
 	ASSERT_TRUE(after.first.has_value());
+	EXPECT_EQ(active->getAvailableHealth(), activeHealthBefore)
+		<< "Spell valuation must not injure the live active unit";
+	EXPECT_EQ(shooter->getAvailableHealth(), shooterHealthBefore)
+		<< "Projected spell valuation must not damage the blinded archer";
 	if(after.second)
 	{
 		EXPECT_EQ(after.first->spell, SpellID(SpellID::HASTE));
