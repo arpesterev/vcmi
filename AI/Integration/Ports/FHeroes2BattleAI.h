@@ -21,6 +21,7 @@
 #include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/mapObjects/CGTownInstance.h"
 #include "../../../lib/CStack.h"
+#include "../../../lib/bonuses/BonusSelector.h"
 #include "../../../lib/battle/BattleAction.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
 #include "../../../lib/callback/CBattleCallback.h"
@@ -224,7 +225,43 @@ private:
 		info.defenderPos = aimedHex;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
-		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
+		// Pinned fheroes2 optimalAttackVector ranks an attack after estimating
+		// the exchange. Heroes II has no FIRST_STRIKE, but VCMI can resolve a
+		// melee retaliation BEFORE the attacker hits. Use the native damage
+		// subtype and retaliation gates, then price the survivors on a detached
+		// stack. This is a VCMI-only rule projection, not source equivalence.
+		const bool meleeFirstStrike = !shooting
+			&& defender.hasBonus(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+					BonusCustomSubtype::damageTypeAll)
+				.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+					BonusCustomSubtype::damageTypeMelee)))
+			&& !defender.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+			&& !attacker.isInvincible()
+			&& !battle.isLongWeaponAttack(&attacker, &defender, from)
+			&& defender.ableToRetaliate();
+		double value = lossValue(defender, damage)
+			- (shooting ? 0 : lossValue(attacker, retaliation));
+		if(meleeFirstStrike)
+		{
+			BattleAttackInfo counter(&defender, &attacker, 0, false);
+			counter.attackerPos = defender.getPosition();
+			counter.defenderPos = from;
+			const auto preemptive = battle.battleEstimateDamage(counter);
+			auto survivingAttacker = attacker.acquireState();
+			int64_t hit = preemptive.damage.min
+				+ (preemptive.damage.max - preemptive.damage.min) / 2;
+			hit = std::clamp<int64_t>(hit, 0, survivingAttacker->getAvailableHealth());
+			survivingAttacker->damage(hit);
+			value = -lossValue(attacker, preemptive);
+			if(survivingAttacker->alive())
+			{
+				BattleAttackInfo remaining(survivingAttacker.get(), &defender, distance, false);
+				remaining.attackerPos = from;
+				remaining.defenderPos = aimedHex;
+				value += lossValue(defender, battle.battleEstimateDamage(remaining));
+			}
+		}
 		if(attackerPosition != attacker.getPosition().toInt()
 			|| defenderPosition != defender.getPosition().toInt()
 			|| attackerHealth != attacker.getAvailableHealth()
