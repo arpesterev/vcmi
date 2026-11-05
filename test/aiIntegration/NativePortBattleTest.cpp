@@ -3269,6 +3269,80 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CautiousMultiTurnApproachAvoidsNextTur
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 isUnitAbleToApproachPosition uses GetSpeed(false, true):
+// a Blind/Paralyze-immobilized enemy cannot threaten future path steps.
+// VCMI still reports nonzero raw movement range under native Blind, so
+// the source-aware path scorer must not stop early for a fictitious attack.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedEnemyDoesNotBlockCautiousMultiTurnAdvance)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	const BattleHex origin = infantry->getPosition();
+	const int speed = static_cast<int>(infantry->getMovementRange());
+	ASSERT_GT(speed, 0);
+	const BattleHex guardHex(origin.toInt() + 2 * speed + 1);
+	ASSERT_TRUE(guardHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(guardHex), nullptr);
+	const auto * guard = addStack(BattleSide::DEFENDER, CreatureID(0), guardHex, 35);
+	ASSERT_NE(guard, nullptr);
+	ASSERT_GT(BattleHex::getDistance(origin, guardHex), speed + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, infantry);
+		return callback->action;
+	};
+	const auto before = decide();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::WALK);
+	ASSERT_FALSE(before->target.empty());
+	const BattleHex cautiousStep = before->target.front().hexValue;
+	ASSERT_LT(BattleHex::getDistance(origin, cautiousStep), speed);
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, guard))
+		<< "The authoritative server must Blind the ground melee threat";
+	ASSERT_TRUE(guard->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(guard->getMovementRange(), 0)
+		<< "The fixture must expose native raw-speed versus effective-speed divergence";
+	const auto after = decide();
+	ASSERT_TRUE(after.has_value());
+	ASSERT_EQ(after->actionType, EActionType::WALK)
+		<< "Independent FHeroes2 must still approach after native Blind";
+	ASSERT_FALSE(after->target.empty());
+	const BattleHex advancedStep = after->target.front().hexValue;
+	EXPECT_GT(BattleHex::getDistance(origin, advancedStep),
+		BattleHex::getDistance(origin, cautiousStep))
+		<< "The immobilized enemy must no longer reduce safe forward progress";
+	EXPECT_LE(BattleHex::getDistance(origin, advancedStep), speed);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "VCMI rejected the independently selected source-derived WALK";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
