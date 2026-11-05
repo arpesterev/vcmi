@@ -337,6 +337,28 @@ TEST(MMAINNOutputValidation, V13StrictRejectsInvalidModelActionWithoutResampling
 	EXPECT_NO_THROW(enforceNNV13SingleLiveAction(false, false, 42));
 }
 
+TEST(MMAINNOutputValidation, RejectsScriptedFallbackForStrictOrInvalidActiveActor)
+{
+	using MMAI::BAI::canNNUseLegacyBattleFallback;
+	struct Creature
+	{
+		bool living;
+		bool alive() const { return living; }
+	};
+	const Creature living{true};
+	const Creature dead{false};
+
+	// The neural identity never delegates to BattleEvaluator.
+	EXPECT_FALSE(canNNUseLegacyBattleFallback(true, &living));
+	EXPECT_FALSE(canNNUseLegacyBattleFallback(true, &dead));
+	EXPECT_FALSE(canNNUseLegacyBattleFallback(true, static_cast<const Creature *>(nullptr)));
+
+	// Legacy gym/hybrid fallback is still allowed for a live creature only.
+	EXPECT_TRUE(canNNUseLegacyBattleFallback(false, &living));
+	EXPECT_FALSE(canNNUseLegacyBattleFallback(false, &dead));
+	EXPECT_FALSE(canNNUseLegacyBattleFallback(false, static_cast<const Creature *>(nullptr)));
+}
+
 TEST(MMAINNOutputValidation, V13RejectsDeadOrMissingEngineOwnedMachineActor)
 {
 	using MMAI::BAI::requireNNV13LivingActiveStack;

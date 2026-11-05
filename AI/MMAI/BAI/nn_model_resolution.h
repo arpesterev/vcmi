@@ -32,6 +32,15 @@ inline void enforceStrictNNModelLoad(bool strictNeural, const std::string & key,
 		throw std::runtime_error("MMAI: configured neural model '" + key + "' (" + configuredPath
 			+ ") failed to load: " + cause.what() + "; refusing substitute neural policy");
 }
+// A legacy hybrid policy may invoke BattleEvaluator only for a still-living
+// actor. In particular, a failed activeStack event must never send a null/dead
+// actor into scripted fallback, and strict neural policy never uses it at all.
+template<typename Stack>
+inline bool canNNUseLegacyBattleFallback(bool strictNeural, const Stack * activeStack)
+{
+	return !strictNeural && activeStack && activeStack->alive();
+}
+
 // A V15 activeStack event may refer to a creature eliminated by a previous
 // battle callback. Such an event must not enter ONNX inference, automatic
 // war-machine dispatch, or action conversion. This check is also repeated
