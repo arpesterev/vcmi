@@ -180,11 +180,135 @@ pinned fheroes2 `meleeUnitDefense`, not a full source-equivalent port:
 source-specific flank preferences, defensive spacing, kiting and spell-area
 responses remain incomplete.
 
+Pinned fheroes2 `archerDecision` temporarily removes the *moving archer*
+from the board when evaluating candidate retreats. Thus an enemy archer that
+was in melee **only** with the departing archer must be evaluated as an
+unengaged ranged unit for its future melee reach; otherwise its raw speed
+falsely turns it into a long-range ground pursuer. The VCMI projection now
+excludes the moving stack from enemy hand-fighting classification while
+retaining engagements with other friendly stacks. Direct adjacency still
+blocks shooting. A test with deliberately elevated, fixture-only speeds
+checks the independent native movement selection and server acceptance.
+This does not model the Heroes II pathfinder or alter Heroes III rules.
+
+Pinned fheroes2 `Unit::GetSpeed(false, true)` reports STANDING for
+Blind/Paralyze. This partial VCMI adapter now consistently projects a
+current `NOT_ACTIVE` enemy as having zero future-turn pursuit speed when
+ranking distant targets, avoiding enemy melee contact along a multi-turn path,
+and deciding whether a melee guard should screen a threatened friendly
+shooter. Existing fast-archer retreat uses the same effective speed. Native
+movement and defender spell effects are not modified: adjacent disabled
+stacks can still physically block a shot, and `NOT_ACTIVE` alone does not
+predict whether a spell will expire or be dispelled before the next turn.
+Two targeted native-battle regressions compare live decisions before and
+after a VCMI-authorized Blind, require acceptance of a selected `DEFEND`
+or `WALK`, and complete actual combat. This tests the *projection*, not
+Heroes II combat-engine equivalence.
+
+Pinned fheroes2 `analyzeBattleState` counts shooters blocked by ordinary
+melee contact or Forgetfulness, but excludes Blind/Paralyze through
+`Unit::isImmovable()` when computing **ranged** army strength. The partial
+VCMI stance adapter now excludes a native `NOT_ACTIVE` shooter from both
+sides' ranged ratios while retaining its current total combat value in army
+strength. Unlike Heroes II, VCMI can expose a positive raw movement range
+while the spell prevents action. The paired pre-/post-Blind native regression
+requires a defensive guard to independently switch from `DEFEND` to a
+server-accepted `WALK` and then complete combat. This does not predict spell
+expiry, change the unit's bonuses or imply exact Heroes II stance parity.
+
+Pinned fheroes2 `meleeUnitDefense` considers every enemy adjacent to
+a friendly archer, including enemy archers who are engaged in melee.
+Under Heroes III's VCMI rules, a nearby enemy shooter still blocks a
+friendly archer's ranged attack; the adapter treats that **adjacent**
+enemy as a real shooter-cover threat without treating remote ranged units
+as future ground-melee pursuers. A native regression requires the blocked
+shot, FHeroes2's independent cover movement, server acceptance, and a
+completed battle. Heroes II targeting, speed and ability rules are not
+equated with Heroes III.
+
+Pinned fheroes2 `optimalAttackVector` / `doubleCellAttackValue` considers
+additional victims of line attacks when choosing a melee strike. This partial
+adapter now scores each native VCMI-legal melee target hex using the
+authoritative additional-victim footprint and penalizes collateral hits on
+friendly stacks. A native breath-attack regression checks the selected
+`WALK_AND_ATTACK`, server acceptance, multiple actual injuries, and battle
+completion. This tests the projection on Heroes III creature bonuses and
+hex geometry, **not** Heroes II breath behavior or general port parity.
+A separate native regression supplies equal-value adjacent targets and a real
+friendly unit on one breath ray. It requires the FHeroes2 policy to select a
+non-friendly-fire vector, VCMI to accept the independent action, and the
+protected unit's real server health to remain unchanged. The splash ability
+is attached only to the test creature, not to any gameplay definitions.
+
+Both ordinary melee and blocked-archer attack previews now pass the
+**actual legal struck cell** through VCMI `BattleAttackInfo::defenderPos` for
+each candidate, instead of scoring the default head of a double-wide victim.
+This follows the pinned `optimalAttackVector` / `archerDecision` separation
+between target stack and chosen attack vector, but leaves final direction,
+damage, retaliation and legality to Heroes III's engine. The native
+wide-target tests demand independent decisions, accepted attacks and
+completed battles; they do not establish exact Heroes II combat parity.
+
+A blocked ranged unit may also carry VCMI's two-hex melee breath bonus.
+The pinned fheroes2 `archerDecision` scores blocked-shooter melee by
+direct hit-point damage minus retaliation; it does not define Heroes III
+breath geometry. This port now checks native secondary victims for each
+legal blocked-archer melee vector, adding inflicted damage and penalizing
+friendly collateral. A native-server fixture with two equal adjacent
+primaries and one allied unit behind the first requires independent
+`WALK_AND_ATTACK`, native acceptance, no friendly damage and completed
+combat. This is a VCMI safety extension, **not** source-parity evidence.
+
+Blocked archers also now project a *melee* FIRST_STRIKE defender on a
+detached copy of the attacker, subtract preemptive HP losses and evaluate
+the surviving archers' damage, including native secondary victims. This
+avoids counting a later ordinary retaliation twice. The real-server
+`fheroes2BlockedArcherAvoidsPreemptiveMeleeCounter` regression compares
+the same two equal contact targets before and after one gains FIRST_STRIKE,
+then submits the independently chosen melee command and completes combat.
+Heroes II does not have this VCMI ability or these combat timings.
+
+VCMI also supports `RANGED_RETALIATION`, unlike the pinned fheroes2
+`archerDecision` ranged attack scoring. The partial adapter now subtracts
+the estimated loss from a **native-legal return shot** when ranking primary
+ranged targets, except where the initial shot is guaranteed to kill the
+retaliator or VCMI suppresses the countershot. The reverse estimate is only
+a decision proxy; the actual engine owns retaliation timing and effects.
+Two server regressions separately require a changed independent target
+choice and a real accepted ranged counterattack before battle completion.
+With native `FIRST_STRIKE` plus `RANGED_RETALIATION`, a detached copy of
+the attacking shooter now receives the countershot **before** estimating
+its own outgoing ranged damage (including splash victims). The native
+`fheroes2NativeFirstStrikeRangedCounterPrecedesOwnShot` regression asserts
+server packet order, an independently chosen legal shot, non-mutating
+preview and a completed real battle. The expected counter damage uses a
+bounded mean, not guaranteed future combat rolls.
+The preemptive ranged forecast is now restricted to a FIRST_STRIKE bonus
+whose native subtype explicitly covers ranged or all damage. A melee-only
+FIRST_STRIKE bonus must not change ranged target valuation. The
+`fheroes2MeleeOnlyFirstStrikeCannotPreemptRangedShot` regression compares
+independently chosen equal-return-fire targets, executes the chosen shot on
+the native server and checks shot-before-countershot ordering. This is
+still a VCMI-only subtype projection, not a Heroes II ability.
+This is **Heroes III host-rule adaptation**, not Heroes II equivalence.
+
 Not implemented: complete upstream buff/debuff and creature-spell selection,
-retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
+complete withdrawal policy parity, complete archer kiting and screen placement, exact siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
 Do not use this partial policy as a quality replacement for the default AI.
 No source-policy equivalence evidence has been produced.
+
+The pinned fheroes2 `Unit::GetSpeed(false,true)` reports STANDING for
+Blind/Paralyze. Native VCMI can still expose positive raw movement for an
+incapacitated stack. If an area Dispel removes both Blind and Haste/Slow,
+the projected movement recovery must not be mislabelled as the cost of
+removing the speed spell. The partial `FHeroes2SpellPolicy` now excludes
+those simultaneous control-state transitions from lost-Haste/lost-Slow
+penalties, while retaining normal active-stack valuation. The native
+`fheroes2DispelPrefersStrongerBlindedHastedAlly` regression must establish
+the independently chosen legal target, real accepted Dispel and terminal
+battle result on the exact commit before this change is considered verified.
+It is a current-state VCMI projection, not proof of Heroes II spell parity.
 
 ## HoMM3OriginalTactics
 
@@ -287,6 +411,19 @@ aggregation rules, improved tower targeting, clone/antimagic/cure selection,
 distraction avoidance, full siege valuation, exact fast-stack pursuit scoring, creature ability choices, buff/debuff
 planning and the rest of the compiled ERA AI modifications. Native battle
 smoke tests do not establish those behaviors or a match win-rate improvement.
+
+### Native FIRST_STRIKE and melee collateral (verification pending)
+
+Pinned fheroes2 `optimalAttackVector` / `doubleCellAttackValue` value
+secondary targets of a melee strike. The separate VCMI `FIRST_STRIKE`
+mechanic can eliminate the entire attacker **before** its strike. This
+partial port now values native breath collateral using a detached surviving
+attacker, and credits no downstream hits when that attacker is killed.
+The targeted native regression requires an independently chosen legal
+`WALK_AND_ATTACK`, an authoritative damage preview proving the preemptive
+counter is fatal for the unsafe path, engine acceptance and a completed
+battle. This is a host-engine projection, not a Heroes II rule or a proof of
+source equivalence. Exact-head CI must pass before integration.
 
 ## Native battle regressions
 

@@ -21,6 +21,7 @@
 #include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/mapObjects/CGTownInstance.h"
 #include "../../../lib/CStack.h"
+#include "../../../lib/bonuses/BonusSelector.h"
 #include "../../../lib/battle/BattleAction.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
 #include "../../../lib/callback/CBattleCallback.h"
@@ -184,6 +185,16 @@ private:
 	AutocombatPreferences preferences;
 	bool humanAutocombat = false;
 
+	// Pinned fheroes2 Unit::GetSpeed(false, true) returns STANDING while
+	// Blind or Paralyze prevents a turn. In VCMI NOT_ACTIVE is the
+	// authoritative current incapacitation flag, not raw creature speed.
+	// This projects current state only; it cannot predict future dispels.
+	static int futureThreatSpeed(const CStack & enemy)
+	{
+		return enemy.hasBonusOfType(BonusType::NOT_ACTIVE)
+			? 0 : static_cast<int>(enemy.getMovementRange());
+	}
+
 	static double strength(const battle::Unit & stack)
 	{
 		return static_cast<double>(stack.estimateCombatValue());
@@ -200,7 +211,7 @@ private:
 	}
 
 	static double attackValue(CPlayerBattleCallback & battle, const CStack & attacker,
-		const CStack & defender, const BattleHex & from, bool shooting, int distance)
+		const CStack & defender, const BattleHex & from, const BattleHex & aimedHex, bool shooting, int distance)
 	{
 		const int attackerPosition = attacker.getPosition().toInt();
 		const int defenderPosition = defender.getPosition().toInt();
@@ -208,9 +219,72 @@ private:
 		const int64_t defenderHealth = defender.getAvailableHealth();
 		BattleAttackInfo info(&attacker, &defender, distance, shooting);
 		info.attackerPos = from;
+		// Pinned fheroes2 optimalAttackVector evaluates the actual struck
+		// footprint, not necessarily the head of a wide defender. VCMI
+		// damage and attack-direction rules own this native projection.
+		info.defenderPos = aimedHex;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
-		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
+		// Pinned fheroes2 optimalAttackVector ranks an attack after estimating
+		// the exchange. Heroes II has no FIRST_STRIKE, but VCMI can resolve a
+		// melee retaliation BEFORE the attacker hits. Use the native damage
+		// subtype and retaliation gates, then price the survivors on a detached
+		// stack. This is a VCMI-only rule projection, not source equivalence.
+		const bool meleeFirstStrike = !shooting
+			&& defender.hasBonus(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+					BonusCustomSubtype::damageTypeAll)
+				.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+					BonusCustomSubtype::damageTypeMelee)))
+			&& !defender.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+			&& !attacker.isInvincible()
+			&& !battle.isLongWeaponAttack(&attacker, &defender, from)
+			&& defender.ableToRetaliate();
+		// Source optimalAttackVector and doubleCellAttackValue price secondary
+		// victims. VCMI FIRST_STRIKE can destroy the attacker before any
+		// breath/sweep effects happen; never project splash from the live,
+		// pre-retaliation stack after a fatal preemptive hit.
+		const auto collateralValue = [&](const battle::Unit & outgoing)
+		{
+			double extraValue = 0.0;
+			for(const auto * victim : battle.getAttackedBattleUnits(
+				&attacker, &defender, aimedHex, false, from))
+			{
+				if(victim == &defender || victim == &attacker)
+					continue;
+				BattleAttackInfo extra(&outgoing, victim, distance, false);
+				extra.attackerPos = from;
+				const double effect = lossValue(*victim, battle.battleEstimateDamage(extra));
+				extraValue += battle.battleGetOwner(victim) == battle.battleGetOwner(&attacker)
+					? -effect : effect;
+			}
+			return extraValue;
+		};
+		double value = lossValue(defender, damage)
+			- (shooting ? 0 : lossValue(attacker, retaliation));
+		if(meleeFirstStrike)
+		{
+			BattleAttackInfo counter(&defender, &attacker, 0, false);
+			counter.attackerPos = defender.getPosition();
+			counter.defenderPos = from;
+			const auto preemptive = battle.battleEstimateDamage(counter);
+			auto survivingAttacker = attacker.acquireState();
+			int64_t hit = preemptive.damage.min
+				+ (preemptive.damage.max - preemptive.damage.min) / 2;
+			hit = std::clamp<int64_t>(hit, 0, survivingAttacker->getAvailableHealth());
+			survivingAttacker->damage(hit);
+			value = -lossValue(attacker, preemptive);
+			if(survivingAttacker->alive())
+			{
+				BattleAttackInfo remaining(survivingAttacker.get(), &defender, distance, false);
+				remaining.attackerPos = from;
+				remaining.defenderPos = aimedHex;
+				value += lossValue(defender, battle.battleEstimateDamage(remaining));
+				value += collateralValue(*survivingAttacker);
+			}
+		}
+		else if(!shooting)
+			value += collateralValue(attacker);
 		if(attackerPosition != attacker.getPosition().toInt()
 			|| defenderPosition != defender.getPosition().toInt()
 			|| attackerHealth != attacker.getAvailableHealth()
@@ -226,16 +300,20 @@ private:
 		for(const auto * friendly : battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
 		{
 			input.armyStrength += strength(*friendly);
-			// fheroes2 analyzeBattleState counts ranged units even when an
-			// adjacent enemy currently blocks shooting. BattleCanShoot is a
-			// per-turn legality check, not the source unit classification.
-			if(friendly->isShooter() && friendly->getMovementRange() > 0)
+			// Pinned analyzeBattleState counts an archer blocked by adjacent
+			// melee or Forgetfulness, but excludes Blind/Paralyze via
+			// Unit::isImmovable(). VCMI's NOT_ACTIVE is the current
+			// incapacitation projection; raw movement range alone can remain
+			// positive under Blind. Keep full army strength in either case.
+			if(friendly->isShooter() && friendly->getMovementRange() > 0
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				input.shootersStrength += strength(*friendly);
 		}
 		for(const auto * enemy : enemies)
 		{
 			input.enemyArmyStrength += strength(*enemy);
-			if(enemy->isShooter() && enemy->getMovementRange() > 0)
+			if(enemy->isShooter() && enemy->getMovementRange() > 0
+				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
 				input.enemyShootersStrength += strength(*enemy);
 		}
 		if(input.armyStrength <= 0 || input.enemyArmyStrength <= 0)
@@ -382,7 +460,7 @@ private:
 			if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
 				continue;
 
-			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			const int enemySpeed = futureThreatSpeed(*enemy);
 			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
 				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
 			const Ports::FHeroes2::DistantTarget candidate{
@@ -469,7 +547,7 @@ private:
 					if(!engaged)
 						continue;
 				}
-				const int speed = static_cast<int>(enemy->getMovementRange());
+				const int speed = futureThreatSpeed(*enemy);
 				if(speed <= 0)
 					continue;
 				int distance = GameConstants::BFIELD_SIZE;
@@ -523,15 +601,40 @@ private:
 						static_cast<int>(BattleHex::getDistance(guardHex, shooterHex)));
 			return nearest;
 		};
+		// Pinned analyzeBattleState excludes Blind/Paralyze from usable
+		// archer strength via Unit::isImmovable(). Match that classification
+		// when selecting an archer to screen: a currently NOT_ACTIVE shooter
+		// cannot fire while incapacitated. This is a current-state VCMI
+		// projection, not a prediction of when the effect will expire.
 		double totalShooterStrength = 0;
 		for(const auto * friendly : friends)
 		{
 			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
-				&& friendly->hasBonusOfType(BonusType::SHOOTER))
+				&& friendly->hasBonusOfType(BonusType::SHOOTER)
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				totalShooterStrength += strength(*friendly);
 		}
 		if(totalShooterStrength <= 0)
 			return std::nullopt;
+
+		// Pinned fheroes2 analyzeBattleState enables _avoidStackingUnits when
+		// unengaged AREA_SHOT archers contribute over one tenth of enemy
+		// strength. Native SHOOTS_ALL_ADJACENT is a Heroes III analogue, not
+		// the identical Heroes II splash rule. Space screens one extra hex
+		// from friendly archers to avoid exposing both to a single shot.
+		double enemyStrength = 0;
+		double areaShotStrength = 0;
+		for(const auto * enemy : enemies)
+		{
+			const double value = strength(*enemy);
+			enemyStrength += value;
+			if(enemy->isShooter() && enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
+				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				&& battle.battleCanShoot(enemy))
+				areaShotStrength += value;
+		}
+		const bool avoidStacking = enemyStrength > 0 && areaShotStrength > enemyStrength * 0.1;
+		const int coverDistance = avoidStacking ? 2 : 1;
 
 		BattleHex bestCoverHex;
 		double bestCoverValue = -std::numeric_limits<double>::infinity();
@@ -539,11 +642,12 @@ private:
 		for(const auto * friendly : friends)
 		{
 			if(friendly == &stack || !friendly->alive() || !friendly->getPosition().isValid()
-				|| !friendly->hasBonusOfType(BonusType::SHOOTER))
+				|| !friendly->hasBonusOfType(BonusType::SHOOTER)
+				|| friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				continue;
 			const bool threatened = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 			{
-				if(!enemy->getPosition().isValid() || enemy->hasBonusOfType(BonusType::SHOOTER))
+				if(!enemy->getPosition().isValid())
 					return false;
 				// The threat is the *enemy's* real footprint, not a hypothetical
 				// footprint of this covering unit placed at an enemy cell. Reusing
@@ -554,7 +658,12 @@ private:
 					for(const auto & shooterHex : friendly->getHexes())
 						nearest = std::min(nearest,
 							static_cast<int>(BattleHex::getDistance(enemyHex, shooterHex)));
-				return nearest <= static_cast<int>(enemy->getMovementRange()) + 1;
+				// fheroes2 meleeUnitDefense considers every adjacent enemy
+				// blocking an archer, including an enemy shooter in melee.
+				// A distant shooter is not a projected advancing melee threat.
+				if(enemy->isShooter())
+					return nearest == 1;
+				return nearest <= futureThreatSpeed(*enemy) + 1;
 			});
 			if(!threatened)
 				continue;
@@ -563,7 +672,7 @@ private:
 			// Treat its current screen as a zero-travel candidate, then
 			// compare every reachable cover using the same source-derived
 			// archer-strength / travel-penalty ranking.
-			if(distanceToShooter(stack.getPosition(), *friendly) == 1)
+			if(distanceToShooter(stack.getPosition(), *friendly) == coverDistance)
 			{
 				const double value = strength(*friendly);
 				if(value > bestCoverValue)
@@ -578,7 +687,7 @@ private:
 			for(const auto & hex : available)
 			{
 				if(!hex.isAvailable() || hex == stack.getPosition()
-					|| distanceToShooter(hex, *friendly) != 1)
+					|| distanceToShooter(hex, *friendly) != coverDistance)
 					continue;
 				const int travel = reachability.distances[hex.toInt()];
 				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))
@@ -646,9 +755,14 @@ private:
 		const auto friendlies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
 		const auto handFighting = [&](const CStack & enemy)
 		{
+			// Pinned archerDecision temporarily removes the moving shooter from
+			// the board before evaluating candidate retreat positions. An enemy
+			// archer engaged only by that shooter becomes unengaged when it moves.
+			// Keep other friendly units: they can still hold the enemy in melee.
 			for(const auto * friendly : friendlies)
 			{
-				if(!friendly->alive() || battle.battleGetOwner(friendly) == battle.battleGetOwner(&enemy))
+				if(friendly == &stack || !friendly->alive()
+					|| battle.battleGetOwner(friendly) == battle.battleGetOwner(&enemy))
 					continue;
 				for(const auto & friendlyHex : friendly->getHexes())
 					for(const auto & enemyHex : enemy.getHexes())
@@ -666,9 +780,7 @@ private:
 			// for Blind and Paralyze even when base speed is high. VCMI
 			// NOT_ACTIVE is the native cannot-act projection: adjacent
 			// contact still blocks shooting, but it cannot chase next turn.
-			const bool disabled = enemy.hasBonusOfType(BonusType::NOT_ACTIVE);
-			const int reach = unengagedArcher || disabled ? 1
-				: static_cast<int>(enemy.getMovementRange()) + 1;
+			const int reach = unengagedArcher ? 1 : futureThreatSpeed(enemy) + 1;
 			return distance <= reach;
 		};
 
@@ -681,8 +793,7 @@ private:
 			// Avoid classifying a Blind/Paralyzed enemy's raw creature
 			// speed as a future-turn pursuit threat. This matches the
 			// upstream GetSpeed(false, true) standing-unit gate.
-			const int enemySpeed = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
-				? 0 : static_cast<int>(enemy->getMovementRange());
+			const int enemySpeed = futureThreatSpeed(*enemy);
 			if(enemySpeed > 0 && enemySpeed + 2 >= speed)
 				return std::nullopt;
 		}
@@ -755,18 +866,77 @@ private:
 			const auto attackHexes = battle.meleeAttackHexes(&stack, enemy, stack.getPosition());
 			if(attackHexes.empty())
 				continue;
-			BattleAttackInfo attack(&stack, enemy, 0, false);
-			attack.attackerPos = stack.getPosition();
-			DamageEstimation retaliation;
-			const auto damage = battle.battleEstimateDamage(attack, &retaliation);
-			const double outgoing = (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
-			const double incoming = (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
-			const double difference = outgoing - incoming;
-			if(!bestTarget || difference > bestDamageDifference)
+			// Pinned archerDecision ranks blocked shots by direct damage minus
+			// retaliation. A VCMI archer may additionally have a two-hex melee
+			// strike: check each native legal hit hex so a friendly behind the
+			// primary does not become invisible collateral. This is a native
+			// Heroes III safety extension, not Heroes II attack geometry.
+			for(const auto & hitHex : attackHexes)
 			{
-				bestTarget = enemy;
-				bestTargetHex = attackHexes.front();
-				bestDamageDifference = difference;
+				if(battle.battleGetUnitByPos(hitHex) != enemy)
+					continue;
+				// Source archerDecision evaluates the target actually struck.
+				// On a wide defender, VCMI's legal tail and head contacts can
+				// have different directions. Estimate each contact separately.
+				// Pinned archerDecision uses raw hit-point damage minus retaliation.
+				// Heroes II has no FIRST_STRIKE. In VCMI melee FIRST_STRIKE may
+				// kill some archers before they hit: forecast that exchange on a
+				// detached unit, and never count the preemptive response twice.
+				const bool firstStrike = enemy->hasBonus(
+						Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+							.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee)))
+					&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+					&& !stack.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+					&& !stack.isInvincible()
+					&& !battle.isLongWeaponAttack(&stack, enemy, stack.getPosition())
+					&& enemy->ableToRetaliate();
+				auto survivingArcher = stack.acquireState();
+				double difference = 0;
+				if(firstStrike)
+				{
+					BattleAttackInfo counter(enemy, &stack, 0, false);
+					counter.attackerPos = enemy->getPosition();
+					counter.defenderPos = stack.getPosition();
+					const auto preemptive = battle.battleEstimateDamage(counter);
+					int64_t hit = preemptive.damage.min
+						+ (preemptive.damage.max - preemptive.damage.min) / 2;
+					hit = std::clamp<int64_t>(hit, 0, survivingArcher->getAvailableHealth());
+					difference -= static_cast<double>(hit);
+					survivingArcher->damage(hit);
+				}
+				if(survivingArcher->alive())
+				{
+					const battle::Unit * attacker = firstStrike ? survivingArcher.get() : &stack;
+					BattleAttackInfo attack(attacker, enemy, 0, false);
+					attack.attackerPos = stack.getPosition();
+					attack.defenderPos = hitHex;
+					DamageEstimation retaliation;
+					const auto damage = battle.battleEstimateDamage(attack,
+						firstStrike ? nullptr : &retaliation);
+					difference += (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
+					if(!firstStrike)
+						difference -= (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
+					for(const auto * victim : battle.getAttackedBattleUnits(
+						&stack, enemy, hitHex, false, stack.getPosition()))
+					{
+						if(victim == enemy || victim == &stack)
+							continue;
+						BattleAttackInfo extra(attacker, victim, 0, false);
+						extra.attackerPos = stack.getPosition();
+						const auto estimate = battle.battleEstimateDamage(extra);
+						const double health = std::max(0.0, static_cast<double>(victim->getAvailableHealth()));
+						const double collateral = std::min(health, std::max(0.0,
+							(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
+						difference += battle.battleGetOwner(victim) == battle.battleGetOwner(&stack)
+							? -collateral : collateral;
+					}
+				}
+				if(!bestTarget || difference > bestDamageDifference)
+				{
+					bestTarget = enemy;
+					bestTargetHex = hitHex;
+					bestDamageDifference = difference;
+				}
 			}
 		}
 		return bestTarget
@@ -794,9 +964,40 @@ private:
 		double friendlyDamage = 0;
 		double enemyDamage = 0;
 		double priority = 0;
+		// Heroes II's archerDecision has no ranged FIRST_STRIKE. In VCMI,
+		// ranged/all-subtype FIRST_STRIKE combined with RANGED_RETALIATION
+		// fires BEFORE our opening shot; melee-only FIRST_STRIKE must not. Forecast the surviving shooter on a detached state
+		// before valuing every affected victim, including area-shot victims.
+		// Never turn an engine-only ability into an invented Heroes II rule.
+		const bool firstStrikeCounter = target.hasBonus(
+				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+					.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged)))
+			// The native ranged attack processor suppresses FIRST_STRIKE
+			// while NOT_ACTIVE (e.g. Blind) even if the troop still has
+			// ammunition and retaliation charges. Heroes II has no such
+			// ability: this is an explicit Heroes III/VCMI rule projection.
+			&& !target.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
+			&& !shooter.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+			&& target.ableToRetaliate()
+			&& battle.battleCanShoot(&target, shooter.getPosition());
+		auto survivingShooter = shooter.acquireState();
+		if(firstStrikeCounter)
+		{
+			BattleAttackInfo counter(&target, &shooter, 0, true);
+			counter.attackerPos = target.getPosition();
+			counter.defenderPos = shooter.getPosition();
+			const auto preemptive = battle.battleEstimateDamage(counter);
+			priority -= lossValue(shooter, preemptive);
+			int64_t hit = preemptive.damage.min
+				+ (preemptive.damage.max - preemptive.damage.min) / 2;
+			hit = std::clamp<int64_t>(hit, 0, survivingShooter->getAvailableHealth());
+			survivingShooter->damage(hit);
+		}
+		const battle::Unit * outgoingShooter = firstStrikeCounter ? survivingShooter.get() : &shooter;
 		const auto evaluate = [&](const battle::Unit & victim)
 		{
-			BattleAttackInfo info(&shooter, &victim, 0, true);
+			BattleAttackInfo info(outgoingShooter, &victim, 0, true);
 			info.attackerPos = shooter.getPosition();
 			const auto estimate = battle.battleEstimateDamage(info);
 			const double health = std::max(0.0, static_cast<double>(victim.getAvailableHealth()));
@@ -814,10 +1015,46 @@ private:
 				priority += value;
 			}
 		};
-		evaluate(target);
-		for(const auto * victim : additionalVictims)
-			if(victim != &target)
-				evaluate(*victim);
+		if(outgoingShooter->alive())
+		{
+			evaluate(target);
+			for(const auto * victim : additionalVictims)
+				if(victim != &target)
+					evaluate(*victim);
+		}
+		// The pinned fheroes2 archerDecision values outgoing ranged damage,
+		// but Heroes II has no equivalent to VCMI's RANGED_RETALIATION.
+		// A legal native countershot must be included in the net exchange.
+		// battleEstimateDamage's retaliation output omits ranged return fire:
+		// estimate the reverse shot only if the initial hit cannot certainly
+		// kill the primary victim, and the native engine permits retaliation.
+		BattleAttackInfo first(&shooter, &target, 0, true);
+		first.attackerPos = shooter.getPosition();
+		const auto opening = battle.battleEstimateDamage(first);
+		const bool certainKill = target.getAvailableHealth() > 0
+			&& opening.damage.min >= target.getAvailableHealth();
+		if(!firstStrikeCounter && !certainKill && target.hasBonusOfType(BonusType::RANGED_RETALIATION)
+			&& !shooter.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+			&& target.ableToRetaliate()
+			&& battle.battleCanShoot(&target, shooter.getPosition()))
+		{
+			// Return fire is executed after the opening hit. A countershot
+			// estimated from the untouched stack overstates its surviving
+			// shooters. Forecast casualties on a detached state; never alter
+			// the live stack during target evaluation. VCMI's ranged return
+			// fire has no direct Heroes II equivalent.
+			auto afterShot = target.acquireState();
+			int64_t firstHit = opening.damage.min
+				+ (opening.damage.max - opening.damage.min) / 2;
+			firstHit = std::clamp<int64_t>(firstHit, 0, afterShot->getAvailableHealth());
+			afterShot->damage(firstHit);
+			if(afterShot->alive())
+			{
+				BattleAttackInfo counter(afterShot.get(), &shooter, 0, true);
+				counter.attackerPos = target.getPosition();
+				priority -= lossValue(shooter, battle.battleEstimateDamage(counter));
+			}
+		}
 		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
 	}
 
@@ -1018,13 +1255,25 @@ private:
 				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
 				if(attackedHexes.empty())
 					continue;
-				const double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
-				const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
-				if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+				// Pinned fheroes2 optimalAttackVector / doubleCellAttackValue
+				// values the second creature struck by a two-cell melee attack.
+				// VCMI owns the actual area footprint, which may also include
+				// friendly units; compare every legal target hex instead of
+				// unconditionally attacking the first head/tail cell.
+				for(const auto & hitHex : attackedHexes)
 				{
-					target = enemy;
-					targetHex = attackedHexes.front();
-					best = candidate;
+					// Engine attack candidates must still identify this live
+					// victim in the selected target hex.
+					if(battle.battleGetUnitByPos(hitHex) != enemy)
+						continue;
+					double value = attackValue(battle, stack, *enemy, hex, hitHex, false, reachability.distances[hex.toInt()]);
+					const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
+					if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+					{
+						target = enemy;
+						targetHex = hitHex;
+						best = candidate;
+					}
 				}
 			}
 		}

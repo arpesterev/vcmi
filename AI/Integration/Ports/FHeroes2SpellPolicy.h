@@ -46,6 +46,15 @@ class FHeroes2SpellPolicy
 		PlayerColor owner;
 	};
 
+	// fheroes2 Unit::GetSpeed(false, true) yields STANDING for Blind/Paralyze.
+	// Native VCMI may retain nonzero raw movement while NOT_ACTIVE; that
+	// speed cannot confer Haste/Slow value until the control effect ends.
+	static int actingSpeed(const battle::Unit & unit)
+	{
+		return unit.hasBonusOfType(BonusType::NOT_ACTIVE) ? 0
+			: static_cast<int>(unit.getMovementRange());
+	}
+
 	static Army army(const CPlayerBattleCallback & battle, PlayerColor player, bool friendly)
 	{
 		Army result;
@@ -55,10 +64,15 @@ class FHeroes2SpellPolicy
 				continue;
 			const double strength = static_cast<double>(unit->estimateCombatValue());
 			result.strength += strength;
-			result.weightedSpeed += strength * unit->getMovementRange();
-			// Pinned fheroes2 analyzeBattleState counts movable archers even
-			// when a temporary spell or adjacent enemy prevents this turn's shot.
-			if(unit->isShooter() && unit->getMovementRange() > 0)
+			// Pinned fheroes2 analyzeBattleState weights GetSpeed(false, true),
+			// which is STANDING for Blind/Paralyze. VCMI can retain a positive
+			// raw movement range under Blind, so use its NOT_ACTIVE status for
+			// this current-state projection. This cannot forecast dispels.
+			const bool immovable = unit->hasBonusOfType(BonusType::NOT_ACTIVE);
+			result.weightedSpeed += strength * actingSpeed(*unit);
+			// The source retains blocked/Forgetful archers but excludes
+			// immovable ones from strategic ranged strength.
+			if(unit->isShooter() && unit->getMovementRange() > 0 && !immovable)
 				result.shooters += strength;
 		}
 		return result;
@@ -125,10 +139,16 @@ class FHeroes2SpellPolicy
 		if(damage <= 0 || health <= 0)
 			return 0;
 		const double strength = static_cast<double>(unit.estimateCombatValue());
+		// Pinned fheroes2 spellDamageValue uses effective speed to
+		// prioritize removing dangerous units. VCMI Blind can leave a
+		// positive raw movement range despite NOT_ACTIVE.
 		if(static_cast<double>(damage) >= health)
-			return strength + side.strength * (unit.getMovementRange() > side.averageSpeed() ? 0.07 : 0.035);
+			return strength + side.strength * (actingSpeed(unit) > side.averageSpeed() ? 0.07 : 0.035);
 		double fraction = static_cast<double>(damage) / health;
-		if(unit.isFrozen())
+		// Source isImmovable penalizes partially damaging an incapacitated
+		// enemy: survivors wake up. VCMI isFrozen() only denotes Stone Gaze;
+		// native Blind/Paralyze instead expose NOT_ACTIVE.
+		if(unit.isFrozen() || unit.hasBonusOfType(BonusType::NOT_ACTIVE))
 			fraction += fraction - 1;
 		return strength * fraction;
 	}
@@ -312,8 +332,8 @@ public:
 							BonusSourceID(SpellID(SpellID::HASTE)));
 						if(old.unit->hasBonus(haste) && !after->hasBonus(haste))
 						{
-							const int hasted = static_cast<int>(old.unit->getMovementRange());
-							const int restored = static_cast<int>(after->getMovementRange());
+							const int hasted = actingSpeed(*old.unit);
+							const int restored = actingSpeed(*after);
 							value += static_cast<double>(old.unit->estimateCombatValue())
 								* Ports::FHeroes2::hasteSpeedRatio(restored, hasted,
 									ours.averageSpeed(), false, old.unit->isShooter(), false);
@@ -400,8 +420,8 @@ public:
 						const auto slow = sourceEffect(SpellID(SpellID::SLOW));
 						if(old.unit->hasBonus(slow) && !after->hasBonus(slow) && old.position.isValid())
 						{
-							const int slowedSpeed = static_cast<int>(old.unit->getMovementRange());
-							const int restoredSpeed = static_cast<int>(after->getMovementRange());
+							const int slowedSpeed = actingSpeed(*old.unit);
+							const int restoredSpeed = actingSpeed(*after);
 							const int distance = old.unit->unitSide() == BattleSide::DEFENDER
 								? old.position.getX()
 								: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
@@ -453,11 +473,15 @@ public:
 						if(friendly)
 						{
 							if(old.unit->hasBonus(effect(SpellID(SpellID::HASTE)))
-								&& !after->hasBonus(effect(SpellID(SpellID::HASTE))))
+								&& !after->hasBonus(effect(SpellID(SpellID::HASTE)))
+								// Source GetSpeed(false,true) is STANDING while Blind/Paralyze.
+								// If a broad Dispel also lifts the disable, the restored
+								// movement is NOT a benefit of removing friendly Haste.
+								&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
 							{
 								const double haste = Ports::FHeroes2::hasteSpeedRatio(
-									static_cast<int>(after->getMovementRange()),
-									static_cast<int>(old.unit->getMovementRange()),
+									actingSpeed(*after), actingSpeed(*old.unit),
 									theirs.averageSpeed(), false, old.unit->isShooter(), false);
 								value -= strength * haste;
 							}
@@ -497,14 +521,17 @@ public:
 							}
 							if(old.unit->hasBonus(effect(SpellID(SpellID::SLOW)))
 								&& !after->hasBonus(effect(SpellID(SpellID::SLOW)))
-								&& old.position.isValid())
+								&& old.position.isValid()
+								// Do not mistake a simultaneous release from Blind
+								// for the tactical cost of removing hostile Slow.
+								&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
 							{
 								const int distance = old.unit->unitSide() == BattleSide::DEFENDER
 									? old.position.getX()
 									: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
 								value -= strength * Ports::FHeroes2::slowSpeedRatio(
-									static_cast<int>(after->getMovementRange()),
-									static_cast<int>(old.unit->getMovementRange()),
+									actingSpeed(*after), actingSpeed(*old.unit),
 									ours.averageSpeed(), old.unit->isShooter(), false, false,
 									old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
 							}
@@ -628,8 +655,8 @@ public:
 					// VCMI resistance, stacking, legality and duration.
 					if(speedSpell && after && after->alive() && health == old.health)
 					{
-						const int beforeSpeed = static_cast<int>(old.unit->getMovementRange());
-						const int afterSpeed = static_cast<int>(after->getMovementRange());
+						const int beforeSpeed = actingSpeed(*old.unit);
+						const int afterSpeed = actingSpeed(*after);
 						const double strength = static_cast<double>(old.unit->estimateCombatValue());
 						if(friendly && spell->id == SpellID::HASTE)
 						{
