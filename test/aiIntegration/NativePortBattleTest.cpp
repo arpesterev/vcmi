@@ -2118,6 +2118,65 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FarewellSpellChoosesNativeDamageAndCom
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2StrategicFarewellCastThenNativeRetreat)
+{
+	// In the pinned planUnitTurn, a doomed AI hero with a valuable artifact
+	// casts a damage spell and then retreats. VCMI's single-action callback
+	// requires two distinct authoritative server submissions.
+	prepareBattle(CreatureID(19), 1, CreatureID(16), 600);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	gameState()->players.at(player).human = false;
+	ASSERT_TRUE(gameHandler->giveHeroNewArtifact(attackerSideHero,
+		ArtifactID(7), ArtifactPosition::RIGHT_HAND))
+		<< "Test hero must carry a valuable worn weapon to trigger source retreat";
+	ASSERT_NE(attackerSideHero->getArt(ArtifactPosition::RIGHT_HAND), nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 6);
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanFlee());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	policy->initBattleInterface(environment, callback); // AI, not human autocombat
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::HERO_SPELL)
+		<< "Pinned fheroes2 queues a legal damage spell before abandoning a lost battle";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native VCMI rejected the source-derived farewell spell";
+	EXPECT_GT(recorder.spellPackets, 0);
+	ASSERT_TRUE(recorder.battleResults.empty()) << "The farewell spell must not finish the fight";
+	callback->action.reset();
+	const auto * resumed = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(resumed, nullptr);
+	ASSERT_EQ(resumed->unitSide(), BattleSide::ATTACKER);
+	policy->activeStack(battleID, resumed);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::RETREAT)
+		<< "The queued native withdrawal must follow, rather than repeat, the hero spell";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI rejected the legal retreat after farewell casting";
+	ASSERT_EQ(recorder.battleResults.size(), 1u);
+	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
+	if(recorder.battleResults.back().questionID != QuestionID::NONE)
+		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+	EXPECT_TRUE(gameState()->currentBattles.empty());
+	EXPECT_EQ(recorder.acceptedResults, 1);
+	callback->onBattleEnded(battleID);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveStance)
 {
 	// Pinned fheroes2 analyzeBattleState counts an archer as ranged strength
