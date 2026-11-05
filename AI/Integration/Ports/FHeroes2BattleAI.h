@@ -751,6 +751,109 @@ private:
 			: std::nullopt;
 	}
 
+	// Pinned fheroes2 meleeUnitDefense (ai_battle.cpp): when a friendly
+	// shooter is engaged, BestAttackOutcome may return a *future* melee
+	// position against its blocker, not only an attack this turn. Follow
+	// the native VCMI reachability predecessor chain to a legal first step;
+	// never manufacture WALK_AND_ATTACK beyond the current movement range.
+	// Heroes II and III pathfinding, obstruction and attack geometry differ.
+	static std::optional<BattleAction> pursueShooterBlocker(CPlayerBattleCallback & battle,
+		const CStack & guard, const ReachabilityInfo & reachability,
+		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
+	{
+		if(guard.hasBonusOfType(BonusType::SHOOTER)
+			|| guard.unitOwner() != battle.battleGetOwner(&guard)
+			|| !guard.getPosition().isValid() || guard.getMovementRange() == 0)
+			return std::nullopt;
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		double allShooterStrength = 0;
+		for(const auto * friendly : friends)
+			if(friendly != &guard && friendly->alive() && friendly->isShooter())
+				allShooterStrength += strength(*friendly);
+		if(allShooterStrength <= 0)
+			return std::nullopt;
+
+		// The source declines a remote two-turn screen if another immediate
+		// melee attack exists and the guard is too slow to reach the archer.
+		const bool immediateMeleeExists = std::any_of(enemies.begin(), enemies.end(),
+			[&](const CStack * enemy)
+			{
+				return std::any_of(available.begin(), available.end(), [&](const BattleHex & from)
+				{
+					return from.isAvailable() && !battle.meleeAttackHexes(&guard, enemy, from).empty();
+				});
+			});
+		const int speed = static_cast<int>(guard.getMovementRange());
+		BattleHex bestStep;
+		double bestPriority = -std::numeric_limits<double>::infinity();
+		int bestTravel = GameConstants::BFIELD_SIZE;
+		for(const auto * shooter : friends)
+		{
+			if(shooter == &guard || !shooter->alive() || !shooter->isShooter()
+				|| !shooter->getPosition().isValid() || battle.battleCanShoot(shooter))
+				continue;
+			for(const auto * blocker : enemies)
+			{
+				// Lack of ammunition and magical shot suppression are not
+				// evidence of a physically engaged archer.
+				bool adjacent = false;
+				for(const auto & shooterHex : shooter->getHexes())
+					for(const auto & blockerHex : blocker->getHexes())
+						adjacent |= BattleHex::getDistance(shooterHex, blockerHex) == 1;
+				if(!adjacent)
+					continue;
+
+				int shortest = GameConstants::BFIELD_SIZE;
+				BattleHex goal;
+				for(const auto & from : blocker->getAttackableHexes(&guard))
+				{
+					if(!from.isValid() || !battle.isMeleeAttackPossible(&guard, blocker, from))
+						continue;
+					const int distance = static_cast<int>(reachability.distances[from.toInt()]);
+					if(distance < shortest || (distance == shortest
+						&& (!goal.isValid() || from.toInt() < goal.toInt())))
+					{
+						shortest = distance;
+						goal = from;
+					}
+				}
+				if(!goal.isValid() || shortest <= speed || shortest >= GameConstants::BFIELD_SIZE
+					|| (immediateMeleeExists && !guard.hasBonusOfType(BonusType::FLYING)
+						&& shortest > speed * 2))
+					continue;
+
+				BattleHex step;
+				for(int turns = 0; turns < GameConstants::BFIELD_SIZE; ++turns)
+				{
+					if(available.contains(goal) && goal != guard.getPosition())
+					{
+						step = goal;
+						break;
+					}
+					const auto previous = reachability.predecessors[goal.toInt()];
+					if(!previous.isValid() || previous == goal)
+						break;
+					goal = previous;
+				}
+				if(!step.isValid())
+					continue;
+				// Source defenseDistanceModifier = total shooter strength / 15.
+				const double priority = strength(*shooter)
+					- allShooterStrength * shortest / 15.0;
+				if(!bestStep.isValid() || priority > bestPriority
+					|| (priority == bestPriority && (shortest < bestTravel
+						|| (shortest == bestTravel && step.toInt() < bestStep.toInt()))))
+				{
+					bestPriority = priority;
+					bestTravel = shortest;
+					bestStep = step;
+				}
+			}
+		}
+		return bestStep.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&guard, bestStep))
+			: std::nullopt;
+	}
+
 	// fheroes2 ai_battle.cpp archerDecision, pinned at 0dbfe9f386f33c2500842f4a59cd284d7f03d541:
 	// only a sufficiently faster shooter attempts to escape an imminent melee
 	// threat, and only to a position safe from every visible enemy stack.
@@ -1157,6 +1260,8 @@ private:
 			// attack is required; otherwise retain the generic melee policy.
 			if(const auto unblock = attackShooterBlocker(battle, stack, reachability, available, allEnemies))
 				return *unblock;
+			if(const auto pursue = pursueShooterBlocker(battle, stack, reachability, available, allEnemies))
+				return *pursue;
 			const auto friendlyUnits = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
 			const bool shootersCanFire = std::all_of(friendlyUnits.begin(), friendlyUnits.end(),
 				[&](const CStack * friendly)
