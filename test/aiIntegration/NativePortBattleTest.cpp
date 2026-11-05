@@ -4037,6 +4037,120 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeRangedFirstStrikeExecutesBeforeOpen
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// The pinned HoMM3 ranged score prices only one primary victim. The native
+// SHOOTS_ALL_ADJACENT extension must not forecast full-strength collateral
+// after a preemptive ranged FIRST_STRIKE has killed some shooters. Verify
+// the detached preview, independent port command and real server hit order.
+// Neither ability combination nor its valuation is a retail HoMM3 rule.
+TEST_F(AIIntegrationNativeBattle, homm3NativeFirstStrikeReducesAreaShotCollateralAndExecutes)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(2), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * shooter = nullptr;
+	CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			shooter = unit.get();
+		else
+			defender = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(defender, nullptr);
+	BattleHex neighbouringCell;
+	for(const auto & hex : defender->getPosition().getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			neighbouringCell = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(neighbouringCell.isValid());
+	const CStack * secondary = addStack(BattleSide::DEFENDER, CreatureID(0), neighbouringCell, 100);
+	ASSERT_NE(secondary, nullptr);
+	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	defender->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::RANGED_RETALIATION, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	defender->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::FIRST_STRIKE, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto view = callback->getBattle(battleID);
+	ASSERT_TRUE(view->battleCanShoot(shooter, defender->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(defender, shooter->getPosition()));
+	ASSERT_TRUE(defender->ableToRetaliate());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const auto nativeSplash = view->getAttackedBattleUnits(
+		shooter, defender, defender->getPosition(), true);
+	ASSERT_NE(std::find(nativeSplash.begin(), nativeSplash.end(), secondary), nativeSplash.end())
+		<< "The actual area shot must reach a second living enemy";
+	BattleAttackInfo counter(defender, shooter, 0, true);
+	const auto preemptive = view->battleEstimateDamage(counter);
+	ASSERT_GT(preemptive.damage.min, 0);
+	auto survivingShooter = shooter->acquireState();
+	int64_t counterHit = preemptive.damage.min
+		+ (preemptive.damage.max - preemptive.damage.min) / 2;
+	counterHit = std::clamp<int64_t>(counterHit, 0, survivingShooter->getAvailableHealth());
+	survivingShooter->damage(counterHit);
+	ASSERT_TRUE(survivingShooter->alive());
+	ASSERT_LT(survivingShooter->getCount(), shooter->getCount());
+	BattleAttackInfo originalCollateral(shooter, secondary, 0, true);
+	BattleAttackInfo reducedCollateral(survivingShooter.get(), secondary, 0, true);
+	reducedCollateral.attackerPos = shooter->getPosition();
+	EXPECT_LT(view->battleEstimateDamage(reducedCollateral).damage.max,
+		view->battleEstimateDamage(originalCollateral).damage.max)
+		<< "Preemptive casualties must reduce the projected area volley";
+	const auto firstDecision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(firstDecision.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(firstDecision.target.empty());
+	EXPECT_EQ(firstDecision.target.front().unitValue, defender->unitId());
+	const int64_t oldShooterHealth = shooter->getAvailableHealth();
+	const int64_t oldSecondaryHealth = secondary->getAvailableHealth();
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, firstDecision.target.front().unitValue);
+	std::vector<int> shotVictims;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & hit)
+	{
+		if(!hit.shot())
+			return;
+		for(const auto & victim : hit.bsa)
+			shotVictims.push_back(victim.stackAttacked);
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	recorder.onAttackBeforeApply = {};
+	ASSERT_GE(shotVictims.size(), 3u);
+	EXPECT_EQ(shotVictims.front(), shooter->unitId())
+		<< "FIRST_STRIKE must damage the shooter before its area hit";
+	EXPECT_LT(shooter->getAvailableHealth(), oldShooterHealth);
+	EXPECT_LT(secondary->getAvailableHealth(), oldSecondaryHealth)
+		<< "The server must actually damage the secondary area-shot victim";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Retail simulateAttack predicts first melee hit -> retaliation -> second hit.
 // VCMI's damageTypeMelee FIRST_STRIKE reverses the first two steps. The
 // HoMM3-only detached-state projection must account for this native rule,
