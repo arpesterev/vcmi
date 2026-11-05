@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2ThreatProjection.h"
 #include "../AI/Integration/Ports/FHeroes2EarthquakePolicy.h"
 #include "../AI/Integration/Ports/FHeroes2TeleportPolicy.h"
 #include "../AI/Integration/Ports/FHeroes2BerserkOrder.h"
@@ -29,6 +30,68 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+
+	// fheroes2 Unit::evaluateThreatForUnit: damage to a particular
+	// defender, distance/speed discount, second strike, clone priority,
+	// moved/disabled status and mind-control penalty.
+	FHeroes2::ThreatProjection threat;
+	threat.damage = 100;
+	threat.attackerHealth = 100;
+	threat.distance = 3;
+	threat.movement = 4;
+	require(FHeroes2::projectRelativeThreat(threat) == 100,
+		"Nearby ground attacker keeps full potential damage");
+	threat.distance = 9;
+	require(FHeroes2::projectRelativeThreat(threat) == 100.0 / (1.5 * 9 / 4),
+		"Distant ground attacker loses threat by source distance factor");
+	threat.ranged = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 100,
+		"Ranged attack bypasses ground movement-distance penalty");
+	threat.ranged = false;
+	threat.flying = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 100,
+		"Flying attack bypasses ground movement-distance penalty");
+	threat.flying = false;
+	threat.distance = 3;
+	threat.attacks = 2;
+	require(FHeroes2::projectRelativeThreat(threat) == 200,
+		"Second attack doubles threat when no retaliation occurs");
+	threat.retaliationDamage = 50;
+	require(FHeroes2::projectRelativeThreat(threat) == 150,
+		"Source second attack discounts expected retaliatory losses");
+	threat.attacks = 1;
+	threat.retaliationDamage = 0;
+	threat.clone = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 1000,
+		"Destroyable clone gets original source tenfold priority");
+	threat.clone = false;
+	threat.disabled = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 0,
+		"Disabled unit cannot threaten a defender");
+	threat.disabled = false;
+	threat.alreadyActed = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 80,
+		"Unit that already acted receives source 1.25 divisor");
+	threat.alreadyActed = false;
+	threat.originallyFriendly = true;
+	require(FHeroes2::projectRelativeThreat(threat) == -200,
+		"Friendly target has a source negative threat");
+	threat.originallyFriendly = false;
+	threat.mindControlled = true;
+	require(FHeroes2::projectRelativeThreat(threat) == -100,
+		"Mind controlled target receives source negative priority");
+	threat.mindControlled = false;
+	threat.movement = 0;
+	require(FHeroes2::projectRelativeThreat(threat) == 0,
+		"Immobile ground unit cannot approach another stack");
+	threat.movement = 4;
+	threat.damage = std::numeric_limits<double>::quiet_NaN();
+	try { FHeroes2::projectRelativeThreat(threat); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	threat.damage = 100;
+	threat.distance = -1;
+	try { FHeroes2::projectRelativeThreat(threat); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 	// Pinned Earthquake formula requires fortress, ground melee, standing
 	// walls and enemy ranged strength. No spell is spent when any is absent.
 	const double expectedEarthquake = FHeroes2::earthquakeValue(true, 2, 50, 100,
