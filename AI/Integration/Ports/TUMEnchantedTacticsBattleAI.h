@@ -178,6 +178,14 @@ private:
 			// do not reward that physically impossible damage under TUM's
 			// published dealt + received Hypnotize preference.
 			const bool guaranteedKill = static_cast<double>(damage.damage.min) >= targetHealth;
+			// VCMI resolves ranged FIRST_STRIKE before the shooter's opening
+			// attack. The victim therefore returns fire with its original
+			// strength even if the later shot would be guaranteed lethal.
+			static const auto rangedFirstStrike = Selector::typeSubtype(
+				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
+				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
+			const bool counterFirst = shooting && victim.hasBonus(rangedFirstStrike)
+				&& !victim.hasBonusOfType(BonusType::NOT_ACTIVE);
 			// A stack that exhausted its counterattacks cannot retaliate, even
 			// if a damage preview reports the hypothetical exchange. Retain
 			// native VCMI's authoritative retaliation eligibility.
@@ -185,7 +193,7 @@ private:
 			// server can counter a shot when the victim can shoot back, is
 			// eligible for retaliation and the attacker does not block it.
 			double received = 0.0;
-			if(!guaranteedKill && victim.ableToRetaliate())
+			if((!guaranteedKill || counterFirst) && victim.ableToRetaliate())
 			{
 				if(shooting)
 				{
@@ -193,10 +201,19 @@ private:
 						&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 						&& battle.battleCanShoot(&victim, stack.getPosition()))
 					{
-						// Native melee previews apply first-hit casualties before
-						// estimating retaliation. Ranged previews do not handle
-						// RANGED_RETALIATION, so reproduce that ordering on an
-						// independent state, never on the live battle stack.
+						// Native FIRST_STRIKE resolves the countershot before
+						// casualties. For ordinary RANGED_RETALIATION, first reduce
+						// the victim on a private state; never modify the live stack.
+						if(counterFirst)
+						{
+							BattleAttackInfo counter(&victim, &stack, 0, true);
+							counter.attackerPos = victim.getPosition();
+							const auto firstCounter = battle.battleEstimateDamage(counter, nullptr);
+							received = (static_cast<double>(firstCounter.damage.min)
+								+ firstCounter.damage.max) / 2.0;
+						}
+						else
+						{
 						const auto counterAfterShot = [&](int64_t shotDamage)
 						{
 							auto remaining = victim.acquireState();
@@ -213,15 +230,19 @@ private:
 							lowShotCounter.damage.min, highShotCounter.damage.min));
 						const double maximum = static_cast<double>(std::max(
 							lowShotCounter.damage.max, highShotCounter.damage.max));
-						received = (minimum + maximum) / 2.0;
+							received = (minimum + maximum) / 2.0;
+						}
 					}
 				}
 				else
 					received = (static_cast<double>(retaliation.damage.min)
 						+ retaliation.damage.max) / 2.0;
 			}
-			// Both melee and ranged return-fire previews now include first-hit
-			// casualties. This remains a VCMI projection, not ERA/DLL parity.
+			// Melee retaliation and ordinary ranged return fire include first-hit
+			// losses; ranged FIRST_STRIKE counters before those losses. This is
+			// still a bounded damage-score projection, not ERA/DLL parity.
+			// A countershot that kills our attacker may prevent its opening
+			// shot; full multi-hit sequencing remains outside this scorer.
 			received = std::clamp(received, 0.0, static_cast<double>(stack.getAvailableHealth()));
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
 		};
