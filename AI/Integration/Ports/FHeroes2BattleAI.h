@@ -1074,9 +1074,8 @@ private:
 			// any legal immediate attack bypassed this screen entirely.
 			// Keep the existing direct-attack priority if an archer's shot is
 			// blocked: source defense first attacks the adjacent blockers.
-			const bool shootersCanFire = std::all_of(
-				battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE).begin(),
-				battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE).end(),
+			const auto friendlyUnits = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+			const bool shootersCanFire = std::all_of(friendlyUnits.begin(), friendlyUnits.end(),
 				[&](const CStack * friendly)
 				{
 					return !friendly->alive() || !friendly->isShooter()
