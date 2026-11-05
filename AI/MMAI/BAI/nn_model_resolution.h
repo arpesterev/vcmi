@@ -54,6 +54,19 @@ inline void requireNNV15ActiveAction(const ActionPtr & action)
 		throw std::runtime_error("MMAI V15: model selected an inactive graph action");
 }
 
+// V15 MOVE graph actions are legal only while their destination is still
+// reachable by the active creature in the current engine battle state.
+// FastBFS builds the ONNX action graph, but the VCMI server owns the final
+// movement rules (walls, gates, obstacles, speed and double-wide stacks).
+// Never silently substitute a different movement or scripted policy.
+template<typename Hex, typename Reachability, typename Distance>
+inline void requireNNV15LegalMove(const Hex & destination, const Reachability & reachability, Distance movementRange)
+{
+	if(!destination.isAvailable() || !reachability.isReachable(destination) ||
+	   reachability.distances[destination.toInt()] > movementRange)
+		throw std::runtime_error("MMAI V15: model MOVE destination is not reachable this turn");
+}
+
 // V13's battle action masks are derived from a preceding observation.
 // They cannot guarantee that a target is still present and legal at dispatch.
 // Check the live VCMI callback before forming a server action, including in
