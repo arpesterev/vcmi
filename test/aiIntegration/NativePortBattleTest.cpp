@@ -4210,6 +4210,93 @@ TEST_F(AIIntegrationNativeBattle, homm3MeleeOnlyFirstStrikeDoesNotPreemptRangedA
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// The original HoMM3 getSimpleAttackEffect subtracts loss to the attacker:
+// a poor return-fire exchange must remain NEGATIVE, not be clamped to zero.
+// Use real VCMI preview values from a hopeless one-Archer attack against a
+// native ranged-retaliating stack. The decision itself is still made by the
+// HoMM3OriginalTactics adapter and executed by the authoritative game server;
+// an independent retail HoMM3 target ranking is not established.
+TEST_F(AIIntegrationNativeBattle, homm3NativeReturnFireProducesSignedLosingShotAndExecutes)
+{
+	prepareBattle(CreatureID(2), 1, CreatureID(2), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * attacker = nullptr;
+	CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			attacker = unit.get();
+		else
+			defender = unit.get();
+	}
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_NE(defender, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
+	defender->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(attacker, defender->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(defender, attacker->getPosition()));
+	ASSERT_TRUE(defender->ableToRetaliate());
+	BattleAttackInfo shot(attacker, defender, 0, true);
+	const auto projectedShot = view->battleEstimateDamage(shot);
+	ASSERT_GT(projectedShot.damage.min, 0);
+	ASSERT_LT(projectedShot.damage.max, defender->getAvailableHealth());
+	auto survivingDefender = defender->acquireState();
+	int64_t firstHit = projectedShot.damage.min
+		+ (projectedShot.damage.max - projectedShot.damage.min) / 2;
+	firstHit = std::clamp<int64_t>(firstHit, 0, survivingDefender->getAvailableHealth());
+	survivingDefender->damage(firstHit);
+	ASSERT_TRUE(survivingDefender->alive());
+	BattleAttackInfo counter(survivingDefender.get(), attacker, 0, true);
+	counter.attackerPos = defender->getPosition();
+	const auto projectedCounter = view->battleEstimateDamage(counter);
+	const auto scaledLoss = [](const CStack & unit, const DamageEstimation & estimate)
+	{
+		const double suffered = std::min<double>(unit.getAvailableHealth(),
+			static_cast<double>(estimate.damage.min)
+			+ (static_cast<double>(estimate.damage.max) - estimate.damage.min) / 2);
+		return unit.estimateCombatValue() * suffered / unit.getAvailableHealth();
+	};
+	const double netEffect = scaledLoss(*defender, projectedShot)
+		- scaledLoss(*attacker, projectedCounter);
+	ASSERT_LT(netEffect, -1.0)
+		<< "This fixture requires a genuinely losing native return-fire exchange";
+	EXPECT_LT(AIIntegration::Ports::HoMM3::signedProjectedAttackEffect(netEffect), 0);
+	const auto planned = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *attacker);
+	ASSERT_EQ(planned.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(planned.target.empty());
+	EXPECT_EQ(planned.target.front().unitValue, defender->unitId());
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, attacker);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative engine rejected the independently chosen losing shot";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Independent real-server confirmation that RANGED_RETALIATION causes a
 // countershot, instead of trusting a generic damage preview or a fake model.
 TEST_F(AIIntegrationNativeBattle, homm3RangedRetaliationExecutesOnNativeServer)
