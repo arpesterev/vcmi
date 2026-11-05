@@ -29,6 +29,7 @@
 #include "lib/GameLibrary.h"
 
 #include <SDL3/SDL_render.h>
+#include <SDL3/SDL_surface.h>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -225,13 +226,10 @@ void CVideoInstance::prepareOutput(float scaleFactor, bool useTextureOutput)
 			SDL_SetTextureScaleMode(textureRGB, SDL_SCALEMODE_LINEAR);
 	}
 
-	// without a texture the frames are drawn through a surface instead - a video with neither
-	// decodes fine but never shows anything
-	if (textureRGB == nullptr)
-		surface = CSDL_Ext::newSurface(dimensions);
-
-	// a surface is blitted as it is, so that path has no one to scale for it
+	// Software canvases can still draw videos opened with GPU output enabled.
+	// Keep a CPU copy at the decoded resolution for the software blit path.
 	scaledSize = textureRGB ? nativeSize : dimensions;
+	surface = CSDL_Ext::newSurface(scaledSize);
 
 	sws = sws_getContext(getCodecContext()->width, getCodecContext()->height, getCodecContext()->pix_fmt,
 						 scaledSize.x, scaledSize.y, AV_PIX_FMT_RGB32,
@@ -312,7 +310,7 @@ bool CVideoInstance::loadNextFrame()
 
 	// Avoid buffer overflow caused by sws_scale():
 	// http://trac.ffmpeg.org/ticket/9254
-	const size_t pitch = surface ? surface->pitch : scaledSize.x * 4;
+	const size_t pitch = surface->pitch;
 	const size_t pic_bytes = pitch * scaledSize.y;
 	const size_t ffmpeg_pad = 1024; /* a few bytes of overflow will go here */
 
@@ -323,8 +321,7 @@ bool CVideoInstance::loadNextFrame()
 
 	if(textureRGB)
 		SDL_UpdateTexture(textureRGB, nullptr, data[0], linesize[0]);
-	if(surface)
-		memcpy(surface->pixels, data[0], pic_bytes);
+	memcpy(surface->pixels, data[0], pic_bytes);
 
 	av_free(data[0]);
 	return true;
@@ -396,7 +393,16 @@ void CVideoInstance::show(const Point & position, SDL_Surface * to)
 	if(sws == nullptr)
 		throw std::runtime_error("No video to show!");
 
-	CSDL_Ext::blitSurface(surface, to, position * ENGINE->screenHandler().getScalingFactor());
+	const Point destination = position * ENGINE->screenHandler().getScalingFactor();
+	if(surface->w == dimensions.x && surface->h == dimensions.y)
+	{
+		CSDL_Ext::blitSurface(surface, to, destination);
+		return;
+	}
+
+	SDL_Rect destinationRect{destination.x, destination.y, dimensions.x, dimensions.y};
+	if(!SDL_BlitSurfaceScaled(surface, nullptr, to, &destinationRect, SDL_SCALEMODE_LINEAR))
+		logGlobal->error("Failed to blit scaled video surface: %s", SDL_GetError());
 }
 
 double FFMpegStream::getCurrentFrameEndTime() const
