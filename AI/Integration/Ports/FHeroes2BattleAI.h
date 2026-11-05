@@ -537,11 +537,17 @@ private:
 						static_cast<int>(BattleHex::getDistance(guardHex, shooterHex)));
 			return nearest;
 		};
+		// Pinned analyzeBattleState excludes Blind/Paralyze from usable
+		// archer strength via Unit::isImmovable(). Match that classification
+		// when selecting an archer to screen: a currently NOT_ACTIVE shooter
+		// cannot fire while incapacitated. This is a current-state VCMI
+		// projection, not a prediction of when the effect will expire.
 		double totalShooterStrength = 0;
 		for(const auto * friendly : friends)
 		{
 			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
-				&& friendly->hasBonusOfType(BonusType::SHOOTER))
+				&& friendly->hasBonusOfType(BonusType::SHOOTER)
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				totalShooterStrength += strength(*friendly);
 		}
 		if(totalShooterStrength <= 0)
@@ -553,7 +559,8 @@ private:
 		for(const auto * friendly : friends)
 		{
 			if(friendly == &stack || !friendly->alive() || !friendly->getPosition().isValid()
-				|| !friendly->hasBonusOfType(BonusType::SHOOTER))
+				|| !friendly->hasBonusOfType(BonusType::SHOOTER)
+				|| friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				continue;
 			const bool threatened = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 			{
