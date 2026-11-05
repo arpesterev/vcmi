@@ -737,7 +737,8 @@ private:
 		const int oldHeadDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
 		const int oldTime = std::max(1, (oldHeadDistance + oldSpeed - 1) / oldSpeed);
 		const int time = includeNativeInactive
-			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement) : oldTime;
+			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement,
+				battle.battleCanShoot(&target, attacker.getPosition())) : oldTime;
 		const bool canRetaliateLater = battle.battleCanAttackUnit(&target, &attacker);
 		return Ports::HoMM3::rangedAttackValue(
 			{effect, isIncapacitated(target, includeNativeInactive), !canRetaliateLater, canRetaliateLater, time}, false);

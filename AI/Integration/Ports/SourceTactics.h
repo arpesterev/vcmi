@@ -116,10 +116,15 @@ inline bool projectedShooterReadyAfterMoverLeaves(bool canShootNow, bool intrins
 // For the VCMI ranged-target approximation, count steps to the first
 // adjacent attack hex (not the victim's occupied hex), and never invent
 // movement for a speed-zero unit. This is not original getAITargetTime parity.
-inline int projectedRangedTargetTime(int nearestFootprintDistance, int movement)
+inline int projectedRangedTargetTime(int nearestFootprintDistance, int movement, bool hasLegalShotNow)
 {
 	if(nearestFootprintDistance < 0 || movement < 0)
 		throw std::invalid_argument("HoMM3 projected ranged target time needs nonnegative distance and speed");
+	// getAITargetTime accounts for shooters as well as melee pursuers. An
+	// archer with a legal native shot can threaten THIS active stack now,
+	// even at speed zero. Never treat its only useful action as pursuit.
+	if(hasLegalShotNow)
+		return 1;
 	const int stepsToMelee = std::max(0, nearestFootprintDistance - 1);
 	if(stepsToMelee == 0)
 		return 1;

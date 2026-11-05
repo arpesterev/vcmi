@@ -187,21 +187,25 @@ int main()
 	// A target's global getAITargetTime from retail HoMM3 is not yet
 	// reconstructed. Our native ranged-target proxy must not grant a
 	// zero-speed enemy imaginary travel, and reaches melee at distance one.
-	require(HoMM3::projectedRangedTargetTime(1, 0) == 1,
+	require(HoMM3::projectedRangedTargetTime(1, 0, false) == 1,
 		"Already-adjacent immobile target can attack without moving");
-	require(HoMM3::projectedRangedTargetTime(2, 0) == 100,
+	require(HoMM3::projectedRangedTargetTime(2, 0, false) == 100,
 		"Nonadjacent immobile target cannot reach the archer");
-	require(HoMM3::projectedRangedTargetTime(5, 2) == 2,
+	require(HoMM3::projectedRangedTargetTime(5, 2, false) == 2,
 		"Native approach counts steps to contact rather than the target hex");
-	require(HoMM3::projectedRangedTargetTime(2, 1) == 1,
+	require(HoMM3::projectedRangedTargetTime(2, 1, false) == 1,
 		"A one-step approach reaches melee on the next activation");
-	require(HoMM3::projectedRangedTargetTime(0, 0) == 1,
+	require(HoMM3::projectedRangedTargetTime(0, 0, false) == 1,
 		"Overlapping synthetic footprints cannot cause division by zero");
-	require(HoMM3::projectedRangedTargetTime(100, 0) == 100,
+	require(HoMM3::projectedRangedTargetTime(100, 0, false) == 100,
 		"Stationary 100-turn sentinel is source-derived");
-	try { HoMM3::projectedRangedTargetTime(-1, 1); return 1; }
+	require(HoMM3::projectedRangedTargetTime(100, 0, true) == 1,
+		"A stationary enemy archer with a legal shot threatens immediately");
+	require(HoMM3::projectedRangedTargetTime(6, 2, true) == 1,
+		"A ready shooter does not chase a melee path to use its ranged attack");
+	try { HoMM3::projectedRangedTargetTime(-1, 1, false); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
-	try { HoMM3::projectedRangedTargetTime(2, -1); return 1; }
+	try { HoMM3::projectedRangedTargetTime(2, -1, false); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
 	// Source checkAdjacentHexes combines a wide stack's per-cell threats
