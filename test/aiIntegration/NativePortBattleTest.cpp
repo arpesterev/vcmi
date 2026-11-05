@@ -3349,6 +3349,86 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedFastArcherEscapesAdjacentSlowMe
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedFastMeleeNoLongerBlocksArcherRetreat)
+{
+	// Pinned fheroes2 battle_troop.cpp Unit::GetSpeed(false, true) returns
+	// STANDING for Blind/Paralyze. Native VCMI Blind supplies NOT_ACTIVE,
+	// but its raw creature movement range may still be high. A blocked
+	// Grand Elf must escape an adjacent slow melee enemy even when a
+	// distant, much faster melee stack is currently Blind and cannot chase.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(19), 30); // Grand Elf
+	setArmy(defenderSideHero, CreatureID(16), 15); // Melee pursuer
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::FIRE_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	const CStack * shooter = nullptr;
+	const CStack * blindedMelee = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(16))
+			blindedMelee = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(blindedMelee, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	ASSERT_FALSE(blindedMelee->isShooter());
+	ASSERT_GT(BattleHex::getDistance(shooter->getPosition(), blindedMelee->getPosition()), 1);
+	const BattleHex blockerHex(shooter->getPosition().toInt() + 1);
+	ASSERT_TRUE(blockerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
+	const CStack * blocker = addStack(BattleSide::DEFENDER, CreatureID(16), blockerHex, 10);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
+		static_cast<int>(blocker->getMovementRange()) + 2);
+
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blindedMelee));
+	ASSERT_TRUE(blindedMelee->hasBonusOfType(BonusType::NOT_ACTIVE))
+		<< "Actual VCMI Blind must incapacitate the distant melee pursuer";
+	ASSERT_FALSE(blindedMelee->isShooter());
+	// Deliberately make the Blind melee enemy faster on the raw VCMI
+	// movement field. This is a fixture modifier, not a changed game rule.
+	const_cast<CStack *>(blindedMelee)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED, BonusSource::OTHER, 25, BonusSourceID()));
+	ASSERT_GT(static_cast<int>(blindedMelee->getMovementRange()),
+		static_cast<int>(shooter->getMovementRange()));
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "A remotely blinded melee unit cannot veto the fast archer's escape: "
+		<< callback->action->toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Real VCMI engine rejected retreat with a blinded distant melee enemy";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2ForgottenRemoteShooterDoesNotBlockSafeRetreat)
 {
 	// Pinned fheroes2 archerDecision treats a distant, unengaged archer as
