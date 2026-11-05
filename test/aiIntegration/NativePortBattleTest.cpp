@@ -4465,106 +4465,79 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedWideAttackerReceivesFirstStrikeAt
 // The published TUM Hypnotize priority is a single comparison across all
 // attack types. A legal ranged shot must not suppress a higher-scoring melee
 // strike when the latter also receives substantial retaliation.
-// A Hypnotized archer can attack a double-wide former ally at either legal
-// occupied hex. Native ranged damage is aim-dependent near the range-penalty
-// boundary, so the head-only projection can silently choose a worse shot.
-// This is a VCMI targeting correction, not source parity with closed TUM DLL.
+// Published TUM Hypnotize favors outgoing + incoming damage. Native
+// SHOOTS_ALL_ADJACENT hits more former allies when aiming at a wide unit's
+// tail rather than its head. Require an actual hero Hypnotize, an independently
+// verified splash footprint, a different HoMM3 unit-aim proposal, the server's
+// acceptance of TUM's hex-aimed shot and a completed battle.
 TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 {
-	startRecordedGame();
+	prepareBattle(CreatureID(45), 30, CreatureID(0), 8);
 	ASSERT_FALSE(HasFatalFailure());
-	setArmy(attackerSideHero, CreatureID(2), 20);
-	setArmy(defenderSideHero, CreatureID(0), 30);
-	ASSERT_TRUE(gameHandler->insertNewStack(
-		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(4).toCreature(), 50));
-	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
-	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 	battle()->obstacles.clear();
-
-	CStack * archer = nullptr;
-	CStack * wideAlly = nullptr;
+	CStack * shooter = nullptr;
 	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	shooter->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SHOOTS_ALL_ADJACENT,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	const BattleHex widePosition(shooter->getPosition().toInt() + 8);
+	ASSERT_TRUE(widePosition.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(widePosition), nullptr);
+	const CStack * wide = addStack(BattleSide::ATTACKER, CreatureID(102), widePosition, 10);
+	ASSERT_NE(wide, nullptr);
+	ASSERT_TRUE(wide->doubleWide());
+	const auto footprint = wide->getHexes();
+	ASSERT_EQ(footprint.size(), 2u);
+	const BattleHex head = footprint[0];
+	const BattleHex tail = footprint[1];
+	ASSERT_NE(head, tail);
+	std::vector<BattleHex> tailOnly;
+	for(const auto & hex : tail.getNeighbouringTiles())
 	{
-		if(unit->unitSide() != BattleSide::ATTACKER)
-			continue;
-		if(unit->unitSlot() == SlotID(0))
-			archer = unit.get();
-		if(unit->unitSlot() == SlotID(1))
-			wideAlly = unit.get();
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr
+			&& BattleHex::getDistance(hex, head) > 1)
+			tailOnly.push_back(hex);
 	}
-	ASSERT_NE(archer, nullptr);
-	ASSERT_NE(wideAlly, nullptr);
-	ASSERT_TRUE(wideAlly->doubleWide());
+	ASSERT_GE(tailOnly.size(), 2u);
+	const CStack * firstExtra = addStack(BattleSide::ATTACKER, CreatureID(0), tailOnly[0], 1000);
+	const CStack * secondExtra = addStack(BattleSide::ATTACKER, CreatureID(0), tailOnly[1], 1000);
+	ASSERT_NE(firstExtra, nullptr);
+	ASSERT_NE(secondExtra, nullptr);
+
 	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
-	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, archer));
-	ASSERT_TRUE(archer->isHypnotized());
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, shooter));
+	ASSERT_TRUE(shooter->isHypnotized());
 	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
-	ASSERT_EQ(battle()->battleGetOwner(archer), player);
+	ASSERT_EQ(battle()->battleGetOwner(shooter), player);
 	const auto battleID = battle()->getBattleID();
 	auto callback = std::make_shared<DecisionCallback>(player);
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
-
-	// Find an actual legal native position straddling the ranged damage
-	// threshold; do not manufacture an expected damage or a fake shot.
-	bool foundBetterTail = false;
-	double headDamage = 0;
-	double tailDamage = 0;
-	for(int hexId = 0; hexId < GameConstants::BFIELD_SIZE; ++hexId)
+	ASSERT_TRUE(view->battleCanShoot(shooter, head));
+	ASSERT_TRUE(view->battleCanShoot(shooter, tail));
+	const auto headHits = view->getAttackedBattleUnits(shooter, wide, head, true);
+	const auto tailHits = view->getAttackedBattleUnits(shooter, wide, tail, true);
+	const auto hasHit = [](const auto & units, const CStack * needle)
 	{
-		const BattleHex candidate(hexId);
-		if(!candidate.isAvailable())
-			continue;
-		const auto footprint = wideAlly->getHexes(candidate);
-		if(footprint.size() != 2)
-			continue;
-		if(std::any_of(footprint.begin(), footprint.end(), [&](const BattleHex & hex)
-			{
-				const auto * occupying = hex.isAvailable() ? view->battleGetUnitByPos(hex) : nullptr;
-				return !hex.isAvailable() || (occupying != nullptr && occupying != wideAlly);
-			}))
-			continue;
-		// Keep every immediate melee strike out of this ranged test.
-		if(BattleHex::getDistance(archer->getPosition(), candidate)
-			<= static_cast<int>(archer->getMovementRange()) + 2)
-			continue;
-		wideAlly->setPosition(candidate);
-		const auto occupied = wideAlly->getHexes();
-		if(!view->battleCanShoot(archer, occupied[0])
-			|| !view->battleCanShoot(archer, occupied[1]))
-			continue;
-		const auto estimate = [&](BattleHex aim)
+		return std::any_of(units.begin(), units.end(), [&](const auto * unit)
 		{
-			BattleAttackInfo info(archer, wideAlly, 0, true);
-			info.attackerPos = archer->getPosition();
-			info.defenderPos = aim;
-			const auto preview = view->battleEstimateDamage(info, nullptr);
-			return (static_cast<double>(preview.damage.min)
-				+ static_cast<double>(preview.damage.max)) / 2.0;
-		};
-		headDamage = estimate(occupied[0]);
-		tailDamage = estimate(occupied[1]);
-		if(tailDamage > headDamage)
-		{
-			foundBetterTail = true;
-			break;
-		}
+			return unit->unitId() == needle->unitId();
+		});
+	};
+	for(const auto * extra : {firstExtra, secondExtra})
+	{
+		ASSERT_FALSE(hasHit(headHits, extra))
+			<< "Head aim must miss tail-only original allies";
+		ASSERT_TRUE(hasHit(tailHits, extra))
+			<< "Native tail aim must hit both additional original allies";
 	}
-	ASSERT_TRUE(foundBetterTail)
-		<< "Fixture needs a genuine, legal wide-tail shot with higher native projected damage";
-	const auto occupied = wideAlly->getHexes();
-	const BattleHex head = occupied[0];
-	const BattleHex tail = occupied[1];
-	ASSERT_NE(head, tail);
-	ASSERT_GT(tailDamage, headDamage);
-	const auto originalHealth = wideAlly->getAvailableHealth();
-	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *archer);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
-	ASSERT_FALSE(baseline.target.empty());
-	EXPECT_EQ(baseline.target.front().unitValue, wideAlly->unitId())
-		<< "Partial HoMM3 baseline aims at the whole unit, not the tail hex";
-
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
@@ -4576,20 +4549,23 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
 		battle()->getSideHero(BattleSide::ATTACKER),
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
-	battle()->activeStack = archer->unitId();
-	policy->activeStack(battleID, archer);
+	battle()->activeStack = shooter->unitId();
+	policy->activeStack(battleID, shooter);
 	ASSERT_TRUE(callback->action.has_value());
 	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
 	ASSERT_EQ(callback->action->target.size(), 1u);
 	EXPECT_EQ(callback->action->target.front().hexValue, tail)
-		<< "TUM must independently select the better native tail aim";
-	std::cout << "AI_TUM_HYPNOTIZE_WIDE_SHOT baseline=" << baseline.toString()
+		<< "TUM must select the legal tail shot that damages three original allies";
+	std::cout << "AI_TUM_HYPNOTIZE_WIDE_SPLASH homm3=" << baseline.toString()
 		<< " tum=" << callback->action->toString() << '\n';
 	const int shotsBefore = recorder.shots;
+	const auto firstHealth = firstExtra->getAvailableHealth();
+	const auto secondHealth = secondExtra->getAvailableHealth();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
-		<< "Authoritative VCMI server rejected TUM's double-wide tail shot";
+		<< "The real VCMI server rejected TUM's tail-aimed Hypnotize shot";
 	EXPECT_GT(recorder.shots, shotsBefore);
-	EXPECT_LT(wideAlly->getAvailableHealth(), originalHealth);
+	EXPECT_LT(firstExtra->getAvailableHealth(), firstHealth);
+	EXPECT_LT(secondExtra->getAvailableHealth(), secondHealth);
 	policy.reset();
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
 	EXPECT_GT(recorder.damage, 0);
