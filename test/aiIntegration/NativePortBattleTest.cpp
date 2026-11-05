@@ -2889,6 +2889,116 @@ TEST_F(AIIntegrationNativeBattle, fheroes2GuardRepositionsFromCoveredWeakShooter
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned analyzeBattleState excludes Blind/Paralyze from effective ranged
+// strength. The partial VCMI cover policy must likewise stop screening an
+// incapacitated high-value archer when a smaller archer is still able to fire.
+// Before/after decisions come from independent policy executions on one native
+// battle, with actual server-applied Blind and an engine-accepted final action.
+TEST_F(AIIntegrationNativeBattle, fheroes2GuardStopsScreeningBlindedArcherWhenAnotherCanShoot)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	const CStack * originalEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			originalEnemy = unit.get();
+	}
+	ASSERT_NE(guard, nullptr);
+	ASSERT_NE(originalEnemy, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex weakHex(origin.toInt() + GameConstants::BFIELD_WIDTH);
+	const BattleHex strongHex(origin.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(weakHex.isAvailable());
+	ASSERT_TRUE(strongHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(weakHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(strongHex), nullptr);
+	const CStack * weak = addStack(BattleSide::ATTACKER, CreatureID(2), weakHex, 60);
+	const CStack * strong = addStack(BattleSide::ATTACKER, CreatureID(2), strongHex, 160);
+	ASSERT_NE(weak, nullptr);
+	ASSERT_NE(strong, nullptr);
+	ASSERT_EQ(BattleHex::getDistance(origin, weakHex), 1);
+	ASSERT_GT(strong->estimateCombatValue(), weak->estimateCombatValue());
+	const int enemyReach = static_cast<int>(originalEnemy->getMovementRange()) + 1;
+	const int guardReach = static_cast<int>(guard->getMovementRange()) + 1;
+	const auto findThreatPosition = [&](const BattleHex & shooterHex)
+	{
+		BattleHex best;
+		int longestToGuard = -1;
+		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+		{
+			const BattleHex hex(index);
+			if(!hex.isAvailable() || hex.getX() <= shooterHex.getX()
+				|| battle()->battleGetUnitByPos(hex) != nullptr)
+				continue;
+			const int toShooter = BattleHex::getDistance(hex, shooterHex);
+			const int toGuard = BattleHex::getDistance(hex, origin);
+			if(toShooter < 2 || toShooter > enemyReach || toGuard <= guardReach)
+				continue;
+			if(toGuard > longestToGuard)
+			{
+				best = hex;
+				longestToGuard = toGuard;
+			}
+		}
+		return best;
+	};
+	const BattleHex weakThreatHex = findThreatPosition(weakHex);
+	ASSERT_TRUE(weakThreatHex.isValid());
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), weakThreatHex, 15), nullptr);
+	const BattleHex strongThreatHex = findThreatPosition(strongHex);
+	ASSERT_TRUE(strongThreatHex.isValid());
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), strongThreatHex, 15), nullptr);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto choose = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		EXPECT_NE(policy, nullptr);
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, guard);
+		return callback->action;
+	};
+	const auto before = choose();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::WALK)
+		<< "The unblinded stronger archer must initially attract the guard";
+	ASSERT_FALSE(before->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(before->target.front().hexValue, strongHex), 1);
+
+	teachBattleSpell(defenderSideHero, SpellID::BLIND);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, strong));
+	ASSERT_TRUE(strong->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_FALSE(weak->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto after = choose();
+	ASSERT_TRUE(after.has_value());
+	EXPECT_EQ(after->actionType, EActionType::DEFEND)
+		<< "Screen the still-active adjacent archer instead of the blinded one: "
+		<< after->toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "Native server rejected the independently chosen post-Blind action";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Source-derived cautious offense must stop before projected next-turn
 // ground-melee exposure. Check an independent choice, the native server
 // acceptance of that movement, and a completed engine battle.
