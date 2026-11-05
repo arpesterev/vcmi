@@ -283,9 +283,11 @@ public:
 			auto targets = enemies;
 			vstd::erase_if(targets, [&](const CStack * enemy)
 			{
-				// TUM-only: an incapacitated high-speed target cannot flee
-				// as a mobile decoy. This opt-in gate leaves HoMM3 unchanged.
-				if(enemy->hasBonusOfType(BonusType::NOT_ACTIVE) || enemy->isFrozen())
+				// TUM-only: a siege machine or an incapacitated high-speed stack
+				// cannot flee as a mobile decoy, irrespective of its speed stat.
+				// HoMM3 retains the baseline policy when this flag is false.
+				if(enemy->hasBonusOfType(BonusType::SIEGE_WEAPON)
+					|| enemy->hasBonusOfType(BonusType::NOT_ACTIVE) || enemy->isFrozen())
 					return false;
 				// A wide target can be within the decoy radius by its tail
 				// even when its head lies outside. Use native occupied cells.

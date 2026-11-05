@@ -3501,6 +3501,111 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 }
 
 
+TEST_F(AIIntegrationNativeBattle, tumFastSiegeWeaponCannotBeMobileDecoy)
+{
+	// The TUM anti-decoy override applies only to mobile bait. First prove
+	// the independent mobile-griffin decision, then mark that same Griffin
+	// as a siege weapon and require a legal native non-decoy decision.
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * own = nullptr;
+	const CStack * slow = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->creatureId() != CreatureID(0))
+			continue;
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			own = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER)
+			slow = unit.get();
+	}
+	ASSERT_NE(own, nullptr);
+	ASSERT_NE(slow, nullptr);
+	const auto origin = own->getPosition();
+	const int baitY = origin.getY() >= 4 ? origin.getY() - 3 : origin.getY() + 3;
+	const BattleHex baitHex(static_cast<si16>(origin.getX() + 5), static_cast<si16>(baitY));
+	ASSERT_TRUE(baitHex.isAvailable());
+	ASSERT_LT(BattleHex::getDistance(origin, baitHex), BattleHex::getDistance(origin, slow->getPosition()));
+	auto * fast = addStack(BattleSide::DEFENDER, CreatureID(4), baitHex, 12);
+	ASSERT_NE(fast, nullptr);
+	const int speed = static_cast<int>(own->getMovementRange());
+	ASSERT_GE(static_cast<int>(fast->getMovementRange()), speed + 2);
+	ASSERT_LE(static_cast<int>(slow->getMovementRange()), speed);
+	const int distance = BattleHex::getDistance(origin, fast->getPosition());
+	// The live Griffin decoy occupies two native VCMI hexes. Verify that
+	// the tactical predicate receives their true minimum distance rather
+	// than the head-only approximation before playing the complete battle.
+	const auto fastCells = fast->getHexes();
+	const auto ownCells = own->getHexes();
+	ASSERT_EQ(fastCells.size(), 2u);
+	int expectedFootprintDistance = GameConstants::BFIELD_SIZE;
+	for(const auto & friendlyCell : ownCells)
+		for(const auto & enemyCell : fastCells)
+			expectedFootprintDistance = std::min(expectedFootprintDistance,
+				static_cast<int>(BattleHex::getDistance(friendlyCell, enemyCell)));
+	const int footprintDistance = AIIntegration::Ports::TUM::nearestFootprintDistance(
+		ownCells, fastCells, [](const BattleHex & lhs, const BattleHex & rhs)
+		{
+			return BattleHex::getDistance(lhs, rhs);
+		});
+	ASSERT_EQ(footprintDistance, expectedFootprintDistance);
+	ASSERT_LE(footprintDistance, distance);
+	ASSERT_LE(footprintDistance, speed * 2 + 1);
+	ASSERT_GT(distance, speed + 1) << "The decoy must not be immediately attackable";
+	ASSERT_LE(distance, speed * 2 + 1) << "The decoy must fall inside the guarded movement range";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto playerView = callback->getBattle(battleID);
+	ASSERT_NE(playerView, nullptr);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerView, *own);
+	ASSERT_EQ(baseline.actionType, EActionType::WALK)
+		<< "Fixture must make the original HoMM3 baseline pursue rather than attack";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, own);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK);
+	ASSERT_FALSE(baseline.target.empty());
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_NE(callback->action->target.front().hexValue, baseline.target.front().hexValue)
+		<< "TUM should advance toward slower infantry rather than the faster decoy";
+	// The siege-weapon flag is explicit fixture setup, not a natural
+	// Griffin ability or an assertion about TUM's unavailable DLL.
+	fast->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SIEGE_WEAPON, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(fast->hasBonusOfType(BonusType::SIEGE_WEAPON));
+	ASSERT_FALSE(fast->isMeleeAttacker());
+	ASSERT_GE(static_cast<int>(fast->getMovementRange()), speed + 2)
+		<< "The host-engine mobility gate must be tested with high printed speed";
+	const auto machineBaseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerView, *own);
+	ASSERT_EQ(machineBaseline.actionType, EActionType::WALK);
+	callback->action.reset();
+	policy->activeStack(battleID, own);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK);
+	EXPECT_EQ(callback->action->toString(), machineBaseline.toString())
+		<< "A siege machine cannot lure melee away from the original route";
+	battle()->activeStack = own->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The authoritative VCMI server rejected TUM's legal machine-safe move";
+	EXPECT_GT(recorder.movementPackets, 0);
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumWarMachineCannotBeSlowAnchorForFastDecoyAvoidance)
 {
 	// Pinned TUM only discourages pursuing fast mobile bait near slower stacks.
