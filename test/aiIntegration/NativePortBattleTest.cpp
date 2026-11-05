@@ -3495,6 +3495,112 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeBreathAvoidsFriendlyCollateral)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// fheroes2 optimalAttackVector/doubleCellAttackValue price secondary strikes.
+// In native VCMI FIRST_STRIKE can kill the entire breath attacker before the
+// opening swing, so such a target must not earn phantom secondary-hit value.
+// This Heroes III first-strike ordering has no exact Heroes II counterpart.
+TEST_F(AIIntegrationNativeBattle, fheroes2FatalFirstStrikeDoesNotRewardUnexecutedBreath)
+{
+	prepareBattle(CreatureID(0), 1, CreatureID(0), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * attacker = nullptr;
+	CStack * secondary = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			attacker = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			secondary = unit.get();
+	}
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_NE(secondary, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
+	attacker->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::TWO_HEX_ATTACK_BREATH, BonusSource::OTHER, 1, BonusSourceID()));
+	BattleHex front;
+	BattleHex behind;
+	BattleHex safe;
+	for(const auto & nearby : attacker->getPosition().getNeighbouringTiles())
+	{
+		if(!nearby.isAvailable() || battle()->battleGetUnitByPos(nearby))
+			continue;
+		const auto direction = BattleHex::mutualPosition(attacker->getPosition(), nearby);
+		if(direction == BattleHex::NONE)
+			continue;
+		const auto rear = nearby.cloneInDirection(direction, false);
+		if(!rear.isAvailable() || battle()->battleGetUnitByPos(rear))
+			continue;
+		for(const auto & other : attacker->getPosition().getNeighbouringTiles())
+		{
+			if(other.isAvailable() && other != nearby && other != rear
+				&& !battle()->battleGetUnitByPos(other))
+			{
+				front = nearby;
+				behind = rear;
+				safe = other;
+				break;
+			}
+		}
+		if(safe.isValid())
+			break;
+	}
+	ASSERT_TRUE(front.isValid());
+	ASSERT_TRUE(behind.isValid());
+	ASSERT_TRUE(safe.isValid());
+	secondary->setPosition(behind);
+	CStack * dangerous = addStack(BattleSide::DEFENDER, CreatureID(0), front, 100);
+	CStack * alternative = addStack(BattleSide::DEFENDER, CreatureID(0), safe, 1);
+	ASSERT_NE(dangerous, nullptr);
+	ASSERT_NE(alternative, nullptr);
+	dangerous->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::FIRST_STRIKE, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(0))));
+	const auto splash = battle()->getAttackedBattleUnits(
+		attacker, dangerous, front, false, attacker->getPosition());
+	ASSERT_TRUE(std::any_of(splash.begin(), splash.end(), [&](const auto * unit)
+	{
+		return unit->unitId() == secondary->unitId();
+	})) << "The unsafe strike must have a real native breath target behind it";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	BattleAttackInfo counter(dangerous, attacker, 0, false);
+	counter.attackerPos = front;
+	counter.defenderPos = attacker->getPosition();
+	ASSERT_GE(view->battleEstimateDamage(counter).damage.min, attacker->getAvailableHealth())
+		<< "Native first strike must certainly kill before any projected breath hit";
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	const int64_t originalHealth = attacker->getAvailableHealth();
+	policy->activeStack(battleID, attacker);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_NE(callback->action->target[1].hexValue, front)
+		<< "Fatal first strike must not earn fictitious breath damage against the secondary stack";
+	EXPECT_EQ(attacker->getAvailableHealth(), originalHealth)
+		<< "The first-strike estimate must not modify the active native unit";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Pinned fheroes2 optimalAttackVector and doubleCellAttackValue consider
 // the creature behind the primary melee victim. In Heroes III the source
 // geometry is different; native VCMI TWO_HEX_ATTACK_BREATH owns both the
