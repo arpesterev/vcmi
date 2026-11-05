@@ -4757,6 +4757,105 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
 	runToCompletion(BattleSide::DEFENDER, false, "TUMEnchantedTactics");
 }
 
+
+TEST_F(AIIntegrationNativeBattle, tumCitadelArrowTowerSendsNativeShotBeforeCompletingSiege)
+{
+	// The pinned TUM document advertises improved arrow-tower targeting, but
+	// does not publish its numerical decision rule. Exercise our explicit
+	// damage-aware native projection rather than implying closed-DLL parity.
+	// A real citadel is required: an ordinary FORT has no arrow-tower unit.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 160);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 40));
+	const auto * town = findFirst<CGTownInstance>();
+	ASSERT_NE(town, nullptr);
+	if(town->fortificationsLevel().wallsHealth <= 0)
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
+	if(town->fortificationsLevel().citadelHealth <= 0)
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CITADEL, true));
+	ASSERT_GT(town->fortificationsLevel().citadelHealth, 0);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 80));
+	const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
+	gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
+		attackerSideHero, nullptr, layout, town);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * tower = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
+			tower = unit.get();
+	ASSERT_NE(tower, nullptr) << "The actual siege must generate a native arrow-tower stack";
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+
+	const CStack * expected = nullptr;
+	double bestValue = -1;
+	for(const auto * enemy : view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+	{
+		if(!enemy->alive() || enemy->isInvincible() || !enemy->getPosition().isValid()
+			|| !view->battleCanShoot(tower, enemy->getPosition()))
+			continue;
+		BattleAttackInfo info(tower, enemy, 0, true);
+		info.attackerPos = tower->getPosition();
+		DamageEstimation retaliation;
+		const auto projection = view->battleEstimateDamage(info, &retaliation);
+		const double health = static_cast<double>(enemy->getAvailableHealth());
+		if(health <= 0)
+			continue;
+		const double meanDamage = (static_cast<double>(projection.damage.min)
+			+ static_cast<double>(projection.damage.max)) / 2.0;
+		const double value = static_cast<double>(enemy->estimateCombatValue())
+			* std::clamp(meanDamage, 0.0, health) / health;
+		if(!expected || value > bestValue)
+		{
+			expected = enemy;
+			bestValue = value;
+		}
+	}
+	ASSERT_NE(expected, nullptr) << "Native arrow tower must have a legal target";
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, tower);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT)
+		<< "TUM's native citadel tower may not fall back to ground movement";
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, expected->unitId())
+		<< "The tower must choose the largest engine-projected casualty value";
+	std::cout << "AI_TUM_TOWER_DECISION baseline=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+
+	// The preview above is not engine evidence. Force this specific native
+	// tower activation through the authoritative VCMI server, then continue
+	// the same siege until the result is applied to the adventure state.
+	battle()->activeStack = tower->unitId();
+	const int beforeShots = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The real server rejected TUM's independently selected tower shot";
+	EXPECT_GT(recorder.shots, beforeShots);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 {
 	startRecordedGame();
