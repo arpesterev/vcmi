@@ -557,6 +557,25 @@ private:
 		if(totalShooterStrength <= 0)
 			return std::nullopt;
 
+		// Pinned fheroes2 analyzeBattleState enables _avoidStackingUnits when
+		// unengaged AREA_SHOT archers contribute over one tenth of enemy
+		// strength. Native SHOOTS_ALL_ADJACENT is a Heroes III analogue, not
+		// the identical Heroes II splash rule. Space screens one extra hex
+		// from friendly archers to avoid exposing both to a single shot.
+		double enemyStrength = 0;
+		double areaShotStrength = 0;
+		for(const auto * enemy : enemies)
+		{
+			const double value = strength(*enemy);
+			enemyStrength += value;
+			if(enemy->isShooter() && enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
+				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				&& battle.battleCanShoot(enemy))
+				areaShotStrength += value;
+		}
+		const bool avoidStacking = enemyStrength > 0 && areaShotStrength > enemyStrength * 0.1;
+		const int coverDistance = avoidStacking ? 2 : 1;
+
 		BattleHex bestCoverHex;
 		double bestCoverValue = -std::numeric_limits<double>::infinity();
 		int bestTravel = GameConstants::BFIELD_SIZE;
@@ -593,7 +612,7 @@ private:
 			// Treat its current screen as a zero-travel candidate, then
 			// compare every reachable cover using the same source-derived
 			// archer-strength / travel-penalty ranking.
-			if(distanceToShooter(stack.getPosition(), *friendly) == 1)
+			if(distanceToShooter(stack.getPosition(), *friendly) == coverDistance)
 			{
 				const double value = strength(*friendly);
 				if(value > bestCoverValue)
@@ -608,7 +627,7 @@ private:
 			for(const auto & hex : available)
 			{
 				if(!hex.isAvailable() || hex == stack.getPosition()
-					|| distanceToShooter(hex, *friendly) != 1)
+					|| distanceToShooter(hex, *friendly) != coverDistance)
 					continue;
 				const int travel = reachability.distances[hex.toInt()];
 				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))

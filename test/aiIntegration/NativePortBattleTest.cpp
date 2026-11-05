@@ -2321,6 +2321,94 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 // Pinned fheroes2 meleeUnitDefense enumerates *all* enemies adjacent to
 // a blocked friendly archer. In Heroes III, a real adjacent enemy shooter
 // blocks shots even if the enemy also has an innate ranged attack.
+// Pinned fheroes2 analyzeBattleState activates _avoidStackingUnits when an
+// active AREA_SHOT enemy represents enough battlefield strength. Heroes III
+// Magog uses SHOOTS_ALL_ADJACENT, not the identical Heroes II splash rules.
+// Verify an independently chosen, native-legal dispersed archer screen and
+// a server-completed combat, not only a helper's numeric priority.
+TEST_F(AIIntegrationNativeBattle, fheroes2MagogAreaShotMakesDefensiveGuardSpreadOut)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex archerHex(origin.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex meleeHex(archerHex.toInt() + 5);
+	ASSERT_TRUE(archerHex.isAvailable() && meleeHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(meleeHex), nullptr);
+	const CStack * archer = addStack(BattleSide::ATTACKER, CreatureID(2), archerHex, 120);
+	const CStack * melee = addStack(BattleSide::DEFENDER, CreatureID(0), meleeHex, 15);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(melee, nullptr);
+	ASSERT_LE(BattleHex::getDistance(archerHex, meleeHex),
+		static_cast<int>(melee->getMovementRange()) + 1);
+	ASSERT_GT(BattleHex::getDistance(origin, meleeHex),
+		static_cast<int>(guard->getMovementRange()) + 1);
+	BattleHex magogHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex hex(index);
+		if(hex.isAvailable() && hex.getX() > archerHex.getX() + 3
+			&& !battle()->battleGetUnitByPos(hex)
+			&& BattleHex::getDistance(hex, origin) > guard->getMovementRange() + 1
+			&& BattleHex::getDistance(hex, archerHex) > 3)
+		{
+			magogHex = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(magogHex.isValid());
+	const CStack * magog = addStack(BattleSide::DEFENDER, CreatureID(45), magogHex, 3);
+	ASSERT_NE(magog, nullptr);
+	ASSERT_TRUE(magog->isShooter());
+	ASSERT_TRUE(magog->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+	ASSERT_TRUE(battle()->battleCanShoot(magog))
+		<< "The hostile area shooter must actually be able to fire";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "An independently chosen area-shot defense must move the screen: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_EQ(BattleHex::getDistance(destination, archerHex), 2)
+		<< "The guard must avoid adjacent splash clustering";
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto routes = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(routes, guard, false);
+	ASSERT_TRUE(available.contains(destination)) << "Selected screen hex must be natively reachable";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native VCMI rejected the independently selected spread-out cover";
+	EXPECT_EQ(guard->getPosition(), destination);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2EngagedEnemyShooterTriggersNativeArcherScreen)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
