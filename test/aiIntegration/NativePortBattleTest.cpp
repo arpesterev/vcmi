@@ -3988,6 +3988,35 @@ TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 	ASSERT_TRUE(hasMultipleAims)
 		<< "A wide target must offer two real melee aim hexes at a legal landing";
 
+	// The pinned checkAdjacentHexes visits each target footprint hex. Both
+	// forecasts must be accepted by VCMI's REAL damage calculator, not just
+	// by a source-shaped helper. The port now forwards the selected hex into
+	// BattleAttackInfo (including the second-hit preview) without touching
+	// the live defender while it evaluates candidate aims.
+	int nativeAimsPreviewed = 0;
+	const auto healthBeforePreview = griffin->getAvailableHealth();
+	for(const auto & candidate : available)
+	{
+		if(!candidate.isAvailable())
+			continue;
+		const auto legal = view->meleeAttackHexes(dragon, griffin, candidate);
+		if(legal.size() < 2)
+			continue;
+		for(const auto & hit : legal)
+		{
+			BattleAttackInfo forecast(dragon, griffin, reach.distances[candidate.toInt()], false);
+			forecast.attackerPos = candidate;
+			forecast.defenderPos = hit;
+			const auto result = view->battleEstimateDamage(forecast);
+			EXPECT_GT(result.damage.max, 0);
+			EXPECT_EQ(griffin->getAvailableHealth(), healthBeforePreview)
+				<< "Preview must never mutate the real defender";
+			++nativeAimsPreviewed;
+		}
+		break;
+	}
+	ASSERT_GE(nativeAimsPreviewed, 2);
+
 	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
