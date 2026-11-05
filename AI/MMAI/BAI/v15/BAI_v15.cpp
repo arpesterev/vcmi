@@ -335,14 +335,25 @@ namespace
 				return BattleAction::makeMove(acstack, destination);
 			}
 			case AT::AMOVE:
-				if(a->endsAt.empty() || !a->endsAt.front() || !a->target ||
-				   !battle.isMeleeAttackPossible(acstack, &a->target->cstack, a->endsAt.front()->bhex))
-					throw std::runtime_error("MMAI V15: model AMOVE action has no legal melee target");
-				return BattleAction::makeMeleeAttack(acstack, &a->target->cstack, a->endsAt.front()->bhex);
+			{
+				if(a->endsAt.empty() || !a->endsAt.front())
+					throw std::runtime_error("MMAI V15: model AMOVE action has no destination");
+				const auto * target = a->target ? &a->target->cstack : nullptr;
+				requireNNV15LegalTarget(target, [&](const CStack * candidate)
+				{
+					return battle.isMeleeAttackPossible(acstack, candidate, a->endsAt.front()->bhex);
+				}, "AMOVE");
+				return BattleAction::makeMeleeAttack(acstack, target, a->endsAt.front()->bhex);
+			}
 			case AT::SHOOT:
-				if(!a->target || !battle.battleCanShoot(acstack, a->target->cstack.getPosition()))
-					throw std::runtime_error("MMAI V15: model SHOOT action has no legal ranged target");
-				return BattleAction::makeShotAttack(acstack, &a->target->cstack);
+			{
+				const auto * target = a->target ? &a->target->cstack : nullptr;
+				requireNNV15LegalTarget(target, [&](const CStack * candidate)
+				{
+					return battle.battleCanShoot(acstack, candidate->getPosition());
+				}, "SHOOT");
+				return BattleAction::makeShotAttack(acstack, target);
+			}
 			default:
 				throwf("Unexpected action type: %1%", EI(a->actionType));
 		}
