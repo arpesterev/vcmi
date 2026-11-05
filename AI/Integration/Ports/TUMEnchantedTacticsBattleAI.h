@@ -349,9 +349,36 @@ private:
 			// Ordinary retaliation includes first-hit casualties; native melee
 			// and ranged FIRST_STRIKE occur before those casualties. Multi-hit
 			// and other special-attack sequencing remains outside this projection.
+			// A hypnotized ranged attacker with a native adjacent-splash shot
+			// can hit different former allies from a wide target's head and
+			// tail. Account for those actual impacted units rather than pricing
+			// only the aimed creature. Keep the projection bounded: FIRST_STRIKE
+			// survivor damage, spell-like splash and multi-shot sequencing need
+			// separate engine-specific evaluation before they can be included.
+			double friendlySplashLoss = 0.0;
+			if(shooting && !counterFirst && stack.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
+			{
+				const auto impacted = battle.getAttackedBattleUnits(&stack, &victim, aimedHex, true, origin);
+				for(const auto * hit : impacted)
+				{
+					if(!hit || hit->unitId() == victim.unitId())
+						continue;
+					BattleAttackInfo splash(&stack, hit, distance, true);
+					splash.attackerPos = origin;
+					splash.defenderPos = hit->getPosition();
+					const auto preview = battle.battleEstimateDamage(splash, nullptr);
+					const double loss = std::clamp(
+						(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0,
+						0.0, static_cast<double>(hit->getAvailableHealth()));
+					if(battle.battleGetOwner(hit) == battle.battleGetOwner(&stack))
+						friendlySplashLoss += loss;
+					else
+						dealt += loss;
+				}
+			}
 			// None of this establishes equivalence with the unavailable ERA/DLL.
 			received = std::clamp(received, 0.0, static_cast<double>(stack.getAvailableHealth()));
-			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
+			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received) - friendlySplashLoss;
 		};
 
 		// TUM's published Hypnotize priority applies across all legal attack
