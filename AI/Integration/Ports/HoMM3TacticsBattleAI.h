@@ -502,7 +502,12 @@ private:
 				if((shooting && !canShoot) || (!shooting && !canMelee))
 					continue;
 				BattleAttackInfo info(enemy, &attacker, 0, shooting);
-				info.defenderPos = destination;
+				// checkAdjacentHexes evaluates each occupied hex separately.
+				// The projected defender still occupies its old position in
+				// the live battle, so explicitly aim at the future HEAD or TAIL
+				// being scored. A head-only preview would silently discard the
+				// second cell's native attack geometry.
+				info.defenderPos = cell;
 				worstLoss = std::max(worstLoss, lossValue(attacker, battle.battleEstimateDamage(info)));
 			}
 		}
