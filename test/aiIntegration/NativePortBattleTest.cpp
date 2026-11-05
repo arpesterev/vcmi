@@ -2340,9 +2340,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveSt
 		BattleSide::ATTACKER, false);
 	policy->activeStack(battleID, infantry);
 	ASSERT_TRUE(callback->action.has_value());
-	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
-		<< "Blocked friendly archer still supports defensive fheroes2 stance: "
+	// Source meleeUnitDefense does not merely DEFEND when a blocked
+	// archer has an enemy beyond this turn's melee reach: it pursues the
+	// blocker on a native legal route before generic offensive targets.
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Blocked friendly archer should trigger source-derived defensive pursuit: "
 		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_LT(BattleHex::getDistance(destination, blockerHex),
+		BattleHex::getDistance(infantry->getPosition(), blockerHex));
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI rejected the source-derived defensive step";
 	policy.reset();
 	// The engine, not the test, chooses all subsequent actions and the winner.
 	runToCompletion(std::nullopt, false);
