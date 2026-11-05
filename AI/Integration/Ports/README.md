@@ -267,6 +267,13 @@ retaliator or VCMI suppresses the countershot. The reverse estimate is only
 a decision proxy; the actual engine owns retaliation timing and effects.
 Two server regressions separately require a changed independent target
 choice and a real accepted ranged counterattack before battle completion.
+With native `FIRST_STRIKE` plus `RANGED_RETALIATION`, a detached copy of
+the attacking shooter now receives the countershot **before** estimating
+its own outgoing ranged damage (including splash victims). The native
+`fheroes2NativeFirstStrikeRangedCounterPrecedesOwnShot` regression asserts
+server packet order, an independently chosen legal shot, non-mutating
+preview and a completed real battle. The expected counter damage uses a
+bounded mean, not guaranteed future combat rolls.
 This is **Heroes III host-rule adaptation**, not Heroes II equivalence.
 
 Not implemented: complete upstream buff/debuff and creature-spell selection,
