@@ -226,6 +226,18 @@ reconstruct the original `enemy_attacks` field or prove that the original
 HoMM3 would choose the same attack hex. The TUM-composed baseline is not
 changed by this HoMM3-only projection.
 
+The pinned `type_AI_combat_parameters::simulateAttack` applies its first
+melee blow, the surviving defender's retaliation, and then a possible
+`creatureTwoAttacks` second blow. For the HoMM3-only two-strike case, the
+VCMI estimator now previews the retaliation from a detached defender after
+representative first-hit casualties, instead of charging the untouched stack's
+full counterdamage. The Crusader/Swordsmen server regression verifies reduced
+counterdamage estimates without mutating a live stack, one actual intervening
+retaliation, two Crusader hits and a terminal battle. This is an approximate
+expected-damage projection, not the retail HoMM3 combat simulator; independent
+change of tactical target choice is not established. TUM's partial baseline
+is not changed.
+
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign

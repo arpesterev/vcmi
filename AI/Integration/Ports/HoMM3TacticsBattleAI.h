@@ -104,6 +104,35 @@ private:
 			&& oldTargetHealth > 0 && damage.damage.min >= oldTargetHealth;
 		double retaliationLoss = shooting || certainFirstHitKill
 			? 0.0 : lossValue(attacker, retaliation);
+		// Pinned simulateAttack applies the first blow BEFORE the defender
+		// retaliates, and only then tries creatureTwoAttacks' second blow.
+		// The native initial retaliation estimate uses the original defender
+		// count. Re-price the response from a detached post-hit stack so that
+		// lost defenders cannot inflict an imaginary full-strength counterblow.
+		// This is an expected-damage VCMI projection, not exact retail rolls.
+		// Leave TUM's explicitly separate baseline untouched.
+		if(projectSecondMeleeStrike && !shooting
+			&& attacker.getTotalAttacks(false) > 1 && !certainFirstHitKill
+			&& retaliation.damage.max > 0)
+		{
+			auto afterFirst = target.acquireState();
+			int64_t firstHit = damage.damage.min
+				+ (damage.damage.max - damage.damage.min) / 2;
+			firstHit = std::clamp<int64_t>(firstHit, 0, afterFirst->getAvailableHealth());
+			afterFirst->damage(firstHit);
+			if(afterFirst->alive())
+			{
+				BattleAttackInfo counter(afterFirst.get(), &attacker, 0, false);
+				counter.attackerPos = target.getPosition();
+				counter.defenderPos = from;
+				retaliation = battle.battleEstimateDamage(counter);
+				retaliationLoss = lossValue(attacker, retaliation);
+			}
+			else
+			{
+				retaliationLoss = 0.0;
+			}
+		}
 		// Pinned simulateAttack/getRangedAttackValue has no ranged retaliation:
 		// vanilla Heroes III cannot counter a shot. VCMI can. Its generic
 		// battleEstimateDamage retaliation output does not include this

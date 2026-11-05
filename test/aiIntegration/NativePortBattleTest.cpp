@@ -3115,6 +3115,31 @@ TEST_F(AIIntegrationNativeBattle, homm3CrusaderSecondStrikeSurvivesRetaliationAn
 	ASSERT_LT(firstEstimate.damage.max, before)
 		<< "The first predicted hit must leave a defender for the second strike";
 
+	// The pinned source computes first hit -> surviving retaliation -> second
+	// hit. A full-strength native counter-preview must not stand in for a
+	// retaliation after the first Crusader blow has killed Swordsmen.
+	BattleAttackInfo fullCounter(swordsmen, crusaders, 0, false);
+	fullCounter.attackerPos = swordsmen->getPosition();
+	fullCounter.defenderPos = crusaders->getPosition();
+	const auto fullCounterEstimate = view->battleEstimateDamage(fullCounter);
+	ASSERT_GT(fullCounterEstimate.damage.max, 0);
+	const auto oldDefenderCount = swordsmen->getCount();
+	auto reducedDefender = swordsmen->acquireState();
+	int64_t firstHit = firstEstimate.damage.min
+		+ (firstEstimate.damage.max - firstEstimate.damage.min) / 2;
+	firstHit = std::clamp<int64_t>(firstHit, 0, reducedDefender->getAvailableHealth());
+	reducedDefender->damage(firstHit);
+	ASSERT_TRUE(reducedDefender->alive());
+	ASSERT_LT(reducedDefender->getCount(), oldDefenderCount);
+	BattleAttackInfo reducedCounter(reducedDefender.get(), crusaders, 0, false);
+	reducedCounter.attackerPos = swordsmen->getPosition();
+	reducedCounter.defenderPos = crusaders->getPosition();
+	const auto reducedCounterEstimate = view->battleEstimateDamage(reducedCounter);
+	EXPECT_LT(reducedCounterEstimate.damage.max, fullCounterEstimate.damage.max)
+		<< "Only post-hit surviving Swordsmen may retaliate before strike two";
+	EXPECT_EQ(swordsmen->getAvailableHealth(), before)
+		<< "Sequential preview must not mutate the authoritative defender";
+
 	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
@@ -3135,17 +3160,23 @@ TEST_F(AIIntegrationNativeBattle, homm3CrusaderSecondStrikeSurvivesRetaliationAn
 	EXPECT_EQ(view->battleGetUnitByPos(action.target[1].hexValue), swordsmen);
 
 	int crusaderStrikes = 0;
+	int swordsmenRetaliations = 0;
 	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
 	{
 		if(attack.stackAttacking == static_cast<ui32>(crusaders->unitId())
 			&& !attack.shot() && !attack.counter())
 			++crusaderStrikes;
+		if(attack.stackAttacking == static_cast<ui32>(swordsmen->unitId())
+			&& !attack.shot() && attack.counter())
+			++swordsmenRetaliations;
 	};
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
 		<< "The real VCMI server rejected the Crusaders' double strike";
 	recorder.onAttackBeforeApply = {};
 	EXPECT_EQ(crusaderStrikes, 2)
 		<< "The engine must execute both Crusader hits after the first retaliation";
+	EXPECT_EQ(swordsmenRetaliations, 1)
+		<< "The server must apply one intervening Swordsmen retaliation";
 	EXPECT_LT(swordsmen->getAvailableHealth(), before);
 	policy.reset();
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
