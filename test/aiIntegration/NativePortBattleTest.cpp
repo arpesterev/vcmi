@@ -3489,6 +3489,167 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindTurnsFastFlyerIntoPriorityDistant
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2MeleeSplashChoosesActualNativeMultiTargetAttack)
+{
+	// Pinned ai_battle.cpp::optimalAttackValue scores all opponents hit by
+	// all-adjacent melee. The previous port scored only the primary target.
+	// Use a fixture-local VCMI Hydra bonus on an ordinary melee unit, so
+	// creature definitions and battle rules are not modified.
+	prepareBattle(CreatureID(1), 100, CreatureID(0), 28);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * attacker = nullptr;
+	CStack * isolated = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(1))
+			attacker = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			isolated = unit.get();
+	}
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_NE(isolated, nullptr);
+	ASSERT_FALSE(attacker->isShooter());
+	const BattleHex center(GameConstants::BFIELD_SIZE / 2);
+	ASSERT_TRUE(center.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(center), nullptr);
+	attacker->setPosition(center);
+	BattleHex isolatedHex;
+	for(const auto & candidate : center.getNeighbouringTiles())
+	{
+		if(candidate.isAvailable() && candidate.getX() < center.getX()
+			&& battle()->battleGetUnitByPos(candidate) == nullptr)
+		{
+			isolatedHex = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(isolatedHex.isValid());
+	isolated->setPosition(isolatedHex);
+	ASSERT_EQ(battle()->battleGetUnitByPos(isolatedHex), isolated);
+	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
+
+	// Find an actual reachable attack-from hex with three free hostile
+	// adjacent cells, separated from the strong isolated target. A direct
+	// strike at any one of those smaller troops has lower value than the
+	// isolated strike, but the native three-victim attack has higher value.
+	BattleHex clusterFrom;
+	std::vector<BattleHex> clusterHexes;
+	const auto reachability = battle()->getReachability(attacker);
+	const auto available = battle()->battleGetAvailableHexes(reachability, attacker, false);
+	for(const auto & from : available)
+	{
+		if(!from.isAvailable() || from.getX() < center.getX() + 2
+			|| BattleHex::getDistance(center, from) < 2)
+			continue;
+		std::vector<BattleHex> neighbours;
+		for(const auto & hex : from.getNeighbouringTiles())
+		{
+			if(hex.isAvailable() && hex.getX() >= from.getX()
+				&& battle()->battleGetUnitByPos(hex) == nullptr
+				&& BattleHex::getDistance(hex, isolatedHex) > 3)
+				neighbours.push_back(hex);
+		}
+		if(neighbours.size() >= 3)
+		{
+			clusterFrom = from;
+			clusterHexes.assign(neighbours.begin(), neighbours.begin() + 3);
+			break;
+		}
+	}
+	ASSERT_TRUE(clusterFrom.isValid());
+	std::vector<const CStack *> cluster;
+	for(const auto & hex : clusterHexes)
+	{
+		const auto * additional = addStack(BattleSide::DEFENDER, CreatureID(0), hex, 20);
+		ASSERT_NE(additional, nullptr);
+		cluster.push_back(additional);
+	}
+	ASSERT_TRUE(battle()->battleGetAvailableHexes(battle()->getReachability(attacker), attacker, false)
+		.contains(clusterFrom));
+	for(const auto * defender : cluster)
+	{
+		ASSERT_FALSE(battle()->meleeAttackHexes(attacker, defender, clusterFrom).empty());
+	}
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, attacker);
+		return callback->action;
+	};
+
+	const auto ordinary = decide();
+	ASSERT_TRUE(ordinary.has_value());
+	ASSERT_EQ(ordinary->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(ordinary->target.size(), 2u);
+	EXPECT_EQ(battle()->battleGetUnitByPos(ordinary->target[1].hexValue), isolated)
+		<< "Single-target melee should prefer the stronger isolated stack";
+
+	attacker->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::ATTACKS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(attacker->hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT));
+	const auto nativeSplash = battle()->getAttackedBattleUnits(
+		attacker, cluster.front(), cluster.front()->getPosition(), false, clusterFrom);
+	ASSERT_GE(nativeSplash.size(), 3u)
+		<< "The actual VCMI melee geometry must include all adjacent victims";
+	const auto sourceProjection = decide();
+	ASSERT_TRUE(sourceProjection.has_value());
+	ASSERT_EQ(sourceProjection->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(sourceProjection->target.size(), 2u);
+	const BattleHex from = sourceProjection->target[0].hexValue;
+	const BattleHex aimed = sourceProjection->target[1].hexValue;
+	const auto * primary = battle()->battleGetUnitByPos(aimed);
+	ASSERT_NE(primary, nullptr);
+	EXPECT_NE(primary, isolated)
+		<< "Multi-target valuation must change the independently selected target";
+	const auto struck = battle()->getAttackedBattleUnits(attacker, primary, aimed, false, from);
+	ASSERT_GE(struck.size(), 2u)
+		<< "The selected action must truly hit multiple native enemies";
+
+	std::vector<int> actualVictims;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		for(const auto & injury : attack.bsa)
+		{
+			if(injury.damageAmount > 0
+				&& std::find(actualVictims.begin(), actualVictims.end(), injury.stackAttacked)
+					== actualVictims.end())
+				actualVictims.push_back(injury.stackAttacked);
+		}
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *sourceProjection))
+		<< "VCMI rejected the independently selected multi-target melee action";
+	int hitCluster = 0;
+	for(const auto * defender : cluster)
+	{
+		if(std::find(actualVictims.begin(), actualVictims.end(), defender->unitId())
+			!= actualVictims.end())
+			++hitCluster;
+	}
+	EXPECT_GE(hitCluster, 2)
+		<< "The native server must injure multiple clustered enemies";
+	recorder.onAttackBeforeApply = {};
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 {
 	// Original fheroes2 archerDecision accounts for multiple area victims.
