@@ -2205,6 +2205,91 @@ TEST_F(AIIntegrationNativeBattle, fheroes2StrategicFarewellCastThenNativeRetreat
 	callback->onBattleEnded(battleID);
 }
 
+
+TEST_F(AIIntegrationNativeBattle, fheroes2WithdrawalPrefersRetreatWhenNativeSurrenderIsAlsoLegal)
+{
+	// Pinned ai_battle.cpp:828-870 chooses SURRENDER only if RETREAT is
+	// unavailable. In VCMI CBattleInfoEssentials::battleCanSurrender
+	// explicitly requires battleCanFlee, so that source branch cannot be
+	// reached under current Heroes III rules. Do not silently equate them.
+	prepareBattle(CreatureID(19), 1, CreatureID(16), 600);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	gameState()->players.at(player).human = false;
+	ASSERT_TRUE(gameHandler->giveHeroNewArtifact(attackerSideHero,
+		ArtifactID(7), ArtifactPosition::RIGHT_HAND));
+	attackerSideHero->mana = 0; // No farewell cast: isolate withdrawal priority.
+	gameHandler->giveResource(player, GameResID::GOLD, 100000);
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanFlee());
+	ASSERT_TRUE(view->battleCanSurrender(player))
+		<< "Both VCMI withdrawal actions must be legal for this Heroes II/III contrast";
+	ASSERT_GE(view->battleGetSurrenderCost(), 0);
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	policy->initBattleInterface(environment, callback);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::RETREAT)
+		<< "Source chooses retreat first, even when VCMI permits paid surrender";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative server rejected the independently selected withdrawal";
+	ASSERT_EQ(recorder.battleResults.size(), 1u);
+	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
+	if(recorder.battleResults.back().questionID != QuestionID::NONE)
+		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+	EXPECT_TRUE(gameState()->currentBattles.empty());
+	EXPECT_EQ(recorder.acceptedResults, 1);
+	callback->onBattleEnded(battleID);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2NativeSurrenderPaymentAndResultAreServerValidated)
+{
+	// This intentionally tests VCMI's surrender action, NOT a claim that
+	// source FHeroes2Tactics selected SURRENDER. Unlike Heroes II, VCMI
+	// requires fleeing to be permitted whenever surrender is permitted.
+	prepareBattle(CreatureID(19), 1, CreatureID(16), 600);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	gameHandler->giveResource(player, GameResID::GOLD, 100000);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanFlee());
+	ASSERT_TRUE(view->battleCanSurrender(player));
+	const int price = view->battleGetSurrenderCost();
+	ASSERT_GE(price, 0);
+	const int beforeGold = gameState()->players.at(player).resources[GameResID::GOLD];
+	ASSERT_GE(beforeGold, price);
+	const auto surrender = BattleAction::makeSurrender(BattleSide::ATTACKER);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, surrender))
+		<< "Native VCMI rejected an authorized surrender with sufficient gold";
+	ASSERT_EQ(recorder.battleResults.size(), 1u);
+	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
+	if(recorder.battleResults.back().questionID != QuestionID::NONE)
+		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+	EXPECT_TRUE(gameState()->currentBattles.empty());
+	EXPECT_EQ(recorder.acceptedResults, 1);
+	EXPECT_EQ(gameState()->players.at(player).resources[GameResID::GOLD], beforeGold - price)
+		<< "Native surrender must charge the actual Heroes III server price";
+	callback->onBattleEnded(battleID);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveStance)
 {
 	// Pinned fheroes2 analyzeBattleState counts an archer as ranged strength
