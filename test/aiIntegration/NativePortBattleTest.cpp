@@ -4908,6 +4908,105 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelArrowTowerSendsNativeShotBeforeCompl
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The closed TUM plugin does not publish its arrow-tower formula. Prove that
+// our *explicitly partial* native casualty-value projection can choose a
+// different real siege target from the original partial HoMM3 attack score.
+// HoMM3 discounts an incapacitated ranged target; this TUM tower projection
+// instead estimates the combat value actually removed by its next legal shot.
+// This fixture injects Blind as test status, not as an observed creature proc.
+TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighValueStack)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 300);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 8));
+	const auto * town = findFirst<CGTownInstance>();
+	ASSERT_NE(town, nullptr);
+	if(town->fortificationsLevel().wallsHealth <= 0)
+	{
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
+	}
+	if(town->fortificationsLevel().citadelHealth <= 0)
+	{
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CITADEL, true));
+	}
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 60));
+	const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
+	gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
+		attackerSideHero, nullptr, layout, town);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * tower = nullptr;
+	CStack * largeTarget = nullptr;
+	const CStack * smallTarget = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
+			tower = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->getCount() == 300)
+				largeTarget = unit.get();
+			else if(unit->getCount() == 8)
+				smallTarget = unit.get();
+		}
+	}
+	ASSERT_NE(tower, nullptr);
+	ASSERT_NE(largeTarget, nullptr);
+	ASSERT_NE(smallTarget, nullptr);
+	largeTarget->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::SPELL_EFFECT,
+		1, BonusSourceID(SpellID(SpellID::BLIND)), BonusSubtypeID(SpellID(SpellID::BLIND))));
+	ASSERT_TRUE(largeTarget->hasBonusOfType(BonusType::NOT_ACTIVE));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(tower, largeTarget->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(tower, smallTarget->getPosition()));
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, tower);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	std::cout << "AI_TUM_TOWER_DIFFERENTIAL homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+	EXPECT_EQ(baseline.target.front().unitValue, smallTarget->unitId())
+		<< "HoMM3's incapacitation discount should favor the active stack";
+	EXPECT_EQ(callback->action->target.front().unitValue, largeTarget->unitId())
+		<< "TUM's bounded native projected-loss score should favor the larger stack";
+	EXPECT_NE(callback->action->toString(), baseline.toString());
+
+	// Require the specific proposed TUM tower shot to be accepted and applied
+	// by the authoritative battle processor, not just a test callback.
+	battle()->activeStack = tower->unitId();
+	const int shotsBefore = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_GT(recorder.shots, shotsBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 {
 	startRecordedGame();
