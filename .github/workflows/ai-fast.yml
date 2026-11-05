@@ -248,6 +248,7 @@ jobs:
                       'V13RejectsDeadOrMissingEngineOwnedMachineActor',
                       'V13RejectsStaleOrDeadActiveCreatureBeforeModelDispatch',
                       'V13RejectsIllegalTargetBeforeEngineDispatch',
+                      'V13RejectsReplacedShootHexTargetBeforeDispatch',
                       'V13StrictNeuralRetreatUsesLiveEnginePermission',
                       'V13StrictRejectsInvalidModelActionWithoutResampling',
                       'V13RejectsMoveOutsideLiveEngineReachability',
