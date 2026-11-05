@@ -94,6 +94,7 @@ private:
 			info.defenderPos = aimedHex;
 		}
 		DamageEstimation retaliation;
+		DamageEstimation nativeRangedCounter;
 		auto damage = battle.battleEstimateDamage(info, &retaliation);
 		// VCMI performs every native melee strike, including attacks granted by
 		// the hero. Pinned HoMM3 simulateAttack models at most the creature's
@@ -225,7 +226,8 @@ private:
 			{
 				BattleAttackInfo counter(afterShot.get(), &attacker, 0, true);
 				counter.attackerPos = target.getPosition();
-				retaliationLoss = lossValue(attacker, battle.battleEstimateDamage(counter));
+				nativeRangedCounter = battle.battleEstimateDamage(counter);
+				retaliationLoss = lossValue(attacker, nativeRangedCounter);
 			}
 		}
 		double score = lossValue(target, damage) - retaliationLoss;
@@ -277,6 +279,60 @@ private:
 					score += static_cast<double>(target.estimateCombatValue())
 						* static_cast<double>(additional) / static_cast<double>(oldTargetHealth);
 				afterTarget->damage(additional);
+			}
+		}
+
+		// Retail HoMM3 simulateAttack is single-shot for ranged attacks.
+		// The real VCMI server fires additional ranged volleys (including
+		// HERO_GRANTS_ATTACKS) only while the attacker, target and ammunition
+		// survive. Price these ordinary host-engine shots on detached states.
+		// This extension is HoMM3-only: the TUM composed policy keeps its
+		// historical partial baseline and no retail parity is claimed.
+		if(projectNativeRangedRetaliation && shooting)
+		{
+			int totalRangedAttacks = attacker.getTotalAttacks(true);
+			if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
+				totalRangedAttacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+					BonusSubtypeID(attacker.creatureId()));
+			totalRangedAttacks = std::min(totalRangedAttacks, attacker.shots.available());
+			if(totalRangedAttacks > 1)
+			{
+				const auto expectedDamage = [](const DamageEstimation & estimate, int64_t available)
+				{
+					const int64_t middle = estimate.damage.min
+						+ (estimate.damage.max - estimate.damage.min) / 2;
+					return std::clamp<int64_t>(middle, 0, available);
+				};
+				auto remainingAttacker = attacker.acquireState();
+				auto remainingTarget = target.acquireState();
+				if(firstStrikeRangedCounter)
+				{
+					int64_t counterHit = expectedDamage(preemptiveDamage, remainingAttacker->getAvailableHealth());
+					remainingAttacker->damage(counterHit);
+				}
+				if(remainingAttacker->alive())
+				{
+					int64_t firstHit = expectedDamage(damage, remainingTarget->getAvailableHealth());
+					remainingTarget->damage(firstHit);
+				}
+				if(!firstStrikeRangedCounter && remainingTarget->alive()
+					&& nativeRangedCounter.damage.max > 0)
+				{
+					int64_t counterHit = expectedDamage(nativeRangedCounter, remainingAttacker->getAvailableHealth());
+					remainingAttacker->damage(counterHit);
+				}
+				for(int attackIndex = 1; attackIndex < totalRangedAttacks
+					&& remainingAttacker->alive() && remainingTarget->alive(); ++attackIndex)
+				{
+					BattleAttackInfo followup(remainingAttacker.get(), remainingTarget.get(), 0, true);
+					followup.attackerPos = from;
+					const auto estimate = battle.battleEstimateDamage(followup);
+					const int64_t extraHit = expectedDamage(estimate, remainingTarget->getAvailableHealth());
+					if(oldTargetHealth > 0)
+						score += static_cast<double>(target.estimateCombatValue())
+							* static_cast<double>(extraHit) / static_cast<double>(oldTargetHealth);
+					remainingTarget->damage(extraHit);
+				}
 			}
 		}
 		if(oldAttackerHealth != attacker.getAvailableHealth() || oldTargetHealth != target.getAvailableHealth()
