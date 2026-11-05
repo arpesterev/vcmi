@@ -3354,6 +3354,98 @@ TEST_F(AIIntegrationNativeBattle, homm3MarksmenExecuteTwoNativeShotsAfterIndepen
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Retail HoMM3 simulateAttack models one shot; the native VCMI server honors
+// HERO_GRANTS_ATTACKS from the commanding hero. The HoMM3-only exchange
+// projection must include that second shot without rewriting the pinned
+// source formula or inventing a model decision. Observe both actual packets.
+// This tests host-engine adaptation, NOT equivalence with retail HoMM3.
+TEST_F(AIIntegrationNativeBattle, homm3HeroGrantedRangedVolleyExecutesOnNativeServer)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 12); // Archers: naturally one shot.
+	setArmy(defenderSideHero, CreatureID(6), 40); // Swordsmen: survive both volleys.
+	ASSERT_FALSE(HasFatalFailure());
+	attackerSideHero->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::HERO_GRANTS_ATTACKS,
+		BonusSource::OTHER, 1, BonusSourceID(), BonusSubtypeID(CreatureID(2))));
+	ASSERT_EQ(attackerSideHero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+		BonusSubtypeID(CreatureID(2))), 1);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	CStack * archer = nullptr;
+	CStack * swordsmen = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(6))
+			swordsmen = unit.get();
+	}
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(swordsmen, nullptr);
+	ASSERT_EQ(archer->getTotalAttacks(true), 1);
+	ASSERT_GE(archer->shots.available(), 2);
+	battle()->activeStack = archer->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(archer, swordsmen->getPosition()));
+	BattleAttackInfo opening(archer, swordsmen, 0, true);
+	const auto forecast = view->battleEstimateDamage(opening);
+	const int64_t initialArcherHealth = archer->getAvailableHealth();
+	const int64_t initialDefenderHealth = swordsmen->getAvailableHealth();
+	ASSERT_GT(forecast.damage.min, 0);
+	ASSERT_LT(forecast.damage.max * 2, initialDefenderHealth)
+		<< "Two hero-granted shots must leave a target for the native sequence";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, archer);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::SHOOT)
+		<< "The HoMM3 partial policy must independently select a native shot";
+	ASSERT_FALSE(action.target.empty());
+	EXPECT_EQ(action.target.front().unitValue, swordsmen->unitId());
+	EXPECT_EQ(archer->getAvailableHealth(), initialArcherHealth);
+	EXPECT_EQ(swordsmen->getAvailableHealth(), initialDefenderHealth);
+
+	int attackerShots = 0;
+	const auto archerID = static_cast<ui32>(archer->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(packet.stackAttacking == archerID && packet.shot() && !packet.counter())
+			++attackerShots;
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "VCMI rejected the hero-granted HoMM3 ranged decision";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(attackerShots, 2)
+		<< "The real server must grant the second shot from the hero bonus";
+	EXPECT_LT(swordsmen->getAvailableHealth(), initialDefenderHealth);
+	EXPECT_EQ(archer->getAvailableHealth(), initialArcherHealth);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // The pinned simulateAttack subtracts casualties before retaliation,
 // even for a single-blow melee attacker. Native VCMI battleEstimateDamage
 // already provides a post-hit damage interval in that case. Confirm this
