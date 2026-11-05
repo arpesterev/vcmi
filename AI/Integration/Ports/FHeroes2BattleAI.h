@@ -317,16 +317,20 @@ private:
 		for(const auto * friendly : battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
 		{
 			input.armyStrength += strength(*friendly);
-			// fheroes2 analyzeBattleState counts ranged units even when an
-			// adjacent enemy currently blocks shooting. BattleCanShoot is a
+			// fheroes2 analyzeBattleState counts movable ranged units even
+			// when adjacent enemies block shots, but isImmovable() excludes
+			// Blind/Paralyze. Native NOT_ACTIVE projects that incapacity.
+			// BattleCanShoot is a
 			// per-turn legality check, not the source unit classification.
-			if(friendly->isShooter() && friendly->getMovementRange() > 0)
+			if(friendly->isShooter() && friendly->getMovementRange() > 0
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				input.shootersStrength += strength(*friendly);
 		}
 		for(const auto * enemy : enemies)
 		{
 			input.enemyArmyStrength += strength(*enemy);
-			if(enemy->isShooter() && enemy->getMovementRange() > 0)
+			if(enemy->isShooter() && enemy->getMovementRange() > 0
+				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
 				input.enemyShootersStrength += strength(*enemy);
 		}
 		if(input.armyStrength <= 0 || input.enemyArmyStrength <= 0)

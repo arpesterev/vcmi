@@ -55,10 +55,14 @@ class FHeroes2SpellPolicy
 				continue;
 			const double strength = static_cast<double>(unit->estimateCombatValue());
 			result.strength += strength;
-			result.weightedSpeed += strength * unit->getMovementRange();
-			// Pinned fheroes2 analyzeBattleState counts movable archers even
-			// when a temporary spell or adjacent enemy prevents this turn's shot.
-			if(unit->isShooter() && unit->getMovementRange() > 0)
+			// Source ai_battle.cpp::analyzeBattleState uses GetSpeed(false, true)
+			// for projected army speed and isImmovable() for archer strength.
+			// Blind/Paralyze stop both, although VCMI may retain raw speed;
+			// Forgetfulness and contact only suppress the current shot.
+			const int nextTurnSpeed = unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+				? 0 : static_cast<int>(unit->getMovementRange());
+			result.weightedSpeed += strength * nextTurnSpeed;
+			if(unit->isShooter() && nextTurnSpeed > 0)
 				result.shooters += strength;
 		}
 		return result;

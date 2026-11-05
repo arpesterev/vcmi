@@ -2093,6 +2093,62 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatPreservesForgottenArcherStr
 	EXPECT_GT(recorder.damage, 0);
 }
 
+
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedEnemyShooterDropsSourceRangedThreatInRealBattle)
+{
+	// Pinned ai_battle.cpp::analyzeBattleState excludes isImmovable()
+	// shooters from ranged strength; native Blind may retain raw speed.
+	// Unlike Forgetfulness, checked in the preceding regression, this
+	// unit cannot fire in its next turn or count as a moving archer.
+	prepareBattle(CreatureID(0), 60, CreatureID(2), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * enemyArcher = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			enemyArcher = unit.get();
+	ASSERT_NE(enemyArcher, nullptr);
+	ASSERT_TRUE(enemyArcher->isShooter());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_GT(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*view, player, false), 0);
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::FIRE_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, enemyArcher));
+	ASSERT_TRUE(enemyArcher->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(enemyArcher->getMovementRange(), 0)
+		<< "Fixture requires raw native movement speed under real Blind";
+	EXPECT_DOUBLE_EQ(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*view, player, false), 0);
+
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_FALSE(callback->spellAction);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Real VCMI server rejected the FHeroes2 decision after Blind";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2FarewellSpellChoosesNativeDamageAndCompletesBattle)
 {
 	// Pinned planUnitTurn::farewellSpellcast uses selectBestSpell(..., true)
