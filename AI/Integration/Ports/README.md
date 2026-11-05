@@ -400,6 +400,19 @@ distraction avoidance, full siege valuation, exact fast-stack pursuit scoring, c
 planning and the rest of the compiled ERA AI modifications. Native battle
 smoke tests do not establish those behaviors or a match win-rate improvement.
 
+### Native FIRST_STRIKE and melee collateral (verification pending)
+
+Pinned fheroes2 `optimalAttackVector` / `doubleCellAttackValue` value
+secondary targets of a melee strike. The separate VCMI `FIRST_STRIKE`
+mechanic can eliminate the entire attacker **before** its strike. This
+partial port now values native breath collateral using a detached surviving
+attacker, and credits no downstream hits when that attacker is killed.
+The targeted native regression requires an independently chosen legal
+`WALK_AND_ATTACK`, an authoritative damage preview proving the preemptive
+counter is fatal for the unsafe path, engine acceptance and a completed
+battle. This is a host-engine projection, not a Heroes II rule or a proof of
+source equivalence. Exact-head CI must pass before integration.
+
 ## Native battle regressions
 
 `AIIntegrationNativeBattle` creates actual VCMI battles, obtains the active
