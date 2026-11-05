@@ -98,6 +98,18 @@ inline auto selectLegalNNWarMachineTarget(const Targets & targets, IsLegal isLeg
 	return best;
 }
 
+// V13 reconstructs an action from a cached Battlefield observation. Its
+// active-stack wrapper must still refer to the creature delivered by the
+// current VCMI activeStack event. Otherwise a valid ONNX hex/action mask can
+// dispatch a command for a different or already destroyed actor.
+// Validate both before inference and again immediately before conversion.
+template<typename ObservedStack, typename Stack>
+inline void requireNNV13ActionActor(const ObservedStack * observed, const Stack * activeStack)
+{
+	if(!observed || !activeStack || observed->cstack != activeStack || !activeStack->alive())
+		throw std::runtime_error("MMAI V13: model action has no matching living active creature");
+}
+
 // A V15 graph action refers to a concrete creature, not only to a hex.
 // A target may disappear between the graph observation and engine dispatch;
 // checking the shooting/melee hex alone cannot establish that this specific
