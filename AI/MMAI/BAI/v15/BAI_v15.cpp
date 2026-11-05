@@ -326,9 +326,14 @@ namespace
 			case AT::DEFEND:
 				return BattleAction::makeDefend(acstack);
 			case AT::MOVE:
+			{
 				if(a->endsAt.empty() || !a->endsAt.front())
 					throw std::runtime_error("MMAI V15: model MOVE action has no destination");
-				return BattleAction::makeMove(acstack, a->endsAt.front()->bhex);
+				const auto & destination = a->endsAt.front()->bhex;
+				const auto reachability = battle.getReachability(acstack);
+				requireNNV15LegalMove(destination, reachability, acstack->getMovementRange());
+				return BattleAction::makeMove(acstack, destination);
+			}
 			case AT::AMOVE:
 				if(a->endsAt.empty() || !a->endsAt.front() || !a->target ||
 				   !battle.isMeleeAttackPossible(acstack, &a->target->cstack, a->endsAt.front()->bhex))
