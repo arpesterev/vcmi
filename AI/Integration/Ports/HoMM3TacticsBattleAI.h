@@ -12,6 +12,7 @@
 
 #include "SourceTactics.h"
 #include "../../../lib/CStack.h"
+#include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/battle/BattleAction.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
 #include "../../../lib/callback/CBattleCallback.h"
@@ -94,6 +95,18 @@ private:
 		}
 		DamageEstimation retaliation;
 		auto damage = battle.battleEstimateDamage(info, &retaliation);
+		// VCMI performs every native melee strike, including attacks granted by
+		// the hero. Pinned HoMM3 simulateAttack models at most the creature's
+		// original second strike; later hits are an explicit VCMI extension.
+		// Keep this calculation inside the HoMM3-only projection: the TUM
+		// composed policy deliberately retains its original partial baseline.
+		int totalMeleeAttacks = attacker.getTotalAttacks(false);
+		if(projectSecondMeleeStrike && !shooting)
+		{
+			if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
+				totalMeleeAttacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+					BonusSubtypeID(attacker.creatureId()));
+		}
 		// Retail HoMM3 simulateAttack does not model FIRST_STRIKE. VCMI
 		// resolves a preemptive melee retaliation before the first hit, and
 		// supports preemptive ranged retaliation with a separate subtype.
@@ -165,7 +178,7 @@ private:
 		// This is approximate VCMI damage, not retail HoMM3 parity.
 		// Leave TUM's explicitly separate baseline untouched.
 		if(projectSecondMeleeStrike && !shooting && !firstStrikeMeleeCounter
-			&& attacker.getTotalAttacks(false) > 1 && !certainFirstHitKill
+			&& totalMeleeAttacks > 1 && !certainFirstHitKill
 			&& retaliation.damage.max > 0)
 		{
 			auto afterFirst = target.acquireState();
@@ -217,15 +230,14 @@ private:
 		}
 		double score = lossValue(target, damage) - retaliationLoss;
 
-		// Pinned type_AI_combat_parameters::simulateAttack performs a second
-		// creatureTwoAttacks melee strike AFTER the defender's first retaliation,
-		// provided both stacks survive. Native battleEstimateDamage estimates
-		// only one strike. Replay its representative first-hit/retaliation
-		// losses on detached unit states before pricing the second VCMI hit.
-		// The preview is approximate: random rolls, on-hit effects, first
-		// strike and any further modded attacks are not reconstructed here.
-		// TUM's explicitly composed partial HoMM3 baseline is unchanged.
-		if(projectSecondMeleeStrike && !shooting && attacker.getTotalAttacks(false) > 1)
+		// Pinned simulateAttack performs first hit, retaliation, then a second
+		// hit if both survive. The host also supports extra creature/hero melee
+		// attacks. Replay surviving stacks and price every ordinary follow-up
+		// strike, with at most ONE retaliation, matching performAttackSequence.
+		// Damage remains a representative native estimate: random rolls,
+		// FEROCITY-triggered extra attacks and on-hit effects are not simulated.
+		// Do not alter TUM's separate composed HoMM3 baseline.
+		if(projectSecondMeleeStrike && !shooting && totalMeleeAttacks > 1)
 		{
 			const auto expectedDamage = [](const DamageEstimation & estimate, int64_t available)
 			{
@@ -251,18 +263,20 @@ private:
 					: expectedDamage(retaliation, afterAttacker->getAvailableHealth());
 				afterAttacker->damage(counterLoss);
 			}
-			if(afterAttacker->alive() && afterTarget->alive())
+			for(int attackIndex = 1; attackIndex < totalMeleeAttacks
+				&& afterAttacker->alive() && afterTarget->alive(); ++attackIndex)
 			{
-				BattleAttackInfo second(afterAttacker.get(), afterTarget.get(), 0, false);
-				second.attackerPos = from;
-				second.defenderPos = aimedHex;
-				const auto estimate = battle.battleEstimateDamage(second);
-				const auto additional = expectedDamage(estimate, afterTarget->getAvailableHealth());
-				// Price incremental casualties against the ORIGINAL combat value
-				// and HP. Do not count the first-hit losses a second time.
+				BattleAttackInfo followup(afterAttacker.get(), afterTarget.get(), 0, false);
+				followup.attackerPos = from;
+				followup.defenderPos = aimedHex;
+				const auto estimate = battle.battleEstimateDamage(followup);
+				int64_t additional = expectedDamage(estimate, afterTarget->getAvailableHealth());
+				// All losses are priced against ORIGINAL combat value and health;
+				// never recount the first strike or repeat the retaliation.
 				if(oldTargetHealth > 0)
 					score += static_cast<double>(target.estimateCombatValue())
 						* static_cast<double>(additional) / static_cast<double>(oldTargetHealth);
+				afterTarget->damage(additional);
 			}
 		}
 		if(oldAttackerHealth != attacker.getAvailableHealth() || oldTargetHealth != target.getAvailableHealth()
