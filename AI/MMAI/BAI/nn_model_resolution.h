@@ -54,6 +54,17 @@ inline void requireNNV15ActiveAction(const ActionPtr & action)
 		throw std::runtime_error("MMAI V15: model selected an inactive graph action");
 }
 
+// V13's battle action masks are derived from a preceding observation.
+// They cannot guarantee that a target is still present and legal at dispatch.
+// Check the live VCMI callback before forming a server action, including in
+// release builds where the original ASSERT checks are compiled out.
+template<typename Target, typename LegalCheck>
+inline void requireNNV13LegalTarget(const Target * target, LegalCheck legalCheck, const char * action)
+{
+	if(!target || !legalCheck(target))
+		throw std::runtime_error(std::string("MMAI V13: model ") + action + " has no legal live target");
+}
+
 // ACTION_RESET is a gym episode command, not a legal live battle move.
 // The original adapter turns it into a hero retreat to reset training.
 // V15 may legitimately select graph action ID 0, which numerically equals
