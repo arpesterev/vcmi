@@ -65,6 +65,18 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		// Upstream BattlePlanner::planUnitTurn handles Berserk before army
+		// assessment, retreat and hero spell selection. Do not cast a
+		// controllable hero spell while the active stack is compelled to
+		// act under the native VCMI Berserk effect.
+		if(stack->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+		{
+			const auto action = chooseBerserkAction(*battle, *stack);
+			logAi->debug("AI_PORT_BERSERK backend=FHeroes2Tactics battle=%d unit=%d action=%s",
+				battleID.getNum(), stack->unitId(), action.toString());
+			cb->battleMakeUnitAction(battleID, action);
+			return;
+		}
 		// fheroes2 exits an AI attacker's battle after 50 consecutive
 		// rounds with no deaths. VCMI must authorize retreat, and a
 		// human-controlled autobattle must never lose its hero this way.
