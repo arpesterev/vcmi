@@ -4098,7 +4098,18 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathScoresAndHitsNativeSecondar
 	const auto extra = view->getAttackedBattleUnits(
 		guard, primary, aimed, false, attackFrom);
 	ASSERT_FALSE(extra.empty())
-		<< "Hypnotized TUM must prefer an actual two-victim breath strike";
+		<< "Hypnotized TUM must prefer an actual two-victim breath strike"
+		<< " proposed=" << callback->action->toString()
+		<< " baseline=" << baseline.toString()
+		<< " origin=" << origin.toInt()
+		<< " front=" << frontHex.toInt()
+		<< " rear=" << rearHex.toInt()
+		<< " attack_from=" << attackFrom.toInt()
+		<< " aimed=" << aimed.toInt()
+		<< " primary_id=" << primary->unitId()
+		<< " reachable_origin=" << view->getReachability(guard).isReachable(origin)
+		<< " legal_origin_front="
+		<< view->meleeAttackHexes(guard, front, origin).contains(frontHex);
 	std::cout << "AI_TUM_HYPNOTIZE_MELEE_SPLASH homm3=" << baseline.toString()
 		<< " tum=" << callback->action->toString() << '\n';
 	// Observe the actual BattleAttack packet before its damage applies.
