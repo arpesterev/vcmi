@@ -873,9 +873,33 @@ private:
 		double friendlyDamage = 0;
 		double enemyDamage = 0;
 		double priority = 0;
+		// Heroes II's archerDecision has no ranged FIRST_STRIKE. In VCMI,
+		// FIRST_STRIKE combined with RANGED_RETALIATION fires BEFORE our
+		// opening shot. Forecast the surviving shooter on a detached state
+		// before valuing every affected victim, including area-shot victims.
+		// Never turn an engine-only ability into an invented Heroes II rule.
+		const bool firstStrikeCounter = target.hasBonusOfType(BonusType::FIRST_STRIKE)
+			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
+			&& !shooter.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+			&& target.ableToRetaliate()
+			&& battle.battleCanShoot(&target, shooter.getPosition());
+		auto survivingShooter = shooter.acquireState();
+		if(firstStrikeCounter)
+		{
+			BattleAttackInfo counter(&target, &shooter, 0, true);
+			counter.attackerPos = target.getPosition();
+			counter.defenderPos = shooter.getPosition();
+			const auto preemptive = battle.battleEstimateDamage(counter);
+			priority -= lossValue(shooter, preemptive);
+			int64_t hit = preemptive.damage.min
+				+ (preemptive.damage.max - preemptive.damage.min) / 2;
+			hit = std::clamp<int64_t>(hit, 0, survivingShooter->getAvailableHealth());
+			survivingShooter->damage(hit);
+		}
+		const battle::Unit * outgoingShooter = firstStrikeCounter ? survivingShooter.get() : &shooter;
 		const auto evaluate = [&](const battle::Unit & victim)
 		{
-			BattleAttackInfo info(&shooter, &victim, 0, true);
+			BattleAttackInfo info(outgoingShooter, &victim, 0, true);
 			info.attackerPos = shooter.getPosition();
 			const auto estimate = battle.battleEstimateDamage(info);
 			const double health = std::max(0.0, static_cast<double>(victim.getAvailableHealth()));
@@ -893,10 +917,13 @@ private:
 				priority += value;
 			}
 		};
-		evaluate(target);
-		for(const auto * victim : additionalVictims)
-			if(victim != &target)
-				evaluate(*victim);
+		if(outgoingShooter->alive())
+		{
+			evaluate(target);
+			for(const auto * victim : additionalVictims)
+				if(victim != &target)
+					evaluate(*victim);
+		}
 		// The pinned fheroes2 archerDecision values outgoing ranged damage,
 		// but Heroes II has no equivalent to VCMI's RANGED_RETALIATION.
 		// A legal native countershot must be included in the net exchange.
@@ -908,7 +935,7 @@ private:
 		const auto opening = battle.battleEstimateDamage(first);
 		const bool certainKill = target.getAvailableHealth() > 0
 			&& opening.damage.min >= target.getAvailableHealth();
-		if(!certainKill && target.hasBonusOfType(BonusType::RANGED_RETALIATION)
+		if(!firstStrikeCounter && !certainKill && target.hasBonusOfType(BonusType::RANGED_RETALIATION)
 			&& !shooter.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 			&& target.ableToRetaliate()
 			&& battle.battleCanShoot(&target, shooter.getPosition()))
