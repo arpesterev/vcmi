@@ -188,14 +188,16 @@ private:
 			static const auto meleeFirstStrike = Selector::typeSubtype(
 				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
 				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee));
-			// VCMI's melee FIRST_STRIKE retaliates before our first hit. Exclude
-			// inactive defenders, blocked retaliation, invincible attackers and
-			// nonadjacent long-weapon attacks from this native projection.
+			// VCMI's melee FIRST_STRIKE retaliates before any ordinary
+			// melee attack from a legal native attack hex. meleeAttackHexes()
+			// already excludes nonadjacent and long-weapon-only attacks. A
+			// double-wide attacker may strike from its tail while the head is
+			// more than one hex away, so head-to-aim distance is not a valid
+			// retaliation gate (BattleActionProcessor::performAttackSequence).
 			const bool meleeCounterFirst = !shooting && victim.hasBonus(meleeFirstStrike)
 				&& !victim.hasBonusOfType(BonusType::NOT_ACTIVE)
 				&& !stack.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
-				&& !stack.isInvincible()
-				&& BattleHex::getDistance(origin, aimedHex) == 1;
+				&& !stack.isInvincible();
 			// A stack that exhausted its counterattacks cannot retaliate, even
 			// if a damage preview reports the hypothetical exchange. Retain
 			// native VCMI's authoritative retaliation eligibility.
