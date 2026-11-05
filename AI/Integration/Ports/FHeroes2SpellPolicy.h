@@ -467,11 +467,15 @@ public:
 						if(friendly)
 						{
 							if(old.unit->hasBonus(effect(SpellID(SpellID::HASTE)))
-								&& !after->hasBonus(effect(SpellID(SpellID::HASTE))))
+								&& !after->hasBonus(effect(SpellID(SpellID::HASTE)))
+								// Source GetSpeed(false,true) is STANDING while Blind/Paralyze.
+								// If a broad Dispel also lifts the disable, the restored
+								// movement is NOT a benefit of removing friendly Haste.
+								&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
 							{
 								const double haste = Ports::FHeroes2::hasteSpeedRatio(
-									static_cast<int>(after->getMovementRange()),
-									static_cast<int>(old.unit->getMovementRange()),
+									actingSpeed(*after), actingSpeed(*old.unit),
 									theirs.averageSpeed(), false, old.unit->isShooter(), false);
 								value -= strength * haste;
 							}
@@ -511,14 +515,17 @@ public:
 							}
 							if(old.unit->hasBonus(effect(SpellID(SpellID::SLOW)))
 								&& !after->hasBonus(effect(SpellID(SpellID::SLOW)))
-								&& old.position.isValid())
+								&& old.position.isValid()
+								// Do not mistake a simultaneous release from Blind
+								// for the tactical cost of removing hostile Slow.
+								&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
 							{
 								const int distance = old.unit->unitSide() == BattleSide::DEFENDER
 									? old.position.getX()
 									: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
 								value -= strength * Ports::FHeroes2::slowSpeedRatio(
-									static_cast<int>(after->getMovementRange()),
-									static_cast<int>(old.unit->getMovementRange()),
+									actingSpeed(*after), actingSpeed(*old.unit),
 									ours.averageSpeed(), old.unit->isShooter(), false, false,
 									old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
 							}
