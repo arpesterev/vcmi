@@ -30,6 +30,33 @@ TEST(MMAINNOutputValidation, RejectsInvalidOnnxOutputBeforeGreedyOrSampling)
 	EXPECT_THROW(validateNNActionDistribution({0.3f, 0.7f}, -1.0f), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13V15RejectNonFiniteObservationBeforeInference)
+{
+	using MMAI::BAI::validateNNObservationValues;
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float inf = std::numeric_limits<float>::infinity();
+
+	// Sparse graphs legitimately contain no edges; finite model inputs
+	// must pass through unchanged without normalizing or clipping.
+	EXPECT_NO_THROW(validateNNObservationValues({}, "edge_attr_flat"));
+	EXPECT_NO_THROW(validateNNObservationValues({-1.0f, 0.0f, 1.0f}, "obs"));
+	EXPECT_THROW(validateNNObservationValues({nan}, "obs"), std::runtime_error);
+	EXPECT_THROW(validateNNObservationValues({0.0f, inf}, "x_Unit"), std::runtime_error);
+	EXPECT_THROW(validateNNObservationValues({-inf, 0.0f}, "edge_attr_flat"), std::runtime_error);
+
+	try
+	{
+		validateNNObservationValues({0.0f, 1.0f, nan}, "x_Action");
+		FAIL() << "Non-finite ONNX observation was accepted";
+	}
+	catch(const std::runtime_error & e)
+	{
+		const std::string diagnostic = e.what();
+		EXPECT_NE(diagnostic.find("x_Action"), std::string::npos);
+		EXPECT_NE(diagnostic.find("index 2"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsInvalidValueHead)
 {
 	using MMAI::BAI::validateNNValueEstimate;
