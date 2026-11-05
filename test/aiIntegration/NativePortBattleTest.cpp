@@ -4920,7 +4920,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(0), 300);
 	ASSERT_TRUE(gameHandler->insertNewStack(
-		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 8));
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 3));
 	const auto * town = findFirst<CGTownInstance>();
 	ASSERT_NE(town, nullptr);
 	if(town->fortificationsLevel().wallsHealth <= 0)
