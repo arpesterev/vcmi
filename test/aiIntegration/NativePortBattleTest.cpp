@@ -4288,6 +4288,96 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SlowArcherDoesNotAttemptUnwinnableEsca
 	runToCompletion(std::nullopt, false);
 }
 
+// Pinned fheroes2 ai_battle.cpp::optimalAttackValue and optimalAttackVector
+// consider the extra unit behind a double-cell melee attack. Native VCMI
+// breath is authoritative: it may include friendly fire and has different
+// direction/geometry from Heroes II. Verify the chosen *real* multi-target
+// vector and the server's injury packets, not a synthetic attack value.
+TEST_F(AIIntegrationNativeBattle, fheroes2DragonBreathValuesNativeSecondaryVictimAndCompletesBattle)
+{
+	prepareBattle(CreatureID(26), 20, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * dragon = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(26))
+			dragon = unit.get();
+	ASSERT_NE(dragon, nullptr);
+	ASSERT_TRUE(dragon->doubleWide());
+	// Some stripped test-data variants omit the creature's innate breath.
+	// The fixture-only bonus invokes the real engine's multi-hex attack rules.
+	if(!dragon->hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH))
+		dragon->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+			BonusType::TWO_HEX_ATTACK_BREATH, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(dragon->hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH));
+
+	const BattleHex frontHex = dragon->getPosition().copyToEast();
+	const BattleHex rearHex = frontHex.copyToEast();
+	for(const auto hex : {frontHex, rearHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	const CStack * front = addStack(BattleSide::DEFENDER, CreatureID(0), frontHex, 35);
+	const CStack * rear = addStack(BattleSide::DEFENDER, CreatureID(0), rearHex, 35);
+	ASSERT_NE(front, nullptr);
+	ASSERT_NE(rear, nullptr);
+	const auto nativeVictims = battle()->getAttackedBattleUnits(dragon, front, frontHex,
+		false, dragon->getPosition());
+	ASSERT_TRUE(std::any_of(nativeVictims.begin(), nativeVictims.end(), [&](const battle::Unit * unit)
+	{
+		return unit->unitId() == rear->unitId();
+	})) << "Real VCMI breath must hit the rear stack from the starting vector";
+	ASSERT_EQ(battle()->battleActiveUnit(), dragon);
+
+	const BattleID battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, dragon);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Native breath bonus must be evaluated for a legal melee attack";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const BattleHex from = callback->action->target[0].hexValue;
+	const BattleHex aimed = callback->action->target[1].hexValue;
+	const auto * primary = battle()->battleGetUnitByPos(aimed);
+	ASSERT_NE(primary, nullptr);
+	const auto victims = battle()->getAttackedBattleUnits(dragon, primary, aimed, false, from);
+	EXPECT_TRUE(std::any_of(victims.begin(), victims.end(), [&](const battle::Unit * unit)
+	{
+		return unit->unitId() == (primary == front ? rear->unitId() : front->unitId());
+	})) << "FHeroes2 must select a legal breath vector affecting both real enemies";
+
+	std::set<int> injured;
+	recorder.onInjuriesBeforeApply = [&](const StacksInjured & pack)
+	{
+		for(const auto & injury : pack.stacks)
+			if(injury.damageAmount > 0)
+				injured.insert(injury.stackAttacked);
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Engine rejected FHeroes2's selected multi-hex attack";
+	EXPECT_TRUE(injured.count(front->unitId())) << "Native server did not damage the first breath target";
+	EXPECT_TRUE(injured.count(rear->unitId())) << "Native server did not damage the rear breath target";
+	recorder.onInjuriesBeforeApply = {};
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
