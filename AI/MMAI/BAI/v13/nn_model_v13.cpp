@@ -17,6 +17,7 @@
 #include "BAI/nn_output_validation.h"
 #include "BAI/nn_v13_action_routing.h"
 #include "schema/base.h"
+#include "schema/v13/constants.h"
 #include "vstd/CLoggerBase.h"
 #include "json/JsonNode.h"
 
