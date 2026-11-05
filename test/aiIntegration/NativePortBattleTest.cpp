@@ -2136,6 +2136,86 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveSt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 BattlePlanner::analyzeBattleState counts a blocked or
+// Forgotten archer as ranged strength but omits Blind/Paralyze via
+// Unit::isImmovable(). VCMI keeps the creature's raw movement range after
+// Blind: its actual NOT_ACTIVE status must be checked instead. The action
+// difference below comes from independent FHeroes2 decisions, not fixtures.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedShooterStopsAnchoringDefensiveStance)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	}
+	ASSERT_NE(guard, nullptr);
+	ASSERT_NE(enemy, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex shooterHex(guard->getPosition().toInt() + GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	const CStack * shooter = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 20);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_GT(shooter->getMovementRange(), 0u);
+	ASSERT_GT(BattleHex::getDistance(guard->getPosition(), enemy->getPosition()),
+		guard->getMovementRange() + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto choose = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		EXPECT_NE(policy, nullptr);
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, guard);
+		return callback->action;
+	};
+
+	const auto before = choose();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::DEFEND)
+		<< "A live archer should anchor a defensive melee guard: " << before->toString();
+
+	teachBattleSpell(defenderSideHero, SpellID::BLIND);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, shooter));
+	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_GT(shooter->getMovementRange(), 0u)
+		<< "Fixture must reproduce nonzero VCMI raw speed while blinded";
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto after = choose();
+	ASSERT_TRUE(after.has_value());
+	ASSERT_EQ(after->actionType, EActionType::WALK)
+		<< "Blind archer should lose defensive ranged value: " << after->toString();
+	ASSERT_FALSE(after->target.empty());
+	EXPECT_LT(BattleHex::getDistance(after->target.front().hexValue, enemy->getPosition()),
+		BattleHex::getDistance(guard->getPosition(), enemy->getPosition()));
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "VCMI rejected the independent FHeroes2 WALK";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendlyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
