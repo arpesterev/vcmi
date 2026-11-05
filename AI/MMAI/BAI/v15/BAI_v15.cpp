@@ -333,6 +333,8 @@ namespace
 				if(a->endsAt.empty() || !a->endsAt.front())
 					throw std::runtime_error("MMAI V15: model AMOVE action has no destination");
 				const auto * target = a->target ? &a->target->cstack : nullptr;
+				requireNNV15ObservedTargetAtHex(target, a->targetPositionAtObservation,
+					[&battle](const BattleHex & hex) { return battle.battleGetStackByPos(hex); }, "AMOVE");
 				requireNNV15LegalTarget(target, [&](const CStack * candidate)
 				{
 					return battle.isMeleeAttackPossible(acstack, candidate, a->endsAt.front()->bhex);
@@ -342,6 +344,8 @@ namespace
 			case AT::SHOOT:
 			{
 				const auto * target = a->target ? &a->target->cstack : nullptr;
+				requireNNV15ObservedTargetAtHex(target, a->targetPositionAtObservation,
+					[&battle](const BattleHex & hex) { return battle.battleGetStackByPos(hex); }, "SHOOT");
 				requireNNV15LegalTarget(target, [&](const CStack * candidate)
 				{
 					return battle.battleCanShoot(acstack, candidate->getPosition());

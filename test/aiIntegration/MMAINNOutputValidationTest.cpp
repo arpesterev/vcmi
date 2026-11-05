@@ -697,6 +697,45 @@ TEST(MMAINNOutputValidation, RejectsUnexpectedTerminalOnnxAction)
 	EXPECT_THROW(requireNNModelTerminalReset(42), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V15RejectsMovedOrReplacedObservedTargetBeforeDispatch)
+{
+	using MMAI::BAI::requireNNV15ObservedTargetAtHex;
+	struct Stack
+	{
+		int hex;
+		bool living = true;
+		bool alive() const { return living; }
+		int getPosition() const { return hex; }
+	};
+	Stack selected{12};
+	Stack replacement{12};
+	const Stack * occupant = &selected;
+	const auto lookup = [&occupant](int hex) -> const Stack *
+	{
+		return hex == 12 ? occupant : nullptr;
+	};
+
+	EXPECT_NO_THROW(requireNNV15ObservedTargetAtHex(&selected, 12, lookup, "SHOOT"));
+	EXPECT_NO_THROW(requireNNV15ObservedTargetAtHex(&selected, 12, lookup, "AMOVE"));
+
+	// The target moved. The same still-living stack is not at the observed hex.
+	selected.hex = 13;
+	EXPECT_THROW(requireNNV15ObservedTargetAtHex(&selected, 12, lookup, "SHOOT"), std::runtime_error);
+	EXPECT_THROW(requireNNV15ObservedTargetAtHex(&selected, 12, lookup, "AMOVE"), std::runtime_error);
+
+	// Replacing the target with another live unit is not the ONNX decision.
+	selected.hex = 12;
+	occupant = &replacement;
+	EXPECT_THROW(requireNNV15ObservedTargetAtHex(&selected, 12, lookup, "SHOOT"), std::runtime_error);
+	occupant = nullptr;
+	EXPECT_THROW(requireNNV15ObservedTargetAtHex(&selected, 12, lookup, "AMOVE"), std::runtime_error);
+
+	occupant = &selected;
+	selected.living = false;
+	EXPECT_THROW(requireNNV15ObservedTargetAtHex(&selected, 12, lookup, "SHOOT"), std::runtime_error);
+	EXPECT_THROW(requireNNV15ObservedTargetAtHex(static_cast<const Stack *>(nullptr), 12, lookup, "AMOVE"), std::runtime_error);
+}
+
 TEST(MMAINNOutputValidation, V15RejectsDeadOrMissingModelAttackTarget)
 {
 	using MMAI::BAI::requireNNV15LegalTarget;

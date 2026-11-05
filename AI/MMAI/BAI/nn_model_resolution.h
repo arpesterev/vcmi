@@ -154,6 +154,18 @@ inline void requireNNV15LegalTarget(const Stack * target, LegalCheck legalCheck,
 		throw std::runtime_error(std::string("MMAI V15: model ") + action + " has no legal live target");
 }
 
+// V15 remembers the model-selected target's head hex, not its later mutable
+// CStack position. Reject moved/replaced targets instead of redirecting the
+// neural SHOOT/AMOVE to a different unit or location.
+template<typename Stack, typename Hex, typename LiveLookup>
+inline void requireNNV15ObservedTargetAtHex(const Stack * target, const Hex & observedHex,
+                                           LiveLookup liveAtHex, const char * action)
+{
+	if(!target || !target->alive() || !(target->getPosition() == observedHex) || liveAtHex(observedHex) != target)
+		throw std::runtime_error(std::string("MMAI V15: model ") + action
+			+ " target no longer occupies its observed hex");
+}
+
 // V13 SHOOT encodes the selected target through an observation hex.
 // Re-check that exact hex at dispatch: a still-living observed stack might
 // have moved elsewhere, and reconstructing a shot using its *new* position
