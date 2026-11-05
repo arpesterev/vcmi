@@ -3184,10 +3184,11 @@ TEST_F(AIIntegrationNativeBattle, homm3CrusaderSecondStrikeSurvivesRetaliationAn
 	EXPECT_GT(recorder.damage, 0);
 }
 
-// The pinned simulateAttack subtracts losses from the FIRST hit before
-// the defender retaliates, even if the attacker has only ONE melee blow.
-// This is a VCMI damage preview for a source-ordered exchange, not proof
-// of numeric parity with the retail HoMM3 engine.
+// The pinned simulateAttack subtracts casualties before retaliation,
+// even for a single-blow melee attacker. Native VCMI battleEstimateDamage
+// already provides a post-hit damage interval in that case. Confirm this
+// contract and an actual legal engine exchange without replacing the
+// interval by a biased midpoint or claiming retail HoMM3 numeric parity.
 TEST_F(AIIntegrationNativeBattle, homm3SingleStrikeUsesSurvivingDefenderRetaliationAndExecutes)
 {
 	prepareBattle(CreatureID(6), 8, CreatureID(6), 8); // Swordsmen vs Swordsmen
@@ -3237,8 +3238,19 @@ TEST_F(AIIntegrationNativeBattle, homm3SingleStrikeUsesSurvivingDefenderRetaliat
 	reducedCounter.attackerPos = defender->getPosition();
 	reducedCounter.defenderPos = attacker->getPosition();
 	const auto reducedEstimate = view->battleEstimateDamage(reducedCounter);
-	EXPECT_LT(reducedEstimate.damage.max, originalRetaliation.damage.max)
-		<< "Source-ordered retaliation must use surviving Swordsmen, even after one blow";
+	// CBattleInfoCallback::battleEstimateDamage already simulates the
+	// defender AFTER the hit at both damage-range endpoints. Its envelope
+	// should contain the representative midpoint; it is not the naive
+	// full-strength counter. A dedicated call with an untouched defender
+	// is the correct baseline for testing the actual loss of retaliators.
+	EXPECT_LE(originalRetaliation.damage.min, reducedEstimate.damage.min);
+	EXPECT_GE(originalRetaliation.damage.max, reducedEstimate.damage.max);
+	BattleAttackInfo untouchedCounter(defender, attacker, 0, false);
+	untouchedCounter.attackerPos = defender->getPosition();
+	untouchedCounter.defenderPos = attacker->getPosition();
+	const auto fullCounter = view->battleEstimateDamage(untouchedCounter);
+	EXPECT_LT(reducedEstimate.damage.max, fullCounter.damage.max)
+		<< "The first blow must leave fewer Swordsmen to retaliate";
 	EXPECT_EQ(defender->getAvailableHealth(), fullHealth);
 
 	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");

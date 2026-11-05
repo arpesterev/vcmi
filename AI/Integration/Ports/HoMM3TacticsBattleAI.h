@@ -156,20 +156,17 @@ private:
 			&& oldTargetHealth > 0 && damage.damage.min >= oldTargetHealth;
 		double retaliationLoss = preemptiveCounter ? lossValue(attacker, preemptiveDamage)
 			: (shooting || certainFirstHitKill ? 0.0 : lossValue(attacker, retaliation));
-		// Pinned simulateAttack applies the first blow BEFORE the defender
-		// retaliates, and only then tries creatureTwoAttacks' second blow.
-		// The native initial retaliation estimate uses the original defender
-		// count. Re-price the response from a detached post-hit stack so that
-		// lost defenders cannot inflict an imaginary full-strength counterblow.
-		// This is an expected-damage VCMI projection, not exact retail rolls.
+		// Pinned simulateAttack resolves first strike -> retaliation ->
+		// optional second strike. Native battleEstimateDamage(..., &retaliation)
+		// ALREADY previews post-hit casualties over both damage endpoints
+		// for ordinary single-strike melee. Do not replace its native
+		// interval by a less reliable representative midpoint. Re-price only
+		// when projecting a SECOND attack from detached intermediate states.
+		// This is approximate VCMI damage, not retail HoMM3 parity.
 		// Leave TUM's explicitly separate baseline untouched.
-		// Retail simulateAttack also subtracts a post-hit defender's
-		// response for SINGLE-strike creatures. The previous guard on
-		// getTotalAttacks(false) wrongly left ordinary melee attackers
-		// paying the untouched defender's full-strength retaliation.
-		// Two-strike creatures still replay their second blow below.
 		if(projectSecondMeleeStrike && !shooting && !firstStrikeMeleeCounter
-			&& !certainFirstHitKill && retaliation.damage.max > 0)
+			&& attacker.getTotalAttacks(false) > 1 && !certainFirstHitKill
+			&& retaliation.damage.max > 0)
 		{
 			auto afterFirst = target.acquireState();
 			int64_t firstHit = damage.damage.min
