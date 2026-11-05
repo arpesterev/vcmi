@@ -155,6 +155,7 @@ private:
 				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
 				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
 			if(enemy->hasBonus(rangedFirstStrike)
+				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
 				&& enemy->hasBonusOfType(BonusType::RANGED_RETALIATION)
 				&& enemy->ableToRetaliate()
 				&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
