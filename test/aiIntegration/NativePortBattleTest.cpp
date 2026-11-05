@@ -4860,7 +4860,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeMeleeFirstStrikePrecedesOwnHit)
 	ASSERT_NE(attacker, nullptr);
 	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
 	BattleHex adjacent;
-	for(const auto & hex : attacker->getPosition().getNeighbouringTiles())
+	const BattleHex attackerHex = attacker->getPosition();
+	for(const auto & hex : attackerHex.getNeighbouringTiles())
 		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex))
 		{
 			adjacent = hex;
