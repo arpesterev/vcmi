@@ -2081,6 +2081,43 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatPreservesForgottenArcherStr
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2FarewellSpellChoosesNativeDamageAndCompletesBattle)
+{
+	// Pinned planUnitTurn::farewellSpellcast uses selectBestSpell(..., true)
+	// before queued RETREAT/SURRENDER. Check the damage-only mode against
+	// native VCMI spell legality and complete the resulting real battle.
+	// This case verifies the spell component, not the separate strategic
+	// retreat decision or the entire two-event withdrawal sequence.
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 40);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 6);
+	teachSpell(attackerSideHero, SpellID::HASTE);
+	const auto * active = battle()->battleActiveUnit();
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto * hero = battle()->battleGetMyHero();
+	ASSERT_NE(hero, nullptr);
+	const auto initialMana = hero->mana;
+	const auto selected = AIIntegration::FHeroes2SpellPolicy::choose(
+		callback->getBattle(battleID), environment.get(), active, true);
+	ASSERT_TRUE(selected.has_value()) << "Legal damage spell is required for the farewell fixture";
+	ASSERT_EQ(selected->actionType, EActionType::HERO_SPELL);
+	const auto * spell = LIBRARY->spellh->getById(selected->spell);
+	ASSERT_NE(spell, nullptr);
+	EXPECT_TRUE(spell->isDamage()) << "Farewell must not choose a legal non-damaging buff";
+	EXPECT_EQ(hero->mana, initialMana) << "Native spell preview must not consume live mana";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *selected))
+		<< "Authoritative server rejected the independently selected farewell damage spell";
+	EXPECT_GT(recorder.spellPackets, 0);
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveStance)
 {
 	// Pinned fheroes2 analyzeBattleState counts an archer as ranged strength
