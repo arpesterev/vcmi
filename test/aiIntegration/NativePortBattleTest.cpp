@@ -3868,6 +3868,106 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage
 // but an already exhausted stack cannot deliver it. Compare the native
 // HoMM3 net-exchange baseline with the TUM positive-exchange policy, execute
 // TUM's independent choice through the real battle server, and finish combat.
+
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedWideTargetUsesNativeAim)
+{
+	// TUM's public Hypnotize rule values damage dealt + damage received.
+	// Compare both cells of a wide former ally with native VCMI previews,
+	// then verify the independent attack and actual server resolution.
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex near(guard->getPosition().toInt() + 3);
+	ASSERT_TRUE(near.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(near), nullptr);
+	const CStack * wideAlly = addStack(BattleSide::ATTACKER, CreatureID(4), near, 50);
+	ASSERT_NE(wideAlly, nullptr);
+	ASSERT_TRUE(wideAlly->doubleWide());
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, guard));
+	ASSERT_TRUE(guard->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(guard), player);
+	battle()->activeStack = guard->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reach = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(reach, guard, false);
+	const int64_t health = wideAlly->getAvailableHealth();
+	const auto preview = [&](BattleHex from, BattleHex aimed, int distance)
+	{
+		BattleAttackInfo attack(guard, wideAlly, distance, false);
+		attack.attackerPos = from;
+		attack.defenderPos = aimed;
+		DamageEstimation retaliation;
+		const auto estimate = view->battleEstimateDamage(attack, &retaliation);
+		const double dealt = std::min(static_cast<double>(health),
+			(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0);
+		const double received = !wideAlly->ableToRetaliate()
+			|| estimate.damage.min >= health ? 0.0
+			: std::min(static_cast<double>(guard->getAvailableHealth()),
+				(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+		return AIIntegration::Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
+	};
+	bool sawHead = false;
+	bool sawTail = false;
+	double best = -1.0;
+	for(const auto & from : available)
+	{
+		if(!from.isAvailable() || reach.distances[from.toInt()] < 0)
+			continue;
+		for(const auto & aimed : view->meleeAttackHexes(guard, wideAlly, from))
+		{
+			sawHead |= aimed == wideAlly->getPosition();
+			sawTail |= aimed != wideAlly->getPosition();
+			best = std::max(best, preview(from, aimed, reach.distances[from.toInt()]));
+			EXPECT_EQ(wideAlly->getAvailableHealth(), health);
+		}
+	}
+	ASSERT_TRUE(sawHead && sawTail) << "Both wide-target cells must be reachable";
+
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *guard);
+	ASSERT_EQ(baseline.actionType, EActionType::WALK_AND_ATTACK);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const auto from = callback->action->target[0].hexValue;
+	const auto aimed = callback->action->target[1].hexValue;
+	const auto legal = view->meleeAttackHexes(guard, wideAlly, from);
+	EXPECT_NE(std::find(legal.begin(), legal.end(), aimed), legal.end());
+	EXPECT_EQ(view->battleGetUnitByPos(aimed), wideAlly);
+	ASSERT_GE(reach.distances[from.toInt()], 0);
+	EXPECT_GE(preview(from, aimed, reach.distances[from.toInt()]) + 0.0001, best);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Server rejected TUM's Hypnotize wide-target melee action";
+	EXPECT_LT(wideAlly->getAvailableHealth(), health);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumHypnotizedAttackDoesNotRewardExhaustedRetaliation)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
