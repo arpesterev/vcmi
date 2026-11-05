@@ -4843,6 +4843,91 @@ TEST_F(AIIntegrationNativeBattle, fheroes2RangedRetaliationExecutesOnNativeServe
 
 
 
+// Pinned fheroes2 optimalAttackVector values a melee exchange. VCMI's
+// FIRST_STRIKE is a separate host-engine rule: the defender can retaliate
+// before the chosen attack. The FHeroes2 policy must issue its own legal
+// melee action without mutating the live preview, and the server must show
+// the actual order and battle result.
+TEST_F(AIIntegrationNativeBattle, fheroes2NativeMeleeFirstStrikePrecedesOwnHit)
+{
+	prepareBattle(CreatureID(4), 40, CreatureID(4), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * attacker = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			attacker = unit.get();
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
+	BattleHex adjacent;
+	for(const auto & hex : attacker->getPosition().getNeighbouringTiles())
+		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex))
+		{
+			adjacent = hex;
+			break;
+		}
+	ASSERT_TRUE(adjacent.isValid());
+	auto * defender = addStack(BattleSide::DEFENDER, CreatureID(4), adjacent, 15);
+	ASSERT_NE(defender, nullptr);
+	defender->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(4))));
+	ASSERT_TRUE(defender->ableToRetaliate());
+	ASSERT_FALSE(battle()->meleeAttackHexes(
+		attacker, defender, attacker->getPosition()).empty());
+	const int64_t initialHealth = attacker->getAvailableHealth();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, attacker);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), defender);
+	EXPECT_EQ(attacker->getAvailableHealth(), initialHealth)
+		<< "Detached preemptive-damage forecast must not change the live stack";
+
+	std::vector<ui32> meleeOrder;
+	std::vector<bool> counterOrder;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(!attack.shot())
+		{
+			meleeOrder.push_back(attack.stackAttacking);
+			counterOrder.push_back(attack.counter());
+		}
+	};
+	const int before = recorder.meleeAttacks;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(
+		battleID, player, *callback->action));
+	ASSERT_GE(recorder.meleeAttacks - before, 2);
+	ASSERT_GE(meleeOrder.size(), 2u);
+	EXPECT_EQ(meleeOrder[0], defender->unitId());
+	EXPECT_TRUE(counterOrder[0]);
+	EXPECT_EQ(meleeOrder[1], attacker->unitId());
+	EXPECT_LT(attacker->getAvailableHealth(), initialHealth);
+	recorder.onAttackBeforeApply = {};
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Heroes II has no VCMI ranged FIRST_STRIKE. Here the native server must
 // execute the defender's preemptive return shot before the FHeroes2 shooter's
 // own shot. The policy evaluates a detached post-counter stack, but may only
