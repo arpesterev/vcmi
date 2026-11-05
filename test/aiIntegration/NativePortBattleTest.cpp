@@ -3562,6 +3562,34 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedRetaliationExecutesOnNativeServer)
 	ASSERT_TRUE(view->battleCanShoot(defender, shooter->getPosition()));
 	ASSERT_TRUE(defender->ableToRetaliate());
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+
+	// Pinned simulateAttack models the first hit before any counterattack.
+	// A VCMI ranged countershot is an extension; its predicted damage must
+	// come from the surviving shooters, not the defender's untouched count.
+	BattleAttackInfo firstShot(shooter, defender, 0, true);
+	const auto firstEstimate = view->battleEstimateDamage(firstShot);
+	ASSERT_GT(firstEstimate.damage.min, 0);
+	ASSERT_LT(firstEstimate.damage.max, defender->getAvailableHealth());
+	BattleAttackInfo originalCounter(defender, shooter, 0, true);
+	originalCounter.attackerPos = defender->getPosition();
+	const auto fullCounterEstimate = view->battleEstimateDamage(originalCounter);
+	ASSERT_GT(fullCounterEstimate.damage.max, 0);
+	const auto originalDefenderHealth = defender->getAvailableHealth();
+	const auto originalDefenderCount = defender->getCount();
+	auto survivingDefender = defender->acquireState();
+	int64_t firstHit = firstEstimate.damage.min
+		+ (firstEstimate.damage.max - firstEstimate.damage.min) / 2;
+	firstHit = std::clamp<int64_t>(firstHit, 0, survivingDefender->getAvailableHealth());
+	survivingDefender->damage(firstHit);
+	ASSERT_TRUE(survivingDefender->alive());
+	ASSERT_LT(survivingDefender->getCount(), originalDefenderCount);
+	BattleAttackInfo reducedCounter(survivingDefender.get(), shooter, 0, true);
+	reducedCounter.attackerPos = defender->getPosition();
+	const auto reducedEstimate = view->battleEstimateDamage(reducedCounter);
+	EXPECT_LT(reducedEstimate.damage.max, fullCounterEstimate.damage.max)
+		<< "Reduced ranged retaliation must use the post-hit unit count";
+	EXPECT_EQ(defender->getAvailableHealth(), originalDefenderHealth)
+		<< "The HoMM3 preview must not change the live defender";
 	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
