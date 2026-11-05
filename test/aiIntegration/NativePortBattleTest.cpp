@@ -6015,6 +6015,118 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// TUM documents smarter ballista aiming but does not publish its DLL formula.
+// Score each legal hex of a wide native target instead of assuming that a shot
+// at its head has the same splash footprint as a shot at its tail.
+// SHOOTS_ALL_ADJACENT is a fixture bonus, not a natural war-machine ability.
+TEST_F(AIIntegrationNativeBattle, tumBallistaChoosesWideTailWithNativeSplash)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 70);
+	setArmy(defenderSideHero, CreatureID(102), 10);
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	CStack * ballista = nullptr;
+	CStack * wide = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->isBallista())
+			ballista = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(102))
+			wide = unit.get();
+	}
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_NE(wide, nullptr);
+	ASSERT_TRUE(wide->doubleWide());
+	ASSERT_TRUE(ballista->getPosition().isValid());
+	const BattleHex widePosition(ballista->getPosition().toInt() + 11);
+	ASSERT_TRUE(widePosition.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(widePosition), nullptr);
+	wide->setPosition(widePosition);
+	const auto footprint = wide->getHexes();
+	ASSERT_EQ(footprint.size(), 2u);
+	const BattleHex head = footprint[0];
+	const BattleHex tail = footprint[1];
+	ASSERT_TRUE(tail.isAvailable());
+	ASSERT_NE(head, tail);
+	std::vector<BattleHex> tailOnly;
+	for(const auto & hex : tail.getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex)
+			&& BattleHex::getDistance(hex, head) > 1)
+			tailOnly.push_back(hex);
+	}
+	ASSERT_GE(tailOnly.size(), 2u);
+	const CStack * firstExtra = addStack(BattleSide::DEFENDER, CreatureID(0), tailOnly[0], 1000);
+	const CStack * secondExtra = addStack(BattleSide::DEFENDER, CreatureID(0), tailOnly[1], 1000);
+	ASSERT_NE(firstExtra, nullptr);
+	ASSERT_NE(secondExtra, nullptr);
+	ballista->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SHOOTS_ALL_ADJACENT,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(ballista, head));
+	ASSERT_TRUE(view->battleCanShoot(ballista, tail));
+	const auto headHits = view->getAttackedBattleUnits(ballista, wide, head, true);
+	const auto tailHits = view->getAttackedBattleUnits(ballista, wide, tail, true);
+	const auto includes = [](const auto & hits, const CStack * wanted)
+	{
+		return std::any_of(hits.begin(), hits.end(), [&](const auto * hit)
+		{
+			return hit && hit->unitId() == wanted->unitId();
+		});
+	};
+	for(const CStack * extra : {firstExtra, secondExtra})
+	{
+		ASSERT_FALSE(includes(headHits, extra));
+		ASSERT_TRUE(includes(tailHits, extra));
+	}
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_EQ(callback->action->target.size(), 1u);
+	EXPECT_EQ(callback->action->target.front().hexValue, tail)
+		<< "TUM must aim at the legal tail that covers three enemy stacks";
+	EXPECT_NE(callback->action->toString(), baseline.toString());
+	std::cout << "AI_TUM_BALLISTA_WIDE_AIM homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+	const auto firstHealthBefore = firstExtra->getAvailableHealth();
+	const auto secondHealthBefore = secondExtra->getAvailableHealth();
+	const int shotsBefore = recorder.shots;
+	battle()->activeStack = ballista->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native VCMI rejected the independently chosen ballista tail shot";
+	EXPECT_GT(recorder.shots, shotsBefore);
+	EXPECT_LT(firstExtra->getAvailableHealth(), firstHealthBefore);
+	EXPECT_LT(secondExtra->getAvailableHealth(), secondHealthBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaDefendsRatherThanBreakingBlind)
 {
 	startRecordedGame();

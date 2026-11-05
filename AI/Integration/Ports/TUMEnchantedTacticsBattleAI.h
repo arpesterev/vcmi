@@ -140,95 +140,105 @@ private:
 		const int legalShots = static_cast<int>(std::clamp<int64_t>(
 			attacks, 1, stack.shots.available()));
 		const CStack * selected = nullptr;
+		BattleHex selectedAim;
 		double bestValue = 0.0;
 		for(const auto * enemy : targets)
 		{
 			if(!enemy->alive() || enemy->isInvincible() || !enemy->getPosition().isValid()
-				|| (preserveDisabledTargets && hasDisabledEffect(*enemy))
-				|| !battle.battleCanShoot(&stack, enemy->getPosition()))
+				|| (preserveDisabledTargets && hasDisabledEffect(*enemy)))
 				continue;
-			// TUM forbids ballista attacks against disabled enemies. VCMI
-			// can give a ballista an area shot via mod bonuses: aiming beside
-			// Blind/Paralyze/Petrification would still wake that disabled unit.
-			// Use the engine's ACTUAL affected-unit list, not distance guesses,
-			// before considering this otherwise-legal shot. Arrow towers do
-			// not inherit the published ballista-only prohibition.
-			// The same native impact list drives both the ballista's
-			// disabled-target veto and collateral-aware casualty evaluation.
-			// SHOOTS_ALL_ADJACENT currently targets only enemies in VCMI; other
-			// native attack effects may report additional or friendly victims.
-			const auto impacted = battle.getAttackedBattleUnits(
-				&stack, enemy, enemy->getPosition(), true);
-			if(preserveDisabledTargets && std::any_of(impacted.begin(), impacted.end(),
-				[&](const battle::Unit * hit)
+			// A wide enemy exposes independently legal head and tail shots.
+			// VCMI can report different splash victims for each occupied cell.
+			for(const auto & aimedHex : enemy->getHexes())
+			{
+				if(!aimedHex.isValid() || !battle.battleCanShoot(&stack, aimedHex))
+					continue;
+				// TUM forbids ballista attacks against disabled enemies. VCMI
+				// can give a ballista an area shot via mod bonuses: aiming beside
+				// Blind/Paralyze/Petrification would still wake that disabled unit.
+				// Use the engine's ACTUAL affected-unit list, not distance guesses,
+				// before considering this otherwise-legal shot. Arrow towers do
+				// not inherit the published ballista-only prohibition.
+				// The same native impact list drives both the ballista's
+				// disabled-target veto and collateral-aware casualty evaluation.
+				// SHOOTS_ALL_ADJACENT currently targets only enemies in VCMI; other
+				// native attack effects may report additional or friendly victims.
+				const auto impacted = battle.getAttackedBattleUnits(
+					&stack, enemy, aimedHex, true);
+				if(preserveDisabledTargets && std::any_of(impacted.begin(), impacted.end(),
+					[&](const battle::Unit * hit)
+					{
+						return hit && battle.battleGetOwner(hit) != battle.battleGetOwner(&stack)
+							&& hasDisabledEffect(*hit);
+					}))
+					continue;
+				// VCMI resolves ranged FIRST_STRIKE retaliation before the siege
+				// machine fires its opening shot. A guaranteed lethal countershot
+				// therefore leaves no volley to value. This is a host-engine safety
+				// correction, not the undisclosed ERA/DLL targeting formula.
+				static const auto rangedFirstStrike = Selector::typeSubtype(
+					BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
+					Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
+				if(enemy->hasBonus(rangedFirstStrike)
+					&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+					&& enemy->hasBonusOfType(BonusType::RANGED_RETALIATION)
+					&& enemy->ableToRetaliate()
+					&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+					&& battle.battleCanShoot(enemy, stack.getPosition()))
 				{
-					return hit && battle.battleGetOwner(hit) != battle.battleGetOwner(&stack)
-						&& hasDisabledEffect(*hit);
-				}))
-				continue;
-			// VCMI resolves ranged FIRST_STRIKE retaliation before the siege
-			// machine fires its opening shot. A guaranteed lethal countershot
-			// therefore leaves no volley to value. This is a host-engine safety
-			// correction, not the undisclosed ERA/DLL targeting formula.
-			static const auto rangedFirstStrike = Selector::typeSubtype(
-				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
-				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
-			if(enemy->hasBonus(rangedFirstStrike)
-				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
-				&& enemy->hasBonusOfType(BonusType::RANGED_RETALIATION)
-				&& enemy->ableToRetaliate()
-				&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
-				&& battle.battleCanShoot(enemy, stack.getPosition()))
-			{
-				BattleAttackInfo preemptive(enemy, &stack, 0, true);
-				preemptive.attackerPos = enemy->getPosition();
-				preemptive.defenderPos = stack.getPosition();
-				const auto counter = battle.battleEstimateDamage(preemptive, nullptr);
-				if(counter.damage.min >= stack.getAvailableHealth())
-					continue;
-			}
-			// The TUM ballista and arrow-tower targeting formulas are not
-			// available. Rank legal native shots by projected combat value
-			// removed, not the untouched stack's entire strength. This remains
-			// an engine-specific partial projection, never ERA/DLL parity.
-			const auto projectedLoss = [&](const battle::Unit & hit)
-			{
-				const double health = static_cast<double>(hit.getAvailableHealth());
-				if(health <= 0)
-					return 0.0;
-				BattleAttackInfo info(&stack, &hit, 0, true);
-				info.attackerPos = stack.getPosition();
-				info.defenderPos = hit.getPosition();
-				const auto damage = battle.battleEstimateDamage(info, nullptr);
-				const double expectedDamage = (static_cast<double>(damage.damage.min)
-					+ static_cast<double>(damage.damage.max)) / 2.0;
-				return Ports::TUM::projectedSiegeVolleyLoss(
-					static_cast<double>(hit.estimateCombatValue()), health,
-					std::max(0.0, expectedDamage), legalShots);
-			};
-			// The unpublished TUM targeting formula is not reproduced here.
-			// Rank all engine-reported collateral, not just the primary target.
-			// Subtract allied injury only when VCMI actually reports a legal
-			// friendly victim. No friendly fire is invented for area shots.
-			double value = projectedLoss(*enemy);
-			for(const auto * hit : impacted)
-			{
-				if(!hit || !hit->alive() || hit->isInvincible()
-					|| hit->unitId() == enemy->unitId())
-					continue;
-				const double collateral = projectedLoss(*hit);
-				value += battle.battleGetOwner(hit) == battle.battleGetOwner(&stack)
-					? -collateral : collateral;
-			}
-			// DEFEND is safer than spending ammunition on net harmful shots.
-			// Native VCMI, not a scripted fallback, executes the chosen action.
-			if(value > bestValue)
-			{
-				selected = enemy;
-				bestValue = value;
+					BattleAttackInfo preemptive(enemy, &stack, 0, true);
+					preemptive.attackerPos = enemy->getPosition();
+					preemptive.defenderPos = stack.getPosition();
+					const auto counter = battle.battleEstimateDamage(preemptive, nullptr);
+					if(counter.damage.min >= stack.getAvailableHealth())
+						continue;
+				}
+				// The TUM ballista and arrow-tower targeting formulas are not
+				// available. Rank legal native shots by projected combat value
+				// removed, not the untouched stack's entire strength. This remains
+				// an engine-specific partial projection, never ERA/DLL parity.
+				const auto projectedLoss = [&](const battle::Unit & hit)
+				{
+					const double health = static_cast<double>(hit.getAvailableHealth());
+					if(health <= 0)
+						return 0.0;
+					BattleAttackInfo info(&stack, &hit, 0, true);
+					info.attackerPos = stack.getPosition();
+					info.defenderPos = hit.unitId() == enemy->unitId() ? aimedHex : hit.getPosition();
+					const auto damage = battle.battleEstimateDamage(info, nullptr);
+					const double expectedDamage = (static_cast<double>(damage.damage.min)
+						+ static_cast<double>(damage.damage.max)) / 2.0;
+					return Ports::TUM::projectedSiegeVolleyLoss(
+						static_cast<double>(hit.estimateCombatValue()), health,
+						std::max(0.0, expectedDamage), legalShots);
+				};
+				// The unpublished TUM targeting formula is not reproduced here.
+				// Rank all engine-reported collateral, not just the primary target.
+				// Subtract allied injury only when VCMI actually reports a legal
+				// friendly victim. No friendly fire is invented for area shots.
+				double value = projectedLoss(*enemy);
+				for(const auto * hit : impacted)
+				{
+					if(!hit || !hit->alive() || hit->isInvincible()
+						|| hit->unitId() == enemy->unitId())
+						continue;
+					const double collateral = projectedLoss(*hit);
+					value += battle.battleGetOwner(hit) == battle.battleGetOwner(&stack)
+						? -collateral : collateral;
+				}
+				// DEFEND is safer than spending ammunition on net harmful shots.
+				// Native VCMI, not a scripted fallback, executes the chosen action.
+				if(value > bestValue)
+				{
+					selected = enemy;
+					selectedAim = aimedHex;
+					bestValue = value;
+				}
 			}
 		}
-		return selected ? BattleAction::makeShotAttack(&stack, selected)
+		return selected ? (selectedAim == selected->getPosition()
+			? BattleAction::makeShotAttack(&stack, selected)
+			: BattleAction::makeShotAttack(&stack, selectedAim))
 			: BattleAction::makeDefend(&stack);
 	}
 
