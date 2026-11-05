@@ -286,6 +286,32 @@ TEST(MMAINNOutputValidation, StrictLiveBattleRejectsGymResetButAllowsGraphAction
 	EXPECT_NO_THROW(enforceStrictNNLiveBattleAction(false, ACTION_RETREAT));
 }
 
+TEST(MMAINNOutputValidation, V13StrictRejectsInvalidModelActionWithoutResampling)
+{
+	using MMAI::BAI::enforceNNV13SingleLiveAction;
+	// A valid decision, including V13 WAIT, remains unchanged.
+	EXPECT_NO_THROW(enforceNNV13SingleLiveAction(true, true, 1));
+	EXPECT_NO_THROW(enforceNNV13SingleLiveAction(true, true, 42));
+
+	// A rejected V13 masked action or disallowed hero retreat must fail on
+	// the first decoded output, before the legacy retry loop samples again.
+	try
+	{
+		enforceNNV13SingleLiveAction(true, false, 42);
+		FAIL() << "Strict V13 accepted an invalid neural action";
+	}
+	catch(const std::runtime_error & e)
+	{
+		const std::string diagnostic(e.what());
+		EXPECT_NE(diagnostic.find("42"), std::string::npos);
+		EXPECT_NE(diagnostic.find("refusing resampling"), std::string::npos);
+	}
+	EXPECT_THROW(enforceNNV13SingleLiveAction(true, false, 0), std::runtime_error);
+
+	// Explicit gym/hybrid callers retain the original invalid-action retry.
+	EXPECT_NO_THROW(enforceNNV13SingleLiveAction(false, false, 42));
+}
+
 TEST(MMAINNOutputValidation, V13RejectsIllegalTargetBeforeEngineDispatch)
 {
 	using MMAI::BAI::requireNNV13LegalTarget;
