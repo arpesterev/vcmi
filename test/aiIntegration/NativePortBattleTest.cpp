@@ -4115,7 +4115,8 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeFirstStrikeCountersBeforeAtt
 			hypnotized = unit.get();
 	ASSERT_NE(hypnotized, nullptr);
 	std::vector<BattleHex> adjacent;
-	for(const auto & hex : hypnotized->getPosition().getNeighbouringTiles())
+	const auto neighbouringTiles = hypnotized->getPosition().getNeighbouringTiles();
+	for(const auto & hex : neighbouringTiles)
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 			adjacent.push_back(hex);
 	ASSERT_GE(adjacent.size(), 2u);
