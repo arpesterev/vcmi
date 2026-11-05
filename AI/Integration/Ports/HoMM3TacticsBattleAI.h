@@ -498,6 +498,9 @@ private:
 		}
 
 		double value = 0.0;
+		// Use the original stack for native footprint/aim geometry: removing
+		// creatures does not move a surviving stack. Use survivingAttacker
+		// ONLY for secondary damage, after the preemptive counter.
 		// The engine de-duplicates double-wide targets. A direct hit is
 		// already in exchangeValue; never score it as collateral.
 		for(const auto * affected : battle.getAttackedCreatures(&attacker, attackTo, false, from).first)
