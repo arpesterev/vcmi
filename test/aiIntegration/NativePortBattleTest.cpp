@@ -3923,7 +3923,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedWideTargetUsesNativeAim)
 	double best = -1.0;
 	for(const auto & from : available)
 	{
-		if(!from.isAvailable() || reach.distances[from.toInt()] < 0)
+		if(!from.isAvailable() || static_cast<int>(reach.distances[from.toInt()]) < 0)
 			continue;
 		for(const auto & aimed : view->meleeAttackHexes(guard, wideAlly, from))
 		{
