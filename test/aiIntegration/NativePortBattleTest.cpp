@@ -4947,15 +4947,17 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 			tower = unit.get();
 		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
 		{
-			if(unit->getCount() == 300)
+			if(unit->unitSlot() == SlotID(0))
 				largeTarget = unit.get();
-			else if(unit->getCount() == 8)
+			else if(unit->unitSlot() == SlotID(1))
 				smallTarget = unit.get();
 		}
 	}
 	ASSERT_NE(tower, nullptr);
 	ASSERT_NE(largeTarget, nullptr);
 	ASSERT_NE(smallTarget, nullptr);
+	ASSERT_GT(largeTarget->getCount(), smallTarget->getCount())
+		<< "Native siege deployment must preserve the intended value gap";
 	largeTarget->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::SPELL_EFFECT,
 		1, BonusSourceID(SpellID(SpellID::BLIND)), BonusSubtypeID(SpellID(SpellID::BLIND))));
