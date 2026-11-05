@@ -4217,6 +4217,17 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedWideAttackerReceivesFirstStrikeAt
 			guard = unit.get();
 	ASSERT_NE(guard, nullptr);
 	ASSERT_TRUE(guard->doubleWide());
+	// The default attacker deployment is against the left battlefield edge;
+	// it has no playable tail-only neighboring hex. Reposition this fixture
+	// to open ground before starting the action, not through a fake server
+	// movement packet. The subsequent chosen attack is engine-validated.
+	const BattleHex central(80);
+	for(const auto & hex : guard->getHexes(central))
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	guard->setPosition(central);
 	const BattleHex head = guard->getPosition();
 	const auto & occupied = guard->getHexes();
 	ASSERT_EQ(occupied.size(), 2u);
