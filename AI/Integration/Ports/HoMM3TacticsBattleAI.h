@@ -72,7 +72,7 @@ private:
 
 	static double exchangeValue(CPlayerBattleCallback & battle, const CStack & attacker,
 		const CStack & target, BattleHex from, bool shooting, int distance,
-		bool projectSecondMeleeStrike = false)
+		bool projectSecondMeleeStrike = false, bool projectNativeRangedRetaliation = false)
 	{
 		const auto oldAttackerHealth = attacker.getAvailableHealth();
 		const auto oldTargetHealth = target.getAvailableHealth();
@@ -87,10 +87,28 @@ private:
 		// simulated first hit, so never charge an impossible counterattack for
 		// a CERTAIN kill. Keep the TUM-composed baseline unchanged until the
 		// HoMM3-only sequential exchange is independently validated.
-		const bool certainFirstHitKill = projectSecondMeleeStrike && !shooting
+		const bool certainFirstHitKill = ((projectSecondMeleeStrike && !shooting)
+				|| (projectNativeRangedRetaliation && shooting))
 			&& oldTargetHealth > 0 && damage.damage.min >= oldTargetHealth;
-		double score = lossValue(target, damage)
-			- (shooting || certainFirstHitKill ? 0.0 : lossValue(attacker, retaliation));
+		double retaliationLoss = shooting || certainFirstHitKill
+			? 0.0 : lossValue(attacker, retaliation);
+		// Pinned simulateAttack/getRangedAttackValue has no ranged retaliation:
+		// vanilla Heroes III cannot counter a shot. VCMI can. Its generic
+		// battleEstimateDamage retaliation output does not include this
+		// native ability, so explicitly price the REVERSE legal shot instead.
+		// This is a HoMM3-only host-engine extension, not retail source parity;
+		// TUM keeps its established source-inspired baseline.
+		if(projectNativeRangedRetaliation && shooting && !certainFirstHitKill
+			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+			&& target.ableToRetaliate()
+			&& battle.battleCanShoot(&target, attacker.getPosition()))
+		{
+			BattleAttackInfo counter(&target, &attacker, 0, true);
+			counter.attackerPos = target.getPosition();
+			retaliationLoss = lossValue(attacker, battle.battleEstimateDamage(counter));
+		}
+		double score = lossValue(target, damage) - retaliationLoss;
 
 		// Pinned type_AI_combat_parameters::simulateAttack performs a second
 		// creatureTwoAttacks melee strike AFTER the defender's first retaliation,
@@ -433,7 +451,7 @@ private:
 		// Native replacement for getSimpleAttackEffect and enemy target-time lookup.
 		// The original uses its own projected enemy goal, not hex distance.
 		const int32_t effect = projectedAttackEffect(exchangeValue(battle, attacker, target,
-			attacker.getPosition(), true, 0));
+			attacker.getPosition(), true, 0, false, includeNativeInactive));
 		const int speed = std::max(1, static_cast<int>(target.getMovementRange()));
 		const int hexDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
 		const int time = std::max(1, (hexDistance + speed - 1) / speed);
