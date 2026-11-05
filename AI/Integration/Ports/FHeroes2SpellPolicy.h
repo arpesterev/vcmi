@@ -194,9 +194,9 @@ public:
 		for(const auto & entry : LIBRARY->spellh->objects)
 		{
 			const auto * spell = entry.get();
-			// Pinned planUnitTurn::farewellSpellcast asks for the maximum
-			// damaging spell only. No buffs, summons, control or healing are
-			// eligible just before retreat/surrender. VCMI validates legality.
+			// Pinned planUnitTurn::farewellSpellcast asks for the most
+			// valuable kills, not mere fractional HP damage. Only damaging
+			// spells are eligible; VCMI validates their actual legality.
 			if(farewellDamageOnly && !spell->isDamage())
 				continue;
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
@@ -240,6 +240,41 @@ public:
 					spells::BattleCast cast(projected.get(), hero, spells::Mode::HERO, spell);
 					cast.castEval(projected->getServerCallback(), target);
 					checkUnchanged(*real, *hero, mana, before);
+				}
+
+				if(farewellDamageOnly)
+				{
+					// Pinned spellDamageValue(retreating=true) ignores partial HP
+					// damage, clones and future battlefield pressure: the army
+					// is leaving. Rank only actual creature deaths predicted by
+					// VCMI. Never burn the acting stack with farewell area damage.
+					double killedValue = 0;
+					bool killsActingStack = false;
+					for(const auto & old : before)
+					{
+						if(old.count <= 0)
+							continue;
+						const auto * after = projected->battleGetUnitByID(old.unit->unitId());
+						const int survivors = after && after->alive() ? after->getCount() : 0;
+						const int killed = std::clamp(old.count - survivors, 0, old.count);
+						if(activeStack && old.unit->unitId() == activeStack->unitId() && killed == old.count)
+						{
+							killsActingStack = true;
+							break;
+						}
+						if(old.unit->isClone())
+							continue;
+						const double perCreatureStrength
+							= static_cast<double>(old.unit->estimateCombatValue()) / old.count;
+						killedValue += (old.owner == player ? -1.0 : 1.0)
+								* perCreatureStrength * killed;
+					}
+					if(!killsActingStack && std::isfinite(killedValue) && killedValue > bestValue)
+					{
+						bestValue = killedValue;
+						best = BattleAction::makeHeroSpellcast(real->battleGetMySide(), target, spell->id);
+					}
+					continue;
 				}
 
 				double value = 0;
@@ -807,13 +842,10 @@ public:
 				}
 				if(friendlyHealth <= 0)
 					continue;
-				// The pinned farewell policy maximizes immediate damage and
-				// does not conserve mana for future rounds. Ordinary turns keep
-				// their source-derived spell cost and conservation threshold.
-				const double scaled = farewellDamageOnly
-					? value : value / std::sqrt(std::max(1, cost) / 3.0);
-				if(std::isfinite(scaled) && scaled > bestValue
-					&& (farewellDamageOnly || resurrection || scaled > threshold))
+				// Only ordinary turns reach this branch; farewell ranks
+				// actual killed creatures above, without future mana conservation.
+				const double scaled = value / std::sqrt(std::max(1, cost) / 3.0);
+				if(std::isfinite(scaled) && scaled > bestValue && (resurrection || scaled > threshold))
 				{
 					bestValue = scaled;
 					best = BattleAction::makeHeroSpellcast(real->battleGetMySide(), target, spell->id);
