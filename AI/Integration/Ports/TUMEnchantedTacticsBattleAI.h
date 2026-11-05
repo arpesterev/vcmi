@@ -147,6 +147,26 @@ private:
 				|| (preserveDisabledTargets && hasDisabledEffect(*enemy))
 				|| !battle.battleCanShoot(&stack, enemy->getPosition()))
 				continue;
+			// VCMI resolves ranged FIRST_STRIKE retaliation before the siege
+			// machine fires its opening shot. A guaranteed lethal countershot
+			// therefore leaves no volley to value. This is a host-engine safety
+			// correction, not the undisclosed ERA/DLL targeting formula.
+			static const auto rangedFirstStrike = Selector::typeSubtype(
+				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
+				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
+			if(enemy->hasBonus(rangedFirstStrike)
+				&& enemy->hasBonusOfType(BonusType::RANGED_RETALIATION)
+				&& enemy->ableToRetaliate()
+				&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+				&& battle.battleCanShoot(enemy, stack.getPosition()))
+			{
+				BattleAttackInfo preemptive(enemy, &stack, 0, true);
+				preemptive.attackerPos = enemy->getPosition();
+				preemptive.defenderPos = stack.getPosition();
+				const auto counter = battle.battleEstimateDamage(preemptive, nullptr);
+				if(counter.damage.min >= stack.getAvailableHealth())
+					continue;
+			}
 			// The TUM ballista and arrow-tower targeting formulas are not
 			// available. Rank legal native shots by projected combat value
 			// removed, not the untouched stack's entire strength. This remains
