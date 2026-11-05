@@ -3983,6 +3983,13 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherValuesRangedRetaliation)
 		BonusDuration::PERMANENT, BonusType::ATTACKS_NEAREST_CREATURE, BonusSource::CREATURE_ABILITY,
 		1, BonusSourceID(CreatureID(2))));
 	ASSERT_TRUE(retaliator->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	// The ordinary defender may be adjacent to the return-fire shooter.
+	// Guarantee the fixture's ranged action with native FREE_SHOOTING,
+	// rather than silently accepting a blocked counterattack preview.
+	retaliator->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FREE_SHOOTING, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(2))));
+	ASSERT_TRUE(retaliator->canShootBlocked());
 	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
 	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, archer));
 	ASSERT_TRUE(archer->isHypnotized());
