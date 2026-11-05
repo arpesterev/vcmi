@@ -5033,6 +5033,41 @@ TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 // legal shot* rather than blindly target the largest whole-stack AI value.
 // Compare both metrics from the same authoritative engine state, then let
 // the server execute its normal ballista activation and finish the battle.
+// TUM's documented ballista targeting is only reached through the battle-AI
+// callback when the native server delegates manual control (for example,
+// Artillery). With no Artillery, BattleFlowProcessor owns CPU_CONTROLLED
+// war-machine actions before any TUM activeStack() call. Record that boundary
+// in a fully resolved server battle: an automatic ballista shot must NOT be
+// misreported as an independent TUM tactical decision.
+TEST_F(AIIntegrationNativeBattle, tumUnskilledBallistaIsNativeAutomaticNotTUMDecision)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	setArmy(defenderSideHero, CreatureID(0), 60);
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	ASSERT_EQ(attackerSideHero->valOfBonuses(BonusType::MANUAL_CONTROL,
+		BonusSubtypeID(CreatureID(CreatureID::BALLISTA))), 0)
+		<< "Fixture must not provide Artillery or another manual-control bonus";
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * machine = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER
+			&& unit->creatureId() == CreatureID::BALLISTA)
+			machine = unit.get();
+	ASSERT_NE(machine, nullptr);
+	ASSERT_TRUE(machine->hasBonusOfType(BonusType::CPU_CONTROLLED));
+	// Both armies contain only melee Peasants. Any real SHOOT packet therefore
+	// came from the engine-controlled ballista, not a creature archer.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_EQ(ballistaDecisions, 0)
+		<< "CPU-controlled ballista must not be credited to TUM activeStack";
+	EXPECT_GT(recorder.shots, 0)
+		<< "The native battle engine must actually fire the automatic ballista";
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaValuesEngineProjectedLoss)
 {
 	startRecordedGame();
