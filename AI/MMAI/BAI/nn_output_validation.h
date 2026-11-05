@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace MMAI::BAI
@@ -34,6 +35,17 @@ inline void validateNNActionDistribution(const std::vector<float> & probabilitie
 
 	if(!hasPositiveProbability)
 		throw std::runtime_error("MMAI: neural action distribution contains no positive probability");
+}
+
+// V13 and V15 observations are numerical ONNX inputs. An invalid battle
+// attribute must not be silently promoted to a plausible model decision.
+// Empty edge-attribute tensors are legitimate on sparse battle graphs.
+inline void validateNNObservationValues(const std::vector<float> & values, const std::string & name)
+{
+	for(std::size_t i = 0; i < values.size(); ++i)
+		if(!std::isfinite(values[i]))
+			throw std::runtime_error("MMAI: non-finite neural observation in " + name
+				+ " at index " + std::to_string(i));
 }
 
 // V15 emits a critic value in addition to the action head. Although the
