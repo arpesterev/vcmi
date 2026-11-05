@@ -1210,7 +1210,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DispelPrefersStrongerBlindedHastedAlly
 	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HASTE, hasted));
 	teachBattleSpell(defenderSideHero, SpellID::BLIND, 6);
 	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, hasted));
+	// The native engine permits only one hero spell per side and round.
+	// Advance through real DEFEND actions instead of forcing a second cast.
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
 	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, plain));
+	// Start the independent decision on an actual allied activation.
+	for(int attempt = 0; attempt < 8 && battle()->battleActiveUnit()
+		&& battle()->battleActiveUnit()->unitSide() != BattleSide::ATTACKER; ++attempt)
+		ASSERT_TRUE(act(BattleAction::makeDefend(battle()->battleActiveUnit())));
+	active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
 	const auto haste = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::HASTE)));
 	const auto blind = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLIND)));
 	ASSERT_TRUE(hasted->hasBonus(haste));
