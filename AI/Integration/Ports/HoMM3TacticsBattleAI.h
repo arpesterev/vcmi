@@ -492,8 +492,13 @@ private:
 	// primary attacker, so only additional victims belong here.
 	// This is a conditional, post-hit damage projection, not a HoMM3 formula.
 	static double projectedRetaliationCollateral(CPlayerBattleCallback & battle,
-		const CStack & attacker, const CStack & target, BattleHex from, int pathCost)
+		const CStack & attacker, const CStack & target, BattleHex from, int pathCost, BattleHex aimedHex)
 	{
+		// Pinned checkAdjacentHexes evaluates every legal occupied target hex.
+		// In VCMI the same aim must be forwarded to the hypothetical primary
+		// strike before estimating whether its surviving defender retaliates.
+		if(!aimedHex.isValid() || !target.getHexes().contains(aimedHex))
+			throw std::logic_error("HoMM3 retaliation projection requires a native legal aim");
 		if(!target.hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT)
 			&& !target.hasBonusOfType(BonusType::THREE_HEADED_ATTACK)
 			&& !target.hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH)
@@ -505,6 +510,7 @@ private:
 
 		BattleAttackInfo primary(&attacker, &target, pathCost, false);
 		primary.attackerPos = from;
+		primary.defenderPos = aimedHex;
 		DamageEstimation retaliation;
 		const auto initialHit = battle.battleEstimateDamage(primary, &retaliation);
 		// This also checks the engine's retaliation availability, no-retaliation
@@ -826,7 +832,7 @@ public:
 						+ shooterPinBonus(stack, hex, shooterPins) + landingThreat
 						+ (avoidFastDecoys ? 0.0
 							: projectedCollateral(battle, stack, *enemy, hex, aimedHex, pathCost)
-							+ projectedRetaliationCollateral(battle, stack, *enemy, hex, pathCost));
+							+ projectedRetaliationCollateral(battle, stack, *enemy, hex, pathCost, aimedHex));
 					if(!target || exchange > bestExchange
 						|| (exchange == bestExchange
 							&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
