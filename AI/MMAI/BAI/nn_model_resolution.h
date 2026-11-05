@@ -165,6 +165,17 @@ inline void requireNNV13LegalTarget(const Target * target, LegalCheck legalCheck
 		throw std::runtime_error(std::string("MMAI V13: model ") + action + " has no legal live target");
 }
 
+// The V13 ONNX schema contains an explicit RETREAT action. The original
+// adapter rejected model-selected retreat even when VCMI allowed it, while
+// converting ACTION_RESET to retreat as a gym episode control. Preserve gym
+// reset behavior for legacy callers, but allow a strict neural decision to
+// retreat only when the live battle engine permits fleeing. No scripted
+// surrender/retreat callback or replacement policy is involved.
+inline bool canNNV13DispatchRetreat(bool strictNeural, bool trainingReset, bool engineCanFlee)
+{
+	return trainingReset || (strictNeural && engineCanFlee);
+}
+
 // V13 historically re-sampled an invalid or stale model-selected action up
 // to eleven times. In strict combat this silently changes the single ONNX
 // decision, unlike V15's fail-closed path. Reject on the first invalid

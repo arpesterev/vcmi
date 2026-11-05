@@ -432,6 +432,22 @@ TEST(MMAINNOutputValidation, V13RejectsStaleOrDeadActiveCreatureBeforeModelDispa
 	}
 }
 
+TEST(MMAINNOutputValidation, V13StrictNeuralRetreatUsesLiveEnginePermission)
+{
+	using MMAI::BAI::canNNV13DispatchRetreat;
+
+	// A V13 model-selected RETREAT is dispatched as selected when VCMI
+	// permits fleeing; the legal ONNX decision is never silently discarded.
+	EXPECT_TRUE(canNNV13DispatchRetreat(true, false, true));
+	// A neural model cannot force an illegal live retreat or substitute one.
+	EXPECT_FALSE(canNNV13DispatchRetreat(true, false, false));
+	// Legacy gym/hybrid behavior must not change: explicit model RETREAT
+	// remains invalid, whereas ACTION_RESET still resets its training episode.
+	EXPECT_FALSE(canNNV13DispatchRetreat(false, false, true));
+	EXPECT_TRUE(canNNV13DispatchRetreat(false, true, false));
+	EXPECT_TRUE(canNNV13DispatchRetreat(true, true, false));
+}
+
 TEST(MMAINNOutputValidation, V13RejectsIllegalTargetBeforeEngineDispatch)
 {
 	using MMAI::BAI::requireNNV13LegalTarget;

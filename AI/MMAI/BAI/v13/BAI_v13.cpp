@@ -404,7 +404,15 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 		// A strict neural action must be dispatched exactly as selected or
 		// rejected. Retrying a stale/invalid V13 mask entry silently samples
 		// another policy output, which is allowed only for legacy gym/hybrid.
-		const bool legalAction = ba && (a != Schema::ACTION_RETREAT || resetting);
+		bool legalAction = static_cast<bool>(ba);
+		if(a == Schema::ACTION_RETREAT)
+		{
+			// This is a genuine V13 model action, unlike ACTION_RESET, which
+			// is a gym control. Only the VCMI engine can authorize live retreat.
+			// Keep the original legacy hybrid/gym retry and reset semantics.
+			const bool engineCanFlee = strictNeural && !resetting && battle->battleCanFlee();
+			legalAction = legalAction && canNNV13DispatchRetreat(strictNeural, resetting, engineCanFlee);
+		}
 		enforceNNV13SingleLiveAction(strictNeural, legalAction, a);
 
 		if(legalAction)
