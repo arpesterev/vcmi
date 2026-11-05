@@ -59,6 +59,24 @@ int main()
 	try { HoMM3::signedProjectedAttackEffect(std::numeric_limits<double>::infinity()); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// Pinned getRangedAttackValue checks cannotAttack, not just whether
+	// the enemy can melee. A shooting-only VCMI Ballista remains a live
+	// threat even with zero movement and no melee attack capability.
+	require(HoMM3::nativeTargetCanAttack(false, true),
+		"HoMM3 ranged-only native enemy must count as able to attack");
+	require(HoMM3::nativeTargetCanAttack(true, false),
+		"HoMM3 melee-capable enemy must remain an active threat");
+	require(!HoMM3::nativeTargetCanAttack(false, false),
+		"HoMM3 incapable enemy must not receive an imaginary attack");
+	require(HoMM3::rangedAttackValue({100, false,
+		!HoMM3::nativeTargetCanAttack(false, true),
+		HoMM3::nativeTargetCanAttack(false, true),
+		HoMM3::projectedRangedTargetTime(6, 0, true)}, false) == 100,
+		"A stationary ranged-only threat with a legal shot must receive one-turn weight");
+	require(HoMM3::rangedAttackValue({100, false, true, false,
+		HoMM3::projectedRangedTargetTime(6, 0, false)}, false) == 20,
+		"A stationary nonattacker still receives the source distant-threat discount");
+
 	// HoMM3 check_adjacent_hexes: on equal melee value and one-turn
 	// reachability, Cavalier/Champion prefer the greater path cost.
 	require(preferEqualValueMeleeHex(6, 4, true), "Jouster prefers a longer equal-value charge");
