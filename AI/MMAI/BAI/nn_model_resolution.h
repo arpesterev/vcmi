@@ -67,6 +67,18 @@ inline void requireNNV15LegalMove(const Hex & destination, const Reachability & 
 		throw std::runtime_error("MMAI V15: model MOVE destination is not reachable this turn");
 }
 
+// A V15 graph action refers to a concrete creature, not only to a hex.
+// A target may disappear between the graph observation and engine dispatch;
+// checking the shooting/melee hex alone cannot establish that this specific
+// stack is still alive. Fail closed without resampling or scripted fallback.
+// LegalCheck must query the live VCMI battle callback, not the graph mask.
+template<typename Stack, typename LegalCheck>
+inline void requireNNV15LegalTarget(const Stack * target, LegalCheck legalCheck, const char * action)
+{
+	if(!target || !target->alive() || !legalCheck(target))
+		throw std::runtime_error(std::string("MMAI V15: model ") + action + " has no legal live target");
+}
+
 // V13's battle action masks are derived from a preceding observation.
 // They cannot guarantee that a target is still present and legal at dispatch.
 // Check the live VCMI callback before forming a server action, including in
