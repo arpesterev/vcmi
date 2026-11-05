@@ -4367,7 +4367,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 	// incorrectly discarded this otherwise valid ballista target.
 	// This is explicit test setup, not a natural spell side effect.
 	validTarget->addNewBonus(std::make_shared<Bonus>(
-		BonusDuration::PERMANENT, BonusType::SPEED, BonusSource::SPELL_EFFECT,
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED, BonusSource::SPELL_EFFECT,
 		0, BonusSourceID(SpellID(SpellID::BLIND))));
 	ASSERT_TRUE(validTarget->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
 		BonusSourceID(SpellID(SpellID::BLIND)))));
