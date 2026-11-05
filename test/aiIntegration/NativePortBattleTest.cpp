@@ -2404,6 +2404,116 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotThreatSpreadsArcherCover)
+{
+	// Pinned ihhub/fheroes2 ai_battle.cpp: analyzeBattleState sets
+	// _avoidStackingUnits above 10% active enemy AREA_SHOT strength;
+	// meleeUnitDefense then screens shooters one cell farther away.
+	// Use the native SHOOTS_ALL_ADJACENT bonus and a real VCMI server.
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex original = guard->getPosition();
+	const BattleHex archerHex(original.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex threatHex(archerHex.toInt() + 5);
+	ASSERT_TRUE(archerHex.isAvailable());
+	ASSERT_TRUE(threatHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(threatHex), nullptr);
+	const auto * archer = addStack(BattleSide::ATTACKER, CreatureID(2), archerHex, 120);
+	const auto * threat = addStack(BattleSide::DEFENDER, CreatureID(0), threatHex, 15);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(threat, nullptr);
+	ASSERT_TRUE(archer->isShooter());
+	ASSERT_GT(BattleHex::getDistance(original, threatHex),
+		static_cast<int>(guard->getMovementRange()) + 1);
+	ASSERT_LE(BattleHex::getDistance(archerHex, threatHex),
+		static_cast<int>(threat->getMovementRange()) + 1);
+
+	BattleHex splashHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(!candidate.isAvailable() || candidate.getX() < 11
+			|| battle()->battleGetUnitByPos(candidate) != nullptr
+			|| BattleHex::getDistance(candidate, original) <= static_cast<int>(guard->getMovementRange()) + 1
+			|| BattleHex::getDistance(candidate, threatHex) < 3)
+			continue;
+		splashHex = candidate;
+		break;
+	}
+	ASSERT_TRUE(splashHex.isValid());
+	auto * splash = addStack(BattleSide::DEFENDER, CreatureID(45), splashHex, 12);
+	ASSERT_NE(splash, nullptr);
+	ASSERT_TRUE(splash->isShooter());
+	ASSERT_TRUE(battle()->battleCanShoot(splash))
+		<< "Enemy must have a real, unobstructed ranged attack before gaining splash";
+	ASSERT_GT(static_cast<double>(splash->estimateCombatValue()) /
+		(static_cast<double>(splash->estimateCombatValue()) + threat->estimateCombatValue()), 0.1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto routes = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(routes, guard, false);
+	const bool hasSeparatedScreen = std::any_of(available.begin(), available.end(),
+		[&](const BattleHex & hex)
+		{
+			return hex.isAvailable() && hex != original
+				&& BattleHex::getDistance(hex, archerHex) == 2
+				&& routes.distances[hex.toInt()] <= guard->getMovementRange();
+		});
+	ASSERT_TRUE(hasSeparatedScreen)
+		<< "This scenario needs a legal two-hex cover position";
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+
+	// Hold both armies and all hexes fixed; only the native area-shot
+	// ability changes between the two independent policy decisions.
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Baseline guard must choose a normal archer screen";
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(callback->action->target.front().hexValue, archerHex), 1);
+	splash->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(splash->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+	ASSERT_TRUE(battle()->battleCanShoot(splash));
+
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Source-derived splash warning should change the selected screen";
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_EQ(BattleHex::getDistance(destination, archerHex), 2)
+		<< "Splash-aware guard should not cluster adjacent to its archer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native server rejected the independently selected cover movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerArchers)
 {
 	// Source meleeUnitDefense protects archers only when the melee unit
