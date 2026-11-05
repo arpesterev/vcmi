@@ -5453,6 +5453,88 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedOnlyWarMachineIsAnActiveNativeThrea
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Pinned getRangedAttackValue tests the enemy's globally chosen target, not
+// merely whether it can shoot the currently active friendly stack. A limited-
+// range enemy Archer can legally shoot another friendly while the active
+// attacker remains too far away to be shot. The source-inspired HoMM3 adapter
+// must preserve this live native shooting threat. Positions and bonus are
+// fixture-only, and the actual HoMM3 shot is submitted to the real server.
+TEST_F(AIIntegrationNativeBattle, homm3CountsEnemyShotAtAnotherFriendlyAndCompletesBattle)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 30); // Active Archers
+	setArmy(defenderSideHero, CreatureID(2), 45); // Limited-range Archers
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 100));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	CStack * attacker = nullptr;
+	CStack * otherFriendly = nullptr;
+	CStack * enemyShooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			attacker = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			otherFriendly = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			enemyShooter = unit.get();
+	}
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_NE(otherFriendly, nullptr);
+	ASSERT_NE(enemyShooter, nullptr);
+	battle()->activeStack = attacker->unitId();
+	// The VCMI-specific range bonus does not change game rules.
+	enemyShooter->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::LIMITED_SHOOTING_RANGE,
+		BonusSource::OTHER, 3, BonusSourceID()));
+
+	const BattleID battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(attacker, enemyShooter->getPosition()));
+	ASSERT_FALSE(view->battleCanShoot(enemyShooter, attacker->getPosition()))
+		<< "The limited-range Archer must be unable to return fire at the active stack";
+
+	BattleHex alternate;
+	for(int i = 0; i < GameConstants::BFIELD_SIZE; ++i)
+	{
+		const BattleHex candidate(i);
+		if(!candidate.isAvailable() || battle()->battleGetUnitByPos(candidate))
+			continue;
+		const int distance = BattleHex::getDistance(candidate, enemyShooter->getPosition());
+		if(distance < 2 || distance > 3)
+			continue;
+		otherFriendly->setPosition(candidate);
+		if(view->battleCanShoot(enemyShooter, otherFriendly->getPosition()))
+		{
+			alternate = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(alternate.isValid())
+		<< "A live, legal nearby enemy shot must exist for the global target regression";
+	ASSERT_TRUE(view->battleCanShoot(enemyShooter, otherFriendly->getPosition()));
+	ASSERT_FALSE(view->battleCanShoot(enemyShooter, attacker->getPosition()));
+	ASSERT_TRUE(AIIntegration::Ports::HoMM3::nativeTargetCanAttack(false, true))
+		<< "The HoMM3 global threat must count the real shot at the other friendly";
+
+	const auto decision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *attacker);
+	ASSERT_EQ(decision.actionType, EActionType::SHOOT);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, decision))
+		<< "The native server rejected the independently chosen HoMM3 ranged action";
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3RangedPrefersActiveTargetOverBlindAndCompletesBattle)
 {
 	// The decompiled HoMM3 scorer reduces shots into incapacitated targets.
