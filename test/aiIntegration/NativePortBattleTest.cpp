@@ -5068,6 +5068,98 @@ TEST_F(AIIntegrationNativeBattle, tumUnskilledBallistaIsNativeAutomaticNotTUMDec
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The native server runs ranged FIRST_STRIKE retaliation before a war
+// machine's opening shot. TUM's partial volley ranking must not promise
+// casualties from a ballista that is guaranteed to die before firing.
+// The unusually large enemy archer stack and injected combat abilities
+// are test fixtures, not claims about a naturally occurring TUM creature.
+TEST_F(AIIntegrationNativeBattle, tumBallistaAvoidsGuaranteedFatalFirstStrikeCountershot)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(11), 80);
+	setArmy(defenderSideHero, CreatureID(2), 5000);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 20));
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * ballista = nullptr;
+	CStack * firstStriker = nullptr;
+	const CStack * safeTarget = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER
+			&& unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER
+			&& unit->creatureId() == CreatureID(2))
+			firstStriker = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER
+			&& unit->creatureId() == CreatureID(0))
+			safeTarget = unit.get();
+	}
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_NE(firstStriker, nullptr);
+	ASSERT_NE(safeTarget, nullptr);
+	firstStriker->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(2))));
+	firstStriker->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(2)), BonusSubtypeID(BonusCustomSubtype::damageTypeRanged)));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(ballista, firstStriker->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(ballista, safeTarget->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(firstStriker, ballista->getPosition()));
+	ASSERT_TRUE(firstStriker->ableToRetaliate());
+	BattleAttackInfo firstCounter(firstStriker, ballista, 0, true);
+	firstCounter.attackerPos = firstStriker->getPosition();
+	firstCounter.defenderPos = ballista->getPosition();
+	const auto fatal = view->battleEstimateDamage(firstCounter, nullptr);
+	ASSERT_GE(fatal.damage.min, ballista->getAvailableHealth())
+		<< "Fixture must guarantee a fatal native countershot before the ballista acts";
+
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, safeTarget->unitId())
+		<< "A guaranteed fatal pre-shot counter cannot generate a predicted ballista volley";
+	std::cout << "AI_TUM_FIRST_STRIKE_SIEGE baseline=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\\n';
+
+	// The proposal alone does not prove a valid action. Require server
+	// acceptance, a real attack event, and an applied final battle result.
+	battle()->activeStack = ballista->unitId();
+	const int shotsBefore = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_GT(recorder.shots, shotsBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaValuesEngineProjectedLoss)
 {
 	startRecordedGame();
