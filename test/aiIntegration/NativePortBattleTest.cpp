@@ -3930,24 +3930,47 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherComparesShotAgainstMelee)
 // against a baseline and the authoritative server's return shot.
 TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherValuesRangedRetaliation)
 {
-	prepareBattle(CreatureID(2), 20, CreatureID(0), 8);
+	// Use actual pre-battle army stacks rather than BATTLE_SETUP-pending
+	// spawned stacks: only fully initialized archers possess live ammunition.
+	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 20);
+	setArmy(defenderSideHero, CreatureID(0), 8);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 60));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(2)), CreatureID(2).toCreature(), 60));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 	battle()->obstacles.clear();
-	const CStack * archer = nullptr;
+	CStack * archer = nullptr;
+	CStack * ordinary = nullptr;
+	CStack * retaliator = nullptr;
 	for(const auto & unit : battle()->stacks)
-		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+	{
+		if(unit->unitSide() != BattleSide::ATTACKER || unit->creatureId() != CreatureID(2))
+			continue;
+		if(unit->unitSlot() == SlotID(0))
 			archer = unit.get();
+		else if(unit->unitSlot() == SlotID(1))
+			ordinary = unit.get();
+		else if(unit->unitSlot() == SlotID(2))
+			retaliator = unit.get();
+	}
 	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(ordinary, nullptr);
+	ASSERT_NE(retaliator, nullptr);
+	ASSERT_TRUE(ordinary->canShoot());
+	ASSERT_TRUE(retaliator->canShoot());
 	const BattleHex ordinaryHex(archer->getPosition().toInt() + 8);
 	const BattleHex counterHex(archer->getPosition().toInt() + 9);
 	ASSERT_TRUE(ordinaryHex.isAvailable());
 	ASSERT_TRUE(counterHex.isAvailable());
 	ASSERT_EQ(battle()->battleGetUnitByPos(ordinaryHex), nullptr);
 	ASSERT_EQ(battle()->battleGetUnitByPos(counterHex), nullptr);
-	const CStack * ordinary = addStack(BattleSide::ATTACKER, CreatureID(2), ordinaryHex, 60);
-	CStack * retaliator = addStack(BattleSide::ATTACKER, CreatureID(2), counterHex, 60);
-	ASSERT_NE(ordinary, nullptr);
-	ASSERT_NE(retaliator, nullptr);
+	// Fixture-only positions isolate two legal shots from melee alternatives.
+	ordinary->setPosition(ordinaryHex);
+	retaliator->setPosition(counterHex);
 	retaliator->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION, BonusSource::CREATURE_ABILITY,
 		1, BonusSourceID(CreatureID(2))));
