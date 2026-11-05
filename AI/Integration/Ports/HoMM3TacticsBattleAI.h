@@ -464,6 +464,28 @@ private:
 			&& !attacker.hasBonusOfType(BonusType::MULTIHEX_ENEMY_ATTACK))
 			return 0.0;
 
+		// Native FIRST_STRIKE may kill the moving attacker BEFORE its own
+		// multi-head or breath attack is executed. The pinned Heroes III
+		// checkAdjacentHexes has no preemptive first-strike rule, so this is
+		// strictly a VCMI legality correction to the partial port. A certain
+		// lethal counter must never earn damage credit against bystanders.
+		const auto firstStrikeMelee = target.hasBonus(Selector::typeSubtype(
+			BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+			.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+				BonusCustomSubtype::damageTypeMelee)));
+		if(firstStrikeMelee && !target.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+			&& !attacker.isInvincible() && target.ableToRetaliate()
+			&& !battle.isLongWeaponAttack(&attacker, &target, from))
+		{
+			BattleAttackInfo firstCounter(&target, &attacker, 0, false);
+			firstCounter.attackerPos = target.getPosition();
+			firstCounter.defenderPos = from;
+			const auto counter = battle.battleEstimateDamage(firstCounter);
+			if(counter.damage.min >= attacker.getAvailableHealth())
+				return 0.0;
+		}
+
 		double value = 0.0;
 		// The engine de-duplicates double-wide targets. A direct hit is
 		// already in exchangeValue; never score it as collateral.
