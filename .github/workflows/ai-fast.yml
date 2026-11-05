@@ -258,6 +258,7 @@ jobs:
                       'V15RejectsEmptyActionGraphBeforeOnnxInference',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
                       'V15RejectsMoveOutsideLiveEngineReachability',
+                      'V15RejectsMeleeApproachOutsideLiveEngineReachability',
                       'V15RejectsDeadOrMissingModelAttackTarget',
                       'V15RejectsMovedOrReplacedObservedTargetBeforeDispatch',
                       'RejectsUnexpectedTerminalOnnxAction',

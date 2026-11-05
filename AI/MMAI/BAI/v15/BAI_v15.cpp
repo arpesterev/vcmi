@@ -332,6 +332,10 @@ namespace
 			{
 				if(a->endsAt.empty() || !a->endsAt.front())
 					throw std::runtime_error("MMAI V15: model AMOVE action has no destination");
+				// The model-selected approach must still be reachable at dispatch.
+				const auto & destination = a->endsAt.front()->bhex;
+				const auto reachability = battle.getReachability(acstack);
+				requireNNV15LegalMeleeApproach(destination, reachability, acstack->getMovementRange());
 				const auto * target = a->target ? &a->target->cstack : nullptr;
 				requireNNV15ObservedTargetAtHex(target, a->targetPositionAtObservation,
 					[&battle](const BattleHex & hex) { return battle.battleGetStackByPos(hex); }, "AMOVE");

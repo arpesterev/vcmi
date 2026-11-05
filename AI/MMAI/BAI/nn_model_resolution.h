@@ -88,6 +88,17 @@ inline void requireNNV15LegalMove(const Hex & destination, const Reachability & 
 		throw std::runtime_error("MMAI V15: model MOVE destination is not reachable this turn");
 }
 
+// A V15 AMOVE destination is an ONNX snapshot too. Even if its actor and
+// target remain alive, live speed, gates or obstacles can invalidate the
+// selected melee approach. Never resample or replace the ONNX destination.
+template<typename Hex, typename Reachability, typename Distance>
+inline void requireNNV15LegalMeleeApproach(const Hex & destination, const Reachability & reachability, Distance movementRange)
+{
+	if(!destination.isAvailable() || !reachability.isReachable(destination) ||
+	   reachability.distances[destination.toInt()] > movementRange)
+		throw std::runtime_error("MMAI V15: model AMOVE approach is not reachable this turn");
+}
+
 // V13's hex MOVE mask is also an observation snapshot. Revalidate the
 // model-selected destination against the live server reachability immediately
 // before dispatch, without replacing the policy's chosen hex. A MOVE onto

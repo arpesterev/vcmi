@@ -856,6 +856,43 @@ TEST(MMAINNOutputValidation, V15RejectsMoveOutsideLiveEngineReachability)
 	EXPECT_THROW(requireNNV15LegalMove(Hex{-1, false}, live, 9u), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V15RejectsMeleeApproachOutsideLiveEngineReachability)
+{
+	using MMAI::BAI::requireNNV15LegalMeleeApproach;
+	struct Hex
+	{
+		int index;
+		bool available;
+		bool isAvailable() const { return available; }
+		int toInt() const { return index; }
+	};
+	struct Reachability
+	{
+		std::array<unsigned, 3> distances{0, 2, 5};
+		bool isReachable(const Hex & hex) const { return distances.at(hex.index) < 1000000; }
+	};
+
+	Reachability live;
+	// The current hex and a destination at the movement limit remain legal.
+	EXPECT_NO_THROW(requireNNV15LegalMeleeApproach(Hex{0, true}, live, 0u));
+	EXPECT_NO_THROW(requireNNV15LegalMeleeApproach(Hex{2, true}, live, 5u));
+	// A stale graph mask cannot authorize a changed live movement range.
+	EXPECT_THROW(requireNNV15LegalMeleeApproach(Hex{2, true}, live, 4u), std::runtime_error);
+	live.distances[1] = 1000000;
+	EXPECT_THROW(requireNNV15LegalMeleeApproach(Hex{1, true}, live, 9u), std::runtime_error);
+	EXPECT_THROW(requireNNV15LegalMeleeApproach(Hex{0, false}, live, 9u), std::runtime_error);
+	EXPECT_THROW(requireNNV15LegalMeleeApproach(Hex{-1, false}, live, 9u), std::runtime_error);
+	try
+	{
+		requireNNV15LegalMeleeApproach(Hex{2, true}, live, 4u);
+		FAIL() << "MMAI V15 accepted a stale melee approach";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("AMOVE approach"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsEmptyActionGraphBeforeOnnxInference)
 {
 	using MMAI::BAI::requireNNV15ActionCandidates;
