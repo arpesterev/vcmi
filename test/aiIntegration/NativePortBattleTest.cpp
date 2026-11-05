@@ -2118,6 +2118,31 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FarewellSpellChoosesNativeDamageAndCom
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2FarewellIgnoresSpellWithNoCreatureDeaths)
+{
+	// Pinned ai_battle_spell.cpp::spellDamageValue(retreating=true)
+	// counts killed creatures, not fractional hit-point loss. A 20-damage
+	// Magic Arrow cannot kill a fresh 25-HP Griffin and must not be cast
+	// just before leaving the battlefield. Native VCMI owns spell damage.
+	prepareBattle(CreatureID(0), 20, CreatureID(4), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto * active = battle()->battleActiveUnit();
+	ASSERT_NE(active, nullptr);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto selected = AIIntegration::FHeroes2SpellPolicy::choose(view, environment.get(), active, true);
+	EXPECT_FALSE(selected.has_value())
+		<< "Farewell must not waste mana on a wound with no killed creatures";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2StrategicFarewellCastThenNativeRetreat)
 {
 	// In the pinned planUnitTurn, a doomed AI hero with a valuable artifact
