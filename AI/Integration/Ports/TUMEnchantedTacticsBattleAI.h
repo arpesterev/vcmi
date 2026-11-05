@@ -361,13 +361,25 @@ private:
 		double bestScore = -std::numeric_limits<double>::infinity();
 		for(const auto * target : targets)
 		{
-			if(!battle.battleCanShoot(&stack, target->getPosition()))
-				continue;
-			const double value = score(*target, stack.getPosition(), 0, true, target->getPosition());
-			if(!bestAction || value > bestScore)
+			// An original ally may occupy two cells. Native VCMI range/damage
+			// estimation receives the exact aimed cell, and the two legal shots
+			// can have different results. Do not silently assign every wide
+			// creature a head-only Hypnotize shot. This is a VCMI projection,
+			// not a claim about the unavailable TUM DLL's aiming internals.
+			for(const auto & aimedHex : target->getHexes())
 			{
-				bestAction = BattleAction::makeShotAttack(&stack, target);
-				bestScore = value;
+				if(!battle.battleCanShoot(&stack, aimedHex))
+					continue;
+				const double value = score(*target, stack.getPosition(), 0, true, aimedHex);
+				if(!bestAction || value > bestScore)
+				{
+					// Preserve the unit-target native action for a head shot.
+					// A tail shot must explicitly aim at that occupied hex.
+					bestAction = aimedHex == target->getPosition()
+						? BattleAction::makeShotAttack(&stack, target)
+						: BattleAction::makeShotAttack(&stack, aimedHex);
+					bestScore = value;
+				}
 			}
 		}
 		if(!stack.getPosition().isValid())
