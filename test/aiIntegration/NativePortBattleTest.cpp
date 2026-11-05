@@ -5878,7 +5878,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 	battle()->obstacles.clear();
 
 	CStack * ballista = nullptr;
-	const CStack * isolated = nullptr;
+	CStack * isolated = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->isBallista())
@@ -5888,6 +5888,27 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 	}
 	ASSERT_NE(ballista, nullptr);
 	ASSERT_NE(isolated, nullptr);
+	// HoMM3's native target-time weighting favors a closer isolated stack.
+	// Position it independently of the distant splash cluster, then verify
+	// the two policies genuinely disagree on the SAME native battlefield.
+	BattleHex closer;
+	int shortestDistance = GameConstants::BFIELD_SIZE;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(!candidate.isAvailable() || candidate.getX() < 5 || candidate.getX() > 6
+			|| battle()->battleGetUnitByPos(candidate))
+			continue;
+		const int distance = BattleHex::getDistance(ballista->getPosition(), candidate);
+		if(distance < shortestDistance)
+		{
+			closer = candidate;
+			shortestDistance = distance;
+		}
+	}
+	ASSERT_TRUE(closer.isValid());
+	isolated->setPosition(closer);
+	ASSERT_EQ(isolated->getPosition(), closer);
 	ballista->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::SHOOTS_ALL_ADJACENT,
 		BonusSource::OTHER, 1, BonusSourceID()));
@@ -5895,30 +5916,37 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 
 	BattleHex firstHex;
 	BattleHex secondHex;
+	BattleHex thirdHex;
 	for(int index = 0; index < GameConstants::BFIELD_SIZE && !firstHex.isValid(); ++index)
 	{
 		const BattleHex candidate(index);
-		if(!candidate.isAvailable() || candidate.getX() < 8 || candidate.getX() > 11
+		if(!candidate.isAvailable() || candidate.getX() < 12 || candidate.getX() > 14
 			|| battle()->battleGetUnitByPos(candidate)
-			|| BattleHex::getDistance(candidate, isolated->getPosition()) < 5)
+			|| BattleHex::getDistance(candidate, isolated->getPosition()) < 6)
 			continue;
+		std::vector<BattleHex> neighbours;
 		for(const auto & neighbour : candidate.getNeighbouringTiles())
 		{
 			if(neighbour.isAvailable() && !battle()->battleGetUnitByPos(neighbour)
-				&& BattleHex::getDistance(neighbour, isolated->getPosition()) >= 4)
-			{
-				firstHex = candidate;
-				secondHex = neighbour;
-				break;
-			}
+				&& BattleHex::getDistance(neighbour, isolated->getPosition()) >= 5)
+				neighbours.push_back(neighbour);
+		}
+		if(neighbours.size() >= 2)
+		{
+			firstHex = candidate;
+			secondHex = neighbours[0];
+			thirdHex = neighbours[1];
 		}
 	}
 	ASSERT_TRUE(firstHex.isValid());
 	ASSERT_TRUE(secondHex.isValid());
-	const CStack * first = addStack(BattleSide::DEFENDER, CreatureID(0), firstHex, 50);
-	const CStack * second = addStack(BattleSide::DEFENDER, CreatureID(0), secondHex, 50);
+	ASSERT_TRUE(thirdHex.isValid());
+	const CStack * first = addStack(BattleSide::DEFENDER, CreatureID(0), firstHex, 40);
+	const CStack * second = addStack(BattleSide::DEFENDER, CreatureID(0), secondHex, 40);
+	const CStack * third = addStack(BattleSide::DEFENDER, CreatureID(0), thirdHex, 40);
 	ASSERT_NE(first, nullptr);
 	ASSERT_NE(second, nullptr);
+	ASSERT_NE(third, nullptr);
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -5926,7 +5954,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
-	for(const CStack * target : {isolated, first, second})
+	for(const CStack * target : {isolated, first, second, third})
 		ASSERT_TRUE(view->battleCanShoot(ballista, target->getPosition()));
 	const auto hasHit = [&](const CStack * primary, const CStack * extra)
 	{
@@ -5938,14 +5966,16 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 		});
 	};
 	ASSERT_TRUE(hasHit(first, second));
+	ASSERT_TRUE(hasHit(first, third));
 	ASSERT_TRUE(hasHit(second, first));
 	ASSERT_FALSE(hasHit(isolated, first));
 	ASSERT_FALSE(hasHit(isolated, second));
+	ASSERT_FALSE(hasHit(isolated, third));
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(baseline.target.empty());
 	ASSERT_EQ(baseline.target.front().unitValue, isolated->unitId())
-		<< "HoMM3's single-target score must prefer the isolated 80-unit stack";
+		<< "HoMM3's target-time score must prefer the closer isolated stack";
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
@@ -5963,14 +5993,15 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
 	ASSERT_FALSE(callback->action->target.empty());
 	const int targetID = callback->action->target.front().unitValue;
-	ASSERT_TRUE(targetID == first->unitId() || targetID == second->unitId())
-		<< "The TUM projection must value both nearby enemies, not only the aimed stack";
+	ASSERT_EQ(targetID, first->unitId())
+		<< "The TUM projection must value all three enemies around the aimed stack";
 	EXPECT_NE(callback->action->toString(), baseline.toString());
 	std::cout << "AI_TUM_BALLISTA_SPLASH homm3=" << baseline.toString()
 		<< " tum=" << callback->action->toString() << '\n';
 
 	const auto firstHealthBefore = first->getAvailableHealth();
 	const auto secondHealthBefore = second->getAvailableHealth();
+	const auto thirdHealthBefore = third->getAvailableHealth();
 	battle()->activeStack = ballista->unitId();
 	const int shotsBefore = recorder.shots;
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
@@ -5978,6 +6009,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 	EXPECT_GT(recorder.shots, shotsBefore);
 	EXPECT_LT(first->getAvailableHealth(), firstHealthBefore);
 	EXPECT_LT(second->getAvailableHealth(), secondHealthBefore);
+	EXPECT_LT(third->getAvailableHealth(), thirdHealthBefore);
 	policy.reset();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(recorder.damage, 0);
