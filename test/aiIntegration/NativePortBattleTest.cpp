@@ -4448,7 +4448,26 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeRangedRetaliationChangesChosenTa
 		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
 	ASSERT_TRUE(formerChoice->hasBonusOfType(BonusType::RANGED_RETALIATION));
 	BattleAttackInfo counter(formerChoice, shooter, 0, true);
-	ASSERT_GT(view->battleEstimateDamage(counter).damage.min, 0);
+	const auto untouchedCounter = view->battleEstimateDamage(counter);
+	ASSERT_GT(untouchedCounter.damage.min, 0);
+	// Native RANGED_RETALIATION acts after the primary hit, with fewer
+	// surviving archers. Compare detached forecasts, then verify that the
+	// policy neither changes the live target nor invents a new action.
+	const int64_t liveHealthBeforePreview = formerChoice->getAvailableHealth();
+	const int64_t liveCountBeforePreview = formerChoice->getCount();
+	auto afterShot = formerChoice->acquireState();
+	const auto openingEstimate = view->battleEstimateDamage(opening);
+	const int64_t expectedHit = openingEstimate.damage.min
+		+ (openingEstimate.damage.max - openingEstimate.damage.min) / 2;
+	afterShot->damage(std::clamp<int64_t>(expectedHit, 0, afterShot->getAvailableHealth()));
+	ASSERT_TRUE(afterShot->alive());
+	ASSERT_LT(afterShot->getCount(), liveCountBeforePreview);
+	BattleAttackInfo reducedCounter(afterShot.get(), shooter, 0, true);
+	const auto survivingCounter = view->battleEstimateDamage(reducedCounter);
+	EXPECT_LT(survivingCounter.damage.min, untouchedCounter.damage.min);
+	EXPECT_LE(survivingCounter.damage.max, untouchedCounter.damage.max);
+	EXPECT_EQ(formerChoice->getAvailableHealth(), liveHealthBeforePreview);
+	EXPECT_EQ(formerChoice->getCount(), liveCountBeforePreview);
 	policy->activeStack(battleID, shooter);
 	ASSERT_TRUE(callback->action.has_value());
 	const auto reranked = *callback->action;
