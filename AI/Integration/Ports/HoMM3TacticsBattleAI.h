@@ -768,15 +768,33 @@ private:
 		const int oldHeadDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
 		const int oldTime = std::max(1, (oldHeadDistance + oldSpeed - 1) / oldSpeed);
 		const bool canShootNow = battle.battleCanShoot(&target, attacker.getPosition());
+		// Pinned getRangedAttackValue asks whether the ENEMY has an AI target,
+		// not whether it can shoot our currently active stack. In a real VCMI
+		// battle a limited-range shooter may threaten another friendly stack
+		// without being able to fire back at this distant attacker. Preserve
+		// that global danger instead of giving it the source's 1/5 discount.
+		// Use only legal shots accepted by the native battle callback. TUM's
+		// separate source-inspired baseline remains explicitly unchanged.
+		bool hasNativeShot = canShootNow;
+		if(includeNativeInactive && !hasNativeShot)
+		{
+			for(const auto * friendly : battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
+			{
+				if(friendly->alive() && battle.battleCanShoot(&target, friendly->getPosition()))
+				{
+					hasNativeShot = true;
+					break;
+				}
+			}
+		}
 		const int time = includeNativeInactive
-			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement, canShootNow) : oldTime;
+			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement, hasNativeShot) : oldTime;
 		// Source enemy.cannotAttack includes available ranged attacks. VCMI's
 		// battleCanAttackUnit is melee-only: Ballista and other ranged-only
-		// units would otherwise be discounted even when they can fire NOW.
-		// Keep TUM's explicitly composed older baseline unchanged.
+		// units would otherwise be discounted even when they can shoot an ally.
 		const bool meleeCapable = battle.battleCanAttackUnit(&target, &attacker);
 		const bool canAttack = includeNativeInactive
-			? Ports::HoMM3::nativeTargetCanAttack(meleeCapable, canShootNow) : meleeCapable;
+			? Ports::HoMM3::nativeTargetCanAttack(meleeCapable, hasNativeShot) : meleeCapable;
 		return Ports::HoMM3::rangedAttackValue(
 			{effect, isIncapacitated(target, includeNativeInactive), !canAttack, canAttack, time}, false);
 	}
