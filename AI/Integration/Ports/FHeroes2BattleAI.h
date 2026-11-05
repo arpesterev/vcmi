@@ -429,7 +429,12 @@ private:
 			if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
 				continue;
 
-			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			// Pinned fheroes2 meleeUnitOffense calls GetSpeed(false, true).
+			// Blind/Paralyze opponents cannot evade on their next turn even
+			// when VCMI exposes a positive raw movement range under NOT_ACTIVE.
+			// This affects pursuit priority, not the legality of attacking them.
+			const int enemySpeed = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				? 0 : static_cast<int>(enemy->getMovementRange());
 			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
 				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
 			const Ports::FHeroes2::DistantTarget candidate{
