@@ -4590,6 +4590,7 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraRetaliationReachesAdditionalAlliedSt
 	ASSERT_NE(escort, nullptr);
 	const int64_t escortBefore = escort->getAvailableHealth();
 	const int64_t cavalierBefore = cavalier->getAvailableHealth();
+	const int64_t hydraBefore = hydra->getAvailableHealth();
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -4617,6 +4618,20 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraRetaliationReachesAdditionalAlliedSt
 	const BattleHex aimed = action.target[1].hexValue;
 	const auto legalAims = view->meleeAttackHexes(cavalier, hydra, from);
 	EXPECT_NE(std::find(legalAims.begin(), legalAims.end(), aimed), legalAims.end());
+	// Native wide-target damage previews must use the exact legal aim chosen
+	// by HoMM3, including when a multi-target defender is expected to
+	// retaliate. The preview does not injure any of the three live stacks.
+	const auto reach = view->getReachability(cavalier);
+	BattleAttackInfo chosenHit(cavalier, hydra, reach.distances[from.toInt()], false);
+	chosenHit.attackerPos = from;
+	chosenHit.defenderPos = aimed;
+	DamageEstimation returnHit;
+	const auto initialHit = view->battleEstimateDamage(chosenHit, &returnHit);
+	EXPECT_GT(initialHit.damage.max, 0);
+	EXPECT_GT(returnHit.damage.max, 0);
+	EXPECT_EQ(cavalier->getAvailableHealth(), cavalierBefore);
+	EXPECT_EQ(hydra->getAvailableHealth(), hydraBefore);
+	EXPECT_EQ(escort->getAvailableHealth(), escortBefore);
 	const auto affected = view->getAttackedBattleUnits(
 		hydra, cavalier, from, false, hydra->getPosition(), from);
 	EXPECT_NE(std::find(affected.begin(), affected.end(), escort), affected.end())
