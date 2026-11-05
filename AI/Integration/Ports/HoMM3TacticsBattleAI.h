@@ -303,14 +303,18 @@ public:
 				&& !targets.empty() && targets.size() < enemies.size())
 			{
 				// Only after an actual fast mobile decoy has been excluded,
-				// do not redirect our advance toward a stationary war machine
-				// instead of the slower mobile stack that justified the filter.
-				// Keep machines in the normal fallback and immediate-attack
-				// policies; this is a TUM-only movement preference.
+				// route toward an active, slower mobile unit. A siege machine or
+				// incapacitated stack is not a mobile alternative, even though it
+				// may still be legally attacked (handled above) or be a legitimate
+				// target of the unchanged HoMM3 fallback. In particular, a nearby
+				// paralyzed stack must not replace the slow mobile stack that
+				// justified TUM's anti-decoy movement rule.
+				// This guard runs only with avoidFastDecoys=true (TUM).
 				auto mobileAlternatives = targets;
 				vstd::erase_if(mobileAlternatives, [](const CStack * enemy)
 				{
-					return enemy->hasBonusOfType(BonusType::SIEGE_WEAPON);
+					return enemy->hasBonusOfType(BonusType::SIEGE_WEAPON)
+						|| enemy->hasBonusOfType(BonusType::NOT_ACTIVE) || enemy->isFrozen();
 				});
 				if(!mobileAlternatives.empty())
 					targets = std::move(mobileAlternatives);
