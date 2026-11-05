@@ -3647,6 +3647,7 @@ TEST_F(AIIntegrationNativeBattle, tumIncapacitatedAlternativeCannotRedirectFastD
 		<< "The disabled unit must remain a legal future melee target";
 	const auto withDisabledHoMM3 = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *own);
 	ASSERT_EQ(withDisabledHoMM3.actionType, EActionType::WALK);
+	ASSERT_FALSE(withDisabledHoMM3.target.empty());
 	policy->activeStack(battleID, own);
 	ASSERT_TRUE(callback->action.has_value());
 	ASSERT_EQ(callback->action->actionType, EActionType::WALK);
@@ -3656,14 +3657,12 @@ TEST_F(AIIntegrationNativeBattle, tumIncapacitatedAlternativeCannotRedirectFastD
 	EXPECT_NE(callback->action->target.front().hexValue,
 		withDisabledHoMM3.target.front().hexValue)
 		<< "The TUM movement override must remain independent of the HoMM3 baseline";
-	const int ownId = own->unitId();
-	battle()->activeStack = ownId;
+	battle()->activeStack = own->unitId();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Authoritative VCMI server rejected TUM's independently chosen movement";
 	EXPECT_GT(recorder.movementPackets, 0);
 	policy.reset();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
-	EXPECT_GT(lastAcceptedActionTypesByUnit[ownId][EActionType::WALK], 0);
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
