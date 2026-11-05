@@ -4457,9 +4457,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeRangedRetaliationChangesChosenTa
 	const int64_t liveCountBeforePreview = formerChoice->getCount();
 	auto afterShot = formerChoice->acquireState();
 	const auto openingEstimate = view->battleEstimateDamage(opening);
-	const int64_t expectedHit = openingEstimate.damage.min
+	int64_t expectedHit = openingEstimate.damage.min
 		+ (openingEstimate.damage.max - openingEstimate.damage.min) / 2;
-	afterShot->damage(std::clamp<int64_t>(expectedHit, 0, afterShot->getAvailableHealth()));
+	expectedHit = std::clamp<int64_t>(expectedHit, 0, afterShot->getAvailableHealth());
+	afterShot->damage(expectedHit);
 	ASSERT_TRUE(afterShot->alive());
 	ASSERT_LT(afterShot->getCount(), liveCountBeforePreview);
 	BattleAttackInfo reducedCounter(afterShot.get(), shooter, 0, true);
