@@ -109,6 +109,35 @@ TEST(MMAINNOutputValidation, V15RejectsUnrepresentableNeuralActionIdBeforeDispat
 	}
 }
 
+TEST(MMAINNOutputValidation, V15AcceptsOnlyScalarOrSingletonOnnxOutputs)
+{
+	using MMAI::BAI::requireNNV15ScalarOutputShape;
+
+	// Both scalar [] and [1] are supported by official ONNX V15 exports.
+	EXPECT_NO_THROW(requireNNV15ScalarOutputShape({}, "action"));
+	EXPECT_NO_THROW(requireNNV15ScalarOutputShape({1}, "action"));
+	EXPECT_NO_THROW(requireNNV15ScalarOutputShape({1}, "value"));
+
+	// Multi-dimensional, empty and dynamic dimensions must not slip through
+	// simply because their product equals one (or overflows to one).
+	const std::vector<std::vector<std::int64_t>> invalidShapes{
+		{0}, {2}, {-1}, {1, 1}, {-1, -1}, {1, 0},
+		{std::numeric_limits<std::int64_t>::max(), std::numeric_limits<std::int64_t>::max()}
+	};
+	for(const auto & shape : invalidShapes)
+		EXPECT_THROW(requireNNV15ScalarOutputShape(shape, "action"), std::runtime_error);
+
+	try
+	{
+		requireNNV15ScalarOutputShape({1, 1}, "value");
+		FAIL() << "V15 accepted an ambiguous rank-two critic output";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("value"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsInvalidValueHead)
 {
 	using MMAI::BAI::validateNNValueEstimate;

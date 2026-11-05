@@ -97,12 +97,7 @@ namespace
 			throwf("toScalar: %s: unsupported scalar type", name);
 		}
 
-		int64_t numel = 1;
-		for(auto d : shape)
-			numel *= d;
-
-		if(numel != 1)
-			throwf("toScalar: %s: bad numel: want: 1, have: %d", name, numel);
+		requireNNV15ScalarOutputShape(shape, name);
 
 		return tensor.GetTensorData<T>()[0];
 	}

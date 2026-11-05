@@ -72,6 +72,16 @@ inline int checkedNNV15ActionId(std::int64_t actionId)
 	return static_cast<int>(actionId);
 }
 
+// V15's "action" and "value" heads are scalar values (ONNX shape [] or
+// [1]), not arbitrary tensors whose dimensions happen to multiply to one.
+// The previous dimension-product check also allowed [-1, -1] and could
+// overflow on malformed shapes before reading element zero.
+inline void requireNNV15ScalarOutputShape(const std::vector<std::int64_t> & shape, const std::string & name)
+{
+	if(!shape.empty() && !(shape.size() == 1 && shape.front() == 1))
+		throw std::runtime_error("MMAI V15: ONNX output " + name + " must have scalar or [1] shape");
+}
+
 // V15 emits a critic value in addition to the action head. Although the
 // value does not determine the selected action, non-finite ONNX output is
 // evidence of a broken model and must not be accepted as a valid prediction.
