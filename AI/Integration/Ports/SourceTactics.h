@@ -99,6 +99,17 @@ inline bool projectedNativeRangedThreat(bool canShootNow, bool newContact,
 		&& (!hasRangeLimit || distance <= shootingRange);
 }
 
+// An archer pinned by the moving stack may regain its legal shot after
+// that stack leaves. battleCanShoot(enemy) describes the OLD board state,
+// not the hypothetical landing. Recover shooting only if the moving stack
+// is the actual blocker and no other hostile stack still pins the archer.
+// This is a native VCMI future-state projection, not a retail HoMM3 rule.
+inline bool projectedShooterReadyAfterMoverLeaves(bool canShootNow, bool intrinsicallyCanShoot,
+	bool moverPinsNow, bool anotherBlockerRemains)
+{
+	return canShootNow || (intrinsicallyCanShoot && moverPinsNow && !anotherBlockerRemains);
+}
+
 // checkAdjacentHexes uses the lower enemy_attacks score for two occupied
 // hexes. Native projected incoming-damage scores are negative (danger).
 inline double moreExposedFootprintThreat(double head, double tail)
