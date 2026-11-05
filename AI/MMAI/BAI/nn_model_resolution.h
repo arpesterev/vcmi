@@ -32,6 +32,17 @@ inline void enforceStrictNNModelLoad(bool strictNeural, const std::string & key,
 		throw std::runtime_error("MMAI: configured neural model '" + key + "' (" + configuredPath
 			+ ") failed to load: " + cause.what() + "; refusing substitute neural policy");
 }
+// A V15 activeStack event may refer to a creature eliminated by a previous
+// battle callback. Such an event must not enter ONNX inference, automatic
+// war-machine dispatch, or action conversion. This check is also repeated
+// after inference, since action graph nodes retain the original stack.
+template<typename Stack>
+inline void requireNNV15LivingActiveStack(const Stack * activeStack)
+{
+	if(!activeStack || !activeStack->alive())
+		throw std::runtime_error("MMAI V15: active creature is missing or no longer alive");
+}
+
 // V15 action nodes are generated for a particular active stack. If an
 // event adapter becomes stale, a node may refer to a different creature.
 // Runtime validation is required even in release builds (assert is disabled).
@@ -39,7 +50,8 @@ inline void enforceStrictNNModelLoad(bool strictNeural, const std::string & key,
 template<typename ActionPtr, typename Stack>
 inline void requireNNV15ActionActor(const ActionPtr & action, const Stack * activeStack)
 {
-	if(!action || !activeStack || !action->by || &action->by->cstack != activeStack)
+	requireNNV15LivingActiveStack(activeStack);
+	if(!action || !action->by || &action->by->cstack != activeStack)
 		throw std::runtime_error("MMAI V15: model action has no matching active creature");
 }
 
