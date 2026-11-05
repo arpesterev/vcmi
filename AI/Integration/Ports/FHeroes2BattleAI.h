@@ -1066,6 +1066,26 @@ private:
 		const auto reachability = battle.getReachability(&stack);
 		auto available = battle.battleGetAvailableHexes(reachability, &stack, false);
 		available.sort([](const BattleHex & left, const BattleHex & right) { return left.toInt() < right.toInt(); });
+		const auto stance = tactics(battle, stack, allEnemies);
+		if(stance.defensive)
+		{
+			// Pinned meleeUnitDefense covers a threatened friendly archer
+			// *before* considering unrelated melee opportunities. Previously
+			// any legal immediate attack bypassed this screen entirely.
+			// Keep the existing direct-attack priority if an archer's shot is
+			// blocked: source defense first attacks the adjacent blockers.
+			const bool shootersCanFire = std::all_of(
+				battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE).begin(),
+				battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE).end(),
+				[&](const CStack * friendly)
+				{
+					return !friendly->alive() || !friendly->isShooter()
+						|| battle.battleCanShoot(friendly);
+				});
+			if(shootersCanFire)
+					if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
+						return *cover;
+		}
 		const CStack * target = nullptr;
 		BattleHex targetHex;
 		Ports::FHeroes2::MeleeOutcome best;
@@ -1100,7 +1120,6 @@ private:
 					+ " occupant=" + (occupant ? std::to_string(occupant->unitId()) : "none"));
 			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
-		const auto stance = tactics(battle, stack, allEnemies);
 		if(stance.defensive)
 		{
 			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
