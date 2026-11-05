@@ -2365,9 +2365,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MagogAreaShotMakesDefensiveGuardSpread
 		}
 	}
 	ASSERT_TRUE(magogHex.isValid());
-	const CStack * magog = addStack(BattleSide::DEFENDER, CreatureID(45), magogHex, 3);
+	CStack * magog = addStack(BattleSide::DEFENDER, CreatureID(45), magogHex, 3);
 	ASSERT_NE(magog, nullptr);
 	ASSERT_TRUE(magog->isShooter());
+	// The reduced test creature catalog omits Magog's splash ability.
+	// Restore this existing native bonus only in the battle fixture.
+	magog->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
 	ASSERT_TRUE(magog->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
 	ASSERT_FALSE(magog->hasBonusOfType(BonusType::NOT_ACTIVE));
 	double enemyStrength = 0;
