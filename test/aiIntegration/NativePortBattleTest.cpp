@@ -1484,6 +1484,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBatt
 	const auto player = battle()->sideToPlayer(side);
 	auto callback = std::make_shared<DecisionCallback>(player);
 	callback->onBattleStarted(battle());
+	ASSERT_EQ(callback->getBattle(battleID)->battleCanCastSpell(friendlyHero, spells::Mode::HERO),
+		ESpellCastProblem::OK)
+		<< "The controller's real VCMI hero must be eligible to cast Magic Arrow";
 	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
