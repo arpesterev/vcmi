@@ -65,6 +65,38 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		// fheroes2 planUnitTurn queues SPELLCAST followed by RETREAT or
+		// SURRENDER. VCMI delivers only one action per callback, so resolve
+		// the queued withdrawal when the spell has been applied and the
+		// battle's active-stack callback resumes. The engine must reauthorize
+		// the final action; a changed battle state is never force-retreated.
+		if(const auto pending = pendingWithdrawals.find(battleID.getNum());
+			pending != pendingWithdrawals.end())
+		{
+			const auto requested = pending->second;
+			pendingWithdrawals.erase(pending);
+			if(requested == Ports::FHeroes2::Withdrawal::RETREAT && battle->battleCanFlee())
+			{
+				cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(battle->battleGetMySide()));
+				return;
+			}
+			if(requested == Ports::FHeroes2::Withdrawal::SURRENDER)
+			{
+				const auto * hero = battle->battleGetMyHero();
+				const auto * game = env ? env->game() : nullptr;
+				if(hero && game && battle->battleCanSurrender(hero->getOwner()))
+				{
+					const int cost = battle->battleGetSurrenderCost();
+					if(cost >= 0 && game->getResource(hero->getOwner(), GameResID::GOLD) >= cost)
+					{
+						cb->battleMakeUnitAction(battleID, BattleAction::makeSurrender(battle->battleGetMySide()));
+						return;
+					}
+				}
+			}
+			logAi->warn("AI_PORT_FAREWELL_CANCELLED backend=FHeroes2Tactics battle=%d reason=withdrawal_no_longer_legal",
+				battleID.getNum());
+		}
 		// fheroes2 exits an AI attacker's battle after 50 consecutive
 		// rounds with no deaths. VCMI must authorize retreat, and a
 		// human-controlled autobattle must never lose its hero this way.
@@ -137,7 +169,19 @@ public:
 				const Ports::FHeroes2::WithdrawalContext context{ourStrength, enemyStrength, 100.0 / 7.5,
 					false, initialFriendlySlots < 4 || fullyLostStack, canFlee, canSurrender,
 					affordable, valuableArtifacts, canRehire, primarySkillTotal};
-				switch(Ports::FHeroes2::decideWithdrawal(context))
+				const auto outcome = Ports::FHeroes2::decideWithdrawal(context);
+				if(outcome != Ports::FHeroes2::Withdrawal::FIGHT && preferences.enableSpellsUsage)
+				{
+					if(const auto farewell = FHeroes2SpellPolicy::choose(battle, env.get(), stack, true))
+					{
+						pendingWithdrawals[battleID.getNum()] = outcome;
+						logAi->debug("AI_PORT_FAREWELL backend=FHeroes2Tactics battle=%d action=%s",
+							battleID.getNum(), farewell->toString());
+						cb->battleMakeSpellAction(battleID, *farewell);
+						return;
+					}
+				}
+				switch(outcome)
 				{
 					case Ports::FHeroes2::Withdrawal::RETREAT:
 						cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(battle->battleGetMySide()));
@@ -170,14 +214,17 @@ void battleStart(const BattleID & battleID, const CCreatureSet *, const CCreatur
 		int3, const CGHeroInstance *, const CGHeroInstance *, BattleSide, bool) override
 	{
 		stalemateByBattle[battleID.getNum()].reset();
+		pendingWithdrawals.erase(battleID.getNum());
 	}
 
 	void battleEnd(const BattleID & battleID, const BattleResult *, QuestionID) override
 	{
 		stalemateByBattle.erase(battleID.getNum());
+		pendingWithdrawals.erase(battleID.getNum());
 	}
 
 private:
+	std::map<int32_t, Ports::FHeroes2::Withdrawal> pendingWithdrawals;
 	std::map<int32_t, Ports::FHeroes2::DeathlessRoundLimiter> stalemateByBattle;
 	std::shared_ptr<CBattleCallback> cb;
 	std::shared_ptr<Environment> env;
@@ -382,7 +429,13 @@ private:
 			if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
 				continue;
 
-			const int enemySpeed = static_cast<int>(enemy->getMovementRange());
+			// fheroes2 meleeUnitOffense tests GetSpeed(false, true), which
+			// returns STANDING for Blind/Paralyze even on the next turn.
+			// Native VCMI may preserve the raw movement range under NOT_ACTIVE.
+			// Such a target cannot evade pursuit; already-acted units without
+			// NOT_ACTIVE must retain their next-turn mobility.
+			const int enemySpeed = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				? 0 : static_cast<int>(enemy->getMovementRange());
 			const bool cannotEvade = enemy->hasBonusOfType(BonusType::SHOOTER)
 				|| enemySpeed <= 0 || (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < ownSpeed);
 			const Ports::FHeroes2::DistantTarget candidate{
@@ -469,6 +522,15 @@ private:
 					if(!engaged)
 						continue;
 				}
+				// Pinned fheroes2 isUnitAbleToApproachPosition uses
+				// GetSpeed(false, true): Blind/Paralyze means STANDING even
+				// on the following turn. Native VCMI getMovementRange()
+				// may still report the unmodified speed under NOT_ACTIVE;
+				// it must not create imaginary next-turn melee reach.
+				// Do not use canMove(): it also reflects whether a stack
+				// has already acted, which the source explicitly ignores.
+				if(enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
+					continue;
 				const int speed = static_cast<int>(enemy->getMovementRange());
 				if(speed <= 0)
 					continue;
@@ -533,6 +595,29 @@ private:
 		if(totalShooterStrength <= 0)
 			return std::nullopt;
 
+		// Pinned fheroes2 analyzeBattleState sets _avoidStackingUnits when
+		// active area-shot archers make up more than 10% of enemy strength.
+		// Its meleeUnitDefense then looks one more cell away when screening
+		// friendly archers. VCMI SHOOTS_ALL_ADJACENT is only a native splash
+		// projection, not an assertion that Heroes II and III area shots agree.
+		// In particular, incapacitated or engaged enemy shooters do not
+		// project a ranged splash shot for this turn.
+		double enemyStrength = 0;
+		double areaShotStrength = 0;
+		for(const auto * enemy : enemies)
+		{
+			if(!enemy->alive())
+				continue;
+			const double value = strength(*enemy);
+			enemyStrength += value;
+			if(enemy->isShooter() && enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
+				&& battle.battleCanShoot(enemy))
+				areaShotStrength += value;
+		}
+		const bool avoidSplashGrouping = enemyStrength > 0
+			&& areaShotStrength / enemyStrength > 0.1;
+		const int coverGap = avoidSplashGrouping ? 2 : 1;
+
 		BattleHex bestCoverHex;
 		double bestCoverValue = -std::numeric_limits<double>::infinity();
 		int bestTravel = GameConstants::BFIELD_SIZE;
@@ -563,7 +648,7 @@ private:
 			// Treat its current screen as a zero-travel candidate, then
 			// compare every reachable cover using the same source-derived
 			// archer-strength / travel-penalty ranking.
-			if(distanceToShooter(stack.getPosition(), *friendly) == 1)
+			if(distanceToShooter(stack.getPosition(), *friendly) == coverGap)
 			{
 				const double value = strength(*friendly);
 				if(value > bestCoverValue)
@@ -578,7 +663,7 @@ private:
 			for(const auto & hex : available)
 			{
 				if(!hex.isAvailable() || hex == stack.getPosition()
-					|| distanceToShooter(hex, *friendly) != 1)
+					|| distanceToShooter(hex, *friendly) != coverGap)
 					continue;
 				const int travel = reachability.distances[hex.toInt()];
 				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))
@@ -598,6 +683,189 @@ private:
 		}
 		return bestCoverHex.isValid() && bestCoverHex != stack.getPosition()
 			? std::optional<BattleAction>(BattleAction::makeMove(&stack, bestCoverHex))
+			: std::nullopt;
+	}
+
+	// Pinned fheroes2 meleeUnitDefense (ai_battle.cpp, lines 1774 and
+	// 2012-2039): before generic melee target selection, attack enemies
+	// physically blocking friendly archers. The source scores each blocker
+	// with BestAttackOutcome. Here the positions and damage previews are
+	// native VCMI projections, and only immediately legal attacks qualify.
+	// In particular, a blocked archer must not redirect a guard to an
+	// unrelated, more profitable melee target.
+	static std::optional<BattleAction> attackShooterBlocker(CPlayerBattleCallback & battle,
+		const CStack & guard, const ReachabilityInfo & reachability,
+		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
+	{
+		if(guard.hasBonusOfType(BonusType::SHOOTER)
+			|| guard.unitOwner() != battle.battleGetOwner(&guard))
+			return std::nullopt;
+
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		const CStack * chosenBlocker = nullptr;
+		BattleHex chosenFrom;
+		BattleHex chosenTargetHex;
+		double chosenShooterValue = std::numeric_limits<double>::lowest();
+		for(const auto * shooter : friends)
+		{
+			if(shooter == &guard || !shooter->alive() || !shooter->getPosition().isValid()
+				|| !shooter->isShooter() || battle.battleCanShoot(shooter))
+				continue;
+
+			const auto shooterHexes = shooter->getHexes();
+			const CStack * bestBlocker = nullptr;
+			BattleHex bestFrom;
+			BattleHex bestTargetHex;
+			Ports::FHeroes2::MeleeOutcome bestOutcome;
+			for(const auto * enemy : enemies)
+			{
+				// Lack of a shot can also result from a spell or empty ammo.
+				// Only real enemy contact can make a unit an archer blocker.
+				const auto enemyHexes = enemy->getHexes();
+				const bool adjacent = std::any_of(shooterHexes.begin(),
+					shooterHexes.end(), [&](const BattleHex & friendlyHex)
+					{
+						return std::any_of(enemyHexes.begin(), enemyHexes.end(),
+							[&](const BattleHex & enemyHex)
+							{
+								return BattleHex::getDistance(friendlyHex, enemyHex) == 1;
+							});
+					});
+				if(!adjacent)
+					continue;
+				for(const auto & from : available)
+				{
+					if(!from.isAvailable())
+						continue;
+					const auto targets = battle.meleeAttackHexes(&guard, enemy, from);
+					if(targets.empty() || battle.battleGetUnitByPos(targets.front()) != enemy)
+						continue;
+					const double value = attackValue(battle, guard, *enemy, from,
+						false, reachability.distances[from.toInt()]);
+					const Ports::FHeroes2::MeleeOutcome outcome{
+						from.toInt(), strength(*enemy), value, true};
+					if(!bestBlocker || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
+					{
+						bestBlocker = enemy;
+						bestFrom = from;
+						bestTargetHex = targets.front();
+						bestOutcome = outcome;
+					}
+				}
+			}
+			if(bestBlocker && (!chosenBlocker || strength(*shooter) > chosenShooterValue))
+			{
+				chosenShooterValue = strength(*shooter);
+				chosenBlocker = bestBlocker;
+				chosenFrom = bestFrom;
+				chosenTargetHex = bestTargetHex;
+			}
+		}
+		return chosenBlocker
+			? std::optional<BattleAction>(BattleAction::makeMeleeAttack(&guard, chosenTargetHex, chosenFrom))
+			: std::nullopt;
+	}
+
+	// Pinned fheroes2 meleeUnitDefense (ai_battle.cpp): when a friendly
+	// shooter is engaged, BestAttackOutcome may return a *future* melee
+	// position against its blocker, not only an attack this turn. Follow
+	// the native VCMI reachability predecessor chain to a legal first step;
+	// never manufacture WALK_AND_ATTACK beyond the current movement range.
+	// Heroes II and III pathfinding, obstruction and attack geometry differ.
+	static std::optional<BattleAction> pursueShooterBlocker(CPlayerBattleCallback & battle,
+		const CStack & guard, const ReachabilityInfo & reachability,
+		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
+	{
+		if(guard.hasBonusOfType(BonusType::SHOOTER)
+			|| guard.unitOwner() != battle.battleGetOwner(&guard)
+			|| !guard.getPosition().isValid() || guard.getMovementRange() == 0)
+			return std::nullopt;
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		double allShooterStrength = 0;
+		for(const auto * friendly : friends)
+			if(friendly != &guard && friendly->alive() && friendly->isShooter())
+				allShooterStrength += strength(*friendly);
+		if(allShooterStrength <= 0)
+			return std::nullopt;
+
+		// The source declines a remote two-turn screen if another immediate
+		// melee attack exists and the guard is too slow to reach the archer.
+		const bool immediateMeleeExists = std::any_of(enemies.begin(), enemies.end(),
+			[&](const CStack * enemy)
+			{
+				return std::any_of(available.begin(), available.end(), [&](const BattleHex & from)
+				{
+					return from.isAvailable() && !battle.meleeAttackHexes(&guard, enemy, from).empty();
+				});
+			});
+		const int speed = static_cast<int>(guard.getMovementRange());
+		BattleHex bestStep;
+		double bestPriority = -std::numeric_limits<double>::infinity();
+		int bestTravel = GameConstants::BFIELD_SIZE;
+		for(const auto * shooter : friends)
+		{
+			if(shooter == &guard || !shooter->alive() || !shooter->isShooter()
+				|| !shooter->getPosition().isValid() || battle.battleCanShoot(shooter))
+				continue;
+			for(const auto * blocker : enemies)
+			{
+				// Lack of ammunition and magical shot suppression are not
+				// evidence of a physically engaged archer.
+				bool adjacent = false;
+				for(const auto & shooterHex : shooter->getHexes())
+					for(const auto & blockerHex : blocker->getHexes())
+						adjacent |= BattleHex::getDistance(shooterHex, blockerHex) == 1;
+				if(!adjacent)
+					continue;
+
+				int shortest = GameConstants::BFIELD_SIZE;
+				BattleHex goal;
+				for(const auto & from : blocker->getAttackableHexes(&guard))
+				{
+					if(!from.isValid() || !battle.isMeleeAttackPossible(&guard, blocker, from))
+						continue;
+					const int distance = static_cast<int>(reachability.distances[from.toInt()]);
+					if(distance < shortest || (distance == shortest
+						&& (!goal.isValid() || from.toInt() < goal.toInt())))
+					{
+						shortest = distance;
+						goal = from;
+					}
+				}
+				if(!goal.isValid() || shortest <= speed || shortest >= GameConstants::BFIELD_SIZE
+					|| (immediateMeleeExists && !guard.hasBonusOfType(BonusType::FLYING)
+						&& shortest > speed * 2))
+					continue;
+
+				BattleHex step;
+				for(int turns = 0; turns < GameConstants::BFIELD_SIZE; ++turns)
+				{
+					if(available.contains(goal) && goal != guard.getPosition())
+					{
+						step = goal;
+						break;
+					}
+					const auto previous = reachability.predecessors[goal.toInt()];
+					if(!previous.isValid() || previous == goal)
+						break;
+					goal = previous;
+				}
+				if(!step.isValid())
+					continue;
+				// Source defenseDistanceModifier = total shooter strength / 15.
+				const double priority = strength(*shooter)
+					- allShooterStrength * shortest / 15.0;
+				if(!bestStep.isValid() || priority > bestPriority
+					|| (priority == bestPriority && (shortest < bestTravel
+						|| (shortest == bestTravel && step.toInt() < bestStep.toInt()))))
+				{
+					bestPriority = priority;
+					bestTravel = shortest;
+					bestStep = step;
+				}
+			}
+		}
+		return bestStep.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&guard, bestStep))
 			: std::nullopt;
 	}
 
@@ -996,6 +1264,30 @@ private:
 		const auto reachability = battle.getReachability(&stack);
 		auto available = battle.battleGetAvailableHexes(reachability, &stack, false);
 		available.sort([](const BattleHex & left, const BattleHex & right) { return left.toInt() < right.toInt(); });
+		const auto stance = tactics(battle, stack, allEnemies);
+		if(stance.defensive)
+		{
+			// Pinned meleeUnitDefense covers a threatened friendly archer
+			// *before* considering unrelated melee opportunities. Previously
+			// any legal immediate attack bypassed this screen entirely.
+			// An archer's blocked shot gives its actual adjacent enemy a
+			// higher priority than unrelated melee targets. A legal native
+			// attack is required; otherwise retain the generic melee policy.
+			if(const auto unblock = attackShooterBlocker(battle, stack, reachability, available, allEnemies))
+				return *unblock;
+			if(const auto pursue = pursueShooterBlocker(battle, stack, reachability, available, allEnemies))
+				return *pursue;
+			const auto friendlyUnits = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+			const bool shootersCanFire = std::all_of(friendlyUnits.begin(), friendlyUnits.end(),
+				[&](const CStack * friendly)
+				{
+					return !friendly->alive() || !friendly->isShooter()
+						|| battle.battleCanShoot(friendly);
+				});
+			if(shootersCanFire)
+					if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
+						return *cover;
+		}
 		const CStack * target = nullptr;
 		BattleHex targetHex;
 		Ports::FHeroes2::MeleeOutcome best;
@@ -1030,7 +1322,6 @@ private:
 					+ " occupant=" + (occupant ? std::to_string(occupant->unitId()) : "none"));
 			return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
-		const auto stance = tactics(battle, stack, allEnemies);
 		if(stance.defensive)
 		{
 			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
