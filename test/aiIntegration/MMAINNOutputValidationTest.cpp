@@ -353,6 +353,50 @@ TEST(MMAINNOutputValidation, RejectsUnexpectedTerminalOnnxAction)
 	EXPECT_THROW(requireNNModelTerminalReset(42), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V15RejectsDeadOrMissingModelAttackTarget)
+{
+	using MMAI::BAI::requireNNV15LegalTarget;
+	struct Stack
+	{
+		bool living;
+		bool alive() const { return living; }
+	};
+	const Stack living{true};
+	const Stack dead{false};
+	int liveCallbackCalls = 0;
+	const auto legal = [&liveCallbackCalls](const Stack *)
+	{
+		++liveCallbackCalls;
+		return true;
+	};
+
+	// Both attack variants use this production guard immediately before
+	// constructing their engine actions. A valid ONNX-selected target is
+	// preserved if the actual VCMI callback still permits the action.
+	EXPECT_NO_THROW(requireNNV15LegalTarget(&living, legal, "SHOOT"));
+	EXPECT_NO_THROW(requireNNV15LegalTarget(&living, legal, "AMOVE"));
+	EXPECT_EQ(liveCallbackCalls, 2);
+
+	// A formerly legal graph target may be killed by an intervening event.
+	// Never shoot at its old hex, reinterpret the attack, or sample again.
+	EXPECT_THROW(requireNNV15LegalTarget(&dead, legal, "SHOOT"), std::runtime_error);
+	EXPECT_THROW(requireNNV15LegalTarget(&dead, legal, "AMOVE"), std::runtime_error);
+	EXPECT_THROW(requireNNV15LegalTarget(static_cast<const Stack *>(nullptr), legal, "SHOOT"), std::runtime_error);
+	EXPECT_EQ(liveCallbackCalls, 2); // null/dead do not query the callback
+
+	EXPECT_THROW(requireNNV15LegalTarget(&living,
+		[](const Stack *) { return false; }, "AMOVE"), std::runtime_error);
+	try
+	{
+		requireNNV15LegalTarget(&dead, legal, "SHOOT");
+		FAIL() << "MMAI V15 accepted a dead model-selected target";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("V15: model SHOOT"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsMoveOutsideLiveEngineReachability)
 {
 	using MMAI::BAI::requireNNV15LegalMove;
