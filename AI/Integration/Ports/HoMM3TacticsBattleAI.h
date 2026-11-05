@@ -713,13 +713,44 @@ private:
 		return Ports::HoMM3::moreExposedFootprintThreat(head, tail);
 	}
 
+	// Retail getRangedAttackValue scores a single victim. VCMI shooters
+	// may have SHOOTS_ALL_ADJACENT: the real server can injure other stacks,
+	// including friendlies. Price only victims of the ACTUAL native head-aim
+	// command (makeShotAttack below); never invent a second aim hex here.
+	// This explicitly host-specific first-volley correction is HoMM3-only,
+	// not a claim about the original Heroes III projectile policy or
+	// additional shots, and leaves TUM's separate partial baseline unchanged.
+	static double projectedRangedCollateral(CPlayerBattleCallback & battle,
+		const CStack & attacker, const CStack & primaryTarget)
+	{
+		if(!attacker.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
+			return 0.0;
+		double value = 0.0;
+		for(const auto * affected : battle.getAttackedBattleUnits(
+			&attacker, &primaryTarget, primaryTarget.getPosition(), true))
+		{
+			const auto * secondary = dynamic_cast<const CStack *>(affected);
+			if(!secondary || secondary == &primaryTarget || secondary == &attacker || !secondary->alive())
+				continue;
+			BattleAttackInfo info(&attacker, secondary, 0, true);
+			const double loss = lossValue(*secondary, battle.battleEstimateDamage(info));
+			value += Ports::HoMM3::collateralStrikeValue(
+				battle.battleGetOwner(secondary) != battle.battleGetOwner(&attacker), loss);
+		}
+		if(!std::isfinite(value))
+			throw std::logic_error("Nonfinite HoMM3 ranged collateral projection");
+		return value;
+	}
+
 	static int32_t rangedScore(CPlayerBattleCallback & battle,
 		const CStack & attacker, const CStack & target, bool includeNativeInactive)
 	{
 		// Native replacement for getSimpleAttackEffect and enemy target-time lookup.
 		// The original uses its own projected enemy goal, not hex distance.
-		const int32_t effect = projectedAttackEffect(exchangeValue(battle, attacker, target,
-			attacker.getPosition(), true, 0, false, includeNativeInactive), includeNativeInactive);
+		const double direct = exchangeValue(battle, attacker, target,
+			attacker.getPosition(), true, 0, false, includeNativeInactive);
+		const int32_t effect = projectedAttackEffect(direct + (includeNativeInactive
+			? projectedRangedCollateral(battle, attacker, target) : 0.0), includeNativeInactive);
 		const int nativeMovement = std::max(0, static_cast<int>(target.getMovementRange()));
 		int distance = std::numeric_limits<int>::max();
 		for(const auto & enemyHex : target.getHexes())
