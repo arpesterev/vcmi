@@ -586,6 +586,11 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	if(modelGreedyAction != gaction)
 		throwf("getAction: model greedy action mismatch: output: %d, probabilities: %d", modelGreedyAction, gaction);
 
+	// The ONNX graph uses int64 IDs, but the battle interface accepts int.
+	// Never silently truncate a model-selected node to another action.
+	const int dispatchAction = checkedNNV15ActionId(saction);
+	(void)checkedNNV15ActionId(gaction);
+
 	const auto sname = graph->getNode(ET::NODE_ACTION, saction)->name();
 	const auto gname = graph->getNode(ET::NODE_ACTION, gaction)->name();
 
@@ -598,7 +603,7 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	);
 
 	timer.name = boost::str(boost::format("MMAI action: %d (confidence=%.2f): %s") % saction % sample.confidence % sname);
-	return static_cast<int>(saction);
+	return dispatchAction;
 };
 
 double NNModel::getValue(const MMAI::Schema::IState * s)
