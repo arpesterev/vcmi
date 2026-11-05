@@ -4435,6 +4435,31 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedFirstStrikeRangedCounterPrecedesS
 	ASSERT_GT(fullCounterDamage.damage.max, reducedCounterDamage.damage.max)
 		<< "A first-strike ranged counter must not be priced after casualties";
 
+	// TUM must also price its outgoing shot AFTER the server's FIRST_STRIKE,
+	// including the possibility that the entire hypnotized stack dies.
+	// All previews operate on copies, and must preserve both live health pools.
+	const hypnotizedHealth = hypnotized->getAvailableHealth();
+	const previewFollowUp = [&](int64_t counterDamage)
+	{
+		auto survivors = hypnotized->acquireState();
+		survivors->damage(counterDamage);
+		if(!survivors->alive())
+			return 0.0;
+		BattleAttackInfo followUp(survivors.get(), firstStriker, 0, true);
+		followUp.attackerPos = hypnotized->getPosition();
+		followUp.defenderPos = firstStriker->getPosition();
+		const auto estimate = view->battleEstimateDamage(followUp, nullptr);
+		return (static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0;
+	};
+	const double postCounterShot = (previewFollowUp(fullCounterDamage.damage.min)
+		+ previewFollowUp(fullCounterDamage.damage.max)) / 2.0;
+	const double preCounterShot = (static_cast<double>(firstDamage.damage.min)
+		+ firstDamage.damage.max) / 2.0;
+	ASSERT_LT(postCounterShot, preCounterShot)
+		<< "First-strike casualties must reduce TUM's outgoing shot projection";
+	EXPECT_EQ(hypnotized->getAvailableHealth(), hypnotizedHealth);
+	EXPECT_EQ(firstStriker->getAvailableHealth(), originalHealth);
+
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *hypnotized);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(baseline.target.empty());

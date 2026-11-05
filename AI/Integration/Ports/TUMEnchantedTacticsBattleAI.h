@@ -171,7 +171,7 @@ private:
 			DamageEstimation retaliation;
 			const auto damage = battle.battleEstimateDamage(info, &retaliation);
 			const double targetHealth = static_cast<double>(victim.getAvailableHealth());
-			const double dealt = std::min(targetHealth,
+			double dealt = std::min(targetHealth,
 				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
 			// Normally a guaranteed first-hit kill prevents retaliation;
 			// the native ranged FIRST_STRIKE exception counters before that
@@ -210,6 +210,26 @@ private:
 							const auto firstCounter = battle.battleEstimateDamage(counter, nullptr);
 							received = (static_cast<double>(firstCounter.damage.min)
 								+ firstCounter.damage.max) / 2.0;
+							// In native VCMI FIRST_STRIKE fires before the hypnotized
+							// stack attacks. The counter can kill some or all shooters;
+							// its full-strength return shot cannot coexist with our
+							// pre-retaliation outgoing-damage estimate. Preview the
+							// follow-up from two private post-counter stack states.
+							const auto shotAfterCounter = [&](int64_t counterDamage)
+							{
+								auto survivors = stack.acquireState();
+								survivors->damage(counterDamage);
+								if(!survivors->alive())
+									return 0.0;
+								BattleAttackInfo followUp(survivors.get(), &victim, distance, true);
+								followUp.attackerPos = origin;
+								followUp.defenderPos = aimedHex;
+								const auto preview = battle.battleEstimateDamage(followUp, nullptr);
+								return std::min(targetHealth,
+									(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0);
+							};
+							dealt = (shotAfterCounter(firstCounter.damage.min)
+								+ shotAfterCounter(firstCounter.damage.max)) / 2.0;
 						}
 						else
 						{
