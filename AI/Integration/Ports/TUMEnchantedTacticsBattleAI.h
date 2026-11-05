@@ -160,10 +160,14 @@ private:
 		{
 			return lhs->unitId() < rhs->unitId();
 		});
-		const auto score = [&](const CStack & victim, BattleHex origin, int distance, bool shooting)
+		const auto score = [&](const CStack & victim, BattleHex origin, int distance, bool shooting, BattleHex aimedHex)
 		{
+			// Price the actual occupied cell struck, not always a wide target's head.
+			if(!aimedHex.isValid() || !victim.getHexes().contains(aimedHex))
+				throw std::logic_error("TUM Hypnotize selected an invalid native aim");
 			BattleAttackInfo info(&stack, &victim, distance, shooting);
 			info.attackerPos = origin;
+			info.defenderPos = aimedHex;
 			DamageEstimation retaliation;
 			const auto damage = battle.battleEstimateDamage(info, &retaliation);
 			const double targetHealth = static_cast<double>(victim.getAvailableHealth());
@@ -231,7 +235,7 @@ private:
 		{
 			if(!battle.battleCanShoot(&stack, target->getPosition()))
 				continue;
-			const double value = score(*target, stack.getPosition(), 0, true);
+			const double value = score(*target, stack.getPosition(), 0, true, target->getPosition());
 			if(!bestAction || value > bestScore)
 			{
 				bestAction = BattleAction::makeShotAttack(&stack, target);
@@ -254,13 +258,17 @@ private:
 				if(!hex.isAvailable())
 					continue;
 				const auto attackedHexes = battle.meleeAttackHexes(&stack, target, hex);
-				if(attackedHexes.empty())
+				const int pathCost = reach.distances[hex.toInt()];
+				if(pathCost < 0)
 					continue;
-				const double value = score(*target, hex, reach.distances[hex.toInt()], false);
-				if(!bestAction || value > bestScore)
+				for(const auto & aimedHex : attackedHexes)
 				{
-					bestAction = BattleAction::makeMeleeAttack(&stack, attackedHexes.front(), hex);
-					bestScore = value;
+					const double value = score(*target, hex, pathCost, false, aimedHex);
+					if(!bestAction || value > bestScore)
+					{
+						bestAction = BattleAction::makeMeleeAttack(&stack, aimedHex, hex);
+						bestScore = value;
+					}
 				}
 			}
 		}
