@@ -4670,8 +4670,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2RemoteFlyerVetoesFastArcherEscape)
 	ASSERT_EQ(withFlyer->actionType, EActionType::WALK_AND_ATTACK)
 		<< "A remote flyer forces the source's adjacent-blocker melee: " << withFlyer->toString();
 	EXPECT_NE(withFlyer->actionType, noFlyer->actionType);
-	ASSERT_FALSE(withFlyer->target.empty());
-	EXPECT_EQ(battle()->battleGetUnitByPos(withFlyer->target.front().hexValue), blocker);
+	// Native makeMeleeAttack stores [attack-from, attacked-hex] in that order.
+	ASSERT_GE(withFlyer->target.size(), 2u);
+	EXPECT_EQ(battle()->battleGetUnitByPos(withFlyer->target.back().hexValue), blocker);
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *withFlyer))
 		<< "Server rejected the chosen melee action";
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
