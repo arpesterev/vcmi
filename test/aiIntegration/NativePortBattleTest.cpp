@@ -3592,6 +3592,82 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2MeleeUsesNativeHitHexOfWideTarget)
+{
+	// Pinned fheroes2 BattlePlanner::optimalAttackVector checks the actual
+	// attacked cell of a two-cell defender. The selected VCMI hit hex must
+	// be passed to BattleAttackInfo::defenderPos for damage preview.
+	// Heroes II directional damage is not assumed equivalent to Heroes III.
+	prepareBattle(CreatureID(10), 24, CreatureID(4), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * attacker = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			attacker = unit.get();
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
+	const BattleHex nearbyHead(attacker->getPosition().toInt() + 5);
+	ASSERT_TRUE(nearbyHead.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearbyHead), nullptr);
+	const auto * nearbyWide = addStack(BattleSide::DEFENDER, CreatureID(4), nearbyHead, 12);
+	ASSERT_NE(nearbyWide, nullptr);
+	ASSERT_TRUE(nearbyWide->doubleWide());
+	const auto occupied = nearbyWide->getHexes();
+	ASSERT_EQ(occupied.size(), 2u);
+	for(const auto & hex : occupied)
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nearbyWide);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reachability = view->getReachability(attacker);
+	const auto available = view->battleGetAvailableHexes(reachability, attacker, false);
+	bool hasLegalStrike = false;
+	for(const auto & from : available)
+		if(from.isAvailable() && !view->meleeAttackHexes(attacker, nearbyWide, from).empty())
+			hasLegalStrike = true;
+	ASSERT_TRUE(hasLegalStrike) << "The server must expose a genuine attack on the wide target";
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, attacker);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto & action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK)
+		<< "FHeroes2 must choose melee independently: " << action.toString();
+	ASSERT_GE(action.target.size(), 2u);
+	const BattleHex from = action.target.front().hexValue;
+	const BattleHex hit = action.target[1].hexValue;
+	EXPECT_TRUE(available.contains(from));
+	ASSERT_EQ(view->battleGetUnitByPos(hit), nearbyWide)
+		<< "The source-derived target scorer should prefer the reachable, stronger wide stack";
+	EXPECT_FALSE(view->meleeAttackHexes(attacker, nearbyWide, from).empty());
+	BattleAttackInfo preview(attacker, nearbyWide, reachability.distances[from.toInt()], false);
+	preview.attackerPos = from;
+	preview.defenderPos = hit;
+	const auto damage = view->battleEstimateDamage(preview);
+	EXPECT_GE(damage.damage.max, damage.damage.min);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "The actual server rejected the selected wide-footprint melee attack";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotEvaluatesBothHexesOfWideTarget)
 {
 	// Pinned fheroes2 archerDecision scores the HEAD and TAIL aim points of
