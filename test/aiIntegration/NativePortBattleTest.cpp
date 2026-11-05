@@ -4029,6 +4029,90 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// TUM's published Hypnotize damage-sum priority must account for actual
+// multihex melee victims. An explicit test-only breath bonus on a Peasant
+// exercises the native VCMI affected-unit selector; it does NOT claim that
+// Peasants naturally breathe fire or that the closed TUM DLL was recovered.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathScoresAndHitsNativeSecondaryMeleeVictim)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex frontHex(origin.toInt() + 1);
+	const BattleHex rearHex(origin.toInt() + 2);
+	ASSERT_TRUE(frontHex.isAvailable());
+	ASSERT_TRUE(rearHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(frontHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(rearHex), nullptr);
+	const auto * front = addStack(BattleSide::ATTACKER, CreatureID(0), frontHex, 1);
+	const auto * rear = addStack(BattleSide::ATTACKER, CreatureID(0), rearHex, 1);
+	ASSERT_NE(front, nullptr);
+	ASSERT_NE(rear, nullptr);
+	guard->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::TWO_HEX_ATTACK_BREATH,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(guard->hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH));
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, guard));
+	ASSERT_TRUE(guard->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(guard), player);
+	battle()->activeStack = guard->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto initialSplash = view->getAttackedBattleUnits(
+		guard, front, frontHex, false, origin);
+	ASSERT_TRUE(std::any_of(initialSplash.begin(), initialSplash.end(),
+		[&](const battle::Unit * hit) { return hit->unitId() == rear->unitId(); }))
+		<< "The real VCMI melee footprint must include the second former ally";
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *guard);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const BattleHex attackFrom = callback->action->target[0].hexValue;
+	const BattleHex aimed = callback->action->target[1].hexValue;
+	const auto * primary = view->battleGetUnitByPos(aimed);
+	ASSERT_NE(primary, nullptr);
+	const auto extra = view->getAttackedBattleUnits(
+		guard, primary, aimed, false, attackFrom);
+	ASSERT_FALSE(extra.empty())
+		<< "Hypnotized TUM must prefer an actual two-victim breath strike";
+	std::cout << "AI_TUM_HYPNOTIZE_MELEE_SPLASH homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\\n';
+	const int64_t totalHealthBefore =
+		front->getAvailableHealth() + rear->getAvailableHealth();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI rejected the independent TUM multihex melee attack";
+	EXPECT_LT(front->getAvailableHealth() + rear->getAvailableHealth(), totalHealthBefore)
+		<< "Native melee attack must actually damage the former allied line";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Source-published TUM Hypnotize values incoming retaliation as a benefit,
 // but an already exhausted stack cannot deliver it. Compare the native
 // HoMM3 net-exchange baseline with the TUM positive-exchange policy, execute
