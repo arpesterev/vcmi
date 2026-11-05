@@ -328,6 +328,7 @@ std::vector<NNModel::NodeInputSpec> NNModel::readNodeOrder() const
 	 *   ["Global", "Player", "Unit", "Hex", "Action"]
 	 */
 	auto res = std::vector<NodeInputSpec>{};
+	std::set<int> seenTypes;
 	const auto jsonstr = readMetadata(container, "node_order");
 
 	try
@@ -338,6 +339,7 @@ std::vector<NNModel::NodeInputSpec> NNModel::readNodeOrder() const
 		{
 			const auto & name = jv.String();
 			const auto type = nodeTypeByName(name);
+			requireUniqueNNMetadataType(seenTypes, static_cast<int>(type), "node_order");
 			res.push_back(NodeInputSpec{type, name, nodeAttrSize(type)});
 		}
 	}
@@ -362,6 +364,7 @@ std::vector<NNModel::EdgeInputSpec> NNModel::readEdgeOrder() const
 	 * the flattened edge input order.
 	 */
 	auto res = std::vector<EdgeInputSpec>{};
+	std::set<int> seenTypes;
 	const auto jsonstr = readMetadata(container, "edge_order");
 
 	try
@@ -378,6 +381,7 @@ std::vector<NNModel::EdgeInputSpec> NNModel::readEdgeOrder() const
 			const auto relName = parts[1].String();
 			const auto dstName = parts[2].String();
 			const auto type = edgeTypeByNames(srcName, relName, dstName);
+			requireUniqueNNMetadataType(seenTypes, static_cast<int>(type), "edge_order");
 			res.push_back(EdgeInputSpec{type, srcName, relName, dstName, edgeAttrSize(type)});
 		}
 	}
