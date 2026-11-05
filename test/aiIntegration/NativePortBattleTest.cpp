@@ -2255,6 +2255,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MagicArrowAvoidsWakingBlindedEnemy)
 	// Real round change restores spell availability after the setup cast.
 	endRound();
 	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_TRUE(blinded->alive());
+	ASSERT_TRUE(other->alive());
+	ASSERT_TRUE(blinded->hasBonusOfType(BonusType::NOT_ACTIVE))
+		<< "Blind must survive the setup round for wake-up risk to matter";
 	const CStack * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
 	for(int i = 0; i < 12 && active && active->unitSide() != BattleSide::ATTACKER; ++i)
 	{
@@ -2293,6 +2297,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MagicArrowAvoidsWakingBlindedEnemy)
 	ASSERT_EQ(recorder.castsOf(SpellID::MAGIC_ARROW).size(), 1u);
 	EXPECT_EQ(blinded->getAvailableHealth(), blindedHP);
 	EXPECT_LT(other->getAvailableHealth(), otherHP);
+	ASSERT_TRUE(other->alive()) << "This regression must exercise partial, not lethal, spell damage";
 	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
 	EXPECT_GT(recorder.damage, 0);
 }
