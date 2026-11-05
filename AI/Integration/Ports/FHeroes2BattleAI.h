@@ -266,6 +266,33 @@ private:
 		return value;
 	}
 
+	// Pinned ai_battle.cpp::optimalAttackValue includes every enemy struck
+	// by Hydra-style adjacent melee and the second creature in a dragon's
+	// breath line. The old port valued only the directly selected defender,
+	// and could therefore select a single-target attack instead of a legal
+	// multi-target strike. Ask the native VCMI attack geometry for the
+	// *hypothetical attack-from hex* and the exact aimed target cell; VCMI
+	// determines which units actually receive collateral damage, including
+	// friendly fire. Only the primary defender retaliates in this estimate.
+	// Heroes II/III secondary-hit geometry and damage are not identical.
+	static double meleeAreaAttackValue(CPlayerBattleCallback & battle, const CStack & attacker,
+		const CStack & defender, const BattleHex & from, const BattleHex & aimedHex, int distance)
+	{
+		double value = attackValue(battle, attacker, defender, from, false, distance);
+		for(const auto * victim : battle.getAttackedBattleUnits(
+			&attacker, &defender, aimedHex, false, from, defender.getPosition()))
+		{
+			if(victim == &defender)
+				continue;
+			BattleAttackInfo hit(&attacker, victim, distance, false);
+			hit.attackerPos = from;
+			const auto damage = battle.battleEstimateDamage(hit);
+			const bool friendly = battle.battleGetOwner(victim) == battle.battleGetOwner(&attacker);
+			value += (friendly ? -1.0 : 1.0) * lossValue(*victim, damage);
+		}
+		return value;
+	}
+
 	static Ports::FHeroes2::Tactics tactics(CPlayerBattleCallback & battle, const CStack & stack,
 		const std::vector<const CStack *> & enemies)
 	{
@@ -1308,13 +1335,20 @@ private:
 				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
 				if(attackedHexes.empty())
 					continue;
-				const double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
-				const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
-				if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+				// An area-melee creature can inflict different secondary hits
+				// from different legal attack vectors, even against the same wide
+				// primary target. Evaluate every cell the native engine permits.
+				for(const auto & aimedHex : attackedHexes)
 				{
-					target = enemy;
-					targetHex = attackedHexes.front();
-					best = candidate;
+					const double value = meleeAreaAttackValue(battle, stack, *enemy,
+						hex, aimedHex, reachability.distances[hex.toInt()]);
+					const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
+					if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+					{
+						target = enemy;
+						targetHex = aimedHex;
+						best = candidate;
+					}
 				}
 			}
 		}
