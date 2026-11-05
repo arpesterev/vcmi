@@ -2369,6 +2369,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MagogAreaShotMakesDefensiveGuardSpread
 	ASSERT_NE(magog, nullptr);
 	ASSERT_TRUE(magog->isShooter());
 	ASSERT_TRUE(magog->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+	ASSERT_FALSE(magog->hasBonusOfType(BonusType::NOT_ACTIVE));
+	double enemyStrength = 0;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			enemyStrength += unit->estimateCombatValue();
+	ASSERT_GT(magog->estimateCombatValue() * 10, enemyStrength)
+		<< "The native area shooter must exceed fheroes2's 10% threat threshold";
 	ASSERT_TRUE(battle()->battleCanShoot(magog))
 		<< "The hostile area shooter must actually be able to fire";
 
