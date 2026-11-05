@@ -2081,6 +2081,39 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatPreservesForgottenArcherStr
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 analyzeBattleState excludes Blind/Paralyze from
+// enemy ranged strength (Unit::isImmovable), unlike Forgetfulness.
+// Observe the spell-policy threshold on an actual server-applied Blind,
+// then let FHeroes2 complete the battle using independent engine actions.
+TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatExcludesNativeBlindedEnemyArcher)
+{
+	prepareBattle(CreatureID(0), 60, CreatureID(2), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * defenderArcher = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			defenderArcher = unit.get();
+	ASSERT_NE(defenderArcher, nullptr);
+	ASSERT_TRUE(defenderArcher->isShooter());
+	ASSERT_TRUE(battle()->battleCanShoot(defenderArcher));
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto observer = std::make_shared<DecisionCallback>(player);
+	observer->onBattleStarted(battle());
+	const auto playerView = observer->getBattle(battle()->getBattleID());
+	ASSERT_NE(playerView, nullptr);
+	ASSERT_GT(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, false), 0);
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, defenderArcher));
+	ASSERT_TRUE(defenderArcher->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(defenderArcher->getMovementRange(), 0u);
+	EXPECT_DOUBLE_EQ(AIIntegration::FHeroes2SpellPolicy::sourceArcherStrength(*playerView, player, false), 0.0)
+		<< "Blinded enemy archer must not inflate FHeroes2 spell-conservation threat";
+
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherStillCountsForDefensiveStance)
 {
 	// Pinned fheroes2 analyzeBattleState counts an archer as ranged strength
