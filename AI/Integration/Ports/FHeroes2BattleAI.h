@@ -670,7 +670,13 @@ private:
 					for(const auto & shooterHex : friendly->getHexes())
 						nearest = std::min(nearest,
 							static_cast<int>(BattleHex::getDistance(enemyHex, shooterHex)));
-				return nearest <= static_cast<int>(enemy->getMovementRange()) + 1;
+				// The pinned source's future approach check cannot project a
+				// Blind/Paralyze-disabled melee unit across the battlefield.
+				// Keep its adjacent contact: even an immobile enemy still
+				// blocks a shooter's ranged attack from one hex away.
+				const int futureReach = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+					? 1 : static_cast<int>(enemy->getMovementRange()) + 1;
+				return nearest <= futureReach;
 			});
 			if(!threatened)
 				continue;
