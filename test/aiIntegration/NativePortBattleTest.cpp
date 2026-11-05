@@ -3546,6 +3546,127 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 }
 
 
+// A disabled enemy is still an attackable target, but it is not the slower
+// MOBILE alternative that justifies ignoring a nearby fast decoy. The old
+// TUM-only filter removed siege machines while retaining paralyzed stacks
+// in its movement candidates, redirecting the advance to an immobile unit.
+// Keep the immediate-attack and non-TUM HoMM3 policies unchanged.
+TEST_F(AIIntegrationNativeBattle, tumIncapacitatedAlternativeCannotRedirectFastDecoyAvoidance)
+{
+	prepareBattle(CreatureID(0), 80, CreatureID(0), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * own = nullptr;
+	const CStack * slow = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->creatureId() != CreatureID(0))
+			continue;
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			own = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER)
+			slow = unit.get();
+	}
+	ASSERT_NE(own, nullptr);
+	ASSERT_NE(slow, nullptr);
+	const BattleHex origin = own->getPosition();
+	const int baitY = origin.getY() >= 4 ? origin.getY() - 3 : origin.getY() + 3;
+	const BattleHex baitHex(static_cast<si16>(origin.getX() + 5), static_cast<si16>(baitY));
+	ASSERT_TRUE(baitHex.isAvailable());
+	const auto * fast = addStack(BattleSide::DEFENDER, CreatureID(4), baitHex, 12);
+	ASSERT_NE(fast, nullptr);
+	const int speed = static_cast<int>(own->getMovementRange());
+	ASSERT_GE(static_cast<int>(fast->getMovementRange()), speed + 2);
+	ASSERT_LE(static_cast<int>(slow->getMovementRange()), speed);
+	ASSERT_GT(BattleHex::getDistance(origin, baitHex), speed + 1);
+	ASSERT_LE(AIIntegration::Ports::TUM::nearestFootprintDistance(
+		own->getHexes(), fast->getHexes(), [](const BattleHex & a, const BattleHex & b)
+		{
+			return BattleHex::getDistance(a, b);
+		}), speed * 2 + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *own);
+	ASSERT_EQ(baseline.actionType, EActionType::WALK);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, own);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK);
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex mobileAdvance = callback->action->target.front().hexValue;
+	ASSERT_FALSE(baseline.target.empty());
+	ASSERT_NE(mobileAdvance, baseline.target.front().hexValue)
+		<< "The original fast decoy must already redirect the partial HoMM3 movement";
+	callback->action.reset();
+
+	// Inject a closer, non-attacking Peasant with a native NOT_ACTIVE status.
+	// This is a fixture-only creature effect, not a claimed TUM spell proc.
+	// Place it off the selected move so it cannot block the initial route.
+	BattleHex disabledHex;
+	for(const int dx : {6, 7, 5})
+	{
+		if(disabledHex.isValid())
+			break;
+		for(const int dy : {3, -3, 4, -4})
+		{
+			const BattleHex candidate(static_cast<si16>(origin.getX() + dx),
+				static_cast<si16>(origin.getY() + dy));
+			if(candidate.isAvailable() && battle()->battleGetUnitByPos(candidate) == nullptr
+				&& BattleHex::getDistance(origin, candidate) > speed + 1
+				&& BattleHex::getDistance(origin, candidate)
+					< BattleHex::getDistance(origin, slow->getPosition())
+				&& BattleHex::getDistance(candidate, mobileAdvance) > 1)
+			{
+				disabledHex = candidate;
+				break;
+			}
+		}
+	}
+	ASSERT_TRUE(disabledHex.isValid()) << "Need an off-route disabled target nearer than mobile infantry";
+	auto * disabled = addStack(BattleSide::DEFENDER, CreatureID(0), disabledHex, 12);
+	ASSERT_NE(disabled, nullptr);
+	disabled->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	ASSERT_TRUE(disabled->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(view->battleCanAttackUnit(own, disabled))
+		<< "The disabled unit must remain a legal future melee target";
+	const auto withDisabledHoMM3 = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *own);
+	ASSERT_EQ(withDisabledHoMM3.actionType, EActionType::WALK);
+	policy->activeStack(battleID, own);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().hexValue, mobileAdvance)
+		<< "TUM must continue toward active slower infantry, not the paralyzed closer stack";
+	EXPECT_NE(callback->action->target.front().hexValue,
+		withDisabledHoMM3.target.front().hexValue)
+		<< "The TUM movement override must remain independent of the HoMM3 baseline";
+	const int ownId = own->unitId();
+	battle()->activeStack = ownId;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI server rejected TUM's independently chosen movement";
+	EXPECT_GT(recorder.movementPackets, 0);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByUnit[ownId][EActionType::WALK], 0);
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumSiegeWeaponLosesMobileDecoyStatus)
 {
 	// Pinned TUM avoids pursuing fast mobile bait. First prove the native
