@@ -3407,6 +3407,185 @@ TEST_F(AIIntegrationNativeBattle, homm3FreeShootingThreatAndEngineShotAtAdjacent
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Original getRangedAttackValue cannot model return shots. Under native VCMI
+// rules an eligible shooter can have RANGED_RETALIATION. Both equal-range,
+// equal-strength targets initially have identical source-style shot values.
+// A new return-fire bonus must switch the independent HoMM3-only decision
+// to the otherwise equivalent safe target, not silently assume zero risk.
+TEST_F(AIIntegrationNativeBattle, homm3NativeRangedRetaliationChangesChosenTarget)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 12); // Archer
+	setArmy(defenderSideHero, CreatureID(2), 35);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 35));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	CStack * shooter = nullptr;
+	std::vector<CStack *> targets;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->creatureId() != CreatureID(2))
+			continue;
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			shooter = unit.get();
+		else
+			targets.push_back(unit.get());
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_EQ(targets.size(), 2u);
+	battle()->activeStack = shooter->unitId();
+	// Find two unoccupied and nonadjacent hexes at precisely the same
+	// distance: neither path length nor blocked shooting should decide.
+	BattleHex first, second;
+	for(int i = 0; i < GameConstants::BFIELD_SIZE && !first.isValid(); ++i)
+	{
+		const BattleHex a(i);
+		if(!a.isAvailable() || battle()->battleGetUnitByPos(a))
+			continue;
+		const int radius = BattleHex::getDistance(a, shooter->getPosition());
+		if(radius < 5 || radius > 10)
+			continue;
+		for(int j = i + 1; j < GameConstants::BFIELD_SIZE; ++j)
+		{
+			const BattleHex b(j);
+			if(!b.isAvailable() || battle()->battleGetUnitByPos(b))
+				continue;
+			if(BattleHex::getDistance(b, shooter->getPosition()) == radius
+				&& BattleHex::getDistance(a, b) >= 3)
+			{
+				first = a;
+				second = b;
+				break;
+			}
+		}
+	}
+	ASSERT_TRUE(first.isValid());
+	ASSERT_TRUE(second.isValid());
+	targets.front()->setPosition(first);
+	targets.back()->setPosition(second);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	for(const auto * target : targets)
+	{
+		ASSERT_TRUE(view->battleCanShoot(shooter, target->getPosition()));
+		ASSERT_TRUE(view->battleCanShoot(target, shooter->getPosition()));
+		ASSERT_TRUE(target->ableToRetaliate());
+	}
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+	CStack * formerChoice = nullptr;
+	CStack * safeTarget = nullptr;
+	for(auto * target : targets)
+	{
+		if(target->unitId() == baseline.target.front().unitValue)
+			formerChoice = target;
+		else
+			safeTarget = target;
+	}
+	ASSERT_NE(formerChoice, nullptr);
+	ASSERT_NE(safeTarget, nullptr);
+	BattleAttackInfo opening(shooter, formerChoice, 0, true);
+	ASSERT_LT(view->battleEstimateDamage(opening).damage.max, formerChoice->getAvailableHealth());
+	formerChoice->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	ASSERT_TRUE(formerChoice->hasBonusOfType(BonusType::RANGED_RETALIATION));
+	BattleAttackInfo counter(formerChoice, shooter, 0, true);
+	ASSERT_GT(view->battleEstimateDamage(counter).damage.min, 0);
+	const auto reranked = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(reranked.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(reranked.target.empty());
+	EXPECT_EQ(reranked.target.front().unitValue, safeTarget->unitId())
+		<< "Native return-fire exposure should reverse an otherwise equal shot choice";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, safeTarget->unitId());
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
+// Independent real-server confirmation that RANGED_RETALIATION causes a
+// countershot, instead of trusting a generic damage preview or a fake model.
+TEST_F(AIIntegrationNativeBattle, homm3RangedRetaliationExecutesOnNativeServer)
+{
+	prepareBattle(CreatureID(2), 12, CreatureID(2), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			shooter = unit.get();
+		else
+			defender = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(defender, nullptr);
+	defender->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_TRUE(view->battleCanShoot(shooter, defender->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(defender, shooter->getPosition()));
+	ASSERT_TRUE(defender->ableToRetaliate());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	const int before = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_GE(recorder.shots - before, 2)
+		<< "A real native countershot must execute before the following turn";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
 	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
