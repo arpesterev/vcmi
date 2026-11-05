@@ -104,9 +104,22 @@ private:
 			&& target.ableToRetaliate()
 			&& battle.battleCanShoot(&target, attacker.getPosition()))
 		{
-			BattleAttackInfo counter(&target, &attacker, 0, true);
-			counter.attackerPos = target.getPosition();
-			retaliationLoss = lossValue(attacker, battle.battleEstimateDamage(counter));
+			// The native return shot occurs AFTER our first hit. Estimating it
+			// from the untouched target overprices casualties when the hit
+			// removes some of its shooters. Use a detached representative
+			// post-hit state, as for the pinned source's sequential melee.
+			// This is a VCMI RANGED_RETALIATION extension, not retail parity.
+			auto afterShot = target.acquireState();
+			int64_t firstHit = damage.damage.min
+				+ (damage.damage.max - damage.damage.min) / 2;
+			firstHit = std::clamp<int64_t>(firstHit, 0, afterShot->getAvailableHealth());
+			afterShot->damage(firstHit);
+			if(afterShot->alive())
+			{
+				BattleAttackInfo counter(afterShot.get(), &attacker, 0, true);
+				counter.attackerPos = target.getPosition();
+				retaliationLoss = lossValue(attacker, battle.battleEstimateDamage(counter));
+			}
 		}
 		double score = lossValue(target, damage) - retaliationLoss;
 
