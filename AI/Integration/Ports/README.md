@@ -250,8 +250,18 @@ primaries and one allied unit behind the first requires independent
 `WALK_AND_ATTACK`, native acceptance, no friendly damage and completed
 combat. This is a VCMI safety extension, **not** source-parity evidence.
 
+VCMI also supports `RANGED_RETALIATION`, unlike the pinned fheroes2
+`archerDecision` ranged attack scoring. The partial adapter now subtracts
+the estimated loss from a **native-legal return shot** when ranking primary
+ranged targets, except where the initial shot is guaranteed to kill the
+retaliator or VCMI suppresses the countershot. The reverse estimate is only
+a decision proxy; the actual engine owns retaliation timing and effects.
+Two server regressions separately require a changed independent target
+choice and a real accepted ranged counterattack before battle completion.
+This is **Heroes III host-rule adaptation**, not Heroes II equivalence.
+
 Not implemented: complete upstream buff/debuff and creature-spell selection,
-retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
+complete withdrawal policy parity, complete archer kiting and screen placement, exact siege positioning, upstream battle
 valuation, adventure-map planning, and support validation for arbitrary mods.
 Do not use this partial policy as a quality replacement for the default AI.
 No source-policy equivalence evidence has been produced.
