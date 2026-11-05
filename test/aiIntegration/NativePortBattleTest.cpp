@@ -5238,6 +5238,107 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+// Vanilla HoMM3 getRangedAttackValue prices one target. The real VCMI
+// SHOOTS_ALL_ADJACENT bonus adds a second signed effect: nearby enemy stacks
+// increase the shot value and friendly casualties decrease it. Prove that
+// HoMM3's independent choice changes and that the server accepts/damages the
+// actual splash victims. This is an explicit VCMI extension, NOT parity with
+// the retail HoMM3 shooter AI and not part of the TUM baseline.
+TEST_F(AIIntegrationNativeBattle, homm3NativeAreaShotCollateralChangesTargetAndExecutes)
+{
+	prepareBattle(CreatureID(45), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * shooter = nullptr;
+	const CStack * isolated = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			isolated = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(isolated, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_FALSE(shooter->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+	BattleHex centerHex;
+	std::vector<BattleHex> neighbours;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(!candidate.isAvailable() || candidate.getX() < 8 || candidate.getX() > 12
+			|| battle()->battleGetUnitByPos(candidate) != nullptr
+			|| BattleHex::getDistance(candidate, isolated->getPosition()) < 5)
+			continue;
+		std::vector<BattleHex> nearby;
+		for(const auto & hex : candidate.getNeighbouringTiles())
+			if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr
+				&& BattleHex::getDistance(hex, isolated->getPosition()) >= 4)
+				nearby.push_back(hex);
+		if(nearby.size() >= 3)
+		{
+			centerHex = candidate;
+			neighbours.assign(nearby.begin(), nearby.begin() + 3);
+			break;
+		}
+	}
+	ASSERT_TRUE(centerHex.isValid());
+	std::vector<const CStack *> cluster;
+	cluster.push_back(addStack(BattleSide::DEFENDER, CreatureID(0), centerHex, 1));
+	for(const auto & hex : neighbours)
+		cluster.push_back(addStack(BattleSide::DEFENDER, CreatureID(0), hex, 20));
+	for(const auto * unit : cluster)
+		ASSERT_NE(unit, nullptr);
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, isolated->getPosition()));
+	ASSERT_TRUE(battle()->battleCanShoot(shooter, centerHex));
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto before = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(before.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(before.target.empty());
+	EXPECT_EQ(before.target.front().unitValue, isolated->unitId())
+		<< "The single-victim score must prefer the isolated larger stack";
+
+	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+	const auto after = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(after.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(after.target.empty());
+	const auto chosenID = after.target.front().unitValue;
+	const auto chosen = std::find_if(cluster.begin(), cluster.end(),
+		[&](const CStack * unit) { return unit->unitId() == chosenID; });
+	ASSERT_NE(chosen, cluster.end())
+		<< "Native area collateral must attract the independent HoMM3 shot";
+	const auto splash = battle()->getAttackedBattleUnits(
+		shooter, *chosen, (*chosen)->getPosition(), true);
+	ASSERT_GE(splash.size(), 2u) << "The chosen native shot must have a genuine secondary victim";
+	const CStack * secondary = nullptr;
+	for(const auto * victim : splash)
+		if(victim->unitId() != chosenID)
+		{
+			secondary = dynamic_cast<const CStack *>(victim);
+			break;
+		}
+	ASSERT_NE(secondary, nullptr);
+	const auto secondaryHealth = secondary->getAvailableHealth();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, after))
+		<< "Native server rejected independently selected HoMM3 area shot";
+	EXPECT_LT(secondary->getAvailableHealth(), secondaryHealth)
+		<< "The real battle must damage an additional splash victim";
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Ranged-target timing is a bounded native projection, not the full retail
 // getAITargetTime graph. Exercise its stationary-unit host adaptation in a
 // real server battle: a rooted melee opponent can still be shot, but cannot
