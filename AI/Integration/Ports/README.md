@@ -259,6 +259,15 @@ primaries and one allied unit behind the first requires independent
 `WALK_AND_ATTACK`, native acceptance, no friendly damage and completed
 combat. This is a VCMI safety extension, **not** source-parity evidence.
 
+Blocked archers also now project a *melee* FIRST_STRIKE defender on a
+detached copy of the attacker, subtract preemptive HP losses and evaluate
+the surviving archers' damage, including native secondary victims. This
+avoids counting a later ordinary retaliation twice. The real-server
+`fheroes2BlockedArcherAvoidsPreemptiveMeleeCounter` regression compares
+the same two equal contact targets before and after one gains FIRST_STRIKE,
+then submits the independently chosen melee command and completes combat.
+Heroes II does not have this VCMI ability or these combat timings.
+
 VCMI also supports `RANGED_RETALIATION`, unlike the pinned fheroes2
 `archerDecision` ranged attack scoring. The partial adapter now subtracts
 the estimated loss from a **native-legal return shot** when ranking primary
