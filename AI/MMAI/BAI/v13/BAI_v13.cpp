@@ -510,10 +510,14 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction(const CStack * activeStack)
 			case HexAction::SHOOT:
 				if(!stack || !stack->cstack)
 					throw std::runtime_error("MMAI V13: model SHOOT has no target");
+				// V13 selected this exact hex, not the observed creature's
+				// potentially changed position. Do not silently retarget a shot
+				// if a live event has moved or replaced the original stack.
+				requireNNV13SelectedShootHexTarget(stack->cstack, battle->battleGetStackByPos(bhex));
 				requireNNV13LegalTarget(stack->cstack,
-					[this, acstack](const CStack * target)
+					[this, acstack, &bhex](const CStack *)
 					{
-						return battle->battleCanShoot(acstack, target->getPosition());
+						return battle->battleCanShoot(acstack, bhex);
 					}, "SHOOT");
 				res = std::make_shared<BattleAction>(BattleAction::makeShotAttack(acstack, stack->cstack));
 				break;
