@@ -163,9 +163,13 @@ private:
 		// lost defenders cannot inflict an imaginary full-strength counterblow.
 		// This is an expected-damage VCMI projection, not exact retail rolls.
 		// Leave TUM's explicitly separate baseline untouched.
+		// Retail simulateAttack also subtracts a post-hit defender's
+		// response for SINGLE-strike creatures. The previous guard on
+		// getTotalAttacks(false) wrongly left ordinary melee attackers
+		// paying the untouched defender's full-strength retaliation.
+		// Two-strike creatures still replay their second blow below.
 		if(projectSecondMeleeStrike && !shooting && !firstStrikeMeleeCounter
-			&& attacker.getTotalAttacks(false) > 1 && !certainFirstHitKill
-			&& retaliation.damage.max > 0)
+			&& !certainFirstHitKill && retaliation.damage.max > 0)
 		{
 			auto afterFirst = target.acquireState();
 			int64_t firstHit = damage.damage.min

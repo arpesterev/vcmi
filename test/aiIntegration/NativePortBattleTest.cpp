@@ -3184,6 +3184,105 @@ TEST_F(AIIntegrationNativeBattle, homm3CrusaderSecondStrikeSurvivesRetaliationAn
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The pinned simulateAttack subtracts losses from the FIRST hit before
+// the defender retaliates, even if the attacker has only ONE melee blow.
+// This is a VCMI damage preview for a source-ordered exchange, not proof
+// of numeric parity with the retail HoMM3 engine.
+TEST_F(AIIntegrationNativeBattle, homm3SingleStrikeUsesSurvivingDefenderRetaliationAndExecutes)
+{
+	prepareBattle(CreatureID(6), 8, CreatureID(6), 8); // Swordsmen vs Swordsmen
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * attacker = nullptr;
+	CStack * defender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			attacker = unit.get();
+		else
+			defender = unit.get();
+	}
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_NE(defender, nullptr);
+	ASSERT_EQ(attacker->getTotalAttacks(false), 1)
+		<< "This test must cover the previously unpriced single-strike case";
+	battle()->activeStack = attacker->unitId();
+	const BattleHex nearby(attacker->getPosition().toInt() + 5);
+	ASSERT_TRUE(nearby.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), nullptr);
+	defender->setPosition(nearby);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	BattleAttackInfo opening(attacker, defender, 0, false);
+	DamageEstimation originalRetaliation;
+	const auto openingEstimate = view->battleEstimateDamage(opening, &originalRetaliation);
+	ASSERT_GT(openingEstimate.damage.min, 0);
+	ASSERT_LT(openingEstimate.damage.max, defender->getAvailableHealth());
+	ASSERT_GT(originalRetaliation.damage.max, 0);
+	const auto fullHealth = defender->getAvailableHealth();
+	const auto fullCount = defender->getCount();
+	auto survivingDefender = defender->acquireState();
+	int64_t firstHit = openingEstimate.damage.min
+		+ (openingEstimate.damage.max - openingEstimate.damage.min) / 2;
+	firstHit = std::clamp<int64_t>(firstHit, 0, survivingDefender->getAvailableHealth());
+	survivingDefender->damage(firstHit);
+	ASSERT_TRUE(survivingDefender->alive());
+	ASSERT_LT(survivingDefender->getCount(), fullCount);
+	BattleAttackInfo reducedCounter(survivingDefender.get(), attacker, 0, false);
+	reducedCounter.attackerPos = defender->getPosition();
+	reducedCounter.defenderPos = attacker->getPosition();
+	const auto reducedEstimate = view->battleEstimateDamage(reducedCounter);
+	EXPECT_LT(reducedEstimate.damage.max, originalRetaliation.damage.max)
+		<< "Source-ordered retaliation must use surviving Swordsmen, even after one blow";
+	EXPECT_EQ(defender->getAvailableHealth(), fullHealth);
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, attacker);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(action.target[1].hexValue), defender);
+	EXPECT_EQ(defender->getAvailableHealth(), fullHealth);
+
+	int firstBlows = 0;
+	int responses = 0;
+	const auto attackerID = static_cast<ui32>(attacker->unitId());
+	const auto defenderID = static_cast<ui32>(defender->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(packet.stackAttacking == attackerID && !packet.shot() && !packet.counter())
+			++firstBlows;
+		if(packet.stackAttacking == defenderID && !packet.shot() && packet.counter())
+			++responses;
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Native VCMI server rejected HoMM3's single-strike melee command";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(firstBlows, 1);
+	EXPECT_EQ(responses, 1);
+	EXPECT_LT(defender->getAvailableHealth(), fullHealth);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Pinned simulateAttack stops as soon as the first melee blow kills the
 // defender. The HoMM3-only value projection cannot charge a counterattack
 // that a guaranteed lethal first hit makes impossible. Observe the actual
