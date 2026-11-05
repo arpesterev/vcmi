@@ -4438,8 +4438,8 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedFirstStrikeRangedCounterPrecedesS
 	// TUM must also price its outgoing shot AFTER the server's FIRST_STRIKE,
 	// including the possibility that the entire hypnotized stack dies.
 	// All previews operate on copies, and must preserve both live health pools.
-	const hypnotizedHealth = hypnotized->getAvailableHealth();
-	const previewFollowUp = [&](int64_t counterDamage)
+	const auto hypnotizedHealth = hypnotized->getAvailableHealth();
+	const auto previewFollowUp = [&](int64_t counterDamage)
 	{
 		auto survivors = hypnotized->acquireState();
 		survivors->damage(counterDamage);
