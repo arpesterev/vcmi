@@ -3358,6 +3358,9 @@ TEST_F(AIIntegrationNativeBattle, homm3FreeShootingThreatAndEngineShotAtAdjacent
 	ASSERT_TRUE(archer->canShootBlocked());
 	ASSERT_TRUE(view->battleCanShoot(archer, crusader->getPosition()))
 		<< "Engine must permit unrestricted free shooting against an adjacent foe";
+	EXPECT_FALSE(AIIntegration::Ports::HoMM3::nativeShooterSuppressionPossible(
+		view->battleCanShoot(archer), archer->canShootBlocked(), true))
+		<< "HoMM3-only native scoring must not reward silencing a shooter that still fires";
 	ASSERT_TRUE(AIIntegration::Ports::HoMM3::projectedNativeRangedThreat(
 		view->battleCanShoot(archer), true, archer->canShootBlocked(),
 		true, false, 0, 1))
