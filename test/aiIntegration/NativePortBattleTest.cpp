@@ -2404,6 +2404,74 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2UnblockedShooterScreenOutranksUnrelatedMeleeAttack)
+{
+	// Pinned ihhub/fheroes2 ai_battle.cpp::meleeUnitDefense first screens
+	// threatened archers, before its generic best melee attack phase.
+	// The immediate melee bait below does not threaten our shooter.
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex original = guard->getPosition();
+	const BattleHex shooterHex(original.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex distantThreatHex(shooterHex.toInt() + 5);
+	const BattleHex baitHex(original.toInt() + 1);
+	for(const auto hex : {shooterHex, distantThreatHex, baitHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	const auto * shooter = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 120);
+	const auto * distantThreat = addStack(BattleSide::DEFENDER, CreatureID(0), distantThreatHex, 15);
+	const auto * bait = addStack(BattleSide::DEFENDER, CreatureID(0), baitHex, 1);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(distantThreat, nullptr);
+	ASSERT_NE(bait, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_TRUE(battle()->battleCanShoot(shooter)) << "Shooter must be unblocked for the source screening priority";
+	ASSERT_FALSE(battle()->meleeAttackHexes(guard, bait, original).empty())
+		<< "Unrelated bait must really be immediately attackable";
+	ASSERT_LE(BattleHex::getDistance(shooterHex, distantThreatHex),
+		static_cast<int>(distantThreat->getMovementRange()) + 1)
+		<< "Distant melee stack must threaten the friendly archer next turn";
+	ASSERT_GT(BattleHex::getDistance(original, distantThreatHex),
+		static_cast<int>(guard->getMovementRange()) + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Source defense screens shooter rather than striking unrelated adjacent bait: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_EQ(BattleHex::getDistance(destination, shooterHex), 1);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI server rejected the chosen defensive screen";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotThreatSpreadsArcherCover)
 {
 	// Pinned ihhub/fheroes2 ai_battle.cpp: analyzeBattleState sets
