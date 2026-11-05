@@ -764,18 +764,28 @@ private:
 					if(!from.isAvailable())
 						continue;
 					const auto targets = battle.meleeAttackHexes(&guard, enemy, from);
-					if(targets.empty() || battle.battleGetUnitByPos(targets.front()) != enemy)
-						continue;
-					const double value = attackValue(battle, guard, *enemy, from,
-						false, reachability.distances[from.toInt()]);
-					const Ports::FHeroes2::MeleeOutcome outcome{
-						from.toInt(), strength(*enemy), value, true};
-					if(!bestBlocker || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
+					// Pinned ai_battle.cpp::meleeUnitDefense delegates blockers to
+					// BestAttackOutcome, which uses optimalAttackValue/Vector.
+					// Evaluate EVERY native-legal aim, as in the offensive path:
+					// a breath or all-adjacent hit can release an archer while
+					// injuring other stacks (including friendly collateral).
+					// Merely taking targets.front() would discard the vector
+					// whose secondary victims make it the better blocker attack.
+					for(const auto & aimedHex : targets)
 					{
-						bestBlocker = enemy;
-						bestFrom = from;
-						bestTargetHex = targets.front();
-						bestOutcome = outcome;
+						if(battle.battleGetUnitByPos(aimedHex) != enemy)
+							continue;
+						const double value = meleeAreaAttackValue(battle, guard, *enemy,
+							from, aimedHex, reachability.distances[from.toInt()]);
+						const Ports::FHeroes2::MeleeOutcome outcome{
+							from.toInt(), strength(*enemy), value, true};
+						if(!bestBlocker || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
+						{
+							bestBlocker = enemy;
+							bestFrom = from;
+							bestTargetHex = aimedHex;
+							bestOutcome = outcome;
+						}
 					}
 				}
 			}
