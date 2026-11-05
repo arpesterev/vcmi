@@ -4291,7 +4291,12 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeReturnFireProducesSignedLosingShotA
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Authoritative engine rejected the independently chosen losing shot";
 	policy.reset();
-	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	// The defender's real return shot can destroy the sole attacker and
+	// finish this battle *inside* makePlayerBattleAction. In that case the
+	// server has already applied its terminal result; do not start a second
+	// fixture driver on an already released battle.
+	if(!gameState()->currentBattles.empty())
+		runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.shots, 0);
 	EXPECT_GT(recorder.damage, 0);
 	EXPECT_FALSE(recorder.battleResults.empty());
