@@ -130,6 +130,20 @@ inline double collateralStrikeValue(bool enemy, double projectedLoss)
 	return enemy ? projectedLoss : -projectedLoss;
 }
 
+// Pinned getSimpleAttackEffect subtracts friendly casualties from inflicted
+// losses and returns a signed long. Native ranged retaliation can therefore
+// make a VCMI-hosted shot net-negative. Preserve that sign for the HoMM3-only
+// scorer; the existing TUM composition intentionally retains its unsigned
+// partial-baseline projection. This is not retail damage-formula parity.
+inline int32_t signedProjectedAttackEffect(double value)
+{
+	if(!std::isfinite(value))
+		throw std::invalid_argument("HoMM3 net attack effect must be finite");
+	return static_cast<int32_t>(std::clamp(value,
+		static_cast<double>(std::numeric_limits<int32_t>::min()),
+		static_cast<double>(std::numeric_limits<int32_t>::max())));
+}
+
 struct RangedTarget
 {
 	int32_t attackEffect = 0;
