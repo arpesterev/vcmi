@@ -5246,7 +5246,7 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 // the retail HoMM3 shooter AI and not part of the TUM baseline.
 TEST_F(AIIntegrationNativeBattle, homm3NativeAreaShotCollateralChangesTargetAndExecutes)
 {
-	prepareBattle(CreatureID(45), 30, CreatureID(0), 30);
+	prepareBattle(CreatureID(45), 30, CreatureID(0), 60);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	CStack * shooter = nullptr;
