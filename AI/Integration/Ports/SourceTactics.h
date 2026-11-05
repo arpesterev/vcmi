@@ -430,6 +430,21 @@ inline bool ignoreNearbyFastDecoyForMovement(int ownSpeed, int enemySpeed, int s
 		&& static_cast<int64_t>(hexDistance) <= static_cast<int64_t>(ownSpeed) * 2 + 1;
 }
 
+// The TUM document does not publish a numerical ballista targeting formula.
+// For VCMI-only projected-loss ranking, price the WHOLE legal volley, bounded
+// by remaining target health. The engine owns the actual attack count, ammo
+// and every hit; this is not a TUM ERA/DLL damage simulation.
+inline double projectedSiegeVolleyLoss(double combatValue, double health,
+    double damagePerHit, int legalShots)
+{
+    if(!std::isfinite(combatValue) || !std::isfinite(health)
+        || !std::isfinite(damagePerHit) || combatValue < 0 || health <= 0
+        || damagePerHit < 0 || legalShots <= 0)
+        throw std::invalid_argument("TUM siege volley requires finite nonnegative damage/value, positive health and attacks");
+    const double projectedDamage = std::min(health, damagePerHit * legalShots);
+    return combatValue * projectedDamage / health;
+}
+
 /// AI Improvements.txt: Hypnotized troops under AI control prefer attacks
 /// against their original allies that maximize damage dealt PLUS received.
 /// The actual damage inputs are projections from the host battle engine.

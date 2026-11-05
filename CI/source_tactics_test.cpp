@@ -274,6 +274,30 @@ int main()
 	require(!TUM::holdMeleeForShooters(cover), "Do not apply neutral-only rule to an enemy hero");
 	for(int effects = 0; effects < 8; ++effects)
 		require(TUM::ballistaMayTarget(effects & 1, effects & 2, effects & 4) == (effects == 0), "Do not wake disabled targets with a ballista");
+	// The engine's Artillery grant can make a ballista fire twice. A
+	// single-shot ranking can prefer the small stack while the same native
+	// damage estimate over a full volley prefers a durable alternative.
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 1) == 100,
+		"One shot values a kill but cannot exceed the stack value");
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 2) == 100,
+		"Extra shots cannot double count a stack already killed");
+	require(TUM::projectedSiegeVolleyLoss(200, 100, 40, 1) == 80,
+		"One shot values only lost health, not entire surviving stack");
+	require(TUM::projectedSiegeVolleyLoss(200, 100, 40, 2) == 160,
+		"Two shots value cumulative projected loss on a durable target");
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 1)
+		> TUM::projectedSiegeVolleyLoss(200, 100, 40, 1),
+		"A single shot favors the killable small stack");
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 2)
+		< TUM::projectedSiegeVolleyLoss(200, 100, 40, 2),
+		"A second shot can reverse the selection");
+	try { TUM::projectedSiegeVolleyLoss(100, 0, 5, 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { TUM::projectedSiegeVolleyLoss(100, 20, 5, 0); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { TUM::projectedSiegeVolleyLoss(100, 20,
+		std::numeric_limits<double>::infinity(), 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 	require(!TUM::creatureMayApplyEffect(true), "Do not recast existing effect");
 	require(TUM::creatureMayApplyEffect(false), "Allow a new effect");
 	// Siege hold is invalidated by a breach in either occupied cell of a

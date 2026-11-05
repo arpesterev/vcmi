@@ -5133,6 +5133,108 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesEngineProjectedLoss)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Published TUM ballista targeting is numeric-closed-source. This regression
+// verifies only the VCMI volley-aware *partial* score: Expert Artillery grants
+// extra shots, and a single proposed shot command must cause that many
+// authoritative attacks against its selected target before the battle ends.
+TEST_F(AIIntegrationNativeBattle, tumBallistaProjectedVolleyUsesRealArtilleryShots)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(11), 80);
+	setArmy(defenderSideHero, CreatureID(0), 350);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(11).toCreature(), 8));
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * ballista = nullptr;
+	std::vector<const CStack *> targets;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER
+			&& unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			targets.push_back(unit.get());
+	}
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_EQ(targets.size(), 2u);
+	const int heroAttacks = attackerSideHero->valOfBonuses(
+		BonusType::HERO_GRANTS_ATTACKS, BonusSubtypeID(ballista->creatureId()));
+	const int legalShots = std::min(ballista->shots.available(),
+		ballista->getTotalAttacks(true) + heroAttacks);
+	ASSERT_GE(legalShots, 2) << "Expert Artillery must grant actual extra shots";
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+
+	// Calculate the expectation independently from the new TUM helper,
+	// using only live engine damage, combat values and the native shot count.
+	const CStack * expected = nullptr;
+	double bestLoss = -1;
+	std::sort(targets.begin(), targets.end(), [](const CStack * left, const CStack * right)
+	{
+		return left->unitId() < right->unitId();
+	});
+	for(const auto * target : targets)
+	{
+		ASSERT_TRUE(view->battleCanShoot(ballista, target->getPosition()));
+		BattleAttackInfo info(ballista, target, 0, true);
+		info.attackerPos = ballista->getPosition();
+		DamageEstimation retaliation;
+		const auto preview = view->battleEstimateDamage(info, &retaliation);
+		const double health = static_cast<double>(target->getAvailableHealth());
+		ASSERT_GT(health, 0);
+		const double perHit = std::max(0.0, (static_cast<double>(preview.damage.min)
+			+ static_cast<double>(preview.damage.max)) / 2.0);
+		const double volleyLoss = static_cast<double>(target->estimateCombatValue())
+			* std::min(health, perHit * legalShots) / health;
+		if(!expected || volleyLoss > bestLoss)
+		{
+			expected = target;
+			bestLoss = volleyLoss;
+		}
+	}
+	ASSERT_NE(expected, nullptr);
+	const auto homm3 = AIIntegration::HoMM3TacticsBattleAI::chooseAction(
+		*view, *ballista);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, expected->unitId())
+		<< "TUM must rank full actual Artillery volley, not only the first shot";
+	std::cout << "AI_TUM_BALLISTA_VOLLEY homm3=" << homm3.toString()
+		<< " tum=" << callback->action->toString()
+		<< " expected_shots=" << legalShots << '\\n';
+	battle()->activeStack = ballista->unitId();
+	const int shotsBefore = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player,
+		*callback->action)) << "Server rejected TUM's selected Artillery target";
+	EXPECT_EQ(recorder.shots - shotsBefore, legalShots)
+		<< "A single engine-accepted shot command must resolve the actual volley";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIsBlind)
 {
 	// TUM AI Improvements.txt excludes Blind, Paralyze and Petrification

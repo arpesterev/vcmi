@@ -123,6 +123,17 @@ private:
 		{
 			return left->unitId() < right->unitId();
 		});
+		// BattleActionProcessor::performRangedAttack resolves one attack plus
+		// native extra shots from the creature and the fighting hero (Artillery).
+		// Estimating only the FIRST shot misprices a killable low-health target
+		// against a durable target during the same ballista activation.
+		// Never project more shots than the war machine has ammunition.
+		int64_t attacks = stack.getTotalAttacks(true);
+		if(const auto * hero = battle.battleGetFightingHero(stack.unitSide()))
+			attacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+				BonusSubtypeID(stack.creatureId()));
+		const int legalShots = static_cast<int>(std::clamp<int64_t>(
+			attacks, 1, stack.shots.available()));
 		const CStack * selected = nullptr;
 		double bestValue = -1;
 		for(const auto * enemy : targets)
@@ -144,8 +155,9 @@ private:
 				continue;
 			const double expectedDamage = (static_cast<double>(damage.damage.min)
 				+ static_cast<double>(damage.damage.max)) / 2.0;
-			const double value = static_cast<double>(enemy->estimateCombatValue())
-				* std::clamp(expectedDamage, 0.0, health) / health;
+			const double value = Ports::TUM::projectedSiegeVolleyLoss(
+				static_cast<double>(enemy->estimateCombatValue()), health,
+				std::max(0.0, expectedDamage), legalShots);
 			if(!selected || value > bestValue)
 			{
 				selected = enemy;

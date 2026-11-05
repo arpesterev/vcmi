@@ -209,7 +209,12 @@ five independently implemented overrides derived from the documentation:
 - **Ballista:** excludes targets affected by Blind, Paralyze or Stone Gaze;
   with no remaining legal target, it defends instead of waking a disabled
   stack. We check actual VCMI spell-effect bonuses, not `isFrozen()` alone,
-  because the latter only detects Stone Gaze.
+  because the latter only detects Stone Gaze. VCMI Artillery may grant
+  additional ranged attacks; the partial native targeting score now ranks
+  **cumulative projected loss over the legal volley**, capped by both live
+  target HP and remaining machine ammunition. A native battle checks an
+  expert-Artillery ballista proposal, server-accepted attack sequence and
+  actual result, without claiming the closed TUM numerical formula.
 - **Arrow towers (blocked at the policy boundary):** VCMI
   `BattleFlowProcessor::tryMakeAutomaticActionOfRangedUnit` handles
   CPU-controlled citadel towers before `CBattleGameInterface::activeStack`.
