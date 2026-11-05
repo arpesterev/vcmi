@@ -102,6 +102,17 @@ inline void requireNNV13LegalTarget(const Target * target, LegalCheck legalCheck
 		throw std::runtime_error(std::string("MMAI V13: model ") + action + " has no legal live target");
 }
 
+// V13 historically re-sampled an invalid or stale model-selected action up
+// to eleven times. In strict combat this silently changes the single ONNX
+// decision, unlike V15's fail-closed path. Reject on the first invalid
+// decoded action; retain upstream retry behavior for explicit hybrid/gym use.
+inline void enforceNNV13SingleLiveAction(bool strictNeural, bool legalAction, int action)
+{
+	if(strictNeural && !legalAction)
+		throw std::runtime_error("MMAI V13: invalid live neural action " + std::to_string(action)
+			+ "; refusing resampling or scripted fallback");
+}
+
 // ACTION_RESET is a gym episode command, not a legal live battle move.
 // The original adapter turns it into a hero retreat to reset training.
 // V15 may legitimately select graph action ID 0, which numerically equals
