@@ -201,6 +201,20 @@ private:
 			// that cannot currently shoot our active attacker.
 			if(!enemy->isShooter() || !battle.battleCanShoot(enemy, attacker.getPosition()))
 				continue;
+			// getHexAttackValue rewards contact with a shooter only when
+			// contact actually removes its shot. Under native VCMI rules,
+			// unrestricted FREE_SHOOTING can retain adjacent fire, so a
+			// damage-derived pin bonus would otherwise reward a phantom
+			// suppression. Restricted free shooting (Steel Elves) still
+			// loses its adjacent shot. This is an explicit VCMI projection,
+			// not a claim about the retail HoMM3 score.
+			const auto restricted = Selector::typeSubtype(BonusType::FREE_SHOOTING,
+				BonusCustomSubtype::freeShootingExceptAdjacent);
+			const bool canShootAdjacent = !enemy->hasBonus(restricted)
+				|| enemy->hasBonus(Selector::type()(BonusType::FREE_SHOOTING).And(restricted.Not()));
+			if(!Ports::HoMM3::nativeShooterSuppressionPossible(
+				true, enemy->canShootBlocked(), canShootAdjacent))
+				continue;
 			const auto occupied = enemy->getHexes();
 			const auto original = attacker.getHexes();
 			if(engagesFootprints(original, occupied))
