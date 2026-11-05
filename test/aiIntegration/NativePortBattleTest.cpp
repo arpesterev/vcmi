@@ -4095,6 +4095,10 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathScoresAndHitsNativeSecondar
 	const BattleHex aimed = callback->action->target[1].hexValue;
 	const auto * primary = view->battleGetUnitByPos(aimed);
 	ASSERT_NE(primary, nullptr);
+	ASSERT_NE(primary->unitId(), guard->unitId())
+		<< "A Hypnotized stack must never target itself after a controller swap";
+	ASSERT_NE(view->battleGetOwner(primary), view->battleGetOwner(guard))
+		<< "Hypnotized attacks must target the actual opposing controller";
 	const auto extra = view->getAttackedBattleUnits(
 		guard, primary, aimed, false, attackFrom);
 	ASSERT_FALSE(extra.empty())
