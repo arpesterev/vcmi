@@ -4101,6 +4101,105 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedAttackDoesNotRewardExhaustedRetal
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// A native melee FIRST_STRIKE may destroy a hypnotized attacker before it
+// makes its opening strike. TUM still values received damage positively,
+// but must not also credit a hit that the authoritative VCMI server skips.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeFirstStrikeCountersBeforeAttack)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * hypnotized = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			hypnotized = unit.get();
+	ASSERT_NE(hypnotized, nullptr);
+	std::vector<BattleHex> adjacent;
+	for(const auto & hex : hypnotized->getPosition().getNeighbouringTiles())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+			adjacent.push_back(hex);
+	ASSERT_GE(adjacent.size(), 2u);
+	auto * firstStriker = addStack(BattleSide::ATTACKER, CreatureID(0), adjacent[0], 80);
+	auto * weak = addStack(BattleSide::ATTACKER, CreatureID(0), adjacent[1], 1);
+	ASSERT_NE(firstStriker, nullptr);
+	ASSERT_NE(weak, nullptr);
+	firstStriker->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(BonusCustomSubtype::damageTypeMelee)));
+	ASSERT_TRUE(firstStriker->hasBonus(Selector::typeSubtype(
+		BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee)));
+	ASSERT_TRUE(firstStriker->ableToRetaliate());
+
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, hypnotized));
+	ASSERT_TRUE(hypnotized->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(hypnotized), player);
+	battle()->activeStack = hypnotized->unitId();
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->isMeleeAttackPossible(hypnotized, firstStriker));
+	const auto guardHealth = hypnotized->getAvailableHealth();
+	const auto targetHealth = firstStriker->getAvailableHealth();
+	BattleAttackInfo earlyCounter(firstStriker, hypnotized, 0, false);
+	earlyCounter.attackerPos = firstStriker->getPosition();
+	const auto firstDamage = view->battleEstimateDamage(earlyCounter, nullptr);
+	ASSERT_GE(firstDamage.damage.min, guardHealth);
+	BattleAttackInfo staleOpening(hypnotized, firstStriker, 0, false);
+	staleOpening.attackerPos = hypnotized->getPosition();
+	const auto staleDamage = view->battleEstimateDamage(staleOpening, nullptr);
+	ASSERT_GT(staleDamage.damage.min, 0);
+	
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *hypnotized);
+	ASSERT_EQ(baseline.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(baseline.target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(baseline.target[1].hexValue), weak)
+		<< "HoMM3's partial net-exchange baseline must prefer the safer target";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, hypnotized);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), firstStriker)
+		<< "TUM's positive incoming-damage score must independently select first strike";
+	const int guardId = hypnotized->unitId();
+	const int strikerId = firstStriker->unitId();
+	std::vector<int> initialAttacks;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.stackAttacking == strikerId && attack.counter())
+			initialAttacks.push_back(strikerId);
+		else if(attack.stackAttacking == guardId)
+			initialAttacks.push_back(guardId);
+	};
+	const auto beforeDamage = recorder.damage;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The real VCMI server rejected TUM's Hypnotize melee choice";
+	ASSERT_EQ(initialAttacks.size(), 1u);
+	EXPECT_EQ(initialAttacks[0], strikerId);
+	EXPECT_FALSE(hypnotized->alive());
+	EXPECT_EQ(firstStriker->getAvailableHealth(), targetHealth)
+		<< "A lethal first-strike counter must prevent outgoing melee damage";
+	EXPECT_GT(recorder.damage, beforeDamage);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 // The published TUM Hypnotize priority is a single comparison across all
 // attack types. A legal ranged shot must not suppress a higher-scoring melee
 // strike when the latter also receives substantial retaliation.

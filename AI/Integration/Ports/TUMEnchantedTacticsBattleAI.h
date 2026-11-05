@@ -185,6 +185,17 @@ private:
 				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
 			const bool counterFirst = shooting && victim.hasBonus(rangedFirstStrike)
 				&& !victim.hasBonusOfType(BonusType::NOT_ACTIVE);
+			static const auto meleeFirstStrike = Selector::typeSubtype(
+				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
+				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee));
+			// VCMI's melee FIRST_STRIKE retaliates before our first hit. Exclude
+			// inactive defenders, blocked retaliation, invincible attackers and
+			// nonadjacent long-weapon attacks from this native projection.
+			const bool meleeCounterFirst = !shooting && victim.hasBonus(meleeFirstStrike)
+				&& !victim.hasBonusOfType(BonusType::NOT_ACTIVE)
+				&& !stack.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+				&& !stack.isInvincible()
+				&& BattleHex::getDistance(origin, aimedHex) == 1;
 			// A stack that exhausted its counterattacks cannot retaliate, even
 			// if a damage preview reports the hypothetical exchange. Retain
 			// native VCMI's authoritative retaliation eligibility.
@@ -192,7 +203,7 @@ private:
 			// server can counter a shot when the victim can shoot back, is
 			// eligible for retaliation and the attacker does not block it.
 			double received = 0.0;
-			if((!guaranteedKill || counterFirst) && victim.ableToRetaliate())
+			if((!guaranteedKill || counterFirst || meleeCounterFirst) && victim.ableToRetaliate())
 			{
 				if(shooting)
 				{
@@ -253,15 +264,41 @@ private:
 						}
 					}
 				}
+				else if(meleeCounterFirst)
+				{
+					// BattleActionProcessor::performAttackSequence counters before
+					// our opening swing. Preview each damage bound on private stack
+					// states; a lethal counter prevents outgoing damage entirely.
+					BattleAttackInfo counter(&victim, &stack, 0, false);
+					counter.attackerPos = victim.getPosition();
+					counter.defenderPos = origin;
+					const auto firstCounter = battle.battleEstimateDamage(counter, nullptr);
+					received = (static_cast<double>(firstCounter.damage.min)
+						+ firstCounter.damage.max) / 2.0;
+					const auto dealtAfterCounter = [&](int64_t counterDamage)
+					{
+						auto survivors = stack.acquireState();
+						survivors->damage(counterDamage);
+						if(!survivors->alive())
+							return 0.0;
+						BattleAttackInfo followUp(survivors.get(), &victim, distance, false);
+						followUp.attackerPos = origin;
+						followUp.defenderPos = aimedHex;
+						const auto preview = battle.battleEstimateDamage(followUp, nullptr);
+						return std::min(targetHealth,
+							(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0);
+					};
+					dealt = (dealtAfterCounter(firstCounter.damage.min)
+						+ dealtAfterCounter(firstCounter.damage.max)) / 2.0;
+				}
 				else
 					received = (static_cast<double>(retaliation.damage.min)
 						+ retaliation.damage.max) / 2.0;
 			}
-			// Melee retaliation and ordinary ranged return fire include first-hit
-			// losses; ranged FIRST_STRIKE counters before those losses. This is
-			// still a bounded damage-score projection, not ERA/DLL parity.
-			// A countershot that kills our attacker may prevent its opening
-			// shot; full multi-hit sequencing remains outside this scorer.
+			// Ordinary retaliation includes first-hit casualties; native melee
+			// and ranged FIRST_STRIKE occur before those casualties. Multi-hit
+			// and other special-attack sequencing remains outside this projection.
+			// None of this establishes equivalence with the unavailable ERA/DLL.
 			received = std::clamp(received, 0.0, static_cast<double>(stack.getAvailableHealth()));
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
 		};
