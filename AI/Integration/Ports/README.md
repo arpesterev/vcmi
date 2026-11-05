@@ -274,6 +274,13 @@ its own outgoing ranged damage (including splash victims). The native
 server packet order, an independently chosen legal shot, non-mutating
 preview and a completed real battle. The expected counter damage uses a
 bounded mean, not guaranteed future combat rolls.
+The preemptive ranged forecast is now restricted to a FIRST_STRIKE bonus
+whose native subtype explicitly covers ranged or all damage. A melee-only
+FIRST_STRIKE bonus must not change ranged target valuation. The
+`fheroes2MeleeOnlyFirstStrikeCannotPreemptRangedShot` regression compares
+independently chosen equal-return-fire targets, executes the chosen shot on
+the native server and checks shot-before-countershot ordering. This is
+still a VCMI-only subtype projection, not a Heroes II ability.
 This is **Heroes III host-rule adaptation**, not Heroes II equivalence.
 
 Not implemented: complete upstream buff/debuff and creature-spell selection,
