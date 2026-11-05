@@ -5859,16 +5859,17 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaAvoidsNativeSplashOntoParalyzedEnem
 	EXPECT_GT(recorder.damage, 0);
 }
 
-// The public TUM text announces smarter ballista aiming but does not give
-// the ERA/DLL numerical formula. A VCMI area-shot bonus can hit our archers:
-// rank the complete native impact set so friendly losses are not rewarded.
-// Fixture-only SHOOTS_ALL_ADJACENT is not a natural ballista ability.
-TEST_F(AIIntegrationNativeBattle, tumBallistaRejectsFriendlySplashWhenSafeShotExists)
+// The pinned TUM notes promise smarter ballista targeting but no numeric
+// source formula. VCMI SHOOTS_ALL_ADJACENT affects hostile creatures around
+// the aimed hex. This native fixture compares a larger isolated enemy against
+// two smaller adjacent enemies whose combined projected casualties exceed it.
+// The area-shot bonus is fixture-only, not a natural ballista ability.
+TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 {
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(0), 70);
-	setArmy(defenderSideHero, CreatureID(0), 1);
+	setArmy(defenderSideHero, CreatureID(0), 80);
 	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
 	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
 		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
@@ -5877,47 +5878,47 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaRejectsFriendlySplashWhenSafeShotEx
 	battle()->obstacles.clear();
 
 	CStack * ballista = nullptr;
-	const CStack * safe = nullptr;
+	const CStack * isolated = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->isBallista())
 			ballista = unit.get();
 		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
-			safe = unit.get();
+			isolated = unit.get();
 	}
 	ASSERT_NE(ballista, nullptr);
-	ASSERT_NE(safe, nullptr);
+	ASSERT_NE(isolated, nullptr);
 	ballista->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::SHOOTS_ALL_ADJACENT,
 		BonusSource::OTHER, 1, BonusSourceID()));
 	ASSERT_TRUE(ballista->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
 
-	BattleHex largeHex;
-	BattleHex friendlyHex;
-	for(int index = 0; index < GameConstants::BFIELD_SIZE && !largeHex.isValid(); ++index)
+	BattleHex firstHex;
+	BattleHex secondHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE && !firstHex.isValid(); ++index)
 	{
 		const BattleHex candidate(index);
 		if(!candidate.isAvailable() || candidate.getX() < 8 || candidate.getX() > 11
 			|| battle()->battleGetUnitByPos(candidate)
-			|| BattleHex::getDistance(candidate, safe->getPosition()) < 5)
+			|| BattleHex::getDistance(candidate, isolated->getPosition()) < 5)
 			continue;
 		for(const auto & neighbour : candidate.getNeighbouringTiles())
 		{
 			if(neighbour.isAvailable() && !battle()->battleGetUnitByPos(neighbour)
-				&& BattleHex::getDistance(neighbour, safe->getPosition()) >= 4)
+				&& BattleHex::getDistance(neighbour, isolated->getPosition()) >= 4)
 			{
-				largeHex = candidate;
-				friendlyHex = neighbour;
+				firstHex = candidate;
+				secondHex = neighbour;
 				break;
 			}
 		}
 	}
-	ASSERT_TRUE(largeHex.isValid());
-	ASSERT_TRUE(friendlyHex.isValid());
-	const CStack * valuable = addStack(BattleSide::DEFENDER, CreatureID(0), largeHex, 250);
-	const CStack * protectedArcher = addStack(BattleSide::ATTACKER, CreatureID(2), friendlyHex, 250);
-	ASSERT_NE(valuable, nullptr);
-	ASSERT_NE(protectedArcher, nullptr);
+	ASSERT_TRUE(firstHex.isValid());
+	ASSERT_TRUE(secondHex.isValid());
+	const CStack * first = addStack(BattleSide::DEFENDER, CreatureID(0), firstHex, 50);
+	const CStack * second = addStack(BattleSide::DEFENDER, CreatureID(0), secondHex, 50);
+	ASSERT_NE(first, nullptr);
+	ASSERT_NE(second, nullptr);
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -5925,26 +5926,26 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaRejectsFriendlySplashWhenSafeShotEx
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
-	ASSERT_TRUE(view->battleCanShoot(ballista, valuable->getPosition()));
-	ASSERT_TRUE(view->battleCanShoot(ballista, safe->getPosition()));
-	const auto friendlyInSplash = [&](const CStack * primary)
+	for(const CStack * target : {isolated, first, second})
+		ASSERT_TRUE(view->battleCanShoot(ballista, target->getPosition()));
+	const auto hasHit = [&](const CStack * primary, const CStack * extra)
 	{
 		const auto impacted = view->getAttackedBattleUnits(
 			ballista, primary, primary->getPosition(), true);
 		return std::any_of(impacted.begin(), impacted.end(), [&](const battle::Unit * hit)
 		{
-			return hit && hit->unitId() == protectedArcher->unitId();
+			return hit && hit->unitId() == extra->unitId();
 		});
 	};
-	ASSERT_TRUE(friendlyInSplash(valuable))
-		<< "Native splash must hit our archers for the collateral regression";
-	ASSERT_FALSE(friendlyInSplash(safe))
-		<< "An independent safe target must exist";
+	ASSERT_TRUE(hasHit(first, second));
+	ASSERT_TRUE(hasHit(second, first));
+	ASSERT_FALSE(hasHit(isolated, first));
+	ASSERT_FALSE(hasHit(isolated, second));
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(baseline.target.empty());
-	ASSERT_EQ(baseline.target.front().unitValue, valuable->unitId())
-		<< "The baseline must prefer the larger enemy without TUM's safety projection";
+	ASSERT_EQ(baseline.target.front().unitValue, isolated->unitId())
+		<< "HoMM3's single-target score must prefer the isolated 80-unit stack";
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
@@ -5961,18 +5962,22 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaRejectsFriendlySplashWhenSafeShotEx
 	ASSERT_TRUE(callback->action.has_value());
 	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
 	ASSERT_FALSE(callback->action->target.empty());
-	EXPECT_EQ(callback->action->target.front().unitValue, safe->unitId())
-		<< "TUM must avoid projected damage to friendly archers";
+	const int targetID = callback->action->target.front().unitValue;
+	ASSERT_TRUE(targetID == first->unitId() || targetID == second->unitId())
+		<< "The TUM projection must value both nearby enemies, not only the aimed stack";
 	EXPECT_NE(callback->action->toString(), baseline.toString());
+	std::cout << "AI_TUM_BALLISTA_SPLASH homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
 
-	const auto friendlyHealthBefore = protectedArcher->getAvailableHealth();
+	const auto firstHealthBefore = first->getAvailableHealth();
+	const auto secondHealthBefore = second->getAvailableHealth();
 	battle()->activeStack = ballista->unitId();
 	const int shotsBefore = recorder.shots;
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
-		<< "Native VCMI rejected the independent collateral-safe ballista action";
+		<< "Native VCMI rejected the independently selected area shot";
 	EXPECT_GT(recorder.shots, shotsBefore);
-	EXPECT_EQ(protectedArcher->getAvailableHealth(), friendlyHealthBefore)
-		<< "The accepted safe shot must not damage friendly archers";
+	EXPECT_LT(first->getAvailableHealth(), firstHealthBefore);
+	EXPECT_LT(second->getAvailableHealth(), secondHealthBefore);
 	policy.reset();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(recorder.damage, 0);

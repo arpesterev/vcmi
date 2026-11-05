@@ -155,7 +155,8 @@ private:
 			// not inherit the published ballista-only prohibition.
 			// The same native impact list drives both the ballista's
 			// disabled-target veto and collateral-aware casualty evaluation.
-			// Area shots can hit friendly stacks as well as additional enemies.
+			// SHOOTS_ALL_ADJACENT currently targets only enemies in VCMI; other
+			// native attack effects may report additional or friendly victims.
 			const auto impacted = battle.getAttackedBattleUnits(
 				&stack, enemy, enemy->getPosition(), true);
 			if(preserveDisabledTargets && std::any_of(impacted.begin(), impacted.end(),
@@ -206,8 +207,9 @@ private:
 					std::max(0.0, expectedDamage), legalShots);
 			};
 			// The unpublished TUM targeting formula is not reproduced here.
-			// For VCMI area attacks, discount projected damage to our own units
-			// instead of incorrectly rewarding a shot that harms both armies.
+			// Rank all engine-reported collateral, not just the primary target.
+			// Subtract allied injury only when VCMI actually reports a legal
+			// friendly victim. No friendly fire is invented for area shots.
 			double value = projectedLoss(*enemy);
 			for(const auto * hit : impacted)
 			{
