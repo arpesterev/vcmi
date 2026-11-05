@@ -250,6 +250,7 @@ jobs:
                       'V13RejectsInvalidRequiredHead',
                       'V13RejectsJaggedActionTableMetadata',
                       'V13RejectsOutOfRangeActionTableEntries',
+                      'V15RejectsDuplicateNodeAndEdgeMetadataTypes',
                       'RejectsInvalidModelSideMetadata',
                       'RejectsInvalidModelVersionMetadata',
                       'StrictRejectsConfiguredNeuralLoadError',
