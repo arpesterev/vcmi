@@ -4465,6 +4465,136 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedWideAttackerReceivesFirstStrikeAt
 // The published TUM Hypnotize priority is a single comparison across all
 // attack types. A legal ranged shot must not suppress a higher-scoring melee
 // strike when the latter also receives substantial retaliation.
+// A Hypnotized archer can attack a double-wide former ally at either legal
+// occupied hex. Native ranged damage is aim-dependent near the range-penalty
+// boundary, so the head-only projection can silently choose a worse shot.
+// This is a VCMI targeting correction, not source parity with closed TUM DLL.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 20);
+	setArmy(defenderSideHero, CreatureID(0), 30);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(4).toCreature(), 50));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	CStack * archer = nullptr;
+	CStack * wideAlly = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() != BattleSide::ATTACKER)
+			continue;
+		if(unit->unitSlot() == SlotID(0))
+			archer = unit.get();
+		if(unit->unitSlot() == SlotID(1))
+			wideAlly = unit.get();
+	}
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(wideAlly, nullptr);
+	ASSERT_TRUE(wideAlly->doubleWide());
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, archer));
+	ASSERT_TRUE(archer->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(archer), player);
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+
+	// Find an actual legal native position straddling the ranged damage
+	// threshold; do not manufacture an expected damage or a fake shot.
+	bool foundBetterTail = false;
+	double headDamage = 0;
+	double tailDamage = 0;
+	for(int hexId = 0; hexId < GameConstants::BFIELD_SIZE; ++hexId)
+	{
+		const BattleHex candidate(hexId);
+		if(!candidate.isAvailable())
+			continue;
+		const auto footprint = wideAlly->getHexes(candidate);
+		if(footprint.size() != 2)
+			continue;
+		if(std::any_of(footprint.begin(), footprint.end(), [&](const BattleHex & hex)
+			{
+				const auto * occupying = hex.isAvailable() ? view->battleGetUnitByPos(hex) : nullptr;
+				return !hex.isAvailable() || (occupying != nullptr && occupying != wideAlly);
+			}))
+			continue;
+		// Keep every immediate melee strike out of this ranged test.
+		if(BattleHex::getDistance(archer->getPosition(), candidate)
+			<= static_cast<int>(archer->getMovementRange()) + 2)
+			continue;
+		wideAlly->setPosition(candidate);
+		const auto occupied = wideAlly->getHexes();
+		if(!view->battleCanShoot(archer, occupied[0])
+			|| !view->battleCanShoot(archer, occupied[1]))
+			continue;
+		const auto estimate = [&](BattleHex aim)
+		{
+			BattleAttackInfo info(archer, wideAlly, 0, true);
+			info.attackerPos = archer->getPosition();
+			info.defenderPos = aim;
+			const auto preview = view->battleEstimateDamage(info, nullptr);
+			return (static_cast<double>(preview.damage.min)
+				+ static_cast<double>(preview.damage.max)) / 2.0;
+		};
+		headDamage = estimate(occupied[0]);
+		tailDamage = estimate(occupied[1]);
+		if(tailDamage > headDamage)
+		{
+			foundBetterTail = true;
+			break;
+		}
+	}
+	ASSERT_TRUE(foundBetterTail)
+		<< "Fixture needs a genuine, legal wide-tail shot with higher native projected damage";
+	const auto occupied = wideAlly->getHexes();
+	const BattleHex head = occupied[0];
+	const BattleHex tail = occupied[1];
+	ASSERT_NE(head, tail);
+	ASSERT_GT(tailDamage, headDamage);
+	const auto originalHealth = wideAlly->getAvailableHealth();
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *archer);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+	EXPECT_EQ(baseline.target.front().unitValue, wideAlly->unitId())
+		<< "Partial HoMM3 baseline aims at the whole unit, not the tail hex";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	battle()->activeStack = archer->unitId();
+	policy->activeStack(battleID, archer);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_EQ(callback->action->target.size(), 1u);
+	EXPECT_EQ(callback->action->target.front().hexValue, tail)
+		<< "TUM must independently select the better native tail aim";
+	std::cout << "AI_TUM_HYPNOTIZE_WIDE_SHOT baseline=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+	const int shotsBefore = recorder.shots;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI server rejected TUM's double-wide tail shot";
+	EXPECT_GT(recorder.shots, shotsBefore);
+	EXPECT_LT(wideAlly->getAvailableHealth(), originalHealth);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherComparesShotAgainstMelee)
 {
 	prepareBattle(CreatureID(2), 20, CreatureID(0), 8);
