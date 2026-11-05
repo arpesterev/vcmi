@@ -156,6 +156,28 @@ TEST(MMAINNOutputValidation, V13RejectsJaggedActionTableMetadata)
 }
 
 
+TEST(MMAINNOutputValidation, V15RejectsDuplicateNodeAndEdgeMetadataTypes)
+{
+	using MMAI::BAI::requireUniqueNNMetadataType;
+	// The upstream exporter derives node_order and edge_order from unique
+	// dictionary keys. The model must reject repeated schema types before
+	// ONNX inference instead of silently duplicating a graph relation.
+	std::set<int> nodeTypes;
+	EXPECT_NO_THROW(requireUniqueNNMetadataType(nodeTypes, 0, "node_order"));
+	EXPECT_NO_THROW(requireUniqueNNMetadataType(nodeTypes, 1, "node_order"));
+	EXPECT_THROW(requireUniqueNNMetadataType(nodeTypes, 0, "node_order"), std::runtime_error);
+
+	std::set<int> edgeTypes;
+	EXPECT_NO_THROW(requireUniqueNNMetadataType(edgeTypes, 0, "edge_order"));
+	EXPECT_NO_THROW(requireUniqueNNMetadataType(edgeTypes, 1, "edge_order"));
+	EXPECT_THROW(requireUniqueNNMetadataType(edgeTypes, 1, "edge_order"), std::runtime_error);
+
+	// A repeated numeric value in a different category is not a duplicate.
+	EXPECT_NO_THROW(requireUniqueNNMetadataType(edgeTypes, 2, "edge_order"));
+	EXPECT_EQ(nodeTypes.size(), 2u);
+	EXPECT_EQ(edgeTypes.size(), 3u);
+}
+
 TEST(MMAINNOutputValidation, RejectsInvalidModelSideMetadata)
 {
 	using MMAI::BAI::parseNNModelSide;
