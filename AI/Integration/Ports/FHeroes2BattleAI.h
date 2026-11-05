@@ -210,7 +210,7 @@ private:
 	}
 
 	static double attackValue(CPlayerBattleCallback & battle, const CStack & attacker,
-		const CStack & defender, const BattleHex & from, bool shooting, int distance)
+		const CStack & defender, const BattleHex & from, const BattleHex & aimedHex, bool shooting, int distance)
 	{
 		const int attackerPosition = attacker.getPosition().toInt();
 		const int defenderPosition = defender.getPosition().toInt();
@@ -218,6 +218,10 @@ private:
 		const int64_t defenderHealth = defender.getAvailableHealth();
 		BattleAttackInfo info(&attacker, &defender, distance, shooting);
 		info.attackerPos = from;
+		// Pinned fheroes2 optimalAttackVector evaluates the actual struck
+		// footprint, not necessarily the head of a wide defender. VCMI
+		// damage and attack-direction rules own this native projection.
+		info.defenderPos = aimedHex;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
 		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
@@ -1114,7 +1118,7 @@ private:
 					// victim in the selected target hex.
 					if(battle.battleGetUnitByPos(hitHex) != enemy)
 						continue;
-					double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
+					double value = attackValue(battle, stack, *enemy, hex, hitHex, false, reachability.distances[hex.toInt()]);
 					const auto collateral = battle.getAttackedBattleUnits(
 						&stack, enemy, hitHex, false, hex);
 					for(const auto * victim : collateral)
