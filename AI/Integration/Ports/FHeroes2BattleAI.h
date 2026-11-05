@@ -516,6 +516,15 @@ private:
 					if(!engaged)
 						continue;
 				}
+				// Pinned fheroes2 isUnitAbleToApproachPosition uses
+				// GetSpeed(false, true): Blind/Paralyze means STANDING even
+				// on the following turn. Native VCMI getMovementRange()
+				// may still report the unmodified speed under NOT_ACTIVE;
+				// it must not create imaginary next-turn melee reach.
+				// Do not use canMove(): it also reflects whether a stack
+				// has already acted, which the source explicitly ignores.
+				if(enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
+					continue;
 				const int speed = static_cast<int>(enemy->getMovementRange());
 				if(speed <= 0)
 					continue;
