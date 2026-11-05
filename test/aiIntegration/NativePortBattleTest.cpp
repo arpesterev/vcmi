@@ -3501,11 +3501,11 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 }
 
 
-TEST_F(AIIntegrationNativeBattle, tumFastSiegeWeaponCannotBeMobileDecoy)
+TEST_F(AIIntegrationNativeBattle, tumSiegeWeaponLosesMobileDecoyStatus)
 {
-	// The TUM anti-decoy override applies only to mobile bait. First prove
-	// the independent mobile-griffin decision, then mark that same Griffin
-	// as a siege weapon and require a legal native non-decoy decision.
+	// Pinned TUM avoids pursuing fast mobile bait. First prove the native
+	// Griffin triggers a distinct TUM action; then mark it a siege weapon
+	// and require the engine-legitimate non-decoy decision.
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 35);
 	ASSERT_FALSE(HasFatalFailure());
 	const CStack * own = nullptr;
@@ -3588,8 +3588,13 @@ TEST_F(AIIntegrationNativeBattle, tumFastSiegeWeaponCannotBeMobileDecoy)
 		BonusDuration::PERMANENT, BonusType::SIEGE_WEAPON, BonusSource::OTHER, 1, BonusSourceID()));
 	ASSERT_TRUE(fast->hasBonusOfType(BonusType::SIEGE_WEAPON));
 	ASSERT_FALSE(fast->isMeleeAttacker());
-	ASSERT_GE(static_cast<int>(fast->getMovementRange()), speed + 2)
-		<< "The host-engine mobility gate must be tested with high printed speed";
+	// Unlike a visual unit label, native SIEGE_WEAPON changes the engine's
+	// movement capability: getMovementRange() now returns zero. Checking
+	// the previous fast speed here was invalid. The regression concerns
+	// the legal decision after that real rule takes effect, not a fictitious
+	// fast-moving siege machine.
+	ASSERT_EQ(static_cast<int>(fast->getMovementRange()), 0)
+		<< "VCMI must classify the siege-weapon-marked stack as immobile";
 	const auto machineBaseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerView, *own);
 	ASSERT_EQ(machineBaseline.actionType, EActionType::WALK);
 	callback->action.reset();
