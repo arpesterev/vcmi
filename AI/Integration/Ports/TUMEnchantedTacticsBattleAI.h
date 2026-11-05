@@ -173,10 +173,9 @@ private:
 			const double targetHealth = static_cast<double>(victim.getAvailableHealth());
 			const double dealt = std::min(targetHealth,
 				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0);
-			// A target guaranteed to die from the first hit cannot retaliate.
-			// Damage estimation may still return a hypothetical counterstrike;
-			// do not reward that physically impossible damage under TUM's
-			// published dealt + received Hypnotize preference.
+			// Normally a guaranteed first-hit kill prevents retaliation;
+			// the native ranged FIRST_STRIKE exception counters before that
+			// first hit, so it must be evaluated separately.
 			const bool guaranteedKill = static_cast<double>(damage.damage.min) >= targetHealth;
 			// VCMI resolves ranged FIRST_STRIKE before the shooter's opening
 			// attack. The victim therefore returns fire with its original
@@ -214,22 +213,22 @@ private:
 						}
 						else
 						{
-						const auto counterAfterShot = [&](int64_t shotDamage)
-						{
-							auto remaining = victim.acquireState();
-							remaining->damage(shotDamage);
-							if(!remaining->alive())
-								return DamageEstimation();
-							BattleAttackInfo counter(remaining.get(), &stack, 0, true);
-							counter.attackerPos = victim.getPosition();
-							return battle.battleEstimateDamage(counter, nullptr);
-						};
-						const auto lowShotCounter = counterAfterShot(damage.damage.min);
-						const auto highShotCounter = counterAfterShot(damage.damage.max);
-						const double minimum = static_cast<double>(std::min(
-							lowShotCounter.damage.min, highShotCounter.damage.min));
-						const double maximum = static_cast<double>(std::max(
-							lowShotCounter.damage.max, highShotCounter.damage.max));
+							const auto counterAfterShot = [&](int64_t shotDamage)
+							{
+								auto remaining = victim.acquireState();
+								remaining->damage(shotDamage);
+								if(!remaining->alive())
+									return DamageEstimation();
+								BattleAttackInfo counter(remaining.get(), &stack, 0, true);
+								counter.attackerPos = victim.getPosition();
+								return battle.battleEstimateDamage(counter, nullptr);
+							};
+							const auto lowShotCounter = counterAfterShot(damage.damage.min);
+							const auto highShotCounter = counterAfterShot(damage.damage.max);
+							const double minimum = static_cast<double>(std::min(
+								lowShotCounter.damage.min, highShotCounter.damage.min));
+							const double maximum = static_cast<double>(std::max(
+								lowShotCounter.damage.max, highShotCounter.damage.max));
 							received = (minimum + maximum) / 2.0;
 						}
 					}
