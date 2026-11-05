@@ -65,6 +65,38 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		// fheroes2 planUnitTurn queues SPELLCAST followed by RETREAT or
+		// SURRENDER. VCMI delivers only one action per callback, so resolve
+		// the queued withdrawal when the spell has been applied and the
+		// battle's active-stack callback resumes. The engine must reauthorize
+		// the final action; a changed battle state is never force-retreated.
+		if(const auto pending = pendingWithdrawals.find(battleID.getNum());
+			pending != pendingWithdrawals.end())
+		{
+			const auto requested = pending->second;
+			pendingWithdrawals.erase(pending);
+			if(requested == Ports::FHeroes2::Withdrawal::RETREAT && battle->battleCanFlee())
+			{
+				cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(battle->battleGetMySide()));
+				return;
+			}
+			if(requested == Ports::FHeroes2::Withdrawal::SURRENDER)
+			{
+				const auto * hero = battle->battleGetMyHero();
+				const auto * game = env ? env->game() : nullptr;
+				if(hero && game && battle->battleCanSurrender(hero->getOwner()))
+				{
+					const int cost = battle->battleGetSurrenderCost();
+					if(cost >= 0 && game->getResource(hero->getOwner(), GameResID::GOLD) >= cost)
+					{
+						cb->battleMakeUnitAction(battleID, BattleAction::makeSurrender(battle->battleGetMySide()));
+						return;
+					}
+				}
+			}
+			logAi->warn("AI_PORT_FAREWELL_CANCELLED backend=FHeroes2Tactics battle=%d reason=withdrawal_no_longer_legal",
+				battleID.getNum());
+		}
 		// fheroes2 exits an AI attacker's battle after 50 consecutive
 		// rounds with no deaths. VCMI must authorize retreat, and a
 		// human-controlled autobattle must never lose its hero this way.
@@ -137,7 +169,19 @@ public:
 				const Ports::FHeroes2::WithdrawalContext context{ourStrength, enemyStrength, 100.0 / 7.5,
 					false, initialFriendlySlots < 4 || fullyLostStack, canFlee, canSurrender,
 					affordable, valuableArtifacts, canRehire, primarySkillTotal};
-				switch(Ports::FHeroes2::decideWithdrawal(context))
+				const auto outcome = Ports::FHeroes2::decideWithdrawal(context);
+				if(outcome != Ports::FHeroes2::Withdrawal::FIGHT && preferences.enableSpellsUsage)
+				{
+					if(const auto farewell = FHeroes2SpellPolicy::choose(battle, env.get(), stack, true))
+					{
+						pendingWithdrawals[battleID.getNum()] = outcome;
+						logAi->debug("AI_PORT_FAREWELL backend=FHeroes2Tactics battle=%d action=%s",
+							battleID.getNum(), farewell->toString());
+						cb->battleMakeSpellAction(battleID, *farewell);
+						return;
+					}
+				}
+				switch(outcome)
 				{
 					case Ports::FHeroes2::Withdrawal::RETREAT:
 						cb->battleMakeUnitAction(battleID, BattleAction::makeRetreat(battle->battleGetMySide()));
@@ -170,14 +214,17 @@ void battleStart(const BattleID & battleID, const CCreatureSet *, const CCreatur
 		int3, const CGHeroInstance *, const CGHeroInstance *, BattleSide, bool) override
 	{
 		stalemateByBattle[battleID.getNum()].reset();
+		pendingWithdrawals.erase(battleID.getNum());
 	}
 
 	void battleEnd(const BattleID & battleID, const BattleResult *, QuestionID) override
 	{
 		stalemateByBattle.erase(battleID.getNum());
+		pendingWithdrawals.erase(battleID.getNum());
 	}
 
 private:
+	std::map<int32_t, Ports::FHeroes2::Withdrawal> pendingWithdrawals;
 	std::map<int32_t, Ports::FHeroes2::DeathlessRoundLimiter> stalemateByBattle;
 	std::shared_ptr<CBattleCallback> cb;
 	std::shared_ptr<Environment> env;
