@@ -521,6 +521,9 @@ Schema::Side NNModel::getSide()
 
 int NNModel::getAction(const MMAI::Schema::IState * s)
 {
+	// A role model is cached and reused across battles. Protect the shared RNG
+	// and ONNX session from overlapping inferences on different battle threads.
+	const std::lock_guard<std::mutex> inferenceLock(inferenceMutex);
 	NestedLogTag _("getAction");
 	auto timer = ScopedTimer("call");
 	auto any = s->getSupplementaryData();
