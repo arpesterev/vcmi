@@ -215,6 +215,15 @@ five independently implemented overrides derived from the documentation:
   target HP and remaining machine ammunition. A native battle checks an
   expert-Artillery ballista proposal, server-accepted attack sequence and
   actual result, without claiming the closed TUM numerical formula.
+  **Manual-control boundary:** this TUM decision requires a server-delivered
+  unit activation, e.g. from Artillery. Without a native `MANUAL_CONTROL`
+  bonus, `BattleFlowProcessor` resolves `CPU_CONTROLLED` ballista turns
+  before `TUMEnchantedTactics::activeStack` is called. A separate native
+  server regression distinguishes automatic ballista shots from TUM decisions.
+  The published rule against waking disabled enemies is therefore **not yet
+  enforced on automatic ballista turns**. Changing that requires an explicitly
+  authorized integration at the automatic-action boundary, not an invented
+  tactical activation.
 - **Arrow towers (blocked at the policy boundary):** VCMI
   `BattleFlowProcessor::tryMakeAutomaticActionOfRangedUnit` handles
   CPU-controlled citadel towers before `CBattleGameInterface::activeStack`.
