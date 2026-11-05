@@ -71,6 +71,17 @@ inline int32_t pinnedShooterValue(double rangedUnitValue, double meleeUnitValue,
 		static_cast<double>(std::numeric_limits<int32_t>::max())));
 }
 
+// Pinned getHexAttackValue compares a neighboring shooter's ranged and
+// melee combat values. VCMI's native FREE_SHOOTING may preserve a legal shot
+// even after melee contact. Do not pretend contact suppresses that shooter.
+// Restricted free shooting can still lose adjacent shots; this is a VCMI
+// legality correction to a partial port, not an exact HoMM3 valuation.
+inline bool nativeShooterSuppressionPossible(bool canShootNow,
+	bool canShootWhileBlocked, bool canShootAdjacent)
+{
+	return canShootNow && !(canShootWhileBlocked && canShootAdjacent);
+}
+
 // The pinned checkAdjacentHexes consumes a precomputed enemy_attacks[hex]
 // landing-risk field. In the VCMI approximation, the prospective landing
 // cell is still empty, so battleCanShoot(enemy, thatCell) would incorrectly
