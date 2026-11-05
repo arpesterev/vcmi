@@ -78,7 +78,6 @@ int main()
 	try { HoMM3::collateralStrikeValue(false, std::numeric_limits<double>::infinity()); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
-	// HoMM3 checkAdjacentHexes evaluates BOTH attacker's occupied hexes and
 	// VCMI free shooting (e.g. Sharpshooter's Bow) can survive
 	// adjacent contact. The original source valuation is not reused when
 	// native rules prove the intended suppression does not occur.
@@ -91,6 +90,7 @@ int main()
 	require(!HoMM3::nativeShooterSuppressionPossible(false, false, false),
 		"Unavailable shot cannot receive a fictional pin bonus");
 
+	// HoMM3 checkAdjacentHexes evaluates BOTH attacker's occupied hexes and
 	// shares its visited-shooter mask. Physical contact on a wide tail must
 	// count, while a nonadjacent head alone does not. A wide shooter may also
 	// be engaged at its tail; its two cells never imply two separate shooters.
