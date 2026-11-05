@@ -649,6 +649,22 @@ TEST(MMAINNOutputValidation, V15RejectsMoveOutsideLiveEngineReachability)
 	EXPECT_THROW(requireNNV15LegalMove(Hex{-1, false}, live, 9u), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V15RejectsEmptyActionGraphBeforeOnnxInference)
+{
+	using MMAI::BAI::requireNNV15ActionCandidates;
+	EXPECT_NO_THROW(requireNNV15ActionCandidates(1u));
+	EXPECT_NO_THROW(requireNNV15ActionCandidates(165u));
+	try
+	{
+		requireNNV15ActionCandidates(0u);
+		FAIL() << "MMAI V15 attempted inference on an empty action graph";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("before ONNX inference"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsInactiveGraphActionBeforeServerDispatch)
 {
 	using MMAI::BAI::requireNNV15ActiveAction;

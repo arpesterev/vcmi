@@ -554,13 +554,15 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 		return MMAI::Schema::ACTION_RESET;
 	}
 
+	const auto activeActionIds = graph->getActiveActionIds();
+	requireNNV15ActionCandidates(activeActionIds.size());
+
 	auto inputs = prepareInputs(graph);
 	auto outputs = container->session->Run(Ort::RunOptions(), inputNames.data(), inputs.data(), inputs.size(), outputNames.data(), outputNames.size());
 
 	if(outputs.size() != 4)
 		throwf("getAction: bad output size: want: 4, have: %d", outputs.size());
 
-	const auto activeActionIds = graph->getActiveActionIds();
 	const auto modelGreedyAction = toScalar<int64_t>("action", outputs[0]);
 	const auto activeProbs = toVec1D<float>("active_probs", outputs[1], static_cast<int64_t>(activeActionIds.size()));
 	const auto value = toScalar<float>("value", outputs[2]);

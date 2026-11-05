@@ -250,6 +250,7 @@ jobs:
                       'V13StrictRejectsInvalidModelActionWithoutResampling',
                       'V13RejectsMoveOutsideLiveEngineReachability',
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
+                      'V15RejectsEmptyActionGraphBeforeOnnxInference',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
                       'V15RejectsMoveOutsideLiveEngineReachability',
                       'V15RejectsDeadOrMissingModelAttackTarget',

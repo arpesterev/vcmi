@@ -48,6 +48,17 @@ inline void validateNNObservationValues(const std::vector<float> & values, const
 				+ " at index " + std::to_string(i));
 }
 
+// V15's dynamic graph may have no active creature-action nodes after
+// battle-event invalidation. Reject the snapshot before invoking ONNX:
+// zero-length action tensors are not a policy decision and must not be
+// interpreted as a retreat, resampled, or routed into scripted BattleAI.
+// Terminal observations are handled separately by ACTION_RESET.
+inline void requireNNV15ActionCandidates(std::size_t activeActionCount)
+{
+	if(activeActionCount == 0)
+		throw std::runtime_error("MMAI V15: observation has no active creature actions before ONNX inference");
+}
+
 // V15 emits a critic value in addition to the action head. Although the
 // value does not determine the selected action, non-finite ONNX output is
 // evidence of a broken model and must not be accepted as a valid prediction.
