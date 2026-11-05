@@ -671,6 +671,84 @@ private:
 			: std::nullopt;
 	}
 
+	// Pinned fheroes2 meleeUnitDefense (ai_battle.cpp, lines 1774 and
+	// 2012-2039): before generic melee target selection, attack enemies
+	// physically blocking friendly archers. The source scores each blocker
+	// with BestAttackOutcome. Here the positions and damage previews are
+	// native VCMI projections, and only immediately legal attacks qualify.
+	// In particular, a blocked archer must not redirect a guard to an
+	// unrelated, more profitable melee target.
+	static std::optional<BattleAction> attackShooterBlocker(CPlayerBattleCallback & battle,
+		const CStack & guard, const ReachabilityInfo & reachability,
+		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
+	{
+		if(guard.hasBonusOfType(BonusType::SHOOTER)
+			|| guard.unitOwner() != battle.battleGetOwner(&guard))
+			return std::nullopt;
+
+		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		const CStack * chosenBlocker = nullptr;
+		BattleHex chosenFrom;
+		BattleHex chosenTargetHex;
+		double chosenShooterValue = std::numeric_limits<double>::lowest();
+		for(const auto * shooter : friends)
+		{
+			if(shooter == &guard || !shooter->alive() || !shooter->getPosition().isValid()
+				|| !shooter->isShooter() || battle.battleCanShoot(shooter))
+				continue;
+
+			const CStack * bestBlocker = nullptr;
+			BattleHex bestFrom;
+			BattleHex bestTargetHex;
+			Ports::FHeroes2::MeleeOutcome bestOutcome;
+			for(const auto * enemy : enemies)
+			{
+				// Lack of a shot can also result from a spell or empty ammo.
+				// Only real enemy contact can make a unit an archer blocker.
+				const bool adjacent = std::any_of(shooter->getHexes().begin(),
+					shooter->getHexes().end(), [&](const BattleHex & friendlyHex)
+					{
+						return std::any_of(enemy->getHexes().begin(), enemy->getHexes().end(),
+							[&](const BattleHex & enemyHex)
+							{
+								return BattleHex::getDistance(friendlyHex, enemyHex) == 1;
+							});
+					});
+				if(!adjacent)
+					continue;
+				for(const auto & from : available)
+				{
+					if(!from.isAvailable())
+						continue;
+					const auto targets = battle.meleeAttackHexes(&guard, enemy, from);
+					if(targets.empty() || battle.battleGetUnitByPos(targets.front()) != enemy)
+						continue;
+					const double value = attackValue(battle, guard, *enemy, from,
+						false, reachability.distances[from.toInt()]);
+					const Ports::FHeroes2::MeleeOutcome outcome{
+						from.toInt(), strength(*enemy), value, true};
+					if(!bestBlocker || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
+					{
+						bestBlocker = enemy;
+						bestFrom = from;
+						bestTargetHex = targets.front();
+						bestOutcome = outcome;
+					}
+				}
+			}
+			if(bestBlocker && (!chosenBlocker || strength(*shooter) > chosenShooterValue))
+			{
+				chosenShooterValue = strength(*shooter);
+				chosenBlocker = bestBlocker;
+				chosenFrom = bestFrom;
+				chosenTargetHex = bestTargetHex;
+			}
+		}
+		return chosenBlocker
+			? std::optional<BattleAction>(BattleAction::makeMeleeAttack(&guard, chosenTargetHex, chosenFrom))
+			: std::nullopt;
+	}
+
 	// fheroes2 ai_battle.cpp archerDecision, pinned at 0dbfe9f386f33c2500842f4a59cd284d7f03d541:
 	// only a sufficiently faster shooter attempts to escape an imminent melee
 	// threat, and only to a position safe from every visible enemy stack.
@@ -1072,8 +1150,11 @@ private:
 			// Pinned meleeUnitDefense covers a threatened friendly archer
 			// *before* considering unrelated melee opportunities. Previously
 			// any legal immediate attack bypassed this screen entirely.
-			// Keep the existing direct-attack priority if an archer's shot is
-			// blocked: source defense first attacks the adjacent blockers.
+			// An archer's blocked shot gives its actual adjacent enemy a
+			// higher priority than unrelated melee targets. A legal native
+			// attack is required; otherwise retain the generic melee policy.
+			if(const auto unblock = attackShooterBlocker(battle, stack, reachability, available, allEnemies))
+				return *unblock;
 			const auto friendlyUnits = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
 			const bool shootersCanFire = std::all_of(friendlyUnits.begin(), friendlyUnits.end(),
 				[&](const CStack * friendly)
