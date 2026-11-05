@@ -473,6 +473,13 @@ private:
 			BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
 			.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
 				BonusCustomSubtype::damageTypeMelee)));
+		// The counterattack happens before every collateral hit. A nonlethal
+		// FIRST_STRIKE can still remove creatures from the attacker, so pricing
+		// secondary damage with its untouched strength is also fictitious.
+		// Simulate the representative preemptive loss on a DETACHED stack.
+		// This is a VCMI host-rule adjustment; pinned getMultiHeadBonus and
+		// getBreathBonus do not perform such a preemptive counterattack.
+		auto survivingAttacker = attacker.acquireState();
 		if(firstStrikeMelee && !target.hasBonusOfType(BonusType::NOT_ACTIVE)
 			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
 			&& !attacker.isInvincible() && target.ableToRetaliate()
@@ -482,7 +489,11 @@ private:
 			firstCounter.attackerPos = target.getPosition();
 			firstCounter.defenderPos = from;
 			const auto counter = battle.battleEstimateDamage(firstCounter);
-			if(counter.damage.min >= attacker.getAvailableHealth())
+			int64_t counterHit = counter.damage.min
+				+ (counter.damage.max - counter.damage.min) / 2;
+			counterHit = std::clamp<int64_t>(counterHit, 0, survivingAttacker->getAvailableHealth());
+			survivingAttacker->damage(counterHit);
+			if(!survivingAttacker->alive())
 				return 0.0;
 		}
 
@@ -494,7 +505,7 @@ private:
 			const auto * secondary = dynamic_cast<const CStack *>(affected);
 			if(!secondary || secondary == &target || secondary == &attacker || !secondary->alive())
 				continue;
-			BattleAttackInfo info(&attacker, secondary, pathCost, false);
+			BattleAttackInfo info(survivingAttacker.get(), secondary, pathCost, false);
 			info.attackerPos = from;
 			const double loss = lossValue(*secondary, battle.battleEstimateDamage(info));
 			// Ownership, not immutable deployment side: Hypnotize can make
