@@ -533,6 +533,9 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction(const CStack * activeStack)
 				if(!nbh.isAvailable())
 					throw std::runtime_error("MMAI V13: model AMOVE has an unavailable target hex");
 				const auto * estack = battle->battleGetStackByPos(nbh);
+				const auto * observed = action->aMoveTargetHex && action->aMoveTargetHex->stack
+					? action->aMoveTargetHex->stack->cstack : nullptr;
+				requireNNV13SelectedMeleeHexTarget(observed, estack);
 				requireNNV13LegalTarget(estack,
 					[this, acstack, &bhex](const CStack * target)
 					{
@@ -556,6 +559,9 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction(const CStack * activeStack)
 				if(!nbh.isAvailable())
 					throw std::runtime_error("MMAI V13: model AMOVE has an unavailable target hex");
 				const auto * estack = battle->battleGetStackByPos(nbh);
+				const auto * observed = action->aMoveTargetHex && action->aMoveTargetHex->stack
+					? action->aMoveTargetHex->stack->cstack : nullptr;
+				requireNNV13SelectedMeleeHexTarget(observed, estack);
 				requireNNV13LegalTarget(estack,
 					[this, acstack, &bhex](const CStack * target)
 					{

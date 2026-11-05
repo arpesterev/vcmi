@@ -555,6 +555,32 @@ TEST(MMAINNOutputValidation, V13RejectsReplacedShootHexTargetBeforeDispatch)
 	}
 }
 
+TEST(MMAINNOutputValidation, V13RejectsReplacedMeleeHexTargetBeforeDispatch)
+{
+	using MMAI::BAI::requireNNV13SelectedMeleeHexTarget;
+	struct Stack { int id; };
+	const Stack original{1};
+	const Stack replacement{2};
+
+	// Even if both occupants could be attacked, an ONNX-selected melee
+	// direction must never silently switch to the replacement creature.
+	EXPECT_NO_THROW(requireNNV13SelectedMeleeHexTarget(&original, &original));
+	EXPECT_THROW(requireNNV13SelectedMeleeHexTarget(&original, &replacement), std::runtime_error);
+	EXPECT_THROW(requireNNV13SelectedMeleeHexTarget(&original, static_cast<const Stack *>(nullptr)), std::runtime_error);
+	EXPECT_THROW(requireNNV13SelectedMeleeHexTarget(static_cast<const Stack *>(nullptr), &replacement), std::runtime_error);
+	EXPECT_THROW(requireNNV13SelectedMeleeHexTarget(static_cast<const Stack *>(nullptr), static_cast<const Stack *>(nullptr)), std::runtime_error);
+
+	try
+	{
+		requireNNV13SelectedMeleeHexTarget(&original, &replacement);
+		FAIL() << "V13 silently redirected an ONNX-selected melee attack";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("V13: model AMOVE target hex"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V13RejectsMoveOutsideLiveEngineReachability)
 {
 	using MMAI::BAI::requireNNV13LegalMove;

@@ -55,10 +55,11 @@ std::unique_ptr<Hex> Action::initAMoveTargetHex(const Schema::Action & a, const 
 
 	const auto & bh = hex->bhex;
 
-	auto edir = AMOVE_TO_EDIR.at(EI(ha));
-	auto nbh = bh.cloneInDirection(edir);
-
-	ASSERT(nbh.isAvailable(), "unavailable AMOVE target hex #" + std::to_string(nbh.toInt()));
+	// AMOVE_2 targets lie beyond the second hex of a double-wide actor.
+	// Use the same twelve-hex geometry as the V13 legal-action mask.
+	auto nbh = Hex::NearbyBattleHexes(bh).at(EI(ha));
+	if(!nbh.isAvailable())
+		throw std::runtime_error("MMAI V13: unavailable AMOVE observation target hex #" + std::to_string(nbh.toInt()));
 
 	auto [x, y] = Hex::CalcXY(nbh);
 

@@ -166,6 +166,17 @@ inline void requireNNV13SelectedShootHexTarget(const Target * observedTarget, co
 		throw std::runtime_error("MMAI V13: model SHOOT selected hex no longer contains the observed target");
 }
 
+// V13 AMOVE encodes the attacker's destination and an adjacent target hex.
+// A replacement creature at the latter hex may also be legally attackable,
+// but is not the one selected by the ONNX observation. This applies to
+// normal and double-wide melee attacks alike.
+template<typename Target>
+inline void requireNNV13SelectedMeleeHexTarget(const Target * observedTarget, const Target * liveTargetAtSelectedHex)
+{
+	if(!observedTarget || liveTargetAtSelectedHex != observedTarget)
+		throw std::runtime_error("MMAI V13: model AMOVE target hex no longer contains the observed target");
+}
+
 // V13's battle action masks are derived from a preceding observation.
 // They cannot guarantee that a target is still alive and legal at dispatch.
 // A stale target must be rejected before consulting the live VCMI callback,
