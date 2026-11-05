@@ -9,6 +9,7 @@
 
 #include "schema/base.h"
 #include <charconv>
+#include <cstddef>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -40,6 +41,19 @@ inline void requireUniqueNNMetadataType(std::set<int> & seen, int type, const ch
 	if(!seen.insert(type).second)
 		throw std::runtime_error(std::string("MMAI: duplicate ONNX ") + field
 			+ " type: " + std::to_string(type));
+}
+
+// V13's exporter (vcmi-gym/rl/algos/mppo_dna_gnn/export.py) defines
+// positional ONNX input/output names. A count-only check lets a different
+// graph interface initialize under the MMAI V13 identity, potentially
+// binding the wrong observation or action head. Refuse it at model load.
+inline void requireNNV13TensorName(const char * actual, const char * expected, std::size_t index, const char * kind)
+{
+	if(actual && std::string(actual) == expected)
+		return;
+	throw std::runtime_error("MMAI V13: unexpected ONNX " + std::string(kind) + " name at index "
+		+ std::to_string(index) + ": expected '" + expected + "', got '"
+		+ (actual ? actual : "<null>") + "'");
 }
 
 inline int parseNNModelVersion(const std::string & value)
