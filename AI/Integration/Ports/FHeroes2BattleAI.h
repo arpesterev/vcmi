@@ -697,6 +697,7 @@ private:
 				|| !shooter->isShooter() || battle.battleCanShoot(shooter))
 				continue;
 
+			const auto shooterHexes = shooter->getHexes();
 			const CStack * bestBlocker = nullptr;
 			BattleHex bestFrom;
 			BattleHex bestTargetHex;
@@ -705,10 +706,11 @@ private:
 			{
 				// Lack of a shot can also result from a spell or empty ammo.
 				// Only real enemy contact can make a unit an archer blocker.
-				const bool adjacent = std::any_of(shooter->getHexes().begin(),
-					shooter->getHexes().end(), [&](const BattleHex & friendlyHex)
+				const auto enemyHexes = enemy->getHexes();
+				const bool adjacent = std::any_of(shooterHexes.begin(),
+					shooterHexes.end(), [&](const BattleHex & friendlyHex)
 					{
-						return std::any_of(enemy->getHexes().begin(), enemy->getHexes().end(),
+						return std::any_of(enemyHexes.begin(), enemyHexes.end(),
 							[&](const BattleHex & enemyHex)
 							{
 								return BattleHex::getDistance(friendlyHex, enemyHex) == 1;
