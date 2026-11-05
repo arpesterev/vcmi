@@ -343,10 +343,17 @@ private:
 		return score;
 	}
 
-	static int32_t projectedAttackEffect(double value)
+	static int32_t projectedAttackEffect(double value, bool hoMM3SourceSigned)
 	{
 		if(!std::isfinite(value))
 			throw std::logic_error("Nonfinite HoMM3 attack projection");
+		// Source getSimpleAttackEffect is signed: a risky return shot may
+		// outweigh inflicted damage. The native HoMM3-only projection keeps
+		// that negative result for target ranking instead of turning every
+		// losing exchange into an identical zero-valued shot. TUM's
+		// explicitly composed partial baseline remains unchanged.
+		if(hoMM3SourceSigned)
+			return Ports::HoMM3::signedProjectedAttackEffect(value);
 		return static_cast<int32_t>(std::clamp(value, 0.0,
 			static_cast<double>(std::numeric_limits<int32_t>::max())));
 	}
@@ -670,7 +677,7 @@ private:
 		// Native replacement for getSimpleAttackEffect and enemy target-time lookup.
 		// The original uses its own projected enemy goal, not hex distance.
 		const int32_t effect = projectedAttackEffect(exchangeValue(battle, attacker, target,
-			attacker.getPosition(), true, 0, false, includeNativeInactive));
+			attacker.getPosition(), true, 0, false, includeNativeInactive), includeNativeInactive);
 		const int speed = std::max(1, static_cast<int>(target.getMovementRange()));
 		const int hexDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
 		const int time = std::max(1, (hexDistance + speed - 1) / speed);
