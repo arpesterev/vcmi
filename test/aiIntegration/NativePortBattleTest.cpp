@@ -4100,7 +4100,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathScoresAndHitsNativeSecondar
 	ASSERT_FALSE(extra.empty())
 		<< "Hypnotized TUM must prefer an actual two-victim breath strike";
 	std::cout << "AI_TUM_HYPNOTIZE_MELEE_SPLASH homm3=" << baseline.toString()
-		<< " tum=" << callback->action->toString() << '\\n';
+		<< " tum=" << callback->action->toString() << '\n';
 	const int64_t totalHealthBefore =
 		front->getAvailableHealth() + rear->getAvailableHealth();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
