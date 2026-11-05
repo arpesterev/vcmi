@@ -544,26 +544,40 @@ private:
 			&& !target.hasBonusOfType(BonusType::MULTIHEX_ENEMY_ATTACK))
 			return 0.0;
 
-		BattleAttackInfo primary(&attacker, &target, pathCost, false);
-		primary.attackerPos = from;
-		primary.defenderPos = aimedHex;
-		DamageEstimation retaliation;
-		const auto initialHit = battle.battleEstimateDamage(primary, &retaliation);
-		// This also checks the engine's retaliation availability, no-retaliation
-		// attacks and death of the primary target. Do not invent a return hit.
-		if(retaliation.damage.max <= 0)
-			return 0.0;
-
-		// The defender has already taken the first hit before counterattacking.
-		// Model a representative surviving state without modifying the live stack.
-		// VCMI's exact random damage and effects are not reconstructed here.
+		// Retail checkAdjacentHexes assumes hit -> retaliation. VCMI melee
+		// FIRST_STRIKE instead retaliates before the opening hit, at the
+		// defender's FULL strength. That preemptive area counter can strike
+		// allied bystanders even if the defender would die to our first hit.
+		// This is a host-rule correction, not a retail HoMM3 ability.
+		const bool preemptive = target.hasBonus(
+			Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+			.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+				BonusCustomSubtype::damageTypeMelee)))
+			&& !target.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+			&& !attacker.isInvincible() && target.ableToRetaliate()
+			&& !battle.isLongWeaponAttack(&attacker, &target, from);
 		auto afterHit = target.acquireState();
-		int64_t received = initialHit.damage.min
-			+ (initialHit.damage.max - initialHit.damage.min) / 2;
-		received = std::clamp<int64_t>(received, 0, afterHit->getAvailableHealth());
-		afterHit->damage(received);
-		if(!afterHit->alive())
-			return 0.0;
+		if(!preemptive)
+		{
+			BattleAttackInfo primary(&attacker, &target, pathCost, false);
+			primary.attackerPos = from;
+			primary.defenderPos = aimedHex;
+			DamageEstimation retaliation;
+			const auto initialHit = battle.battleEstimateDamage(primary, &retaliation);
+			// For an ordinary counter, the native preview checks whether
+			// retaliation is blocked or the first hit certainly kills.
+			if(retaliation.damage.max <= 0)
+				return 0.0;
+			// Estimate the surviving defender at the actual counterattack
+			// point. Never mutate the live unit during tactical scoring.
+			int64_t received = initialHit.damage.min
+				+ (initialHit.damage.max - initialHit.damage.min) / 2;
+			received = std::clamp<int64_t>(received, 0, afterHit->getAvailableHealth());
+			afterHit->damage(received);
+			if(!afterHit->alive())
+				return 0.0;
+		}
 
 		double score = 0.0;
 		// The attacker is NOT yet physically at its prospective landing hex.
