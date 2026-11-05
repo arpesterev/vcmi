@@ -855,27 +855,58 @@ private:
 				// Source archerDecision evaluates the target actually struck.
 				// On a wide defender, VCMI's legal tail and head contacts can
 				// have different directions. Estimate each contact separately.
-				BattleAttackInfo attack(&stack, enemy, 0, false);
-				attack.attackerPos = stack.getPosition();
-				attack.defenderPos = hitHex;
-				DamageEstimation retaliation;
-				const auto damage = battle.battleEstimateDamage(attack, &retaliation);
-				const double outgoing = (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
-				const double incoming = (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
-				double difference = outgoing - incoming;
-				for(const auto * victim : battle.getAttackedBattleUnits(
-					&stack, enemy, hitHex, false, stack.getPosition()))
+				// Pinned archerDecision uses raw hit-point damage minus retaliation.
+				// Heroes II has no FIRST_STRIKE. In VCMI melee FIRST_STRIKE may
+				// kill some archers before they hit: forecast that exchange on a
+				// detached unit, and never count the preemptive response twice.
+				const bool firstStrike = enemy->hasBonus(
+						Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+							.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee)))
+					&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+					&& !stack.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+					&& !stack.isInvincible()
+					&& !battle.isLongWeaponAttack(&stack, enemy, stack.getPosition())
+					&& enemy->ableToRetaliate();
+				auto survivingArcher = stack.acquireState();
+				double difference = 0;
+				if(firstStrike)
 				{
-					if(victim == enemy || victim == &stack)
-						continue;
-					BattleAttackInfo extra(&stack, victim, 0, false);
-					extra.attackerPos = stack.getPosition();
-					const auto estimate = battle.battleEstimateDamage(extra);
-					const double health = std::max(0.0, static_cast<double>(victim->getAvailableHealth()));
-					const double collateral = std::min(health, std::max(0.0,
-						(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
-					difference += battle.battleGetOwner(victim) == battle.battleGetOwner(&stack)
-						? -collateral : collateral;
+					BattleAttackInfo counter(enemy, &stack, 0, false);
+					counter.attackerPos = enemy->getPosition();
+					counter.defenderPos = stack.getPosition();
+					const auto preemptive = battle.battleEstimateDamage(counter);
+					int64_t hit = preemptive.damage.min
+						+ (preemptive.damage.max - preemptive.damage.min) / 2;
+					hit = std::clamp<int64_t>(hit, 0, survivingArcher->getAvailableHealth());
+					difference -= static_cast<double>(hit);
+					survivingArcher->damage(hit);
+				}
+				if(survivingArcher->alive())
+				{
+					const battle::Unit * attacker = firstStrike ? survivingArcher.get() : &stack;
+					BattleAttackInfo attack(attacker, enemy, 0, false);
+					attack.attackerPos = stack.getPosition();
+					attack.defenderPos = hitHex;
+					DamageEstimation retaliation;
+					const auto damage = battle.battleEstimateDamage(attack,
+						firstStrike ? nullptr : &retaliation);
+					difference += (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
+					if(!firstStrike)
+						difference -= (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
+					for(const auto * victim : battle.getAttackedBattleUnits(
+						&stack, enemy, hitHex, false, stack.getPosition()))
+					{
+						if(victim == enemy || victim == &stack)
+							continue;
+						BattleAttackInfo extra(attacker, victim, 0, false);
+						extra.attackerPos = stack.getPosition();
+						const auto estimate = battle.battleEstimateDamage(extra);
+						const double health = std::max(0.0, static_cast<double>(victim->getAvailableHealth()));
+						const double collateral = std::min(health, std::max(0.0,
+							(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0));
+						difference += battle.battleGetOwner(victim) == battle.battleGetOwner(&stack)
+							? -collateral : collateral;
+					}
 				}
 				if(!bestTarget || difference > bestDamageDifference)
 				{
