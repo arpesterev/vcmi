@@ -2787,6 +2787,84 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotThreatSpreadsArcherCover)
 // but it must remove the extra spacing requirement from shooter coverage.
 // Both distinct decisions use the same live battle, and the final move is
 // accepted by the authoritative game handler before combat completes.
+// The pinned source's meleeUnitDefense should not treat a Blind melee stack
+// as a mobile future threat to our archer. In VCMI the stack can retain its
+// raw movement range despite NOT_ACTIVE, so compare independent actions on
+// identical native positions before and after a real Blind spell.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedMeleeStopsProjectingShooterCoverThreat)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex archerHex(origin.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex threatHex(archerHex.toInt() + 5);
+	ASSERT_TRUE(archerHex.isAvailable());
+	ASSERT_TRUE(threatHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(threatHex), nullptr);
+	const auto * archer = addStack(BattleSide::ATTACKER, CreatureID(2), archerHex, 120);
+	const auto * threat = addStack(BattleSide::DEFENDER, CreatureID(0), threatHex, 15);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(threat, nullptr);
+	ASSERT_TRUE(archer->isShooter());
+	ASSERT_GT(BattleHex::getDistance(archerHex, threatHex), 1);
+	ASSERT_LE(BattleHex::getDistance(archerHex, threatHex),
+		static_cast<int>(threat->getMovementRange()) + 1);
+	ASSERT_GT(BattleHex::getDistance(origin, threatHex),
+		static_cast<int>(guard->getMovementRange()) + 1);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, guard);
+		return callback->action;
+	};
+	const auto before = decide();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::WALK);
+	ASSERT_FALSE(before->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(before->target.front().hexValue, archerHex), 1)
+		<< "A mobile enemy approaching the archer demands a close screen";
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, threat))
+		<< "An authoritative spell must disable the enemy instead of a mock state flag";
+	ASSERT_TRUE(threat->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(threat->getMovementRange(), 0)
+		<< "This regression needs raw VCMI speed to remain nonzero under Blind";
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto after = decide();
+	ASSERT_TRUE(after.has_value());
+	EXPECT_EQ(after->actionType, EActionType::DEFEND)
+		<< "An incapacitated distant enemy must not force an unnecessary archer screen";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "The native server rejected the source-derived choice after disabling the threat";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlindedAreaShooterNoLongerSpreadsFriendlyArcherCover)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
