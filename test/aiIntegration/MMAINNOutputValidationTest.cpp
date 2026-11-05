@@ -82,6 +82,33 @@ TEST(MMAINNOutputValidation, V13V15RejectNonFiniteObservationBeforeInference)
 	}
 }
 
+TEST(MMAINNOutputValidation, V15RejectsUnrepresentableNeuralActionIdBeforeDispatch)
+{
+	using MMAI::BAI::checkedNNV15ActionId;
+	const auto maxAction = std::numeric_limits<int>::max();
+
+	// Normal V15 action nodes, including zero, are dispatched unchanged.
+	EXPECT_EQ(checkedNNV15ActionId(0), 0);
+	EXPECT_EQ(checkedNNV15ActionId(1), 1);
+	EXPECT_EQ(checkedNNV15ActionId(maxAction), maxAction);
+
+	// The ONNX head and action graph use int64, but Router returns int.
+	// Negative or oversized IDs must not wrap into a different valid node.
+	EXPECT_THROW(checkedNNV15ActionId(-1), std::runtime_error);
+	EXPECT_THROW(checkedNNV15ActionId(static_cast<int64_t>(maxAction) + 1), std::runtime_error);
+	EXPECT_THROW(checkedNNV15ActionId(std::numeric_limits<int64_t>::max()), std::runtime_error);
+
+	try
+	{
+		checkedNNV15ActionId(std::numeric_limits<int64_t>::max());
+		FAIL() << "An oversized neural graph ID reached VCMI dispatch";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("outside the VCMI action range"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsInvalidValueHead)
 {
 	using MMAI::BAI::validateNNValueEstimate;
