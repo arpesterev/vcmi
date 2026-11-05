@@ -189,19 +189,35 @@ private:
 						&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 						&& battle.battleCanShoot(&victim, stack.getPosition()))
 					{
-						BattleAttackInfo counter(&victim, &stack, 0, true);
-						counter.attackerPos = victim.getPosition();
-						const auto counterDamage = battle.battleEstimateDamage(counter, nullptr);
-						received = (static_cast<double>(counterDamage.damage.min)
-							+ counterDamage.damage.max) / 2.0;
+						// Native melee previews apply first-hit casualties before
+						// estimating retaliation. Ranged previews do not handle
+						// RANGED_RETALIATION, so reproduce that ordering on an
+						// independent state, never on the live battle stack.
+						const auto counterAfterShot = [&](int64_t shotDamage)
+						{
+							auto remaining = victim.acquireState();
+							remaining->damage(shotDamage);
+							if(!remaining->alive())
+								return DamageEstimation();
+							BattleAttackInfo counter(remaining.get(), &stack, 0, true);
+							counter.attackerPos = victim.getPosition();
+							return battle.battleEstimateDamage(counter, nullptr);
+						};
+						const auto lowShotCounter = counterAfterShot(damage.damage.min);
+						const auto highShotCounter = counterAfterShot(damage.damage.max);
+						const double minimum = static_cast<double>(std::min(
+							lowShotCounter.damage.min, highShotCounter.damage.min));
+						const double maximum = static_cast<double>(std::max(
+							lowShotCounter.damage.max, highShotCounter.damage.max));
+						received = (minimum + maximum) / 2.0;
 					}
 				}
 				else
 					received = (static_cast<double>(retaliation.damage.min)
 						+ retaliation.damage.max) / 2.0;
 			}
-			// Counter damage uses pre-shot victim strength: an optimistic
-			// host-engine estimate, not the unavailable ERA/DLL formula.
+			// Both melee and ranged return-fire previews now include first-hit
+			// casualties. This remains a VCMI projection, not ERA/DLL parity.
 			received = std::clamp(received, 0.0, static_cast<double>(stack.getAvailableHealth()));
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
 		};
