@@ -265,6 +265,7 @@ jobs:
                       'V13RejectsInvalidRequiredHead',
                       'V13RejectsJaggedActionTableMetadata',
                       'V13RejectsOutOfRangeActionTableEntries',
+                      'V13RejectsDecodedActionOutsideLiveSchema',
                       'V15RejectsDuplicateNodeAndEdgeMetadataTypes',
                       'RejectsInvalidModelSideMetadata',
                       'RejectsInvalidModelVersionMetadata',

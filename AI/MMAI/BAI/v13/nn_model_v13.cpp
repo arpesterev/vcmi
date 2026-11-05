@@ -485,7 +485,11 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 			throwf("getAction: hex2_sample is masked out");
 	}
 
-	const auto & saction = actionTable.at(act0_sample.index).at(hex1_sample.index).at(hex2_sample.index);
+	// An action_table may legitimately contain masked sentinel values, but a
+	// sampled one must be in V13's actual live action space. Do not rely on
+	// an out_of_range from the mask or try a different neural prediction.
+	const auto saction = checkedV13DecodedAction(
+		actionTable.at(act0_sample.index).at(hex1_sample.index).at(hex2_sample.index), Schema::V13::N_ACTIONS);
 	const auto & gaction = actionTable.at(act0_greedy.index).at(hex1_greedy.index).at(hex2_greedy.index);
 
 	const auto & mask = s->getActionMask();

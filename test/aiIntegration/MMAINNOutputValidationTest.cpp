@@ -215,6 +215,34 @@ TEST(MMAINNOutputValidation, V13RejectsOutOfRangeActionTableEntries)
 	EXPECT_THROW(checkedV13ActionTableEntry(numeric_limits<int64_t>::min()), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13RejectsDecodedActionOutsideLiveSchema)
+{
+	using MMAI::BAI::checkedV13DecodedAction;
+	// Valid live action IDs remain unchanged; the model's policy is not
+	// normalized, clamped, resampled or rerouted.
+	EXPECT_EQ(checkedV13DecodedAction(0, 100), 0);
+	EXPECT_EQ(checkedV13DecodedAction(1, 100), 1);
+	EXPECT_EQ(checkedV13DecodedAction(99, 100), 99);
+
+	// These are legitimate masked metadata sentinels, but never live
+	// commands. Prevent a negative mask index or invalid VCMI action.
+	EXPECT_THROW(checkedV13DecodedAction(-1, 100), std::runtime_error);
+	EXPECT_THROW(checkedV13DecodedAction(std::numeric_limits<int32_t>::min(), 100), std::runtime_error);
+	EXPECT_THROW(checkedV13DecodedAction(100, 100), std::runtime_error);
+	EXPECT_THROW(checkedV13DecodedAction(std::numeric_limits<int32_t>::max(), 100), std::runtime_error);
+	EXPECT_THROW(checkedV13DecodedAction(0, 0), std::runtime_error);
+
+	try
+	{
+		checkedV13DecodedAction(-1, 100);
+		FAIL() << "Masked V13 action_table sentinel reached live action conversion";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("outside the VCMI action space"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V13RejectsJaggedActionTableMetadata)
 {
 	using MMAI::BAI::validateV13ActionTableShape;

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -26,6 +27,17 @@ inline std::int32_t checkedV13ActionTableEntry(std::int64_t id)
 	if(id < std::numeric_limits<std::int32_t>::min() || id > std::numeric_limits<std::int32_t>::max())
 		throw std::runtime_error("MMAI V13: action_table entry exceeds signed 32-bit range");
 	return static_cast<std::int32_t>(id);
+}
+
+// The exporter stores masked action-table entries as negative sentinels.
+// They are legal metadata, but a sampled live action must reference an
+// actual VCMI action slot before indexing the live mask or creating Action.
+// Do not clamp or resample an invalid ONNX choice into another command.
+inline std::int32_t checkedV13DecodedAction(std::int32_t id, std::size_t actionCount)
+{
+	if(id < 0 || static_cast<std::size_t>(id) >= actionCount)
+		throw std::runtime_error("MMAI V13: ONNX-selected action_table ID is outside the VCMI action space");
+	return id;
 }
 
 // V13's action table has three levels: primary action, destination/target
