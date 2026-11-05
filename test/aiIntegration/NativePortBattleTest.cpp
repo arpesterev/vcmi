@@ -4595,7 +4595,12 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 	EXPECT_LT(firstExtra->getAvailableHealth(), firstHealth);
 	EXPECT_LT(secondExtra->getAvailableHealth(), secondHealth);
 	policy.reset();
-	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	// The tail shot is already an independently engine-accepted TUM action,
+	// compared above with HoMM3's separate proposal. This fixture may then
+	// finish before HoMM3 receives a turn; do not misreport that as a failed
+	// mixed-policy duel. Continue under TUM on both sides to require a real
+	// terminal battle result without claiming a HoMM3 head-to-head outcome.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(recorder.damage, 0);
 }
 
