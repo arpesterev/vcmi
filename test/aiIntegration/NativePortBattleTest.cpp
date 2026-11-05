@@ -3597,7 +3597,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FatalFirstStrikeDoesNotRewardUnexecute
 		<< "The first-strike estimate must not modify the active native unit";
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
 	policy.reset();
-	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	// The first attacking activation was already submitted and counted above.
+	// The shared mixed-policy runner counts only its own later activations;
+	// a one-creature attacker can die before getting another turn. Use the
+	// same independent partial controller on both sides to require genuine
+	// subsequent server actions and a terminal result without making a false
+	// mixed-policy activation claim.
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "FHeroes2Tactics");
 	EXPECT_GT(recorder.damage, 0);
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
