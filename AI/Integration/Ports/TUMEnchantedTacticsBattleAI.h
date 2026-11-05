@@ -433,6 +433,34 @@ private:
 						dealt += loss;
 				}
 			}
+			// TUM values all damage dealt by a Hypnotized creature, not just
+			// the unit explicitly aimed at. The native VCMI attack footprint
+			// supplies real extra melee victims (breath and other multihex
+			// attacks). This is separate from the ranged adjacent-splash rule.
+			// FIRST_STRIKE survival and multi-hit timing are still partial:
+			// do not price extra melee hits before a preemptive counterstrike.
+			if(!shooting && !meleeCounterFirst)
+			{
+				const auto impacted = battle.getAttackedBattleUnits(
+					&stack, &victim, aimedHex, false, origin);
+				for(const auto * hit : impacted)
+				{
+					if(!hit || hit->unitId() == victim.unitId()
+						|| !hit->alive() || hit->isInvincible())
+						continue;
+					BattleAttackInfo splash(&stack, hit, distance, false);
+					splash.attackerPos = origin;
+					splash.defenderPos = hit->getPosition();
+					const auto preview = battle.battleEstimateDamage(splash, nullptr);
+					const double loss = std::clamp(
+						(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0,
+						0.0, static_cast<double>(hit->getAvailableHealth()));
+					if(battle.battleGetOwner(hit) == battle.battleGetOwner(&stack))
+						friendlySplashLoss += loss;
+					else
+						dealt += loss;
+				}
+			}
 			// None of this establishes equivalence with the unavailable ERA/DLL.
 			received = std::clamp(received, 0.0, static_cast<double>(stack.getAvailableHealth()));
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received) - friendlySplashLoss;
