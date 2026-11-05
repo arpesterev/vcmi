@@ -11,6 +11,7 @@
 #include "../../AI/MMAI/BAI/nn_v13_action_routing.h"
 
 #include <algorithm>
+#include <array>
 
 #include <limits>
 
@@ -175,6 +176,35 @@ V13TestSample v13TestGreedy(const std::vector<float> & probabilities)
 	const auto best = std::max_element(probabilities.begin(), probabilities.end());
 	return {static_cast<int>(std::distance(probabilities.begin(), best)), 1.0, *best};
 }
+}
+
+TEST(MMAINNOutputValidation, V13RejectsIncorrectOnnxInputAndOutputNamesAtLoad)
+{
+	using MMAI::BAI::requireNNV13TensorName;
+	const std::array<const char *, 4> inputs = {"obs", "ei_flat", "ea_flat", "lengths"};
+	const std::array<const char *, 6> outputs = {"act0_probs", "hex1_probs", "hex2_probs",
+		"act0_mask", "hex1_mask", "hex2_mask"};
+
+	for(size_t i = 0; i < inputs.size(); ++i)
+		EXPECT_NO_THROW(requireNNV13TensorName(inputs[i], inputs[i], i, "input"));
+	for(size_t i = 0; i < outputs.size(); ++i)
+		EXPECT_NO_THROW(requireNNV13TensorName(outputs[i], outputs[i], i, "output"));
+
+	// The same number of tensor names is not enough: swapped/missing
+	// ONNX ports must fail during construction, not after a neural action.
+	EXPECT_THROW(requireNNV13TensorName("ea_flat", "ei_flat", 1, "input"), std::runtime_error);
+	EXPECT_THROW(requireNNV13TensorName("hex1_mask", "act0_mask", 3, "output"), std::runtime_error);
+	EXPECT_THROW(requireNNV13TensorName(nullptr, "obs", 0, "input"), std::runtime_error);
+	try
+	{
+		requireNNV13TensorName("other_logits", "act0_probs", 0, "output");
+		FAIL() << "V13 accepted a renamed ONNX probability head";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("V13: unexpected ONNX output name"), std::string::npos);
+		EXPECT_NE(std::string(e.what()).find("act0_probs"), std::string::npos);
+	}
 }
 
 TEST(MMAINNOutputValidation, V13SamplesOnlyRequiredHierarchicalHeads)
