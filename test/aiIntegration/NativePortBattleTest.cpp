@@ -4313,15 +4313,31 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DragonBreathValuesNativeSecondaryVicti
 
 	const BattleHex frontHex = dragon->getPosition().copyToEast();
 	const BattleHex rearHex = frontHex.copyToEast();
-	for(const auto hex : {frontHex, rearHex})
+	// Deliberately offer a stronger *single* melee target elsewhere.
+	// A primary-only port should favor this bait; source-aware multi-hex
+	// valuation should instead hit both smaller aligned stacks.
+	ASSERT_GE(dragon->getPosition().getY(), 3);
+	const BattleHex baitHex(dragon->getPosition().getX(),
+		dragon->getPosition().getY() - 3);
+	for(const auto hex : {frontHex, rearHex, baitHex})
 	{
 		ASSERT_TRUE(hex.isAvailable());
 		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
 	}
-	const CStack * front = addStack(BattleSide::DEFENDER, CreatureID(0), frontHex, 35);
-	const CStack * rear = addStack(BattleSide::DEFENDER, CreatureID(0), rearHex, 35);
+	const CStack * front = addStack(BattleSide::DEFENDER, CreatureID(0), frontHex, 80);
+	const CStack * rear = addStack(BattleSide::DEFENDER, CreatureID(0), rearHex, 80);
+	const CStack * bait = addStack(BattleSide::DEFENDER, CreatureID(0), baitHex, 140);
 	ASSERT_NE(front, nullptr);
 	ASSERT_NE(rear, nullptr);
+	ASSERT_NE(bait, nullptr);
+	ASSERT_GT(bait->estimateCombatValue(), front->estimateCombatValue());
+	ASSERT_GT(bait->estimateCombatValue(), rear->estimateCombatValue());
+	const auto reach = battle()->getReachability(dragon);
+	const auto steps = battle()->battleGetAvailableHexes(reach, dragon, false);
+	ASSERT_TRUE(std::any_of(steps.begin(), steps.end(), [&](const BattleHex & from)
+	{
+		return from.isAvailable() && !battle()->meleeAttackHexes(dragon, bait, from).empty();
+	})) << "The bait must be a real alternative melee attack, not an unreachable decoy";
 	const auto nativeVictims = battle()->getAttackedBattleUnits(dragon, front, frontHex,
 		false, dragon->getPosition());
 	ASSERT_TRUE(std::any_of(nativeVictims.begin(), nativeVictims.end(), [&](const battle::Unit * unit)
@@ -4354,6 +4370,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DragonBreathValuesNativeSecondaryVicti
 	const BattleHex aimed = callback->action->target[1].hexValue;
 	const auto * primary = battle()->battleGetUnitByPos(aimed);
 	ASSERT_NE(primary, nullptr);
+	ASSERT_TRUE(primary == front || primary == rear)
+		<< "FHeroes2 must prefer the multi-target native breath over stronger single-target bait";
 	const auto victims = battle()->getAttackedBattleUnits(dragon, primary, aimed, false, from);
 	EXPECT_TRUE(std::any_of(victims.begin(), victims.end(), [&](const battle::Unit * unit)
 	{
