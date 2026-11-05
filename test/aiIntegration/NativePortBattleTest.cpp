@@ -5954,7 +5954,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaValuesNativeAdjacentEnemySplash)
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
-	for(const CStack * target : {isolated, first, second, third})
+	for(const CStack * target : {static_cast<const CStack *>(isolated), first, second, third})
 		ASSERT_TRUE(view->battleCanShoot(ballista, target->getPosition()));
 	const auto hasHit = [&](const CStack * primary, const CStack * extra)
 	{
