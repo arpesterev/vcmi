@@ -767,12 +767,18 @@ private:
 		const int oldSpeed = std::max(1, nativeMovement);
 		const int oldHeadDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
 		const int oldTime = std::max(1, (oldHeadDistance + oldSpeed - 1) / oldSpeed);
+		const bool canShootNow = battle.battleCanShoot(&target, attacker.getPosition());
 		const int time = includeNativeInactive
-			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement,
-				battle.battleCanShoot(&target, attacker.getPosition())) : oldTime;
-		const bool canRetaliateLater = battle.battleCanAttackUnit(&target, &attacker);
+			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement, canShootNow) : oldTime;
+		// Source enemy.cannotAttack includes available ranged attacks. VCMI's
+		// battleCanAttackUnit is melee-only: Ballista and other ranged-only
+		// units would otherwise be discounted even when they can fire NOW.
+		// Keep TUM's explicitly composed older baseline unchanged.
+		const bool meleeCapable = battle.battleCanAttackUnit(&target, &attacker);
+		const bool canAttack = includeNativeInactive
+			? Ports::HoMM3::nativeTargetCanAttack(meleeCapable, canShootNow) : meleeCapable;
 		return Ports::HoMM3::rangedAttackValue(
-			{effect, isIncapacitated(target, includeNativeInactive), !canRetaliateLater, canRetaliateLater, time}, false);
+			{effect, isIncapacitated(target, includeNativeInactive), !canAttack, canAttack, time}, false);
 	}
 
 	static BattleAction moveTowardEnemy(CPlayerBattleCallback & battle, const CStack & stack,
