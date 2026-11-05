@@ -240,6 +240,26 @@ private:
 			&& !attacker.isInvincible()
 			&& !battle.isLongWeaponAttack(&attacker, &defender, from)
 			&& defender.ableToRetaliate();
+		// Source optimalAttackVector and doubleCellAttackValue price secondary
+		// victims. VCMI FIRST_STRIKE can destroy the attacker before any
+		// breath/sweep effects happen; never project splash from the live,
+		// pre-retaliation stack after a fatal preemptive hit.
+		const collateralValue = [&](const battle::Unit & outgoing)
+		{
+			double extraValue = 0.0;
+			for(const auto * victim : battle.getAttackedBattleUnits(
+				&attacker, &defender, aimedHex, false, from))
+			{
+				if(victim == &defender || victim == &attacker)
+					continue;
+				BattleAttackInfo extra(&outgoing, victim, distance, false);
+				extra.attackerPos = from;
+				const double effect = lossValue(*victim, battle.battleEstimateDamage(extra));
+				extraValue += battle.battleGetOwner(victim) == battle.battleGetOwner(&attacker)
+					? -effect : effect;
+			}
+			return extraValue;
+		};
 		double value = lossValue(defender, damage)
 			- (shooting ? 0 : lossValue(attacker, retaliation));
 		if(meleeFirstStrike)
@@ -260,8 +280,11 @@ private:
 				remaining.attackerPos = from;
 				remaining.defenderPos = aimedHex;
 				value += lossValue(defender, battle.battleEstimateDamage(remaining));
+				value += collateralValue(*survivingAttacker);
 			}
 		}
+		else if(!shooting)
+			value += collateralValue(attacker);
 		if(attackerPosition != attacker.getPosition().toInt()
 			|| defenderPosition != defender.getPosition().toInt()
 			|| attackerHealth != attacker.getAvailableHealth()
@@ -1239,18 +1262,6 @@ private:
 					if(battle.battleGetUnitByPos(hitHex) != enemy)
 						continue;
 					double value = attackValue(battle, stack, *enemy, hex, hitHex, false, reachability.distances[hex.toInt()]);
-					const auto collateral = battle.getAttackedBattleUnits(
-						&stack, enemy, hitHex, false, hex);
-					for(const auto * victim : collateral)
-					{
-						if(victim == enemy || victim == &stack)
-							continue;
-						BattleAttackInfo extra(&stack, victim, reachability.distances[hex.toInt()], false);
-						extra.attackerPos = hex;
-						const double effect = lossValue(*victim, battle.battleEstimateDamage(extra));
-						value += battle.battleGetOwner(victim) == battle.battleGetOwner(&stack)
-							? -effect : effect;
-					}
 					const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
 					if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
 					{
