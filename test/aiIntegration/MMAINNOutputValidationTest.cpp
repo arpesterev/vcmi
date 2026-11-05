@@ -337,6 +337,45 @@ TEST(MMAINNOutputValidation, V13StrictRejectsInvalidModelActionWithoutResampling
 	EXPECT_NO_THROW(enforceNNV13SingleLiveAction(false, false, 42));
 }
 
+TEST(MMAINNOutputValidation, V13RejectsStaleOrDeadActiveCreatureBeforeModelDispatch)
+{
+	using MMAI::BAI::requireNNV13ActionActor;
+	struct Creature
+	{
+		bool living = true;
+		bool alive() const { return living; }
+	};
+	struct Observed
+	{
+		const Creature * cstack = nullptr;
+	};
+
+	Creature active;
+	Creature another;
+	const Observed matching{&active};
+	const Observed stale{&another};
+	const Observed missing{};
+	EXPECT_NO_THROW(requireNNV13ActionActor(&matching, &active));
+
+	// The observation may still contain a different stack after an event.
+	EXPECT_THROW(requireNNV13ActionActor(&stale, &active), std::runtime_error);
+	EXPECT_THROW(requireNNV13ActionActor(&missing, &active), std::runtime_error);
+	EXPECT_THROW(requireNNV13ActionActor(static_cast<const Observed *>(nullptr), &active), std::runtime_error);
+	EXPECT_THROW(requireNNV13ActionActor(&matching, static_cast<const Creature *>(nullptr)), std::runtime_error);
+
+	// A matching but dead stack must not be sent to the server either.
+	active.living = false;
+	try
+	{
+		requireNNV13ActionActor(&matching, &active);
+		FAIL() << "V13 accepted an already destroyed active creature";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("matching living active creature"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V13RejectsIllegalTargetBeforeEngineDispatch)
 {
 	using MMAI::BAI::requireNNV13LegalTarget;
