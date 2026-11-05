@@ -787,12 +787,6 @@ private:
 			const auto attackHexes = battle.meleeAttackHexes(&stack, enemy, stack.getPosition());
 			if(attackHexes.empty())
 				continue;
-			BattleAttackInfo attack(&stack, enemy, 0, false);
-			attack.attackerPos = stack.getPosition();
-			DamageEstimation retaliation;
-			const auto damage = battle.battleEstimateDamage(attack, &retaliation);
-			const double outgoing = (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
-			const double incoming = (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
 			// Pinned archerDecision ranks blocked shots by direct damage minus
 			// retaliation. A VCMI archer may additionally have a two-hex melee
 			// strike: check each native legal hit hex so a friendly behind the
@@ -802,6 +796,16 @@ private:
 			{
 				if(battle.battleGetUnitByPos(hitHex) != enemy)
 					continue;
+				// Source archerDecision evaluates the target actually struck.
+				// On a wide defender, VCMI's legal tail and head contacts can
+				// have different directions. Estimate each contact separately.
+				BattleAttackInfo attack(&stack, enemy, 0, false);
+				attack.attackerPos = stack.getPosition();
+				attack.defenderPos = hitHex;
+				DamageEstimation retaliation;
+				const auto damage = battle.battleEstimateDamage(attack, &retaliation);
+				const double outgoing = (static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0;
+				const double incoming = (static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0;
 				double difference = outgoing - incoming;
 				for(const auto * victim : battle.getAttackedBattleUnits(
 					&stack, enemy, hitHex, false, stack.getPosition()))
