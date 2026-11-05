@@ -5397,6 +5397,60 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedStationaryEnemyUsesNativeLegalShot)
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// The source getRangedAttackValue checks cannotAttack() rather than
+// 'can attack in melee'. Native Ballista cannot melee but can fire, even
+// without movement. Verify that the predicate is grounded in a LIVE
+// engine battle, and that HoMM3's own shot is server-accepted and the
+// entire encounter reaches a terminal result. This does not prove retail
+// HoMM3's complete target-selection equivalence.
+TEST_F(AIIntegrationNativeBattle, homm3RangedOnlyWarMachineIsAnActiveNativeThreat)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 80); // Archers
+	setArmy(defenderSideHero, CreatureID(0), 8); // Peasants
+	giveArtifact(defenderSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	const CStack * archer = nullptr;
+	const CStack * ballista = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID::BALLISTA)
+			ballista = unit.get();
+	}
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), archer);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_FALSE(view->battleCanAttackUnit(ballista, archer))
+		<< "The Ballista must not be mistaken for a native melee attacker";
+	ASSERT_TRUE(view->battleCanShoot(ballista, archer->getPosition()))
+		<< "The Ballista must be able to make a real ranged attack";
+	ASSERT_TRUE(AIIntegration::Ports::HoMM3::nativeTargetCanAttack(
+		view->battleCanAttackUnit(ballista, archer),
+		view->battleCanShoot(ballista, archer->getPosition())))
+		<< "The HoMM3-only ranged-value adapter must recognize the native threat";
+
+	const auto decision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *archer);
+	ASSERT_EQ(decision.actionType, EActionType::SHOOT)
+		<< "The independent HoMM3 policy must choose a legal ranged action";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, decision))
+		<< "The real VCMI server rejected HoMM3's selected shot";
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3RangedPrefersActiveTargetOverBlindAndCompletesBattle)
 {
 	// The decompiled HoMM3 scorer reduces shots into incapacitated targets.
