@@ -5287,7 +5287,7 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeAreaShotCollateralChangesTargetAndE
 	std::vector<const CStack *> cluster;
 	cluster.push_back(addStack(BattleSide::DEFENDER, CreatureID(0), centerHex, 1));
 	for(const auto & hex : neighbours)
-		cluster.push_back(addStack(BattleSide::DEFENDER, CreatureID(0), hex, 20));
+		cluster.push_back(addStack(BattleSide::DEFENDER, CreatureID(0), hex, 9));
 	for(const auto * unit : cluster)
 		ASSERT_NE(unit, nullptr);
 	ASSERT_TRUE(battle()->battleCanShoot(shooter, isolated->getPosition()));
