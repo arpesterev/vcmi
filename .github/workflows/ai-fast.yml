@@ -269,6 +269,7 @@ jobs:
                       'V13SamplesOnlyRequiredHierarchicalHeads',
                       'V13RejectsInvalidRequiredHead',
                       'V13RejectsJaggedActionTableMetadata',
+                      'V13RejectsIncorrectOnnxInputAndOutputNamesAtLoad',
                       'V13RejectsOutOfRangeActionTableEntries',
                       'V13RejectsDecodedActionOutsideLiveSchema',
                       'V15RejectsDuplicateNodeAndEdgeMetadataTypes',
