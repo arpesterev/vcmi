@@ -1474,6 +1474,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBatt
 	ASSERT_TRUE(castOn(caster, SpellID::BERSERK, acting))
 		<< "A real server spell must apply the controlled-turn status";
 	ASSERT_TRUE(acting->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	// Source planUnitTurn dispatches the compelled Berserk creature turn
+	// before all hero magic. Provide a legal damaging spell to expose the
+	// previously incorrect ordering in the actual controller.
+	auto * friendlyHero = side == BattleSide::ATTACKER ? attackerSideHero : defenderSideHero;
+	teachBattleSpell(friendlyHero, SpellID::MAGIC_ARROW, 12);
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(side);
@@ -1484,7 +1489,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBatt
 	policy->playerID = player;
 	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
 	AutocombatPreferences prefs;
-	prefs.enableSpellsUsage = false;
+	prefs.enableSpellsUsage = true;
 	policy->initBattleInterface(environment, callback, prefs);
 	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
 		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
@@ -1492,6 +1497,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBatt
 		battle()->getSideHero(BattleSide::DEFENDER), side, false);
 	policy->activeStack(battleID, acting);
 	ASSERT_TRUE(callback->action.has_value()) << "FHeroes2 special turn returned no action";
+	EXPECT_FALSE(callback->spellAction)
+		<< "Compelled Berserk creature must act before a legal hero Magic Arrow";
+	EXPECT_NE(callback->action->actionType, EActionType::HERO_SPELL);
 	EXPECT_TRUE(callback->action->actionType == EActionType::WALK
 		|| callback->action->actionType == EActionType::WALK_AND_ATTACK
 		|| callback->action->actionType == EActionType::SHOOT
