@@ -22,6 +22,7 @@
 #include "json/JsonNode.h"
 
 #include <onnxruntime_cxx_api.h>
+#include <array>
 
 namespace MMAI::BAI::V13
 {
@@ -323,6 +324,11 @@ std::vector<const char *> NNModel::readInputNames()
 		res.push_back(inputNamePtrs.back().get());
 	}
 
+	// Match the exported positional ONNX contract before any battle inference.
+	constexpr std::array<const char *, 4> expectedNames = {"obs", "ei_flat", "ea_flat", "lengths"};
+	for(size_t i = 0; i < expectedNames.size(); ++i)
+		requireNNV13TensorName(res[i], expectedNames[i], i, "input");
+
 	return res;
 }
 
@@ -367,6 +373,11 @@ std::vector<const char *> NNModel::readOutputNames()
 		outputNamePtrs.emplace_back(container->session->GetOutputNameAllocated(i, container->allocator));
 		res.push_back(outputNamePtrs.back().get());
 	}
+
+	// Match the exported positional ONNX contract before any battle inference.
+	constexpr std::array<const char *, 6> expectedNames = {"act0_probs", "hex1_probs", "hex2_probs", "act0_mask", "hex1_mask", "hex2_mask"};
+	for(size_t i = 0; i < expectedNames.size(); ++i)
+		requireNNV13TensorName(res[i], expectedNames[i], i, "output");
 
 	return res;
 }
