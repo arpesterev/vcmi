@@ -373,6 +373,9 @@ void BAI::activeStack(const BattleID & bid, const CStack * astack)
 
 void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 {
+	// A stale activeStack callback must not drive either ONNX inference or an
+	// engine-owned war-machine action for a creature that has already died.
+	requireNNV15LivingActiveStack(astack);
 	if(const auto ba = maybeBuildAutoAction(astack, bid))
 	{
 		logger.info("Making automatic action with %s", astack->getDescription());
