@@ -2210,8 +2210,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedShooterStopsAnchoringDefensiveS
 	ASSERT_FALSE(after->target.empty());
 	EXPECT_LT(BattleHex::getDistance(after->target.front().hexValue, enemy->getPosition()),
 		BattleHex::getDistance(guard->getPosition(), enemy->getPosition()));
+	const BattleHex originalPosition = guard->getPosition();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
 		<< "VCMI rejected the independent FHeroes2 WALK";
+	EXPECT_NE(guard->getPosition(), originalPosition)
+		<< "An accepted WALK must change the native unit position";
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.damage, 0);
 }
