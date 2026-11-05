@@ -4535,6 +4535,15 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
+	// An available melee option changes TUM's published damage-sum
+	// optimization. Keep this test strictly about selecting the legal tail
+	// hex over the legal head hex for a ranged area attack.
+	const auto reach = view->getReachability(shooter);
+	const auto reachableHexes = view->battleGetAvailableHexes(reach, shooter, false);
+	for(const auto * victim : {wide, firstExtra, secondExtra})
+		for(const auto & origin : reachableHexes)
+			ASSERT_TRUE(view->meleeAttackHexes(shooter, victim, origin).empty())
+				<< "Wide-tail shooting fixture unexpectedly permits a melee attack";
 	ASSERT_TRUE(view->battleCanShoot(shooter, head));
 	ASSERT_TRUE(view->battleCanShoot(shooter, tail));
 	ASSERT_FALSE(view->battleCanShoot(wide, shooter->getPosition()))
