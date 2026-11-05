@@ -245,6 +245,7 @@ jobs:
                       'V13RejectsIllegalTargetBeforeEngineDispatch',
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
+                      'V15RejectsMoveOutsideLiveEngineReachability',
                       'RejectsUnexpectedTerminalOnnxAction',
                       'StrictNeuralRejectsRepeatedAnsiRenderRequests',
                       'PreservesFiniteOnnxActionDistribution',
