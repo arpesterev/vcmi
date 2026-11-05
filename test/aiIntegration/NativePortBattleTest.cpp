@@ -3663,7 +3663,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MeleeUsesNativeHitHexOfWideTarget)
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
 		<< "The actual server rejected the selected wide-footprint melee attack";
 	policy.reset();
-	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	// The verified first melee action is deliberately submitted BEFORE the
+	// continuation harness; requiring another attacker turn from the runner
+	// would incorrectly fail when that opening strike ends the engagement.
+	runToCompletion(std::nullopt, false);
 	EXPECT_GT(recorder.meleeAttacks, 0);
 	EXPECT_GT(recorder.damage, 0);
 }
