@@ -232,8 +232,17 @@ private:
 			static const auto rangedFirstStrike = Selector::typeSubtype(
 				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
 				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
+			// FIRST_STRIKE alone does not cause ranged retaliation. The VCMI
+			// server counters before the opening shot only when the victim
+			// actually has a legal RANGED_RETALIATION action. In particular,
+			// do not suppress our splash estimate merely because a non-shooter
+			// carries an otherwise inert FIRST_STRIKE bonus.
 			const bool counterFirst = shooting && victim.hasBonus(rangedFirstStrike)
-				&& !victim.hasBonusOfType(BonusType::NOT_ACTIVE);
+				&& !victim.hasBonusOfType(BonusType::NOT_ACTIVE)
+				&& victim.hasBonusOfType(BonusType::RANGED_RETALIATION)
+				&& victim.ableToRetaliate()
+				&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+				&& battle.battleCanShoot(&victim, stack.getPosition());
 			static const auto meleeFirstStrike = Selector::typeSubtype(
 				BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
 				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee));
