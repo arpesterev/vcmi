@@ -4487,9 +4487,21 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 	const BattleHex widePosition(shooter->getPosition().toInt() + 8);
 	ASSERT_TRUE(widePosition.isAvailable());
 	ASSERT_EQ(battle()->battleGetUnitByPos(widePosition), nullptr);
-	const CStack * wide = addStack(BattleSide::ATTACKER, CreatureID(102), widePosition, 10);
+	CStack * wide = addStack(BattleSide::ATTACKER, CreatureID(102), widePosition, 10);
 	ASSERT_NE(wide, nullptr);
 	ASSERT_TRUE(wide->doubleWide());
+	// Regression for the native ranged FIRST_STRIKE eligibility gate: a
+	// melee-only wide unit can have FIRST_STRIKE without RANGED_RETALIATION.
+	// VCMI postpones the attacker's first shot but cannot countershoot.
+	// TUM must still count actual adjacent-splash victims at the tail.
+	// The bonus is fixture-only and does not imply a natural ability.
+	wide->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(102)),
+		BonusSubtypeID(BonusCustomSubtype::damageTypeRanged)));
+	ASSERT_TRUE(wide->hasBonus(Selector::typeSubtype(
+		BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged)));
+	ASSERT_FALSE(wide->hasBonusOfType(BonusType::RANGED_RETALIATION));
 	const auto footprint = wide->getHexes();
 	ASSERT_EQ(footprint.size(), 2u);
 	const BattleHex head = footprint[0];
@@ -4520,6 +4532,8 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 	ASSERT_NE(view, nullptr);
 	ASSERT_TRUE(view->battleCanShoot(shooter, head));
 	ASSERT_TRUE(view->battleCanShoot(shooter, tail));
+	ASSERT_FALSE(view->battleCanShoot(wide, shooter->getPosition()))
+		<< "FIRST_STRIKE alone cannot create a native ranged countershot";
 	const auto headHits = view->getAttackedBattleUnits(shooter, wide, head, true);
 	const auto tailHits = view->getAttackedBattleUnits(shooter, wide, tail, true);
 	const auto hasHit = [](const auto & units, const CStack * needle)
