@@ -91,11 +91,14 @@ private:
 		// The generic isFrozen() method checks only STONE_GAZE in VCMI.
 		const auto disabledBy = [&](SpellID spell)
 		{
-			// NOT_ACTIVE subtype identifies Blind, Paralyze or Petrification,
-			// even when a creature ability (not a hero spell) applied it.
-			// Retain spell-source detection for native spell-effect bonuses.
+			// Only a real native NOT_ACTIVE status disables the target.
+			// Match either the status subtype (creature abilities) or its
+			// spell source (hero casts). Other bonuses tagged with the same
+			// spell source must not falsely make an active target untouchable.
+			const auto inactive = Selector::type()(BonusType::NOT_ACTIVE);
 			return unit.hasBonus(Selector::typeSubtype(BonusType::NOT_ACTIVE, BonusSubtypeID(spell)))
-				|| unit.hasBonus(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell)));
+				|| unit.hasBonus(inactive.And(
+					Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell))));
 		};
 		return !Ports::TUM::ballistaMayTarget(
 			disabledBy(SpellID(SpellID::BLIND)),
