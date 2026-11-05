@@ -4139,7 +4139,8 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherValuesRangedRetaliation)
 	const auto firstShotEstimate = view->battleEstimateDamage(firstShot, nullptr);
 	ASSERT_GT(firstShotEstimate.damage.min, 0);
 	auto survivor = retaliator->acquireState();
-	survivor->damage(firstShotEstimate.damage.min);
+	auto minimumShotDamage = firstShotEstimate.damage.min;
+	survivor->damage(minimumShotDamage);
 	ASSERT_TRUE(survivor->alive());
 	ASSERT_LT(survivor->getAvailableHealth(), originalRetaliatorHealth);
 	BattleAttackInfo survivorCounter(survivor.get(), archer, 0, true);
