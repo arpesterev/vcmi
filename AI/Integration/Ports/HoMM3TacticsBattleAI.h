@@ -94,22 +94,36 @@ private:
 		}
 		DamageEstimation retaliation;
 		auto damage = battle.battleEstimateDamage(info, &retaliation);
-		// A native ranged defender may retaliate BEFORE the opening shot.
-		// The pinned HoMM3 simulateAttack has no ranged retaliation or
-		// FIRST_STRIKE. This is an explicit VCMI-only projection: preview
-		// the preemptive countershot, then re-price our reduced surviving
-		// shooter stack. Detached states never mutate the live battle.
-		// The TUM-composed baseline keeps its previous scoring.
+		// Retail HoMM3 simulateAttack does not model FIRST_STRIKE. VCMI
+		// resolves a preemptive melee retaliation before the first hit, and
+		// supports preemptive ranged retaliation with a separate subtype.
+		// Match the real server's subtype, disabled-unit and attack gates.
+		// This sequential VCMI-only preview is confined to HoMM3: TUM keeps
+		// the explicitly composed original partial baseline unchanged.
+		const auto firstStrikeFor = [&](BonusCustomSubtype subtype)
+		{
+			return target.hasBonus(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+					BonusCustomSubtype::damageTypeAll)
+				.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE, subtype)))
+				&& !target.hasBonusOfType(BonusType::NOT_ACTIVE);
+		};
+		const bool firstStrikeMeleeCounter = projectSecondMeleeStrike && !shooting
+			&& firstStrikeFor(BonusCustomSubtype::damageTypeMelee)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+			&& !attacker.isInvincible()
+			&& !battle.isLongWeaponAttack(&attacker, &target, from)
+			&& target.ableToRetaliate();
 		const bool firstStrikeRangedCounter = projectNativeRangedRetaliation && shooting
-			&& target.hasBonusOfType(BonusType::FIRST_STRIKE)
+			&& firstStrikeFor(BonusCustomSubtype::damageTypeRanged)
 			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
 			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 			&& target.ableToRetaliate()
 			&& battle.battleCanShoot(&target, from);
+		const bool preemptiveCounter = firstStrikeMeleeCounter || firstStrikeRangedCounter;
 		DamageEstimation preemptiveDamage;
-		if(firstStrikeRangedCounter)
+		if(preemptiveCounter)
 		{
-			BattleAttackInfo counter(&target, &attacker, 0, true);
+			BattleAttackInfo counter(&target, &attacker, 0, shooting);
 			counter.attackerPos = target.getPosition();
 			counter.defenderPos = from;
 			preemptiveDamage = battle.battleEstimateDamage(counter);
@@ -120,9 +134,11 @@ private:
 			survivingAttacker->damage(counterHit);
 			if(survivingAttacker->alive())
 			{
-				BattleAttackInfo remainingShot(survivingAttacker.get(), &target, distance, true);
-				remainingShot.attackerPos = from;
-				damage = battle.battleEstimateDamage(remainingShot);
+				BattleAttackInfo remainingHit(survivingAttacker.get(), &target, distance, shooting);
+				remainingHit.attackerPos = from;
+				if(!shooting)
+					remainingHit.defenderPos = aimedHex;
+				damage = battle.battleEstimateDamage(remainingHit);
 			}
 			else
 			{
@@ -138,7 +154,7 @@ private:
 		const bool certainFirstHitKill = ((projectSecondMeleeStrike && !shooting)
 				|| (projectNativeRangedRetaliation && shooting))
 			&& oldTargetHealth > 0 && damage.damage.min >= oldTargetHealth;
-		double retaliationLoss = firstStrikeRangedCounter ? lossValue(attacker, preemptiveDamage)
+		double retaliationLoss = preemptiveCounter ? lossValue(attacker, preemptiveDamage)
 			: (shooting || certainFirstHitKill ? 0.0 : lossValue(attacker, retaliation));
 		// Pinned simulateAttack applies the first blow BEFORE the defender
 		// retaliates, and only then tries creatureTwoAttacks' second blow.
@@ -147,7 +163,7 @@ private:
 		// lost defenders cannot inflict an imaginary full-strength counterblow.
 		// This is an expected-damage VCMI projection, not exact retail rolls.
 		// Leave TUM's explicitly separate baseline untouched.
-		if(projectSecondMeleeStrike && !shooting
+		if(projectSecondMeleeStrike && !shooting && !firstStrikeMeleeCounter
 			&& attacker.getTotalAttacks(false) > 1 && !certainFirstHitKill
 			&& retaliation.damage.max > 0)
 		{
@@ -218,11 +234,22 @@ private:
 			};
 			auto afterAttacker = attacker.acquireState();
 			auto afterTarget = target.acquireState();
-			int64_t firstHitLoss = expectedDamage(damage, afterTarget->getAvailableHealth());
-			int64_t retaliationLoss = certainFirstHitKill ? 0
-				: expectedDamage(retaliation, afterAttacker->getAvailableHealth());
-			afterTarget->damage(firstHitLoss);
-			afterAttacker->damage(retaliationLoss);
+			if(firstStrikeMeleeCounter)
+			{
+				int64_t preemptiveLoss = expectedDamage(preemptiveDamage, afterAttacker->getAvailableHealth());
+				afterAttacker->damage(preemptiveLoss);
+			}
+			if(afterAttacker->alive())
+			{
+				int64_t firstHitLoss = expectedDamage(damage, afterTarget->getAvailableHealth());
+				afterTarget->damage(firstHitLoss);
+			}
+			if(!firstStrikeMeleeCounter && afterTarget->alive())
+			{
+				int64_t counterLoss = certainFirstHitKill ? 0
+					: expectedDamage(retaliation, afterAttacker->getAvailableHealth());
+				afterAttacker->damage(counterLoss);
+			}
 			if(afterAttacker->alive() && afterTarget->alive())
 			{
 				BattleAttackInfo second(afterAttacker.get(), afterTarget.get(), 0, false);
