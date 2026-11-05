@@ -4067,6 +4067,25 @@ TEST_F(AIIntegrationNativeBattle, homm3WideEnemyMeleeAimIsNativeAndExecutes)
 	ASSERT_GE(action.target.size(), 2u);
 	const BattleHex from = action.target.front().hexValue;
 	const BattleHex aimed = action.target[1].hexValue;
+	// The source's checkAdjacentHexes evaluates BOTH future occupied cells
+	// for enemy-attacks exposure. These are real VCMI damage forecasts
+	// with the dragon still at its initial position, not fabricated values.
+	// Neither hypothetical aim is allowed to change the living stacks.
+	const auto landingCells = dragon->getHexes(from);
+	ASSERT_EQ(landingCells.size(), 2u);
+	const auto dragonHealthBeforeCounterPreviews = dragon->getAvailableHealth();
+	const auto griffinHealthBeforeCounterPreviews = griffin->getAvailableHealth();
+	for(const auto & cell : landingCells)
+	{
+		BattleAttackInfo counter(griffin, dragon, 0, false);
+		counter.attackerPos = griffin->getPosition();
+		counter.defenderPos = cell;
+		const auto projected = view->battleEstimateDamage(counter);
+		EXPECT_GT(projected.damage.max, 0)
+			<< "Both head and tail must be independently forecastable by native VCMI";
+		EXPECT_EQ(dragon->getAvailableHealth(), dragonHealthBeforeCounterPreviews);
+		EXPECT_EQ(griffin->getAvailableHealth(), griffinHealthBeforeCounterPreviews);
+	}
 	const auto legalAims = view->meleeAttackHexes(dragon, griffin, from);
 	EXPECT_NE(std::find(legalAims.begin(), legalAims.end(), aimed), legalAims.end())
 		<< "HoMM3 must submit an engine-approved aim at the wide target";
