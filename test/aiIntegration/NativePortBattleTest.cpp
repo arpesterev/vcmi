@@ -4540,7 +4540,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 	// hex over the legal head hex for a ranged area attack.
 	const auto reach = view->getReachability(shooter);
 	const auto reachableHexes = view->battleGetAvailableHexes(reach, shooter, false);
-	for(const auto * victim : {wide, firstExtra, secondExtra})
+	for(const CStack * victim : {static_cast<const CStack *>(wide), firstExtra, secondExtra})
 		for(const auto & origin : reachableHexes)
 			ASSERT_TRUE(view->meleeAttackHexes(shooter, victim, origin).empty())
 				<< "Wide-tail shooting fixture unexpectedly permits a melee attack";
