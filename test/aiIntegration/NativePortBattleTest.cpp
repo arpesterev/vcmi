@@ -5147,7 +5147,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaAvoidsGuaranteedFatalFirstStrikeCou
 	EXPECT_EQ(callback->action->target.front().unitValue, safeTarget->unitId())
 		<< "A guaranteed fatal pre-shot counter cannot generate a predicted ballista volley";
 	std::cout << "AI_TUM_FIRST_STRIKE_SIEGE baseline=" << baseline.toString()
-		<< " tum=" << callback->action->toString() << '\\n';
+		<< " tum=" << callback->action->toString() << '\n';
 
 	// The proposal alone does not prove a valid action. Require server
 	// acceptance, a real attack event, and an applied final battle result.
