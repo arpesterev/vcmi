@@ -3418,6 +3418,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedDistantEnemyBecomesUnavoidableP
 	ASSERT_EQ(after->actionType, EActionType::WALK);
 	ASSERT_FALSE(after->target.empty());
 	const BattleHex afterStep = after->target.front().hexValue;
+	EXPECT_LE(BattleHex::getDistance(origin, afterStep), speed)
+		<< "The new target priority must still produce a legal one-turn approach";
 	EXPECT_NE(afterStep, beforeStep)
 		<< "The immobilized target must change the source-derived choice";
 	EXPECT_LT(BattleHex::getDistance(afterStep, upperHex),
