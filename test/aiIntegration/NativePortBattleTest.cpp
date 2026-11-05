@@ -27,6 +27,7 @@
 #include "../../lib/callback/GameRandomizer.h"
 #include "../../lib/entities/building/TownFortifications.h"
 #include "../../lib/gameState/CGameState.h"
+#include "../../lib/CPlayerState.h"
 #include "../../lib/mapObjects/CGCreature.h"
 #include "../../lib/mapObjects/CGHeroInstance.h"
 #include "../../lib/mapObjects/CGTownInstance.h"
@@ -2092,7 +2093,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FarewellSpellChoosesNativeDamageAndCom
 	ASSERT_FALSE(HasFatalFailure());
 	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 6);
 	teachSpell(attackerSideHero, SpellID::HASTE);
-	const auto * active = battle()->battleActiveUnit();
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
 	ASSERT_NE(active, nullptr);
 	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
 	const auto battleID = battle()->getBattleID();
@@ -2133,7 +2134,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FarewellIgnoresSpellWithNoCreatureDeat
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
-	const auto * active = battle()->battleActiveUnit();
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
 	ASSERT_NE(active, nullptr);
 	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
 	const auto selected = AIIntegration::FHeroes2SpellPolicy::choose(view, environment.get(), active, true);
@@ -2196,7 +2197,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2StrategicFarewellCastThenNativeRetreat
 	ASSERT_EQ(recorder.battleResults.size(), 1u);
 	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
 	if(recorder.battleResults.back().questionID != QuestionID::NONE)
+	{
 		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+	}
 	EXPECT_TRUE(gameState()->currentBattles.empty());
 	EXPECT_EQ(recorder.acceptedResults, 1);
 	callback->onBattleEnded(battleID);
