@@ -298,6 +298,18 @@ valuation, adventure-map planning, and support validation for arbitrary mods.
 Do not use this partial policy as a quality replacement for the default AI.
 No source-policy equivalence evidence has been produced.
 
+The pinned fheroes2 `Unit::GetSpeed(false,true)` reports STANDING for
+Blind/Paralyze. Native VCMI can still expose positive raw movement for an
+incapacitated stack. If an area Dispel removes both Blind and Haste/Slow,
+the projected movement recovery must not be mislabelled as the cost of
+removing the speed spell. The partial `FHeroes2SpellPolicy` now excludes
+those simultaneous control-state transitions from lost-Haste/lost-Slow
+penalties, while retaining normal active-stack valuation. The native
+`fheroes2DispelPrefersStrongerBlindedHastedAlly` regression must establish
+the independently chosen legal target, real accepted Dispel and terminal
+battle result on the exact commit before this change is considered verified.
+It is a current-state VCMI projection, not proof of Heroes II spell parity.
+
 ## HoMM3OriginalTactics
 
 `HoMM3OriginalTactics` is a separate, selectable experimental implementation.
