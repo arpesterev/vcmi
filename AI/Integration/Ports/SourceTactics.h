@@ -134,6 +134,16 @@ inline int projectedRangedTargetTime(int nearestFootprintDistance, int movement,
 	return 1 + (stepsToMelee - 1) / movement;
 }
 
+// Pinned getRangedAttackValue tests enemy.cannotAttack() before using the
+// target's global attack time. VCMI battleCanAttackUnit only answers whether
+// the unit can MELEE (without spatial reasoning). A ranged-only war machine
+// can still fire right now, so it must not be treated as incapable of attack.
+// This is a native capability adaptation, not recovery of the source AI goal.
+inline bool nativeTargetCanAttack(bool canMelee, bool canShootNow)
+{
+	return canMelee || canShootNow;
+}
+
 // checkAdjacentHexes uses the lower enemy_attacks score for two occupied
 // hexes. Native projected incoming-damage scores are negative (danger).
 inline double moreExposedFootprintThreat(double head, double tail)
