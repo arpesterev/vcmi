@@ -4979,6 +4979,126 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraRetaliationReachesAdditionalAlliedSt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Retail ai_tactical.cpp::checkAdjacentHexes prices the defender's multi-head
+// counter after our opening strike. The VCMI FIRST_STRIKE extension changes
+// this order: a full-strength Hydra's adjacent collateral fires BEFORE the
+// opening attack, even when a hypothetical first blow might have killed it.
+// Check the actual future landing footprint, independent AI command,
+// preemptive server packet order and damage to the additional allied stack.
+// This does not imply retail HoMM3 has a FIRST_STRIKE creature ability.
+TEST_F(AIIntegrationNativeBattle, homm3NativeFirstStrikeHydraRetaliationSplashesBeforeAttack)
+{
+	prepareBattle(CreatureID(10), 6, CreatureID(110), 2); // Cavalier vs Hydra
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	CStack * hydra = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(110))
+			hydra = unit.get();
+	}
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_NE(hydra, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	ASSERT_TRUE(hydra->hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT));
+	const BattleHex nearby(cavalier->getPosition().toInt() + 7);
+	ASSERT_TRUE(nearby.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), nullptr);
+	hydra->setPosition(nearby);
+	for(const auto & hex : hydra->getHexes())
+		ASSERT_TRUE(hex.isAvailable());
+	BattleHex escortHex;
+	for(const auto & hex : hydra->getSurroundingHexes())
+		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex))
+		{
+			escortHex = hex;
+			break;
+		}
+	ASSERT_TRUE(escortHex.isValid());
+	const CStack * escort = addStack(BattleSide::ATTACKER, CreatureID(0), escortHex, 150);
+	ASSERT_NE(escort, nullptr);
+	hydra->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(110)),
+		BonusSubtypeID(BonusCustomSubtype::damageTypeMelee)));
+	ASSERT_TRUE(hydra->hasBonus(Selector::typeSubtype(
+		BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeMelee)));
+	const auto cavalierBefore = cavalier->getAvailableHealth();
+	const auto hydraBefore = hydra->getAvailableHealth();
+	const auto escortBefore = escort->getAvailableHealth();
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, cavalier);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	const BattleHex from = action.target.front().hexValue;
+	const BattleHex aimed = action.target[1].hexValue;
+	const auto legalAims = view->meleeAttackHexes(cavalier, hydra, from);
+	ASSERT_NE(std::find(legalAims.begin(), legalAims.end(), aimed), legalAims.end());
+	ASSERT_FALSE(view->isLongWeaponAttack(cavalier, hydra, from));
+	ASSERT_TRUE(hydra->ableToRetaliate());
+	BattleAttackInfo beforeOpening(hydra, cavalier, 0, false);
+	beforeOpening.attackerPos = hydra->getPosition();
+	beforeOpening.defenderPos = from;
+	ASSERT_GT(view->battleEstimateDamage(beforeOpening).damage.max, 0);
+	const auto collateral = view->getAttackedBattleUnits(
+		hydra, cavalier, from, false, hydra->getPosition(), from);
+	ASSERT_NE(std::find(collateral.begin(), collateral.end(), escort), collateral.end())
+		<< "Hydra FIRST_STRIKE must reach an additional friendly at the chosen landing hex";
+	EXPECT_EQ(cavalier->getAvailableHealth(), cavalierBefore);
+	EXPECT_EQ(hydra->getAvailableHealth(), hydraBefore);
+	EXPECT_EQ(escort->getAvailableHealth(), escortBefore);
+
+	std::vector<ui32> attackers;
+	std::vector<ui32> firstVictims;
+	const ui32 hydraID = static_cast<ui32>(hydra->unitId());
+	const ui32 escortID = static_cast<ui32>(escort->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(packet.shot())
+			return;
+		attackers.push_back(packet.stackAttacking);
+		if(attackers.size() == 1)
+			for(const auto & victim : packet.bsa)
+				firstVictims.push_back(victim.stackAttacked);
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "VCMI rejected HoMM3's independent attack into preemptive multi-head retaliation";
+	recorder.onAttackBeforeApply = {};
+	ASSERT_FALSE(attackers.empty());
+	EXPECT_EQ(attackers.front(), hydraID)
+		<< "Hydra's FIRST_STRIKE must run before the Cavalier's opening blow";
+	EXPECT_NE(std::find(firstVictims.begin(), firstVictims.end(), escortID), firstVictims.end())
+		<< "The preemptive packet must actually include the allied escort";
+	EXPECT_LT(cavalier->getAvailableHealth(), cavalierBefore);
+	EXPECT_LT(escort->getAvailableHealth(), escortBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3HydraValuesAndExecutesNativeMultiTargetMelee)
 {
 	// Pinned ai_tactical.cpp getMultiHeadBonus credits OTHER enemy stacks
