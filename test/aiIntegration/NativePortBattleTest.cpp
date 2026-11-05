@@ -5223,7 +5223,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaProjectedVolleyUsesRealArtillerySho
 		<< "TUM must rank full actual Artillery volley, not only the first shot";
 	std::cout << "AI_TUM_BALLISTA_VOLLEY homm3=" << homm3.toString()
 		<< " tum=" << callback->action->toString()
-		<< " expected_shots=" << legalShots << '\\n';
+		<< " expected_shots=" << legalShots << '\n';
 	battle()->activeStack = ballista->unitId();
 	const int shotsBefore = recorder.shots;
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player,
