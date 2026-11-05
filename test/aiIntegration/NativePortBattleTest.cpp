@@ -4059,7 +4059,10 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeFirstStrikeReducesAreaShotCollatera
 	ASSERT_NE(shooter, nullptr);
 	ASSERT_NE(defender, nullptr);
 	BattleHex neighbouringCell;
-	for(const auto & hex : defender->getPosition().getNeighbouringTiles())
+	// getNeighbouringTiles() can refer to storage in its BattleHex receiver.
+	// Keep the receiver alive through iteration instead of borrowing a temporary.
+	const BattleHex defenderPosition = defender->getPosition();
+	for(const auto & hex : defenderPosition.getNeighbouringTiles())
 	{
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 		{
