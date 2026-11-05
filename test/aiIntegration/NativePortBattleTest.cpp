@@ -5246,7 +5246,7 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedStationaryEnemyUsesNativeLegalShot)
 {
 	// Leave the defending Peasants alive after the first shot so the full
 	// native server loop, not only the opening command, finishes the fight.
-	prepareBattle(CreatureID(2), 12, CreatureID(0), 35);
+	prepareBattle(CreatureID(2), 8, CreatureID(0), 100);
 	ASSERT_FALSE(HasFatalFailure());
 	const CStack * archer = nullptr;
 	CStack * grounded = nullptr;
