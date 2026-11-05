@@ -2782,6 +2782,109 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotThreatSpreadsArcherCover)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 analyzeBattleState counts AREA_SHOT pressure only for
+// mobile archers. Blind does not erase the VCMI creature's area-shot bonus,
+// but it must remove the extra spacing requirement from shooter coverage.
+// Both distinct decisions use the same live battle, and the final move is
+// accepted by the authoritative game handler before combat completes.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedAreaShooterNoLongerSpreadsFriendlyArcherCover)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex original = guard->getPosition();
+	const BattleHex archerHex(original.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex threatHex(archerHex.toInt() + 5);
+	ASSERT_TRUE(archerHex.isAvailable());
+	ASSERT_TRUE(threatHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(threatHex), nullptr);
+	const auto * archer = addStack(BattleSide::ATTACKER, CreatureID(2), archerHex, 120);
+	const auto * threat = addStack(BattleSide::DEFENDER, CreatureID(0), threatHex, 15);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(threat, nullptr);
+	ASSERT_TRUE(archer->isShooter());
+	ASSERT_LE(BattleHex::getDistance(archerHex, threatHex),
+		static_cast<int>(threat->getMovementRange()) + 1);
+
+	BattleHex splashHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(!candidate.isAvailable() || candidate.getX() < 11
+			|| battle()->battleGetUnitByPos(candidate) != nullptr
+			|| BattleHex::getDistance(candidate, original) <= static_cast<int>(guard->getMovementRange()) + 1
+			|| BattleHex::getDistance(candidate, threatHex) < 3)
+			continue;
+		splashHex = candidate;
+		break;
+	}
+	ASSERT_TRUE(splashHex.isValid());
+	auto * splash = addStack(BattleSide::DEFENDER, CreatureID(45), splashHex, 12);
+	ASSERT_NE(splash, nullptr);
+	splash->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(splash->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+	ASSERT_TRUE(battle()->battleCanShoot(splash));
+	ASSERT_GT(static_cast<double>(splash->estimateCombatValue()) /
+		(static_cast<double>(splash->estimateCombatValue()) + threat->estimateCombatValue()), 0.1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, guard);
+		return callback->action;
+	};
+
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto activeSplash = decide();
+	ASSERT_TRUE(activeSplash.has_value());
+	ASSERT_EQ(activeSplash->actionType, EActionType::WALK);
+	ASSERT_FALSE(activeSplash->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(activeSplash->target.front().hexValue, archerHex), 2)
+		<< "Active native area shot should keep the melee guard away from its shooter";
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, splash))
+		<< "The actual engine must apply Blind to the enemy area shooter";
+	ASSERT_TRUE(splash->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(splash->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
+		<< "Incapacitation must not need to delete the creature's area attack ability";
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto blindedSplash = decide();
+	ASSERT_TRUE(blindedSplash.has_value());
+	ASSERT_EQ(blindedSplash->actionType, EActionType::WALK);
+	ASSERT_FALSE(blindedSplash->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(blindedSplash->target.front().hexValue, archerHex), 1)
+		<< "A blinded enemy cannot force extra area-shot spacing in source defense";
+	EXPECT_NE(blindedSplash->target.front().hexValue, activeSplash->target.front().hexValue)
+		<< "Removing the actual splash threat should change independent movement";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *blindedSplash))
+		<< "Native VCMI rejected the independent post-Blind guard movement";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerArchers)
 {
 	// Source meleeUnitDefense protects archers only when the melee unit
