@@ -243,6 +243,7 @@ protected:
 	int mmaiUnitDecisions = 0;
 	int mmaiNonpassiveDecisions = 0;
 	int mmaiAutomaticDecisions = 0;
+	int mmaiUntargetedFirstAidActions = 0;
 	int replayedMovementEvents = 0;
 	int replayedRoundEvents = 0;
 	int replayedUnitChangeEvents = 0;
@@ -522,7 +523,16 @@ protected:
 				// They are genuine MMAI actions, but NOT ONNX-selected creature
 				// decisions. Keep them out of neural inference evidence.
 				if(active->isFirstAidTent() || active->isCatapult() || active->isTurret())
+				{
 					++mmaiAutomaticDecisions;
+					if(active->isFirstAidTent())
+					{
+						EXPECT_EQ(action.actionType, EActionType::STACK_HEAL)
+							<< "First aid is engine-controlled, not a V15 ONNX actor";
+						if(action.actionType == EActionType::STACK_HEAL && action.target.empty())
+							++mmaiUntargetedFirstAidActions;
+					}
+				}
 				else
 				{
 					++mmaiUnitDecisions;
@@ -3989,6 +3999,41 @@ TEST_F(AIIntegrationNativeBattle, mmaiOppositeSideMetadataIsRejected)
 	EXPECT_FALSE(MMAI::BAI::validateModelSide(model->getSide(), defenderSide, false, "defender"))
 		<< "Legacy hybrid routing reports a mismatch rather than pretending the roles agree";
 	EXPECT_TRUE(MMAI::BAI::validateModelSide(MMAI::Schema::Side::BOTH, defenderSide, true, "defender"));
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiFirstAidWithoutWoundsUsesEngineAutoHealRealBattle)
+{
+	// Real VCMI 1.8 ONNX pack is required: a first-aid tent is not a V15
+	// graph action. Before the fix, an uninjured army made the adapter return
+	// nullptr and attempt to infer an action for the military machine.
+	if(!std::getenv("VCMI_AI_MMAI_NEURAL_TEST"))
+		GTEST_SKIP() << "Requires installed, checksum-verified MMAI ONNX models";
+	requireInstalledNeuralRole("attacker");
+
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 40);
+	setArmy(defenderSideHero, CreatureID(0), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::FIRST_AID_TENT), ArtifactPosition::MACH3);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	bool foundTent = false;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->isFirstAidTent())
+			foundTent = true;
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->alive())
+			EXPECT_EQ(unit->getFirstHPleft(), unit->getMaxHealth())
+				<< "The first aid scenario must start with no wounded allies";
+	}
+	ASSERT_TRUE(foundTent) << "The artifact did not install the actual first aid tent";
+	runToCompletion(std::nullopt, false, "MMAI", "HoMM3OriginalTactics");
+	EXPECT_GT(mmaiUntargetedFirstAidActions, 0)
+		<< "The first aid tent never made its automatic, untargeted engine HEAL";
+	EXPECT_GT(mmaiUnitDecisions, 0)
+		<< "The actual ONNX policy never controlled a regular creature";
+	EXPECT_GT(recorder.damage, 0) << "No authoritative battle damage was recorded";
 }
 
 TEST_F(AIIntegrationNativeBattle, mmaiWithRealNeuralModelCompletesRealBattle)
