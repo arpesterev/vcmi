@@ -4314,8 +4314,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAvoidsPreemptiveMeleeCoun
 	ASSERT_NE(shooter, nullptr);
 	ASSERT_TRUE(shooter->isShooter());
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const BattleHex shooterPosition = shooter->getPosition();
 	std::vector<BattleHex> adjacent;
-	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+	for(const auto & hex : shooterPosition.getNeighbouringTiles())
 		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex))
 			adjacent.push_back(hex);
 	ASSERT_GE(adjacent.size(), 2u);
@@ -4353,7 +4354,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAvoidsPreemptiveMeleeCoun
 	const auto * originallyChosen = view->battleGetUnitByPos(callback->action->target[1].hexValue);
 	ASSERT_TRUE(originallyChosen == first || originallyChosen == second);
 	const auto * safeTarget = originallyChosen == first ? second : first;
-	const_cast<CStack *>(originallyChosen)->addNewBonus(std::make_shared<Bonus>(
+	CStack * chosenStack = originallyChosen == first ? first : second;
+	chosenStack->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
 		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(19))));
 	ASSERT_TRUE(originallyChosen->ableToRetaliate());
