@@ -9,6 +9,7 @@
 
 #include "schema/base.h"
 #include <charconv>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -28,6 +29,17 @@ inline int parseNNMetadataDecimal(const std::string & value, const char * field)
 		throw std::runtime_error(std::string("MMAI: invalid ONNX ") + field + " metadata: expected unsigned decimal integer");
 
 	return parsed;
+}
+
+// V15's node_order and edge_order come from dictionaries of schema types in
+// vcmi-gym's exporter: each type occurs exactly once. Duplicating a type can
+// cause the ONNX model to consume a repeated observation or edge relation
+// under the wrong positional input. Reject that metadata on model load.
+inline void requireUniqueNNMetadataType(std::set<int> & seen, int type, const char * field)
+{
+	if(!seen.insert(type).second)
+		throw std::runtime_error(std::string("MMAI: duplicate ONNX ") + field
+			+ " type: " + std::to_string(type));
 }
 
 inline int parseNNModelVersion(const std::string & value)
