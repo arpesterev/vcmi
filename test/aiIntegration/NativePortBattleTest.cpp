@@ -3402,6 +3402,93 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShoot
 }
 
 
+// Pinned fheroes2 meleeUnitOffense / Unit::GetSpeed(false, true):
+// Blind and Paralyze remove a fast unit's ability to evade a later melee
+// engagement, even when its base speed and FLYING bonus remain unchanged.
+// The ordinary high-value target must not conceal that source priority.
+// Both actions below are decided by the actual FHeroes2Tactics backend.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindTurnsFastFlyerIntoPriorityDistantTarget)
+{
+	prepareBattle(CreatureID(0), 1000, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), infantry);
+	const BattleHex origin = infantry->getPosition();
+	const BattleHex activeHex(origin.toInt() + 7 - 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex flyerHex(origin.toInt() + 8 + 2 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(activeHex.isAvailable());
+	ASSERT_TRUE(flyerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(activeHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(flyerHex), nullptr);
+	const CStack * activeEnemy = addStack(BattleSide::DEFENDER, CreatureID(0), activeHex, 400);
+	const CStack * flyer = addStack(BattleSide::DEFENDER, CreatureID(4), flyerHex, 1);
+	ASSERT_NE(activeEnemy, nullptr);
+	ASSERT_NE(flyer, nullptr);
+	ASSERT_TRUE(flyer->hasBonusOfType(BonusType::FLYING));
+	ASSERT_GT(static_cast<int>(flyer->getMovementRange()),
+		static_cast<int>(infantry->getMovementRange()));
+	ASSERT_GT(BattleHex::getDistance(origin, activeHex),
+		static_cast<int>(infantry->getMovementRange()) + 1);
+	ASSERT_GT(BattleHex::getDistance(origin, flyerHex),
+		static_cast<int>(infantry->getMovementRange()) + 1);
+	ASSERT_GT(activeEnemy->estimateCombatValue(), flyer->estimateCombatValue());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, infantry);
+		return callback->action;
+	};
+	const auto before = decide();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::WALK) << before->toString();
+	ASSERT_FALSE(before->target.empty());
+	const BattleHex beforeStep = before->target.front().hexValue;
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, flyer))
+		<< "The authoritative server must apply Blind to the flying target";
+	ASSERT_TRUE(flyer->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(flyer->getMovementRange(), 0)
+		<< "Raw VCMI movement speed must remain positive under Blind";
+	ASSERT_EQ(battle()->battleActiveUnit(), infantry);
+	const auto after = decide();
+	ASSERT_TRUE(after.has_value());
+	ASSERT_EQ(after->actionType, EActionType::WALK)
+		<< "Source-derived pursuit must use a legal native first step: " << after->toString();
+	ASSERT_FALSE(after->target.empty());
+	const BattleHex afterStep = after->target.front().hexValue;
+	EXPECT_NE(afterStep, beforeStep)
+		<< "The disabled flyer must displace the active enemy as the priority pursuit";
+	EXPECT_LT(BattleHex::getDistance(afterStep, flyerHex),
+		BattleHex::getDistance(beforeStep, flyerHex))
+		<< "Pursuit must advance toward the now-immobile, otherwise evasive flyer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "The real VCMI server rejected source-derived movement";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotValuesActualEnemySplash)
 {
 	// Original fheroes2 archerDecision accounts for multiple area victims.
