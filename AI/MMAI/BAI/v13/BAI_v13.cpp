@@ -359,6 +359,10 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 		return;
 	}
 
+	// The V13 observation must represent the actor from this engine event.
+	// Do not let a stale wrapper reach ONNX or turn into another creature's move.
+	requireNNV13ActionActor(state->battlefield->astack, astack);
+
 	auto concede = maybeFleeOrSurrender(bid);
 	if(concede)
 	{
@@ -390,7 +394,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 		state->action = std::make_unique<Action>(a, state->battlefield.get(), cb->getPlayerID().value().toString());
 
-		ba = buildBattleAction();
+		ba = buildBattleAction(astack);
 
 		// A strict neural action must be dispatched exactly as selected or
 		// rejected. Retrying a stale/invalid V13 mask entry silently samples
@@ -424,11 +428,13 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	}
 }
 
-std::shared_ptr<BattleAction> BAI::buildBattleAction()
+std::shared_ptr<BattleAction> BAI::buildBattleAction(const CStack * activeStack)
 {
 	ASSERT(state->battlefield != nullptr, "Cannot build battle action if state->battlefield is missing");
 	auto * action = state->action.get();
 	const auto * bf = state->battlefield.get();
+	// Validate again at dispatch, not just when building the observation.
+	requireNNV13ActionActor(bf ? bf->astack : nullptr, activeStack);
 	const auto * acstack = bf->astack->cstack;
 
 	auto [x, y] = Hex::CalcXY(acstack->getPosition());
