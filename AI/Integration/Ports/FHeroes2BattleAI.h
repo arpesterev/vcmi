@@ -65,6 +65,23 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("FHeroes2Tactics received an unknown battle");
+		// Pinned fheroes2 ai_battle.cpp::BattlePlanner::planUnitTurn
+		// returns berserkTurn before army analysis, retreat or hero magic.
+		// A genuinely compelled native stack must execute its creature turn
+		// first, even when the controlling hero could cast an attractive spell.
+		// Invalidate a farewell withdrawal queued on a preceding callback:
+		// a compelled turn is not the source spell -> withdrawal sequence.
+		if(stack->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+		{
+			if(pendingWithdrawals.erase(battleID.getNum()) != 0)
+				logAi->warn("AI_PORT_FAREWELL_CANCELLED backend=FHeroes2Tactics battle=%d reason=compelled_berserk",
+					battleID.getNum());
+			const auto action = chooseBerserkAction(*battle, *stack);
+			logAi->debug("AI_PORT_BERSERK backend=FHeroes2Tactics battle=%d unit=%d action=%s",
+				battleID.getNum(), stack->unitId(), action.toString());
+			cb->battleMakeUnitAction(battleID, action);
+			return;
+		}
 		// fheroes2 planUnitTurn queues SPELLCAST followed by RETREAT or
 		// SURRENDER. VCMI delivers only one action per callback, so resolve
 		// the queued withdrawal when the spell has been applied and the
