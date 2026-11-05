@@ -972,6 +972,11 @@ private:
 		const bool firstStrikeCounter = target.hasBonus(
 				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
 					.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged)))
+			// The native ranged attack processor suppresses FIRST_STRIKE
+			// while NOT_ACTIVE (e.g. Blind) even if the troop still has
+			// ammunition and retaliation charges. Heroes II has no such
+			// ability: this is an explicit Heroes III/VCMI rule projection.
+			&& !target.hasBonusOfType(BonusType::NOT_ACTIVE)
 			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
 			&& !shooter.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 			&& target.ableToRetaliate()
