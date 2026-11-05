@@ -463,9 +463,15 @@ TEST(MMAINNOutputValidation, V13RejectsMoveOutsideLiveEngineReachability)
 TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion)
 {
 	using MMAI::BAI::requireNNV15ActionActor;
+	using MMAI::BAI::requireNNV15LivingActiveStack;
+	struct Creature
+	{
+		bool living = true;
+		bool alive() const { return living; }
+	};
 	struct Unit
 	{
-		int cstack = 0;
+		Creature cstack;
 	};
 	struct Action
 	{
@@ -475,17 +481,25 @@ TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion
 	const auto unit = std::make_shared<Unit>();
 	const auto action = std::make_shared<Action>();
 	action->by = unit;
-	int otherStack = 0;
+	Creature otherStack;
 
+	EXPECT_NO_THROW(requireNNV15LivingActiveStack(&unit->cstack));
 	EXPECT_NO_THROW(requireNNV15ActionActor(action, &unit->cstack));
 	EXPECT_THROW(requireNNV15ActionActor(action, &otherStack), std::runtime_error);
 
 	auto missingActor = std::make_shared<Action>();
 	EXPECT_THROW(requireNNV15ActionActor(missingActor, &unit->cstack), std::runtime_error);
-	EXPECT_THROW(requireNNV15ActionActor(action, static_cast<const int *>(nullptr)), std::runtime_error);
+	EXPECT_THROW(requireNNV15LivingActiveStack(static_cast<const Creature *>(nullptr)), std::runtime_error);
+	EXPECT_THROW(requireNNV15ActionActor(action, static_cast<const Creature *>(nullptr)), std::runtime_error);
 
 	std::shared_ptr<Action> missingAction;
 	EXPECT_THROW(requireNNV15ActionActor(missingAction, &unit->cstack), std::runtime_error);
+
+	// An event adapter can still hold the same stack pointer after its death.
+	// Reject it both before ONNX inference and immediately before dispatch.
+	unit->cstack.living = false;
+	EXPECT_THROW(requireNNV15LivingActiveStack(&unit->cstack), std::runtime_error);
+	EXPECT_THROW(requireNNV15ActionActor(action, &unit->cstack), std::runtime_error);
 }
 
 
