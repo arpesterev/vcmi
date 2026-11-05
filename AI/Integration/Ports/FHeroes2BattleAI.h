@@ -236,16 +236,20 @@ private:
 		for(const auto * friendly : battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
 		{
 			input.armyStrength += strength(*friendly);
-			// fheroes2 analyzeBattleState counts ranged units even when an
-			// adjacent enemy currently blocks shooting. BattleCanShoot is a
-			// per-turn legality check, not the source unit classification.
-			if(friendly->isShooter() && friendly->getMovementRange() > 0)
+			// Pinned analyzeBattleState counts an archer blocked by adjacent
+			// melee or Forgetfulness, but excludes Blind/Paralyze via
+			// Unit::isImmovable(). VCMI's NOT_ACTIVE is the current
+			// incapacitation projection; raw movement range alone can remain
+			// positive under Blind. Keep full army strength in either case.
+			if(friendly->isShooter() && friendly->getMovementRange() > 0
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				input.shootersStrength += strength(*friendly);
 		}
 		for(const auto * enemy : enemies)
 		{
 			input.enemyArmyStrength += strength(*enemy);
-			if(enemy->isShooter() && enemy->getMovementRange() > 0)
+			if(enemy->isShooter() && enemy->getMovementRange() > 0
+				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
 				input.enemyShootersStrength += strength(*enemy);
 		}
 		if(input.armyStrength <= 0 || input.enemyArmyStrength <= 0)
