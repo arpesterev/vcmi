@@ -249,9 +249,17 @@ private:
 	static std::optional<BattleAction> chooseHypnotizedAttack(CPlayerBattleCallback & battle, const CStack & stack)
 	{
 		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
-		vstd::erase_if(targets, [](const CStack * target)
+		// ONLY_ENEMY reflects the callback's visible side, not the current
+		// controller of each unit. Hypnotize can put the active stack itself
+		// in that collection: rejecting it explicitly prevents a self-attack.
+		// Use native battle ownership for every candidate, since a previously
+		// friendly stack may now be controlled by either side.
+		vstd::erase_if(targets, [&](const CStack * target)
 		{
-			return !target->alive() || target->isInvincible() || !target->getPosition().isValid();
+			return target->unitId() == stack.unitId()
+				|| battle.battleGetOwner(target) == battle.battleGetOwner(&stack)
+				|| !target->alive() || target->isInvincible()
+				|| !target->getPosition().isValid();
 		});
 		std::sort(targets.begin(), targets.end(), [](const CStack * lhs, const CStack * rhs)
 		{
