@@ -3343,6 +3343,92 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedEnemyDoesNotBlockCautiousMultiT
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 meleeUnitOffense uses GetSpeed(false, true) to select
+// opponents that cannot evade engagement *before* threat/path scoring.
+// Under native VCMI Blind, a ground enemy can retain nonzero raw speed,
+// yet it will not be able to move next round. This fixture compares the
+// independent movement choices before and after a real server-applied Blind.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedDistantEnemyBecomesUnavoidablePursuitTarget)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * infantry = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			infantry = unit.get();
+	ASSERT_NE(infantry, nullptr);
+	const BattleHex origin = infantry->getPosition();
+	const int speed = static_cast<int>(infantry->getMovementRange());
+	ASSERT_GT(speed, 0);
+	const BattleHex upperHex(origin.toInt() + 7 - 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex lowerHex(origin.toInt() + 8 + 2 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(upperHex.isAvailable());
+	ASSERT_TRUE(lowerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(upperHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(lowerHex), nullptr);
+	const auto * weak = addStack(BattleSide::DEFENDER, CreatureID(0), upperHex, 1);
+	const auto * strong = addStack(BattleSide::DEFENDER, CreatureID(0), lowerHex, 65);
+	ASSERT_NE(weak, nullptr);
+	ASSERT_NE(strong, nullptr);
+	ASSERT_EQ(weak->getMovementRange(), infantry->getMovementRange());
+	ASSERT_EQ(strong->getMovementRange(), infantry->getMovementRange());
+	ASSERT_GT(BattleHex::getDistance(origin, upperHex), speed + 1);
+	ASSERT_GT(BattleHex::getDistance(origin, lowerHex), speed + 1);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, infantry);
+		return callback->action;
+	};
+
+	const auto before = decide();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::WALK);
+	ASSERT_FALSE(before->target.empty());
+	const BattleHex beforeStep = before->target.front().hexValue;
+	EXPECT_LT(BattleHex::getDistance(beforeStep, lowerHex),
+		BattleHex::getDistance(origin, lowerHex))
+		<< "Before Blind, the strong ground target should attract pursuit";
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, weak))
+		<< "Blind must be applied by the authoritative server";
+	ASSERT_TRUE(weak->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(weak->getMovementRange(), 0)
+		<< "Raw VCMI speed must not be confused with next-round speed";
+	const auto after = decide();
+	ASSERT_TRUE(after.has_value());
+	ASSERT_EQ(after->actionType, EActionType::WALK);
+	ASSERT_FALSE(after->target.empty());
+	const BattleHex afterStep = after->target.front().hexValue;
+	EXPECT_NE(afterStep, beforeStep)
+		<< "The immobilized target must change the source-derived choice";
+	EXPECT_LT(BattleHex::getDistance(afterStep, upperHex),
+		BattleHex::getDistance(beforeStep, upperHex))
+		<< "The new movement must favor the now-unavoidable weak enemy";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "The VCMI server rejected independently chosen WALK";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2DistantTargetPriorityPursuesEnemyShooter)
 {
 	prepareBattle(CreatureID(0), 40, CreatureID(0), 1);
