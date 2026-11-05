@@ -79,6 +79,25 @@ inline void requireNNV13LegalMove(const Hex & destination, const Reachability & 
 		throw std::runtime_error("MMAI V13: model MOVE destination is not reachable this turn");
 }
 
+// V13/V15 tower shots are engine-owned actions, not ONNX predictions.
+// Select the highest-value enemy that is still alive and can actually be
+// shot according to the current VCMI battle callback. An empty/blocked
+// target set must produce no target, never dereference an end iterator.
+template<typename Targets, typename IsLegal, typename Value>
+inline auto selectLegalNNWarMachineTarget(const Targets & targets, IsLegal isLegal, Value value)
+{
+	using Target = typename Targets::value_type;
+	Target best = nullptr;
+	for(const auto & candidate : targets)
+	{
+		if(!candidate || !candidate->alive() || !isLegal(candidate))
+			continue;
+		if(!best || value(candidate) > value(best))
+			best = candidate;
+	}
+	return best;
+}
+
 // A V15 graph action refers to a concrete creature, not only to a hex.
 // A target may disappear between the graph observation and engine dispatch;
 // checking the shooting/melee hex alone cannot establish that this specific

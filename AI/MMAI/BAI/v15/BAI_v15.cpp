@@ -241,17 +241,19 @@ std::shared_ptr<BattleAction> BAI::maybeBuildAutoAction(const CStack * astack, c
 			// out of ammo (arrow towers have 99 shots)
 			return std::make_shared<BattleAction>(BattleAction::makeDefend(astack));
 
-		auto allstacks = battle->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
-		auto target = std::ranges::max_element(
-			allstacks,
-			[](const CStack * a, const CStack * b)
+		const auto allstacks = battle->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		const auto * target = selectLegalNNWarMachineTarget(allstacks,
+			[this, astack](const CStack * candidate)
 			{
-				return N::Unit::GetValue(a->unitType()) < N::Unit::GetValue(b->unitType());
-			}
-		);
-
-		ASSERT(target != allstacks.end(), "Could not find an enemy stack to attack. Falling back to a defend.");
-		return std::make_shared<BattleAction>(BattleAction::makeShotAttack(astack, *target));
+				return battle->battleCanShoot(astack, candidate->getPosition());
+			},
+			[](const CStack * candidate)
+			{
+				return N::Unit::GetValue(candidate->unitType());
+			});
+		if(!target)
+			return std::make_shared<BattleAction>(BattleAction::makeDefend(astack));
+		return std::make_shared<BattleAction>(BattleAction::makeShotAttack(astack, target));
 	}
 
 	return nullptr;

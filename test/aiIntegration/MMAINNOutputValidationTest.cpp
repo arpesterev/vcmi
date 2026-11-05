@@ -30,6 +30,31 @@ TEST(MMAINNOutputValidation, RejectsInvalidOnnxOutputBeforeGreedyOrSampling)
 	EXPECT_THROW(validateNNActionDistribution({0.3f, 0.7f}, -1.0f), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13V15WarMachineTargetsOnlyLivingShootableEnemies)
+{
+	struct Candidate
+	{
+		int value;
+		bool living;
+		bool shootable;
+		bool alive() const { return living; }
+	};
+	const Candidate dead{1000, false, true};
+	const Candidate blocked{900, true, false};
+	const Candidate legalLow{10, true, true};
+	const Candidate legalHigh{20, true, true};
+	const auto canShoot = [](const Candidate * target) { return target->shootable; };
+	const auto score = [](const Candidate * target) { return target->value; };
+	using MMAI::BAI::selectLegalNNWarMachineTarget;
+
+	const std::vector<const Candidate *> mixed{nullptr, &dead, &blocked, &legalLow, &legalHigh};
+	EXPECT_EQ(selectLegalNNWarMachineTarget(mixed, canShoot, score), &legalHigh);
+	const std::vector<const Candidate *> noLegal{nullptr, &dead, &blocked};
+	EXPECT_EQ(selectLegalNNWarMachineTarget(noLegal, canShoot, score), nullptr);
+	const std::vector<const Candidate *> empty;
+	EXPECT_EQ(selectLegalNNWarMachineTarget(empty, canShoot, score), nullptr);
+}
+
 TEST(MMAINNOutputValidation, V13V15RejectNonFiniteObservationBeforeInference)
 {
 	using MMAI::BAI::validateNNObservationValues;

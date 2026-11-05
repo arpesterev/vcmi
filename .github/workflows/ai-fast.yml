@@ -241,6 +241,7 @@ jobs:
           cases = list(ET.parse('mmai-onnx-output-contracts.xml').getroot().iter('testcase'))
           expected = {'RejectsInvalidOnnxOutputBeforeGreedyOrSampling',
                       'V15RejectsInvalidValueHead',
+                      'V13V15WarMachineTargetsOnlyLivingShootableEnemies',
                       'V13V15RejectNonFiniteObservationBeforeInference',
                       'V13RejectsIllegalTargetBeforeEngineDispatch',
                       'V13StrictRejectsInvalidModelActionWithoutResampling',
