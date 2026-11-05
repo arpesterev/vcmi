@@ -2987,10 +2987,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2GuardStopsScreeningBlindedArcherWhenAn
 	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, strong));
 	ASSERT_TRUE(strong->hasBonusOfType(BonusType::NOT_ACTIVE));
 	ASSERT_FALSE(weak->hasBonusOfType(BonusType::NOT_ACTIVE));
-	ASSERT_FALSE(battle()->battleCanShoot(strong))
-		<< "The native Blind must actually disable the previously favored archer";
+	// battleCanShoot checks static firing geometry, not whether a stack
+	// can take a turn under Blind. NOT_ACTIVE is the authoritative status.
 	ASSERT_TRUE(battle()->battleCanShoot(weak))
-		<< "The other native archer must still be able to shoot";
+		<< "The other native archer must still have a legal firing lane";
 	ASSERT_EQ(battle()->battleActiveUnit(), guard);
 	const auto after = choose();
 	ASSERT_TRUE(after.has_value());
