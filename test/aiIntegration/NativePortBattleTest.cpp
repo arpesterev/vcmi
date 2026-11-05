@@ -3492,6 +3492,51 @@ TEST_F(AIIntegrationNativeBattle, tumIgnoresNearbyFastDecoyForMovement)
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_NE(callback->action->target.front().hexValue, baseline.target.front().hexValue)
 		<< "TUM should advance toward slower infantry rather than the faster decoy";
+
+	// Add a closer but immobile enemy war machine AFTER observing the normal
+	// slow-infantry route. The fast Griffin is still genuine mobile bait.
+	// This deliberate SIEGE_WEAPON fixture must not become the movement
+	// destination after TUM rejects that bait. The native engine still
+	// controls all actions and the machine is not attributed to TUM.
+	const BattleHex intendedAdvance = callback->action->target.front().hexValue;
+	BattleHex machineHex;
+	for(const int dx : {6, 7, 5})
+	{
+		if(machineHex.isValid())
+			break;
+		for(const int dy : {3, -3, 4, -4})
+		{
+			const BattleHex candidate(static_cast<si16>(origin.getX() + dx),
+				static_cast<si16>(origin.getY() + dy));
+			if(candidate.isAvailable() && battle()->battleGetUnitByPos(candidate) == nullptr
+				&& BattleHex::getDistance(origin, candidate) > speed + 1
+				&& BattleHex::getDistance(origin, candidate)
+					< BattleHex::getDistance(origin, slow->getPosition()))
+			{
+				machineHex = candidate;
+				break;
+			}
+		}
+	}
+	ASSERT_TRUE(machineHex.isValid())
+		<< "Need a nearby nonattacking machine outside the infantry path";
+	auto * machine = addStack(BattleSide::DEFENDER, CreatureID(0), machineHex, 12);
+	ASSERT_NE(machine, nullptr);
+	machine->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SIEGE_WEAPON, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(machine->hasBonusOfType(BonusType::SIEGE_WEAPON));
+	ASSERT_EQ(static_cast<int>(machine->getMovementRange()), 0);
+	const auto withMachineBaseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*playerView, *own);
+	ASSERT_EQ(withMachineBaseline.actionType, EActionType::WALK);
+	callback->action.reset();
+	policy->activeStack(battleID, own);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().hexValue, intendedAdvance)
+		<< "TUM must keep advancing toward mobile slower infantry, not a stationary war machine";
+	EXPECT_NE(callback->action->target.front().hexValue, withMachineBaseline.target.front().hexValue)
+		<< "Published anti-decoy movement must remain distinct from partial HoMM3";
 	battle()->activeStack = own->unitId();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Authoritative VCMI server rejected the independent TUM anti-decoy move";
