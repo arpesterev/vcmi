@@ -55,10 +55,15 @@ class FHeroes2SpellPolicy
 				continue;
 			const double strength = static_cast<double>(unit->estimateCombatValue());
 			result.strength += strength;
-			result.weightedSpeed += strength * unit->getMovementRange();
-			// Pinned fheroes2 analyzeBattleState counts movable archers even
-			// when a temporary spell or adjacent enemy prevents this turn's shot.
-			if(unit->isShooter() && unit->getMovementRange() > 0)
+			// Pinned fheroes2 analyzeBattleState weights GetSpeed(false, true),
+			// which is STANDING for Blind/Paralyze. VCMI can retain a positive
+			// raw movement range under Blind, so use its NOT_ACTIVE status for
+			// this current-state projection. This cannot forecast dispels.
+			const bool immovable = unit->hasBonusOfType(BonusType::NOT_ACTIVE);
+			result.weightedSpeed += strength * (immovable ? 0 : unit->getMovementRange());
+			// The source retains blocked/Forgetful archers but excludes
+			// immovable ones from strategic ranged strength.
+			if(unit->isShooter() && unit->getMovementRange() > 0 && !immovable)
 				result.shooters += strength;
 		}
 		return result;
