@@ -72,7 +72,8 @@ private:
 
 	static double exchangeValue(CPlayerBattleCallback & battle, const CStack & attacker,
 		const CStack & target, BattleHex from, bool shooting, int distance,
-		bool projectSecondMeleeStrike = false, bool projectNativeRangedRetaliation = false)
+		bool projectSecondMeleeStrike = false, bool projectNativeRangedRetaliation = false,
+		BattleHex aimedHex = BattleHex())
 	{
 		const auto oldAttackerHealth = attacker.getAvailableHealth();
 		const auto oldTargetHealth = target.getAvailableHealth();
@@ -80,6 +81,17 @@ private:
 		const auto oldTargetPosition = target.getPosition();
 		BattleAttackInfo info(&attacker, &target, distance, shooting);
 		info.attackerPos = from;
+		// Pinned checkAdjacentHexes considers each occupied enemy hex. The
+		// native damage script uses defenderPos when pricing the actual hit,
+		// and reverse() uses it to locate the post-hit retaliation. Passing
+		// the selected aim avoids evaluating a different wide-target hex.
+		// Do not alter the TUM-composed partial baseline's attack preview.
+		if(projectSecondMeleeStrike && !shooting)
+		{
+			if(!aimedHex.isValid() || !target.getHexes().contains(aimedHex))
+				throw std::logic_error("HoMM3 selected an invalid native melee aim");
+			info.defenderPos = aimedHex;
+		}
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
 		// Pinned simulateAttack returns immediately when the first hit kills
@@ -150,6 +162,7 @@ private:
 			{
 				BattleAttackInfo second(afterAttacker.get(), afterTarget.get(), 0, false);
 				second.attackerPos = from;
+				second.defenderPos = aimedHex;
 				const auto estimate = battle.battleEstimateDamage(second);
 				const auto additional = expectedDamage(estimate, afterTarget->getAvailableHealth());
 				// Price incremental casualties against the ORIGINAL combat value
@@ -633,7 +646,8 @@ public:
 				// TUM intentionally keeps the historical first-aim baseline.
 				for(const auto & aimedHex : attackedHexes)
 				{
-					const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost, !avoidFastDecoys)
+					const double exchange = exchangeValue(battle, stack, *enemy, hex, false, pathCost, !avoidFastDecoys,
+						false, avoidFastDecoys ? BattleHex() : aimedHex)
 						+ shooterPinBonus(stack, hex, shooterPins) + landingThreat
 						+ (avoidFastDecoys ? 0.0
 							: projectedCollateral(battle, stack, *enemy, hex, aimedHex, pathCost)
