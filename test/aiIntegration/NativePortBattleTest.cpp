@@ -1177,6 +1177,97 @@ TEST_F(AIIntegrationNativeBattle, fheroes2HasteDoesNotRewardBlindedArcherSpeed)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// A broad native Dispel may remove friendly Haste and hostile Blind in one
+// cast. In the pinned fheroes2 Unit::GetSpeed(false,true), the blinded unit
+// has STANDING speed. Do not charge the loss of its Haste speed while it is
+// incapacitated: the native removal of Blind is the actual tactical gain.
+// Use two real blinded stacks and unequal strength to distinguish that
+// decision from the old, raw-movement penalty; the engine owns spell legality.
+TEST_F(AIIntegrationNativeBattle, fheroes2DispelPrefersStrongerBlindedHastedAlly)
+{
+	prepareBattle(CreatureID(0), 1, CreatureID(0), 60);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * active = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			active = unit.get();
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), active);
+
+	const BattleHex hastedHex(active->getPosition().toInt() + GameConstants::BFIELD_WIDTH);
+	const BattleHex plainHex(active->getPosition().toInt() + 2 * GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(hastedHex.isAvailable());
+	ASSERT_TRUE(plainHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(hastedHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(plainHex), nullptr);
+	const CStack * hasted = addStack(BattleSide::ATTACKER, CreatureID(0), hastedHex, 21);
+	const CStack * plain = addStack(BattleSide::ATTACKER, CreatureID(0), plainHex, 20);
+	ASSERT_NE(hasted, nullptr);
+	ASSERT_NE(plain, nullptr);
+
+	teachBattleSpell(attackerSideHero, SpellID::HASTE, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HASTE, hasted));
+	teachBattleSpell(defenderSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, hasted));
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, plain));
+	const auto haste = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::HASTE)));
+	const auto blind = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BLIND)));
+	ASSERT_TRUE(hasted->hasBonus(haste));
+	ASSERT_TRUE(hasted->hasBonus(blind));
+	ASSERT_TRUE(plain->hasBonus(blind));
+	ASSERT_TRUE(hasted->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(plain->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(hasted->getMovementRange(), 0u);
+	ASSERT_GT(plain->getMovementRange(), 0u);
+	ASSERT_GT(hasted->estimateCombatValue(), plain->estimateCombatValue());
+
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = true;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	const auto hastedHealth = hasted->getAvailableHealth();
+	const auto plainHealth = plain->getAvailableHealth();
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_TRUE(callback->spellAction);
+	EXPECT_EQ(callback->action->spell, SpellID(SpellID::DISPEL));
+	const bool targetsHasted = std::any_of(callback->action->target.begin(),
+		callback->action->target.end(), [&](const auto & target)
+		{
+			return target.unitValue == hasted->unitId() || target.hexValue == hasted->getPosition();
+		});
+	EXPECT_TRUE(targetsHasted)
+		<< "The stronger Blind target must not be devalued for losing inactive Haste: "
+		<< callback->action->toString();
+	EXPECT_EQ(hasted->getAvailableHealth(), hastedHealth);
+	EXPECT_EQ(plain->getAvailableHealth(), plainHealth)
+		<< "HypotheticBattle must not mutate real stack health";
+
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The authoritative engine rejected FHeroes2's independently selected Dispel";
+	EXPECT_FALSE(hasted->hasBonus(blind));
+	EXPECT_FALSE(hasted->hasBonus(haste));
+	EXPECT_TRUE(plain->hasBonus(blind))
+		<< "Advanced Water Magic Dispel must target only the selected native stack";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeSlowAndCompletesBattle)
 {
 	// A slower melee army can benefit from reducing enemy Cavalier speed.
