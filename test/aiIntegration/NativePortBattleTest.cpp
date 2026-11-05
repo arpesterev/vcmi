@@ -5018,6 +5018,144 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeFirstStrikeRangedCounterPrecedes
 }
 
 
+
+ // Heroes II has no ranged FIRST_STRIKE. The VCMI adapter must not treat a
+ // melee-only FIRST_STRIKE bonus as permission for a preemptive countershot.
+ // Two symmetric ranged retaliators make this a policy-choice regression:
+ // spurious first-fire pricing would incorrectly switch away from the first.
+TEST_F(AIIntegrationNativeBattle, fheroes2MeleeOnlyFirstStrikeCannotPreemptRangedShot)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 12);
+	setArmy(defenderSideHero, CreatureID(2), 35);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 35));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	CStack * shooter = nullptr;
+	std::vector<CStack *> targets;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->creatureId() != CreatureID(2))
+			continue;
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			shooter = unit.get();
+		else
+			targets.push_back(unit.get());
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_EQ(targets.size(), 2u);
+	battle()->activeStack = shooter->unitId();
+	BattleHex first, second;
+	for(int i = 0; i < GameConstants::BFIELD_SIZE && !first.isValid(); ++i)
+	{
+		const BattleHex a(i);
+		if(!a.isAvailable() || battle()->battleGetUnitByPos(a))
+			continue;
+		const int radius = BattleHex::getDistance(a, shooter->getPosition());
+		if(radius < 5 || radius > 10)
+			continue;
+		for(int j = i + 1; j < GameConstants::BFIELD_SIZE; ++j)
+		{
+			const BattleHex b(j);
+			if(b.isAvailable() && !battle()->battleGetUnitByPos(b)
+				&& BattleHex::getDistance(b, shooter->getPosition()) == radius
+				&& BattleHex::getDistance(a, b) >= 3)
+			{
+				first = a;
+				second = b;
+				break;
+			}
+		}
+	}
+	ASSERT_TRUE(first.isValid());
+	ASSERT_TRUE(second.isValid());
+	targets.front()->setPosition(first);
+	targets.back()->setPosition(second);
+	for(auto * target : targets)
+		target->addNewBonus(std::make_shared<Bonus>(
+			BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION,
+			BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	for(const auto * target : targets)
+	{
+		ASSERT_TRUE(view->battleCanShoot(shooter, target->getPosition()));
+		ASSERT_TRUE(view->battleCanShoot(target, shooter->getPosition()));
+		ASSERT_TRUE(target->ableToRetaliate());
+	}
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	const auto baselineTarget = callback->action->target.front().unitValue;
+	CStack * chosen = targets[0]->unitId() == baselineTarget ? targets[0] : targets[1];
+	ASSERT_EQ(chosen->unitId(), baselineTarget);
+	BattleAttackInfo preview(shooter, chosen, 0, true);
+	ASSERT_LT(view->battleEstimateDamage(preview).damage.max, chosen->getAvailableHealth());
+
+	chosen->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2)),
+		BonusCustomSubtype::damageTypeMelee));
+	ASSERT_TRUE(chosen->hasBonusOfType(BonusType::FIRST_STRIKE));
+	ASSERT_FALSE(chosen->hasBonus(
+		Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+			.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged))));
+	const int64_t shooterHealth = shooter->getAvailableHealth();
+	const int64_t targetHealth = chosen->getAvailableHealth();
+	callback->action.reset();
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, baselineTarget)
+		<< "Melee-only FIRST_STRIKE must not change the equivalent ranged-retaliation target score";
+	EXPECT_EQ(shooter->getAvailableHealth(), shooterHealth);
+	EXPECT_EQ(chosen->getAvailableHealth(), targetHealth);
+
+	std::vector<ui32> shotOrder;
+	std::vector<bool> counters;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.shot())
+		{
+			shotOrder.push_back(attack.stackAttacking);
+			counters.push_back(attack.counter());
+		}
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	ASSERT_GE(shotOrder.size(), 2u);
+	EXPECT_EQ(shotOrder[0], shooter->unitId());
+	EXPECT_FALSE(counters[0]);
+	EXPECT_EQ(shotOrder[1], chosen->unitId());
+	EXPECT_TRUE(counters[1]);
+	recorder.onAttackBeforeApply = {};
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
