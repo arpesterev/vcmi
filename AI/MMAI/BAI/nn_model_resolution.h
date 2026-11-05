@@ -154,6 +154,18 @@ inline void requireNNV15LegalTarget(const Stack * target, LegalCheck legalCheck,
 		throw std::runtime_error(std::string("MMAI V15: model ") + action + " has no legal live target");
 }
 
+// V13 SHOOT encodes the selected target through an observation hex.
+// Re-check that exact hex at dispatch: a still-living observed stack might
+// have moved elsewhere, and reconstructing a shot using its *new* position
+// would silently redirect a neural decision to a different location.
+// This is an identity check, not a replacement target-selection policy.
+template<typename Target>
+inline void requireNNV13SelectedShootHexTarget(const Target * observedTarget, const Target * liveTargetAtSelectedHex)
+{
+	if(!observedTarget || liveTargetAtSelectedHex != observedTarget)
+		throw std::runtime_error("MMAI V13: model SHOOT selected hex no longer contains the observed target");
+}
+
 // V13's battle action masks are derived from a preceding observation.
 // They cannot guarantee that a target is still alive and legal at dispatch.
 // A stale target must be rejected before consulting the live VCMI callback,
