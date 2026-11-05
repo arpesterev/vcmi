@@ -156,7 +156,8 @@ public:
 	}
 
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
-		const Environment * environment, const CStack * activeStack = nullptr)
+		const Environment * environment, const CStack * activeStack = nullptr,
+		bool farewellDamageOnly = false)
 	{
 		const auto * hero = real->battleGetMyHero();
 		if(!hero || real->battleCanCastSpell(hero, spells::Mode::HERO) != ESpellCastProblem::OK)
@@ -193,6 +194,11 @@ public:
 		for(const auto & entry : LIBRARY->spellh->objects)
 		{
 			const auto * spell = entry.get();
+			// Pinned planUnitTurn::farewellSpellcast asks for the maximum
+			// damaging spell only. No buffs, summons, control or healing are
+			// eligible just before retreat/surrender. VCMI validates legality.
+			if(farewellDamageOnly && !spell->isDamage())
+				continue;
 			const bool resurrection = spell->id == SpellID::RESURRECTION || spell->id == SpellID::ANIMATE_DEAD;
 			const bool earthquakeSpell = spell->id == SpellID::EARTHQUAKE;
 			const bool teleportSpell = spell->id == SpellID::TELEPORT;
@@ -801,8 +807,13 @@ public:
 				}
 				if(friendlyHealth <= 0)
 					continue;
-				const double scaled = value / std::sqrt(std::max(1, cost) / 3.0);
-				if(std::isfinite(scaled) && scaled > bestValue && (resurrection || scaled > threshold))
+				// The pinned farewell policy maximizes immediate damage and
+				// does not conserve mana for future rounds. Ordinary turns keep
+				// their source-derived spell cost and conservation threshold.
+				const double scaled = farewellDamageOnly
+					? value : value / std::sqrt(std::max(1, cost) / 3.0);
+				if(std::isfinite(scaled) && scaled > bestValue
+					&& (farewellDamageOnly || resurrection || scaled > threshold))
 				{
 					bestValue = scaled;
 					best = BattleAction::makeHeroSpellcast(real->battleGetMySide(), target, spell->id);
