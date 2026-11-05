@@ -4120,7 +4120,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeFirstStrikeCountersBeforeAtt
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 			adjacent.push_back(hex);
 	ASSERT_GE(adjacent.size(), 2u);
-	auto * firstStriker = addStack(BattleSide::ATTACKER, CreatureID(0), adjacent[0], 80);
+	auto * firstStriker = addStack(BattleSide::ATTACKER, CreatureID(0), adjacent[0], 500);
 	auto * weak = addStack(BattleSide::ATTACKER, CreatureID(0), adjacent[1], 1);
 	ASSERT_NE(firstStriker, nullptr);
 	ASSERT_NE(weak, nullptr);
