@@ -3837,8 +3837,23 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotEvaluatesBothHexesOfWideTarget
 	ASSERT_EQ(callback->action->target.size(), 1u);
 	EXPECT_EQ(callback->action->target.front().hexValue, tail)
 		<< "Wide-area target must be aimed at its better tail footprint";
+	// The fheroes2 source uses an ordered set of occupied unit heads to
+	// evaluate AREA_SHOT. The native shot must likewise apply one injury
+	// to each wide or single-cell victim, not one per occupied hex.
+	std::map<int, int> firstShotInjuries;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		for(const auto & injury : attack.bsa)
+			if(injury.damageAmount > 0)
+				++firstShotInjuries[injury.stackAttacked];
+	};
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "The real engine rejected the source-derived wide-target area shot";
+	EXPECT_EQ(firstShotInjuries[wideEnemy->unitId()], 1)
+		<< "A wide stack occupies two hexes but is only one shot victim";
+	EXPECT_EQ(firstShotInjuries[firstExtra->unitId()], 1);
+	EXPECT_EQ(firstShotInjuries[secondExtra->unitId()], 1);
+	recorder.onAttackBeforeApply = {};
 	policy.reset();
 	runToCompletion(std::nullopt, false);
 	EXPECT_GT(recorder.shots, 0);
