@@ -3874,7 +3874,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedWideTargetUsesNativeAim)
 	// TUM's public Hypnotize rule values damage dealt + damage received.
 	// Compare both cells of a wide former ally with native VCMI previews,
 	// then verify the independent attack and actual server resolution.
-	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 80);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	CStack * guard = nullptr;
