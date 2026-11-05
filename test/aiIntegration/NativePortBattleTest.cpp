@@ -4324,7 +4324,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 	const CStack * blinded = nullptr;
 	CStack * paralyzed = nullptr;
 	CStack * petrified = nullptr;
-	const CStack * validTarget = nullptr;
+	CStack * validTarget = nullptr;
 	const CStack * ballista = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
@@ -4362,6 +4362,18 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 	};
 	addCreatureDisable(paralyzed, SpellID(SpellID::PARALYZE));
 	addCreatureDisable(petrified, SpellID(SpellID::STONE_GAZE));
+	// Negative control: a harmless native SPEED bonus carrying Blind's
+	// source ID is NOT a Blind status. The previous broad source lookup
+	// incorrectly discarded this otherwise valid ballista target.
+	// This is explicit test setup, not a natural spell side effect.
+	validTarget->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SPEED, BonusSource::SPELL_EFFECT,
+		0, BonusSourceID(SpellID(SpellID::BLIND))));
+	ASSERT_TRUE(validTarget->hasBonus(Selector::source(BonusSource::SPELL_EFFECT,
+		BonusSourceID(SpellID(SpellID::BLIND)))));
+	ASSERT_FALSE(validTarget->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(blinded->hasBonusOfType(BonusType::NOT_ACTIVE))
+		<< "The hero-cast Blind must remain a genuine native disable";
 	ASSERT_TRUE(battle()->battleCanShoot(ballista, validTarget->getPosition()));
 
 	const auto battleID = battle()->getBattleID();
@@ -4385,7 +4397,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIs
 		<< "A blind enemy must not suppress shots at another valid enemy";
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_EQ(callback->action->target.front().unitValue, validTarget->unitId())
-		<< "Ballista must skip blinded, creature-paralyzed and petrified enemies";
+		<< "Ballista must skip real disables but not a harmless bonus with a Blind source ID";
 
 	// All subsequent commands still come from actual active-unit events,
 	// and the VCMI engine must accept them and finish this battle.
