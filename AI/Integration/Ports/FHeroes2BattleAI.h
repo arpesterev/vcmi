@@ -631,8 +631,16 @@ private:
 		double totalShooterStrength = 0;
 		for(const auto * friendly : friends)
 		{
+			// Pinned ai_battle.cpp::analyzeBattleState adds to _myRangedUnitsOnly
+			// only isArchers() && !isImmovable(). The defense-distance
+			// modifier in meleeUnitDefense uses precisely that aggregate.
+			// VCMI Blind/Paralyze can retain SHOOTER and raw movement speed;
+			// their stacks must not inflate the cost of covering *other*
+			// friendly archers. Do not remove such stacks as candidate
+			// beneficiaries: the source's cover loop still visits them.
 			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
-				&& friendly->hasBonusOfType(BonusType::SHOOTER))
+				&& friendly->hasBonusOfType(BonusType::SHOOTER)
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				totalShooterStrength += strength(*friendly);
 		}
 		if(totalShooterStrength <= 0)
