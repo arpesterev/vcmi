@@ -246,18 +246,38 @@ private:
 		return strength(stack) * damage / health;
 	}
 
+	// Pinned fheroes2 optimalAttackValue / optimalAttackVector account for
+	// DOUBLE_CELL and ALL_ADJACENT melee victims, not just the primary target.
+	// Query the *actual* VCMI attack footprint at each legal attack origin and
+	// target hex. Native breath / multi-hex rules (including friendly fire)
+	// differ from Heroes II; never manufacture extra damage or attack vectors.
 	static double attackValue(CPlayerBattleCallback & battle, const CStack & attacker,
-		const CStack & defender, const BattleHex & from, bool shooting, int distance)
+		const CStack & defender, const BattleHex & from, const BattleHex & targetHex,
+		int distance)
 	{
 		const int attackerPosition = attacker.getPosition().toInt();
 		const int defenderPosition = defender.getPosition().toInt();
 		const int64_t attackerHealth = attacker.getAvailableHealth();
 		const int64_t defenderHealth = defender.getAvailableHealth();
-		BattleAttackInfo info(&attacker, &defender, distance, shooting);
+		BattleAttackInfo info(&attacker, &defender, distance, false);
 		info.attackerPos = from;
 		DamageEstimation retaliation;
 		const auto damage = battle.battleEstimateDamage(info, &retaliation);
-		const double value = lossValue(defender, damage) - (shooting ? 0 : lossValue(attacker, retaliation));
+		double value = lossValue(defender, damage) - lossValue(attacker, retaliation);
+		// VCMI returns only secondary victims here. Explicitly exclude the
+		// primary target if an attack pattern lists it again, as it would be
+		// double-counted. Friendly secondary victims are a *negative* value.
+		for(const auto * victim : battle.getAttackedBattleUnits(
+			&attacker, &defender, targetHex, false, from))
+		{
+			if(victim == &defender || victim == &attacker)
+				continue;
+			BattleAttackInfo additional(&attacker, victim, distance, false);
+			additional.attackerPos = from;
+			const auto estimate = battle.battleEstimateDamage(additional);
+			value += (battle.battleGetOwner(victim) == battle.battleGetOwner(&attacker) ? -1.0 : 1.0)
+				* lossValue(*victim, estimate);
+		}
 		if(attackerPosition != attacker.getPosition().toInt()
 			|| defenderPosition != defender.getPosition().toInt()
 			|| attackerHealth != attacker.getAvailableHealth()
@@ -734,16 +754,19 @@ private:
 					const auto targets = battle.meleeAttackHexes(&guard, enemy, from);
 					if(targets.empty() || battle.battleGetUnitByPos(targets.front()) != enemy)
 						continue;
-					const double value = attackValue(battle, guard, *enemy, from,
-						false, reachability.distances[from.toInt()]);
-					const Ports::FHeroes2::MeleeOutcome outcome{
-						from.toInt(), strength(*enemy), value, true};
-					if(!bestBlocker || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
+					for(const auto & targetHex : targets)
 					{
-						bestBlocker = enemy;
-						bestFrom = from;
-						bestTargetHex = targets.front();
-						bestOutcome = outcome;
+						const double value = attackValue(battle, guard, *enemy, from,
+							targetHex, reachability.distances[from.toInt()]);
+						const Ports::FHeroes2::MeleeOutcome outcome{
+							from.toInt(), strength(*enemy), value, true};
+						if(!bestBlocker || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
+						{
+							bestBlocker = enemy;
+							bestFrom = from;
+							bestTargetHex = targetHex;
+							bestOutcome = outcome;
+						}
 					}
 				}
 			}
@@ -1303,13 +1326,17 @@ private:
 				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
 				if(attackedHexes.empty())
 					continue;
-				const double value = attackValue(battle, stack, *enemy, hex, false, reachability.distances[hex.toInt()]);
-				const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
-				if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+				for(const auto & aimedHex : attackedHexes)
 				{
-					target = enemy;
-					targetHex = attackedHexes.front();
-					best = candidate;
+					const double value = attackValue(battle, stack, *enemy, hex,
+						aimedHex, reachability.distances[hex.toInt()]);
+					const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
+					if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+					{
+						target = enemy;
+						targetHex = aimedHex;
+						best = candidate;
+					}
 				}
 			}
 		}
