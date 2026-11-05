@@ -199,8 +199,9 @@ private:
 			// not merely that the shooter can fire at SOME other stack.
 			// An unrelated legal shot must not reward pinning a shooter
 			// that cannot currently shoot our active attacker.
-			if(!enemy->isShooter() || !battle.battleCanShoot(enemy, attacker.getPosition()))
+			if(!enemy->isShooter())
 				continue;
+			const bool canShootAttacker = battle.battleCanShoot(enemy, attacker.getPosition());
 			// getHexAttackValue rewards contact with a shooter only when
 			// contact actually removes its shot. Under native VCMI rules,
 			// unrestricted FREE_SHOOTING can retain adjacent fire, so a
@@ -213,7 +214,7 @@ private:
 			const bool canShootAdjacent = !enemy->hasBonus(restricted)
 				|| enemy->hasBonus(Selector::type()(BonusType::FREE_SHOOTING).And(restricted.Not()));
 			if(!Ports::HoMM3::nativeShooterSuppressionPossible(
-				true, enemy->canShootBlocked(), canShootAdjacent))
+				canShootAttacker, enemy->canShootBlocked(), canShootAdjacent))
 				continue;
 			const auto occupied = enemy->getHexes();
 			const auto original = attacker.getHexes();
