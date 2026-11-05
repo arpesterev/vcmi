@@ -340,25 +340,54 @@ TEST(MMAINNOutputValidation, V13StrictRejectsInvalidModelActionWithoutResampling
 TEST(MMAINNOutputValidation, V13RejectsIllegalTargetBeforeEngineDispatch)
 {
 	using MMAI::BAI::requireNNV13LegalTarget;
-	const int target = 7;
-	const auto legal = [](const int *) { return true; };
+	struct Stack
+	{
+		bool living;
+		bool alive() const { return living; }
+	};
+	const Stack living{true};
+	const Stack dead{false};
+	int callbackCalls = 0;
+	const auto legal = [&callbackCalls](const Stack *)
+	{
+		++callbackCalls;
+		return true;
+	};
 
-	// An accepted V13 ONNX action must still resolve to the same legal
-	// living engine target at dispatch, even if event updates made a
-	// formerly legal action-mask entry stale.
-	EXPECT_NO_THROW(requireNNV13LegalTarget(&target, legal, "SHOOT"));
-	EXPECT_THROW(requireNNV13LegalTarget(&target,
-		[](const int *) { return false; }, "SHOOT"), std::runtime_error);
-	EXPECT_THROW(requireNNV13LegalTarget(&target,
-		[](const int *) { return false; }, "AMOVE"), std::runtime_error);
+	// The selected V13 SHOOT or AMOVE target is preserved when it is
+	// still alive and legal according to the live engine callback.
+	EXPECT_NO_THROW(requireNNV13LegalTarget(&living, legal, "SHOOT"));
+	EXPECT_NO_THROW(requireNNV13LegalTarget(&living, legal, "AMOVE"));
+	EXPECT_EQ(callbackCalls, 2);
+
+	// A stale observation may retain a pointer to an already dead stack.
+	// In strict neural combat, refuse both action types without querying
+	// the callback or resampling a different action.
+	EXPECT_THROW(requireNNV13LegalTarget(&dead, legal, "SHOOT"), std::runtime_error);
+	EXPECT_THROW(requireNNV13LegalTarget(&dead, legal, "AMOVE"), std::runtime_error);
+	EXPECT_EQ(callbackCalls, 2);
+	EXPECT_THROW(requireNNV13LegalTarget(&living,
+		[](const Stack *) { return false; }, "SHOOT"), std::runtime_error);
+	EXPECT_THROW(requireNNV13LegalTarget(&living,
+		[](const Stack *) { return false; }, "AMOVE"), std::runtime_error);
 
 	bool queriedMissingTarget = false;
-	EXPECT_THROW(requireNNV13LegalTarget(static_cast<const int *>(nullptr),
-		[&queriedMissingTarget](const int *) {
+	EXPECT_THROW(requireNNV13LegalTarget(static_cast<const Stack *>(nullptr),
+		[&queriedMissingTarget](const Stack *) {
 			queriedMissingTarget = true;
 			return true;
 		}, "AMOVE"), std::runtime_error);
 	EXPECT_FALSE(queriedMissingTarget);
+
+	try
+	{
+		requireNNV13LegalTarget(&dead, legal, "SHOOT");
+		FAIL() << "MMAI V13 accepted a dead model-selected target";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("V13: model SHOOT"), std::string::npos);
+	}
 }
 
 TEST(MMAINNOutputValidation, V13RejectsMoveOutsideLiveEngineReachability)

@@ -111,13 +111,13 @@ inline void requireNNV15LegalTarget(const Stack * target, LegalCheck legalCheck,
 }
 
 // V13's battle action masks are derived from a preceding observation.
-// They cannot guarantee that a target is still present and legal at dispatch.
-// Check the live VCMI callback before forming a server action, including in
-// release builds where the original ASSERT checks are compiled out.
+// They cannot guarantee that a target is still alive and legal at dispatch.
+// A stale target must be rejected before consulting the live VCMI callback,
+// even in release builds where the original ASSERT checks are compiled out.
 template<typename Target, typename LegalCheck>
 inline void requireNNV13LegalTarget(const Target * target, LegalCheck legalCheck, const char * action)
 {
-	if(!target || !legalCheck(target))
+	if(!target || !target->alive() || !legalCheck(target))
 		throw std::runtime_error(std::string("MMAI V13: model ") + action + " has no legal live target");
 }
 
