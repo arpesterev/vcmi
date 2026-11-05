@@ -205,6 +205,17 @@ after a VCMI-authorized Blind, require acceptance of a selected `DEFEND`
 or `WALK`, and complete actual combat. This tests the *projection*, not
 Heroes II combat-engine equivalence.
 
+Pinned fheroes2 `analyzeBattleState` counts shooters blocked by ordinary
+melee contact or Forgetfulness, but excludes Blind/Paralyze through
+`Unit::isImmovable()` when computing **ranged** army strength. The partial
+VCMI stance adapter now excludes a native `NOT_ACTIVE` shooter from both
+sides' ranged ratios while retaining its current total combat value in army
+strength. Unlike Heroes II, VCMI can expose a positive raw movement range
+while the spell prevents action. The paired pre-/post-Blind native regression
+requires a defensive guard to independently switch from `DEFEND` to a
+server-accepted `WALK` and then complete combat. This does not predict spell
+expiry, change the unit's bonuses or imply exact Heroes II stance parity.
+
 Pinned fheroes2 `meleeUnitDefense` considers every enemy adjacent to
 a friendly archer, including enemy archers who are engaged in melee.
 Under Heroes III's VCMI rules, a nearby enemy shooter still blocks a
