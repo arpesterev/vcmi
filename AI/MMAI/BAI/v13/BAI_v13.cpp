@@ -466,8 +466,18 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction()
 		{
 			case HexAction::MOVE:
 			{
-				auto ba = (bhex == acstack->getPosition()) ? BattleAction::makeDefend(acstack) : BattleAction::makeMove(acstack, bhex);
-				res = std::make_shared<BattleAction>(ba);
+				if(bhex == acstack->getPosition())
+				{
+					res = std::make_shared<BattleAction>(BattleAction::makeDefend(acstack));
+				}
+				else
+				{
+					// V13's observation mask may be stale after battle events.
+					// Preserve the ONNX-selected hex or reject it before server dispatch.
+					const auto reachability = battle->getReachability(acstack);
+					requireNNV13LegalMove(bhex, reachability, acstack->getMovementRange());
+					res = std::make_shared<BattleAction>(BattleAction::makeMove(acstack, bhex));
+				}
 			}
 			break;
 			case HexAction::SHOOT:

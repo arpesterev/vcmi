@@ -310,6 +310,37 @@ TEST(MMAINNOutputValidation, V13RejectsIllegalTargetBeforeEngineDispatch)
 	EXPECT_FALSE(queriedMissingTarget);
 }
 
+TEST(MMAINNOutputValidation, V13RejectsMoveOutsideLiveEngineReachability)
+{
+	using MMAI::BAI::requireNNV13LegalMove;
+	struct Hex
+	{
+		int index;
+		bool available;
+		bool isAvailable() const { return available; }
+		int toInt() const { return index; }
+	};
+	struct Reachability
+	{
+		std::array<unsigned, 3> distances{0, 1, 4};
+		bool isReachable(const Hex & hex) const { return distances.at(hex.index) < 1000000; }
+	};
+
+	Reachability live;
+	// An ONNX destination at the movement limit is still legal. The
+	// same-hex DEFEND path does not call this MOVE-only guard.
+	EXPECT_NO_THROW(requireNNV13LegalMove(Hex{2, true}, live, 4u));
+	EXPECT_NO_THROW(requireNNV13LegalMove(Hex{1, true}, live, 1u));
+
+	// The originally valid V13 observation can be stale at dispatch time.
+	EXPECT_THROW(requireNNV13LegalMove(Hex{2, true}, live, 3u), std::runtime_error);
+	live.distances[1] = 1000000;
+	EXPECT_THROW(requireNNV13LegalMove(Hex{1, true}, live, 9u), std::runtime_error);
+	EXPECT_THROW(requireNNV13LegalMove(Hex{0, false}, live, 9u), std::runtime_error);
+	// Invalid hex is rejected before indexing the reachability table.
+	EXPECT_THROW(requireNNV13LegalMove(Hex{-1, false}, live, 9u), std::runtime_error);
+}
+
 TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion)
 {
 	using MMAI::BAI::requireNNV15ActionActor;

@@ -243,6 +243,7 @@ jobs:
                       'V15RejectsInvalidValueHead',
                       'V13V15RejectNonFiniteObservationBeforeInference',
                       'V13RejectsIllegalTargetBeforeEngineDispatch',
+                      'V13RejectsMoveOutsideLiveEngineReachability',
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
                       'V15RejectsMoveOutsideLiveEngineReachability',

@@ -67,6 +67,18 @@ inline void requireNNV15LegalMove(const Hex & destination, const Reachability & 
 		throw std::runtime_error("MMAI V15: model MOVE destination is not reachable this turn");
 }
 
+// V13's hex MOVE mask is also an observation snapshot. Revalidate the
+// model-selected destination against the live server reachability immediately
+// before dispatch, without replacing the policy's chosen hex. A MOVE onto
+// the active creature's own position is DEFEND and is handled separately.
+template<typename Hex, typename Reachability, typename Distance>
+inline void requireNNV13LegalMove(const Hex & destination, const Reachability & reachability, Distance movementRange)
+{
+	if(!destination.isAvailable() || !reachability.isReachable(destination) ||
+	   reachability.distances[destination.toInt()] > movementRange)
+		throw std::runtime_error("MMAI V13: model MOVE destination is not reachable this turn");
+}
+
 // A V15 graph action refers to a concrete creature, not only to a hex.
 // A target may disappear between the graph observation and engine dispatch;
 // checking the shooting/melee hex alone cannot establish that this specific
