@@ -246,6 +246,7 @@ jobs:
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
                       'V15RejectsMoveOutsideLiveEngineReachability',
+                      'V15RejectsDeadOrMissingModelAttackTarget',
                       'RejectsUnexpectedTerminalOnnxAction',
                       'StrictNeuralRejectsRepeatedAnsiRenderRequests',
                       'PreservesFiniteOnnxActionDistribution',
