@@ -4550,6 +4550,109 @@ TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieB
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// Native FIRST_STRIKE is not part of pinned HoMM3 simulateAttack. A guaranteed
+// lethal preemptive counter must suppress projected multi-target damage: the
+// attacker never gets to deliver its own splash. The engine, not a mock,
+// decides the order and the battle outcome.
+TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSplash)
+{
+	prepareBattle(CreatureID(7), 1, CreatureID(0), 500); // Crusader vs Peasants
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * crusader = nullptr;
+	CStack * primary = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			crusader = unit.get();
+		else
+			primary = unit.get();
+	}
+	ASSERT_NE(crusader, nullptr);
+	ASSERT_NE(primary, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), crusader);
+	crusader->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::ATTACKS_ALL_ADJACENT,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(7))));
+	ASSERT_TRUE(crusader->hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT));
+	std::vector<BattleHex> adjacent;
+	for(const auto & hex : crusader->getSurroundingHexes())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+			adjacent.push_back(hex);
+	ASSERT_GE(adjacent.size(), 2u);
+	primary->setPosition(adjacent[0]);
+	CStack * secondary = const_cast<CStack *>(
+		addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[1], 500));
+	ASSERT_NE(secondary, nullptr);
+	const auto addPreemptiveCounter = [](CStack * defender)
+	{
+		defender->addNewBonus(std::make_shared<Bonus>(
+			BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+			BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(0)),
+			BonusSubtypeID(BonusCustomSubtype::damageTypeMelee)));
+	};
+	addPreemptiveCounter(primary);
+	addPreemptiveCounter(secondary);
+	const auto beforePrimary = primary->getAvailableHealth();
+	const auto beforeSecondary = secondary->getAvailableHealth();
+	const auto beforeCrusader = crusader->getAvailableHealth();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	for(const CStack * defender : {primary, secondary})
+	{
+		BattleAttackInfo firstCounter(defender, crusader, 0, false);
+		firstCounter.attackerPos = defender->getPosition();
+		firstCounter.defenderPos = crusader->getPosition();
+		const auto preview = view->battleEstimateDamage(firstCounter);
+		ASSERT_GE(preview.damage.min, beforeCrusader)
+			<< "The real host must guarantee a fatal first strike for either target";
+	}
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, crusader);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const CStack * chosen = dynamic_cast<const CStack *>(
+		view->battleGetUnitByPos(callback->action->target[1].hexValue));
+	ASSERT_TRUE(chosen == primary || chosen == secondary);
+	std::vector<ui32> order;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(!packet.shot())
+			order.push_back(packet.stackAttacking);
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected the independent HoMM3 melee command";
+	recorder.onAttackBeforeApply = {};
+	ASSERT_FALSE(order.empty());
+	EXPECT_EQ(order.front(), static_cast<ui32>(chosen->unitId()))
+		<< "The engine must execute the chosen target's FIRST_STRIKE first";
+	EXPECT_EQ(std::count(order.begin(), order.end(), static_cast<ui32>(crusader->unitId())), 0u)
+		<< "A killed attacker must not execute its hypothetical multi-target strike";
+	EXPECT_EQ(crusader->getAvailableHealth(), 0);
+	EXPECT_EQ(primary->getAvailableHealth(), beforePrimary);
+	EXPECT_EQ(secondary->getAvailableHealth(), beforeSecondary);
+	policy.reset();
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty())
+		<< "The server must record a terminal defeat when the last attacking stack dies";
+}
+
 // The pinned HoMM3 checkAdjacentHexes subtracts a defender's secondary
 // multi-head retaliation. The native adapter must price that risk, and the
 // real server must actually apply a Hydra's extra counterattack victim.
