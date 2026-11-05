@@ -3651,7 +3651,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MeleeUsesNativeHitHexOfWideTarget)
 	ASSERT_GE(action.target.size(), 2u);
 	const BattleHex from = action.target.front().hexValue;
 	const BattleHex hit = action.target[1].hexValue;
-	EXPECT_TRUE(available.contains(from));
+	ASSERT_TRUE(available.contains(from));
 	ASSERT_EQ(view->battleGetUnitByPos(hit), nearbyWide)
 		<< "The source-derived target scorer should prefer the reachable, stronger wide stack";
 	EXPECT_FALSE(view->meleeAttackHexes(attacker, nearbyWide, from).empty());
@@ -3854,6 +3854,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAttacksWideEnemyTailInRea
 		<< "An adjacent wide tail must be eligible for blocked-archer melee";
 	ASSERT_GE(callback->action->target.size(), 2u);
 	EXPECT_EQ(inspected->battleGetUnitByPos(callback->action->target[1].hexValue), wideEnemy);
+	EXPECT_EQ(callback->action->target[1].hexValue, chosenTail)
+		<< "Only the genuinely adjacent wide tail may be hit by the blocked archer";
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Real game handler rejected the source-derived wide-tail melee attack";
 	policy.reset();
