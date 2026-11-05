@@ -1107,10 +1107,21 @@ private:
 				priority += value;
 			}
 		};
-		evaluate(target);
+		// Pinned fheroes2 archerDecision first collects AREA_SHOT victims in a
+		// set of head-cell indexes. A wide unit may occupy several affected
+		// hexes, but must contribute its damage and friendly-fire risk ONCE.
+		// The sorted head indexes also make the floating-point sum stable.
+		// Keep VCMI's native victim list and damage estimates; only the
+		// source's unique-target accounting is projected here.
+		std::map<int, const battle::Unit *> affected;
+		affected.emplace(target.getPosition().toInt(), &target);
 		for(const auto * victim : additionalVictims)
-			if(victim != &target)
-				evaluate(*victim);
+		{
+			if(victim && victim->alive())
+				affected.emplace(victim->getPosition().toInt(), victim);
+		}
+		for(const auto & [head, victim] : affected)
+			evaluate(*victim);
 		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
 	}
 
