@@ -4920,7 +4920,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(0), 300);
 	ASSERT_TRUE(gameHandler->insertNewStack(
-		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 3));
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 1));
 	const auto * town = findFirst<CGTownInstance>();
 	ASSERT_NE(town, nullptr);
 	if(town->fortificationsLevel().wallsHealth <= 0)
@@ -4958,6 +4958,9 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	ASSERT_NE(smallTarget, nullptr);
 	ASSERT_GT(largeTarget->getCount(), smallTarget->getCount())
 		<< "Native siege deployment must preserve the intended value gap";
+	// The one-creature alternative is a meaningful low-casualty shot: TUM's
+	// actual projected-loss calculation must still prefer the larger disabled
+	// stack while HoMM3's documented incapacitation discount favors this one.
 	largeTarget->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::SPELL_EFFECT,
 		1, BonusSourceID(SpellID(SpellID::BLIND)), BonusSubtypeID(SpellID(SpellID::BLIND))));
