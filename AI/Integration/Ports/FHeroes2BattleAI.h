@@ -879,9 +879,22 @@ private:
 			&& target.ableToRetaliate()
 			&& battle.battleCanShoot(&target, shooter.getPosition()))
 		{
-			BattleAttackInfo counter(&target, &shooter, 0, true);
-			counter.attackerPos = target.getPosition();
-			priority -= lossValue(shooter, battle.battleEstimateDamage(counter));
+			// Return fire is executed after the opening hit. A countershot
+			// estimated from the untouched stack overstates its surviving
+			// shooters. Forecast casualties on a detached state; never alter
+			// the live stack during target evaluation. VCMI's ranged return
+			// fire has no direct Heroes II equivalent.
+			auto afterShot = target.acquireState();
+			int64_t firstHit = opening.damage.min
+				+ (opening.damage.max - opening.damage.min) / 2;
+			firstHit = std::clamp<int64_t>(firstHit, 0, afterShot->getAvailableHealth());
+			afterShot->damage(firstHit);
+			if(afterShot->alive())
+			{
+				BattleAttackInfo counter(afterShot.get(), &shooter, 0, true);
+				counter.attackerPos = target.getPosition();
+				priority -= lossValue(shooter, battle.battleEstimateDamage(counter));
+			}
 		}
 		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
 	}
