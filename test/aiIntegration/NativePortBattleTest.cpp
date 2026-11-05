@@ -4598,6 +4598,86 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedFastArcherEscapesAdjacentSlowMe
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned ihhub/fheroes2@0dbfe9f ai_battle.cpp::archerDecision vetoes
+// all archer retreats if *any* enemy flies, even one outside melee reach.
+// Compare independent FHeroes2 choices on the same authoritative battlefield.
+TEST_F(AIIntegrationNativeBattle, fheroes2RemoteFlyerVetoesFastArcherEscape)
+{
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 10);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const BattleHex initial = shooter->getPosition();
+	const BattleHex blockerHex(initial.toInt() + 1);
+	ASSERT_TRUE(blockerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
+	const auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(16), blockerHex, 10);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
+		static_cast<int>(blocker->getMovementRange()) + 2);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, shooter);
+		return callback->action;
+	};
+	const auto noFlyer = decide();
+	ASSERT_TRUE(noFlyer.has_value());
+	ASSERT_EQ(noFlyer->actionType, EActionType::WALK) << noFlyer->toString();
+
+	BattleHex farHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(candidate.isAvailable() && candidate.getX() >= 10
+			&& battle()->battleGetUnitByPos(candidate) == nullptr
+			&& BattleHex::getDistance(candidate, initial) >= 6
+			&& BattleHex::getDistance(candidate, blockerHex) >= 4)
+		{
+			farHex = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(farHex.isValid());
+	const auto * flyer = addStack(BattleSide::DEFENDER, CreatureID(4), farHex, 1);
+	ASSERT_NE(flyer, nullptr);
+	ASSERT_TRUE(flyer->hasBonusOfType(BonusType::FLYING));
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const auto withFlyer = decide();
+	ASSERT_TRUE(withFlyer.has_value());
+	ASSERT_EQ(withFlyer->actionType, EActionType::WALK_AND_ATTACK)
+		<< "A remote flyer forces the source's adjacent-blocker melee: " << withFlyer->toString();
+	EXPECT_NE(withFlyer->actionType, noFlyer->actionType);
+	ASSERT_FALSE(withFlyer->target.empty());
+	EXPECT_EQ(battle()->battleGetUnitByPos(withFlyer->target.front().hexValue), blocker);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *withFlyer))
+		<< "Server rejected the chosen melee action";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlindedFastMeleeNoLongerBlocksArcherRetreat)
 {
 	// Pinned fheroes2 battle_troop.cpp Unit::GetSpeed(false, true) returns
