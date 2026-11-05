@@ -4375,8 +4375,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAvoidsPreemptiveMeleeCoun
 	EXPECT_EQ(shooter->getAvailableHealth(), initialHealth);
 	EXPECT_EQ(shooter->getCount(), initialCount)
 		<< "First-strike preview must not damage a live stack";
+	const int beforeMelee = recorder.meleeAttacks;
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Native server rejected the independently chosen safe melee target";
+	EXPECT_GT(recorder.meleeAttacks, beforeMelee)
+		<< "The accepted action must execute a real native melee attack";
 	policy.reset();
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.damage, 0);
