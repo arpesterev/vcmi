@@ -720,9 +720,24 @@ private:
 		// The original uses its own projected enemy goal, not hex distance.
 		const int32_t effect = projectedAttackEffect(exchangeValue(battle, attacker, target,
 			attacker.getPosition(), true, 0, false, includeNativeInactive), includeNativeInactive);
-		const int speed = std::max(1, static_cast<int>(target.getMovementRange()));
-		const int hexDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
-		const int time = std::max(1, (hexDistance + speed - 1) / speed);
+		const int nativeMovement = std::max(0, static_cast<int>(target.getMovementRange()));
+		int distance = std::numeric_limits<int>::max();
+		for(const auto & enemyHex : target.getHexes())
+			for(const auto & friendlyHex : attacker.getHexes())
+				distance = std::min(distance,
+					static_cast<int>(BattleHex::getDistance(enemyHex, friendlyHex)));
+		if(distance == std::numeric_limits<int>::max())
+			throw std::logic_error("HoMM3 ranged target has no valid occupied footprint");
+		// Retail getRangedAttackValue uses the enemy's global AI target time;
+		// this partial port has no such goal map. Only the independent HoMM3
+		// policy projects time to adjacent melee contact, using BOTH occupied
+		// footprints and the pinned stationary-unit rule. TUM's explicitly
+		// composed partial baseline keeps its prior head-to-head estimate.
+		const int oldSpeed = std::max(1, nativeMovement);
+		const int oldHeadDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
+		const int oldTime = std::max(1, (oldHeadDistance + oldSpeed - 1) / oldSpeed);
+		const int time = includeNativeInactive
+			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement) : oldTime;
 		const bool canRetaliateLater = battle.battleCanAttackUnit(&target, &attacker);
 		return Ports::HoMM3::rangedAttackValue(
 			{effect, isIncapacitated(target, includeNativeInactive), !canRetaliateLater, canRetaliateLater, time}, false);

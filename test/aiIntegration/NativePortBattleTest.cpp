@@ -5238,6 +5238,60 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+// Ranged-target timing is a bounded native projection, not the full retail
+// getAITargetTime graph. Exercise its stationary-unit host adaptation in a
+// real server battle: a rooted melee opponent can still be shot, but cannot
+// magically travel across the field during the target-value preview.
+TEST_F(AIIntegrationNativeBattle, homm3RangedStationaryEnemyUsesNativeLegalShot)
+{
+	prepareBattle(CreatureID(2), 60, CreatureID(0), 35);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * archer = nullptr;
+	CStack * grounded = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			archer = unit.get();
+		else
+			grounded = unit.get();
+	}
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(grounded, nullptr);
+	const_cast<CStack *>(grounded)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED,
+		BonusSource::OTHER, -100, BonusSourceID()));
+	ASSERT_EQ(std::max(0, static_cast<int>(grounded->getMovementRange())), 0);
+	ASSERT_GT(BattleHex::getDistance(archer->getPosition(), grounded->getPosition()), 1);
+	const BattleID battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_TRUE(view->battleCanShoot(archer, grounded->getPosition()));
+	ASSERT_EQ(battle()->battleActiveUnit(), archer);
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, archer);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native VCMI rejected HoMM3's independent stationary-target shot";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3RangedPrefersActiveTargetOverBlindAndCompletesBattle)
 {
 	// The decompiled HoMM3 scorer reduces shots into incapacitated targets.

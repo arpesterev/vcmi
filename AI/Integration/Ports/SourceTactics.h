@@ -110,6 +110,25 @@ inline bool projectedShooterReadyAfterMoverLeaves(bool canShootNow, bool intrins
 	return canShootNow || (intrinsicallyCanShoot && moverPinsNow && !anotherBlockerRemains);
 }
 
+// Pinned ai_tactical.cpp::getAttackTime gives a stationary attacker a
+// 100-turn path when it cannot reach its goal. getRangedAttackValue instead
+// obtains target time from the full AI goal map, which is not ported here.
+// For the VCMI ranged-target approximation, count steps to the first
+// adjacent attack hex (not the victim's occupied hex), and never invent
+// movement for a speed-zero unit. This is not original getAITargetTime parity.
+inline int projectedRangedTargetTime(int nearestFootprintDistance, int movement)
+{
+	if(nearestFootprintDistance < 0 || movement < 0)
+		throw std::invalid_argument("HoMM3 projected ranged target time needs nonnegative distance and speed");
+	const int stepsToMelee = std::max(0, nearestFootprintDistance - 1);
+	if(stepsToMelee == 0)
+		return 1;
+	if(movement == 0)
+		return 100;
+	// Overflow-safe ceil(stepsToMelee / movement), at least one turn.
+	return 1 + (stepsToMelee - 1) / movement;
+}
+
 // checkAdjacentHexes uses the lower enemy_attacks score for two occupied
 // hexes. Native projected incoming-damage scores are negative (danger).
 inline double moreExposedFootprintThreat(double head, double tail)
