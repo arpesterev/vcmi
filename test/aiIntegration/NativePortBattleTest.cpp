@@ -3672,7 +3672,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveArcherUnblockValuesNativeMult
 	ASSERT_NE(guard, nullptr);
 	ASSERT_NE(strongBlocker, nullptr);
 	ASSERT_FALSE(guard->isShooter());
-	const BattleHex center(GameConstants::BFIELD_SIZE / 2);
+	// Attacker's left half is required by pinned analyzeBattleState:
+	// otherwise this would exercise offensive melee rather than
+	// meleeUnitDefense and conceal the source-policy regression.
+	const BattleHex center(GameConstants::BFIELD_SIZE / 2 - 1);
 	const BattleHex shooterHex(center.toInt() + 2 * GameConstants::BFIELD_WIDTH);
 	const BattleHex strongHex(shooterHex.toInt() + 1);
 	const BattleHex weakHex(shooterHex.toInt() - 1);
