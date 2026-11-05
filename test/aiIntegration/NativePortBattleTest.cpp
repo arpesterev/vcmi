@@ -4469,6 +4469,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeRangedRetaliationChangesChosenTa
 	EXPECT_EQ(formerChoice->getAvailableHealth(), liveHealthBeforePreview);
 	EXPECT_EQ(formerChoice->getCount(), liveCountBeforePreview);
 	policy->activeStack(battleID, shooter);
+	// FHeroes2 itself must evaluate the hypothetical survivor without
+	// applying damage or deaths to the authoritative battle state.
+	EXPECT_EQ(formerChoice->getAvailableHealth(), liveHealthBeforePreview);
+	EXPECT_EQ(formerChoice->getCount(), liveCountBeforePreview);
 	ASSERT_TRUE(callback->action.has_value());
 	const auto reranked = *callback->action;
 	ASSERT_EQ(reranked.actionType, EActionType::SHOOT);
