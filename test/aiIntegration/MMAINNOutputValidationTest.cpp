@@ -353,6 +353,38 @@ TEST(MMAINNOutputValidation, RejectsUnexpectedTerminalOnnxAction)
 	EXPECT_THROW(requireNNModelTerminalReset(42), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V15RejectsMoveOutsideLiveEngineReachability)
+{
+	using MMAI::BAI::requireNNV15LegalMove;
+	struct Hex
+	{
+		int index;
+		bool available;
+		bool isAvailable() const { return available; }
+		int toInt() const { return index; }
+	};
+	struct Reachability
+	{
+		std::array<unsigned, 3> distances{0, 1, 4};
+		bool isReachable(const Hex & hex) const { return distances.at(hex.index) < 1000000; }
+	};
+
+	Reachability live;
+	// Reachable destination at the exact movement limit remains legal.
+	EXPECT_NO_THROW(requireNNV15LegalMove(Hex{2, true}, live, 4u));
+	EXPECT_NO_THROW(requireNNV15LegalMove(Hex{1, true}, live, 1u));
+
+	// The graph's older action mask is insufficient if speed, occupancy,
+	// wall/gate state or obstacles changed before server dispatch.
+	EXPECT_THROW(requireNNV15LegalMove(Hex{2, true}, live, 3u), std::runtime_error);
+	live.distances[1] = 1000000;
+	EXPECT_THROW(requireNNV15LegalMove(Hex{1, true}, live, 9u), std::runtime_error);
+	EXPECT_THROW(requireNNV15LegalMove(Hex{0, false}, live, 9u), std::runtime_error);
+
+	// An invalid battlefield hex must be rejected before indexing distances.
+	EXPECT_THROW(requireNNV15LegalMove(Hex{-1, false}, live, 9u), std::runtime_error);
+}
+
 TEST(MMAINNOutputValidation, V15RejectsInactiveGraphActionBeforeServerDispatch)
 {
 	using MMAI::BAI::requireNNV15ActiveAction;
