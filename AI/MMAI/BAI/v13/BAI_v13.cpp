@@ -390,7 +390,13 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 		ba = buildBattleAction();
 
-		if(ba && (a != Schema::ACTION_RETREAT || resetting))
+		// A strict neural action must be dispatched exactly as selected or
+		// rejected. Retrying a stale/invalid V13 mask entry silently samples
+		// another policy output, which is allowed only for legacy gym/hybrid.
+		const bool legalAction = ba && (a != Schema::ACTION_RETREAT || resetting);
+		enforceNNV13SingleLiveAction(strictNeural, legalAction, a);
+
+		if(legalAction)
 		{
 			logger.debug("Action is VALID: %d: %s ", a, state->action->name());
 			errcounter = 0;
