@@ -49,8 +49,14 @@ public:
 			throw std::logic_error("TUMEnchantedTactics received an unknown battle");
 
 		BattleAction action;
-		if(stack->creatureId() == CreatureID::BALLISTA)
-			action = chooseBallistaShot(*battle, *stack);
+		// VCMI arrow towers are activated as native shooters with special
+		// (non-field) positions. Do not route their turn through the partial
+		// HoMM3 movement fallback. The published TUM tower formula is closed;
+		// use a bounded engine-damage projection, never a claimed DLL port.
+		if(stack->isTurret())
+			action = chooseSiegeShooterShot(*battle, *stack, false);
+		else if(stack->creatureId() == CreatureID::BALLISTA)
+			action = chooseSiegeShooterShot(*battle, *stack, true);
 		// Published TUM Hypnotize override: attacking former allies is scored
 		// by damage inflicted + retaliation received, not net exchange.
 		else if(stack->isHypnotized() && stack->unitOwner() != battle->battleGetOwner(stack))
@@ -106,7 +112,11 @@ private:
 			disabledBy(SpellID(SpellID::STONE_GAZE)));
 	}
 
-	static BattleAction chooseBallistaShot(CPlayerBattleCallback & battle, const CStack & stack)
+	// Shared legal-target and native damage evaluation for the two distinct
+	// siege shooters. Only ballistae have TUM's documented prohibition on
+	// breaking Blind, Paralyze or Petrification. Arrow towers do NOT inherit it.
+	static BattleAction chooseSiegeShooterShot(CPlayerBattleCallback & battle, const CStack & stack,
+		bool preserveDisabledTargets)
 	{
 		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 		std::sort(targets.begin(), targets.end(), [](const CStack * left, const CStack * right)
@@ -117,13 +127,14 @@ private:
 		double bestValue = -1;
 		for(const auto * enemy : targets)
 		{
-			if(!enemy->alive() || enemy->isInvincible() || hasDisabledEffect(*enemy)
+			if(!enemy->alive() || enemy->isInvincible() || !enemy->getPosition().isValid()
+				|| (preserveDisabledTargets && hasDisabledEffect(*enemy))
 				|| !battle.battleCanShoot(&stack, enemy->getPosition()))
 				continue;
-			// The unpublished TUM targeting formula is unavailable. Score the
-			// expected combat value actually removed by a native VCMI shot,
-			// not the untouched stack's entire strength. This is a bounded
-			// engine-specific projection, not an ERA/DLL-equivalent formula.
+			// The TUM ballista and arrow-tower targeting formulas are not
+			// available. Rank legal native shots by projected combat value
+			// removed, not the untouched stack's entire strength. This remains
+			// an engine-specific partial projection, never ERA/DLL parity.
 			BattleAttackInfo info(&stack, enemy, 0, true);
 			info.attackerPos = stack.getPosition();
 			DamageEstimation retaliation;
