@@ -302,6 +302,18 @@ public:
 			if(slowestEnemySpeed != std::numeric_limits<int>::max()
 				&& !targets.empty() && targets.size() < enemies.size())
 			{
+				// Only after an actual fast mobile decoy has been excluded,
+				// do not redirect our advance toward a stationary war machine
+				// instead of the slower mobile stack that justified the filter.
+				// Keep machines in the normal fallback and immediate-attack
+				// policies; this is a TUM-only movement preference.
+				auto mobileAlternatives = targets;
+				vstd::erase_if(mobileAlternatives, [](const CStack * enemy)
+				{
+					return enemy->hasBonusOfType(BonusType::SIEGE_WEAPON);
+				});
+				if(!mobileAlternatives.empty())
+					targets = std::move(mobileAlternatives);
 				const auto alternate = moveTowardEnemy(battle, stack, reach, available, targets);
 				if(alternate.actionType != EActionType::DEFEND)
 					return alternate;
