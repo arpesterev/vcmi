@@ -5407,8 +5407,10 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedOnlyWarMachineIsAnActiveNativeThrea
 {
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
-	setArmy(attackerSideHero, CreatureID(2), 80); // Archers
-	setArmy(defenderSideHero, CreatureID(0), 8); // Peasants
+	// The opening native Archer shot must not end the fight by wiping out
+	// the only ordinary defender stack before runToCompletion can start.
+	setArmy(attackerSideHero, CreatureID(2), 20); // Archers
+	setArmy(defenderSideHero, CreatureID(0), 100); // Peasants
 	giveArtifact(defenderSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
 	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
