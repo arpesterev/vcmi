@@ -5445,6 +5445,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedFirstStrikeCannotPreemptRangedS
 	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, chosen))
 		<< "The status change must come from the authoritative spell processor";
 	ASSERT_TRUE(chosen->hasBonusOfType(BonusType::NOT_ACTIVE));
+	// The exception matters even when the disabled shooter still has
+	// ammunition and a legal return-fire line: only FIRST_STRIKE is
+	// suppressed by the native ranged sequence's NOT_ACTIVE check.
+	ASSERT_TRUE(view->battleCanShoot(chosen, shooter->getPosition()));
+	ASSERT_TRUE(chosen->ableToRetaliate());
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
 	callback->action.reset();
 	policy->activeStack(battleID, shooter);
