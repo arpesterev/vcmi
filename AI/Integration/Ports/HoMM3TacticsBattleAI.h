@@ -327,7 +327,7 @@ private:
 					BattleAttackInfo followup(remainingAttacker.get(), remainingTarget.get(), 0, true);
 					followup.attackerPos = from;
 					const auto estimate = battle.battleEstimateDamage(followup);
-					const int64_t extraHit = expectedDamage(estimate, remainingTarget->getAvailableHealth());
+					int64_t extraHit = expectedDamage(estimate, remainingTarget->getAvailableHealth());
 					if(oldTargetHealth > 0)
 						score += static_cast<double>(target.estimateCombatValue())
 							* static_cast<double>(extraHit) / static_cast<double>(oldTargetHealth);
