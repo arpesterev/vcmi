@@ -244,7 +244,7 @@ private:
 		// victims. VCMI FIRST_STRIKE can destroy the attacker before any
 		// breath/sweep effects happen; never project splash from the live,
 		// pre-retaliation stack after a fatal preemptive hit.
-		const collateralValue = [&](const battle::Unit & outgoing)
+		const auto collateralValue = [&](const battle::Unit & outgoing)
 		{
 			double extraValue = 0.0;
 			for(const auto * victim : battle.getAttackedBattleUnits(
