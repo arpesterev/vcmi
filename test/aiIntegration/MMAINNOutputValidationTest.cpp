@@ -640,6 +640,46 @@ TEST(MMAINNOutputValidation, V13RejectsMoveOutsideLiveEngineReachability)
 	EXPECT_THROW(requireNNV13LegalMove(Hex{-1, false}, live, 9u), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13RejectsMeleeApproachOutsideLiveEngineReachability)
+{
+	using MMAI::BAI::requireNNV13LegalMeleeApproach;
+	struct Hex
+	{
+		int index;
+		bool available;
+		bool isAvailable() const { return available; }
+		int toInt() const { return index; }
+	};
+	struct Reachability
+	{
+		std::array<unsigned, 3> distances{0, 2, 5};
+		bool isReachable(const Hex & hex) const { return distances.at(hex.index) < 1000000; }
+	};
+
+	Reachability live;
+	// Preserve the original model-selected hex at the movement limit,
+	// including an adjacent strike from the creature's current position.
+	EXPECT_NO_THROW(requireNNV13LegalMeleeApproach(Hex{0, true}, live, 0u));
+	EXPECT_NO_THROW(requireNNV13LegalMeleeApproach(Hex{2, true}, live, 5u));
+
+	// Changed speed, a closed gate, or an obstacle can invalidate the mask.
+	// An invalid ONNX approach must not be resampled or reinterpreted.
+	EXPECT_THROW(requireNNV13LegalMeleeApproach(Hex{2, true}, live, 4u), std::runtime_error);
+	live.distances[1] = 1000000;
+	EXPECT_THROW(requireNNV13LegalMeleeApproach(Hex{1, true}, live, 9u), std::runtime_error);
+	EXPECT_THROW(requireNNV13LegalMeleeApproach(Hex{0, false}, live, 9u), std::runtime_error);
+	EXPECT_THROW(requireNNV13LegalMeleeApproach(Hex{-1, false}, live, 9u), std::runtime_error);
+	try
+	{
+		requireNNV13LegalMeleeApproach(Hex{2, true}, live, 4u);
+		FAIL() << "MMAI V13 accepted an unreachable model-selected melee approach";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("V13: model AMOVE approach"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion)
 {
 	using MMAI::BAI::requireNNV15ActionActor;

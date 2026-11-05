@@ -254,6 +254,7 @@ jobs:
                       'V13StrictNeuralRetreatUsesLiveEnginePermission',
                       'V13StrictRejectsInvalidModelActionWithoutResampling',
                       'V13RejectsMoveOutsideLiveEngineReachability',
+                      'V13RejectsMeleeApproachOutsideLiveEngineReachability',
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
                       'V15RejectsEmptyActionGraphBeforeOnnxInference',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',

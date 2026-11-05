@@ -99,6 +99,18 @@ inline void requireNNV15LegalMeleeApproach(const Hex & destination, const Reacha
 		throw std::runtime_error("MMAI V15: model AMOVE approach is not reachable this turn");
 }
 
+// V13 AMOVE reuses a hex action mask created for the ONNX observation.
+// A still-living target and a valid melee direction do not establish that
+// the selected approach can be reached after speed, gates, or obstacles change.
+// Preserve the exact model-selected approach or fail closed before dispatch.
+template<typename Hex, typename Reachability, typename Distance>
+inline void requireNNV13LegalMeleeApproach(const Hex & destination, const Reachability & reachability, Distance movementRange)
+{
+	if(!destination.isAvailable() || !reachability.isReachable(destination) ||
+	   reachability.distances[destination.toInt()] > movementRange)
+		throw std::runtime_error("MMAI V13: model AMOVE approach is not reachable this turn");
+}
+
 // V13's hex MOVE mask is also an observation snapshot. Revalidate the
 // model-selected destination against the live server reachability immediately
 // before dispatch, without replacing the policy's chosen hex. A MOVE onto

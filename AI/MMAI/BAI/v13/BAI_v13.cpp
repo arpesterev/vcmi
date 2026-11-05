@@ -541,6 +541,10 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction(const CStack * activeStack)
 				const auto * observed = action->aMoveTargetHex && action->aMoveTargetHex->stack
 					? action->aMoveTargetHex->stack->cstack : nullptr;
 				requireNNV13SelectedMeleeHexTarget(observed, estack);
+				// Reject an ONNX approach invalidated by live speed or obstacles.
+				// Neither a live target nor adjacency establishes reachability.
+				const auto reachability = battle->getReachability(acstack);
+				requireNNV13LegalMeleeApproach(bhex, reachability, acstack->getMovementRange());
 				requireNNV13LegalTarget(estack,
 					[this, acstack, &bhex](const CStack * target)
 					{
@@ -567,6 +571,10 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction(const CStack * activeStack)
 				const auto * observed = action->aMoveTargetHex && action->aMoveTargetHex->stack
 					? action->aMoveTargetHex->stack->cstack : nullptr;
 				requireNNV13SelectedMeleeHexTarget(observed, estack);
+				// Reject an ONNX approach invalidated by live speed or obstacles.
+				// Neither a live target nor adjacency establishes reachability.
+				const auto reachability = battle->getReachability(acstack);
+				requireNNV13LegalMeleeApproach(bhex, reachability, acstack->getMovementRange());
 				requireNNV13LegalTarget(estack,
 					[this, acstack, &bhex](const CStack * target)
 					{
