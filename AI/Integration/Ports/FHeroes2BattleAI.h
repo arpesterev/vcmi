@@ -911,11 +911,13 @@ private:
 		double enemyDamage = 0;
 		double priority = 0;
 		// Heroes II's archerDecision has no ranged FIRST_STRIKE. In VCMI,
-		// FIRST_STRIKE combined with RANGED_RETALIATION fires BEFORE our
-		// opening shot. Forecast the surviving shooter on a detached state
+		// ranged/all-subtype FIRST_STRIKE combined with RANGED_RETALIATION
+		// fires BEFORE our opening shot; melee-only FIRST_STRIKE must not. Forecast the surviving shooter on a detached state
 		// before valuing every affected victim, including area-shot victims.
 		// Never turn an engine-only ability into an invented Heroes II rule.
-		const bool firstStrikeCounter = target.hasBonusOfType(BonusType::FIRST_STRIKE)
+		const bool firstStrikeCounter = target.hasBonus(
+				Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+					.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged)))
 			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
 			&& !shooter.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 			&& target.ableToRetaliate()
