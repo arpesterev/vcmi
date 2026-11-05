@@ -93,7 +93,43 @@ private:
 			info.defenderPos = aimedHex;
 		}
 		DamageEstimation retaliation;
-		const auto damage = battle.battleEstimateDamage(info, &retaliation);
+		auto damage = battle.battleEstimateDamage(info, &retaliation);
+		// A native ranged defender may retaliate BEFORE the opening shot.
+		// The pinned HoMM3 simulateAttack has no ranged retaliation or
+		// FIRST_STRIKE. This is an explicit VCMI-only projection: preview
+		// the preemptive countershot, then re-price our reduced surviving
+		// shooter stack. Detached states never mutate the live battle.
+		// The TUM-composed baseline keeps its previous scoring.
+		const bool firstStrikeRangedCounter = projectNativeRangedRetaliation && shooting
+			&& target.hasBonusOfType(BonusType::FIRST_STRIKE)
+			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+			&& target.ableToRetaliate()
+			&& battle.battleCanShoot(&target, from);
+		DamageEstimation preemptiveDamage;
+		if(firstStrikeRangedCounter)
+		{
+			BattleAttackInfo counter(&target, &attacker, 0, true);
+			counter.attackerPos = target.getPosition();
+			counter.defenderPos = from;
+			preemptiveDamage = battle.battleEstimateDamage(counter);
+			auto survivingAttacker = attacker.acquireState();
+			int64_t counterHit = preemptiveDamage.damage.min
+				+ (preemptiveDamage.damage.max - preemptiveDamage.damage.min) / 2;
+			counterHit = std::clamp<int64_t>(counterHit, 0, survivingAttacker->getAvailableHealth());
+			survivingAttacker->damage(counterHit);
+			if(survivingAttacker->alive())
+			{
+				BattleAttackInfo remainingShot(survivingAttacker.get(), &target, distance, true);
+				remainingShot.attackerPos = from;
+				damage = battle.battleEstimateDamage(remainingShot);
+			}
+			else
+			{
+				damage.damage.min = 0;
+				damage.damage.max = 0;
+			}
+		}
 		// Pinned simulateAttack returns immediately when the first hit kills
 		// its victim. Some native retaliation previews are independent of that
 		// simulated first hit, so never charge an impossible counterattack for
@@ -102,8 +138,8 @@ private:
 		const bool certainFirstHitKill = ((projectSecondMeleeStrike && !shooting)
 				|| (projectNativeRangedRetaliation && shooting))
 			&& oldTargetHealth > 0 && damage.damage.min >= oldTargetHealth;
-		double retaliationLoss = shooting || certainFirstHitKill
-			? 0.0 : lossValue(attacker, retaliation);
+		double retaliationLoss = firstStrikeRangedCounter ? lossValue(attacker, preemptiveDamage)
+			: (shooting || certainFirstHitKill ? 0.0 : lossValue(attacker, retaliation));
 		// Pinned simulateAttack applies the first blow BEFORE the defender
 		// retaliates, and only then tries creatureTwoAttacks' second blow.
 		// The native initial retaliation estimate uses the original defender
@@ -139,7 +175,7 @@ private:
 		// native ability, so explicitly price the REVERSE legal shot instead.
 		// This is a HoMM3-only host-engine extension, not retail source parity;
 		// TUM keeps its established source-inspired baseline.
-		if(projectNativeRangedRetaliation && shooting && !certainFirstHitKill
+		if(projectNativeRangedRetaliation && shooting && !firstStrikeRangedCounter && !certainFirstHitKill
 			&& target.hasBonusOfType(BonusType::RANGED_RETALIATION)
 			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 			&& target.ableToRetaliate()
