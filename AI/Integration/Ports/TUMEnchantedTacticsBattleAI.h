@@ -339,7 +339,12 @@ private:
 		// classification remains intentionally conservative.
 		state.hasShooters = std::any_of(friends.begin(), friends.end(), [&](const CStack * friendly)
 		{
-			if(!friendly->alive() || !friendly->isShooter() || !friendly->canShoot()
+			// Siege weapons (including a ballista) can fire, but they are not
+			// the creature archer line protected by TUM's neutral-melee screen.
+			// Otherwise a hero with only a ballista can make infantry wait
+			// indefinitely for autonomous war-machine fire.
+			if(!friendly->alive() || !friendly->isShooter()
+				|| friendly->hasBonusOfType(BonusType::SIEGE_WEAPON) || !friendly->canShoot()
 				|| friendly->hasBonusOfType(BonusType::NOT_ACTIVE) || friendly->isFrozen())
 				return false;
 			// In VCMI an adjacent opponent can block every shot despite
