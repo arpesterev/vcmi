@@ -240,6 +240,15 @@ non-friendly-fire vector, VCMI to accept the independent action, and the
 protected unit's real server health to remain unchanged. The splash ability
 is attached only to the test creature, not to any gameplay definitions.
 
+Both ordinary melee and blocked-archer attack previews now pass the
+**actual legal struck cell** through VCMI `BattleAttackInfo::defenderPos` for
+each candidate, instead of scoring the default head of a double-wide victim.
+This follows the pinned `optimalAttackVector` / `archerDecision` separation
+between target stack and chosen attack vector, but leaves final direction,
+damage, retaliation and legality to Heroes III's engine. The native
+wide-target tests demand independent decisions, accepted attacks and
+completed battles; they do not establish exact Heroes II combat parity.
+
 A blocked ranged unit may also carry VCMI's two-hex melee breath bonus.
 The pinned fheroes2 `archerDecision` scores blocked-shooter melee by
 direct hit-point damage minus retaliation; it does not define Heroes III
