@@ -4016,6 +4016,14 @@ TEST_F(AIIntegrationNativeBattle, mmaiFirstAidWithoutWoundsUsesEngineAutoHealRea
 	setArmy(defenderSideHero, CreatureID(0), 35);
 	ASSERT_FALSE(HasFatalFailure());
 	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::FIRST_AID_TENT), ArtifactPosition::MACH3);
+	// Without First Aid mastery the server executes HEAL automatically before
+	// delivering an active-stack event. Grant real in-game manual control so
+	// this test actually exercises the MMAI V15 machine adapter as well.
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::FIRST_AID),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	ASSERT_GT(attackerSideHero->valOfBonuses(BonusType::MANUAL_CONTROL,
+		BonusSubtypeID(CreatureID(CreatureID::FIRST_AID_TENT))), 0)
+		<< "The hero needs game-granted manual tent control for this adapter regression";
 	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 	bool foundTent = false;
