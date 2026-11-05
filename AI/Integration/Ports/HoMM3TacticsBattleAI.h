@@ -725,6 +725,34 @@ private:
 	{
 		if(!attacker.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
 			return 0.0;
+		// FIRST_STRIKE + RANGED_RETALIATION in the host engine can hit
+		// the shooter before the area volley. The primary-target preview
+		// already accounts for that lost strength, but without this detached
+		// state the secondary-victim score would still price an impossible
+		// full-strength shot. Retail HoMM3 does not have this preemptive
+		// ranged counterattack; this is a VCMI-only tactical correction.
+		auto survivingAttacker = attacker.acquireState();
+		const bool firstStrike = primaryTarget.hasBonus(
+			Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
+			.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+				BonusCustomSubtype::damageTypeRanged)));
+		if(firstStrike && !primaryTarget.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& primaryTarget.hasBonusOfType(BonusType::RANGED_RETALIATION)
+			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+			&& primaryTarget.ableToRetaliate()
+			&& battle.battleCanShoot(&primaryTarget, attacker.getPosition()))
+		{
+			BattleAttackInfo counter(&primaryTarget, &attacker, 0, true);
+			counter.attackerPos = primaryTarget.getPosition();
+			counter.defenderPos = attacker.getPosition();
+			const auto estimate = battle.battleEstimateDamage(counter);
+			int64_t received = estimate.damage.min
+				+ (estimate.damage.max - estimate.damage.min) / 2;
+			received = std::clamp<int64_t>(received, 0, survivingAttacker->getAvailableHealth());
+			survivingAttacker->damage(received);
+			if(!survivingAttacker->alive())
+				return 0.0;
+		}
 		double value = 0.0;
 		for(const auto * affected : battle.getAttackedBattleUnits(
 			&attacker, &primaryTarget, primaryTarget.getPosition(), true))
@@ -732,7 +760,8 @@ private:
 			const auto * secondary = dynamic_cast<const CStack *>(affected);
 			if(!secondary || secondary == &primaryTarget || secondary == &attacker || !secondary->alive())
 				continue;
-			BattleAttackInfo info(&attacker, secondary, 0, true);
+			BattleAttackInfo info(survivingAttacker.get(), secondary, 0, true);
+			info.attackerPos = attacker.getPosition();
 			const double loss = lossValue(*secondary, battle.battleEstimateDamage(info));
 			value += Ports::HoMM3::collateralStrikeValue(
 				battle.battleGetOwner(secondary) != battle.battleGetOwner(&attacker), loss);
