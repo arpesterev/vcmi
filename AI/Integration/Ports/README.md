@@ -238,6 +238,16 @@ expected-damage projection, not the retail HoMM3 combat simulator; independent
 change of tactical target choice is not established. TUM's partial baseline
 is not changed.
 
+Native VCMI `FIRST_STRIKE` is not part of the pinned HoMM3 combat
+sequence. A preemptive hit can reduce, but not kill, a multi-target attacker.
+For HoMM3-only collateral previews, `projectedCollateral` now applies the
+representative counterdamage to a detached attacker before valuing splash
+against secondary stacks. A separate server regression exercises partial
+preemptive casualties, independent `WALK_AND_ATTACK` selection, real
+attack packets and battle completion. This remains approximate damage
+valuation, not retail HoMM3 behavior or proof of identical target choice.
+The TUM-composed partial baseline remains independent.
+
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign
