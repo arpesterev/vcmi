@@ -3925,6 +3925,102 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherComparesShotAgainstMelee)
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
 
+// General VCMI damage previews omit RANGED_RETALIATION; actual combat
+// may countershoot. Test the published TUM Hypnotize damage-sum choice
+// against a baseline and the authoritative server's return shot.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherValuesRangedRetaliation)
+{
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * archer = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+	ASSERT_NE(archer, nullptr);
+	const BattleHex ordinaryHex(archer->getPosition().toInt() + 8);
+	const BattleHex counterHex(archer->getPosition().toInt() + 9);
+	ASSERT_TRUE(ordinaryHex.isAvailable());
+	ASSERT_TRUE(counterHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(ordinaryHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(counterHex), nullptr);
+	const CStack * ordinary = addStack(BattleSide::ATTACKER, CreatureID(2), ordinaryHex, 60);
+	CStack * retaliator = addStack(BattleSide::ATTACKER, CreatureID(2), counterHex, 60);
+	ASSERT_NE(ordinary, nullptr);
+	ASSERT_NE(retaliator, nullptr);
+	retaliator->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(2))));
+	ASSERT_TRUE(retaliator->hasBonusOfType(BonusType::RANGED_RETALIATION));
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, archer));
+	ASSERT_TRUE(archer->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(archer), player);
+	battle()->activeStack = archer->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(archer, ordinary->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(archer, retaliator->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(retaliator, archer->getPosition()));
+	ASSERT_TRUE(retaliator->ableToRetaliate());
+	const auto reach = view->getReachability(archer);
+	const auto available = view->battleGetAvailableHexes(reach, archer, false);
+	for(const auto & hex : available)
+	{
+		if(!hex.isAvailable())
+			continue;
+		EXPECT_TRUE(view->meleeAttackHexes(archer, ordinary, hex).empty());
+		EXPECT_TRUE(view->meleeAttackHexes(archer, retaliator, hex).empty());
+	}
+	BattleAttackInfo counter(retaliator, archer, 0, true);
+	counter.attackerPos = retaliator->getPosition();
+	const auto counterEstimate = view->battleEstimateDamage(counter, nullptr);
+	ASSERT_GT(counterEstimate.damage.min, 0);
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *archer);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+	EXPECT_EQ(baseline.target.front().unitValue, ordinary->unitId())
+		<< "This fixture requires a differing baseline decision";
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, archer);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, retaliator->unitId())
+		<< "TUM should reward the incoming ranged countershot";
+	bool serverCounterShot = false;
+	const int retaliatorId = retaliator->unitId();
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.stackAttacking == retaliatorId && attack.shot() && attack.counter())
+			serverCounterShot = true;
+	};
+	const int64_t damageBefore = recorder.damage;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The real VCMI battle processor rejected this choice";
+	EXPECT_TRUE(serverCounterShot) << "The VCMI server did not execute ranged retaliation";
+	EXPECT_GT(recorder.damage, damageBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 1);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);

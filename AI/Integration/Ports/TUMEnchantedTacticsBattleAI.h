@@ -174,9 +174,32 @@ private:
 			// A stack that exhausted its counterattacks cannot retaliate, even
 			// if a damage preview reports the hypothetical exchange. Retain
 			// native VCMI's authoritative retaliation eligibility.
-			const double received = (shooting || guaranteedKill || !victim.ableToRetaliate()) ? 0.0
-				: std::min(static_cast<double>(stack.getAvailableHealth()),
-					(static_cast<double>(retaliation.damage.min) + retaliation.damage.max) / 2.0);
+			// The native damage preview omits RANGED_RETALIATION. The VCMI
+			// server can counter a shot when the victim can shoot back, is
+			// eligible for retaliation and the attacker does not block it.
+			double received = 0.0;
+			if(!guaranteedKill && victim.ableToRetaliate())
+			{
+				if(shooting)
+				{
+					if(victim.hasBonusOfType(BonusType::RANGED_RETALIATION)
+						&& !stack.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+						&& battle.battleCanShoot(&victim, stack.getPosition()))
+					{
+						BattleAttackInfo counter(&victim, &stack, 0, true);
+						counter.attackerPos = victim.getPosition();
+						const auto counterDamage = battle.battleEstimateDamage(counter, nullptr);
+						received = (static_cast<double>(counterDamage.damage.min)
+							+ counterDamage.damage.max) / 2.0;
+					}
+				}
+				else
+					received = (static_cast<double>(retaliation.damage.min)
+						+ retaliation.damage.max) / 2.0;
+			}
+			// Counter damage uses pre-shot victim strength: an optimistic
+			// host-engine estimate, not the unavailable ERA/DLL formula.
+			received = std::clamp(received, 0.0, static_cast<double>(stack.getAvailableHealth()));
 			return Ports::TUM::hypnotizedAttackDamageSum(dealt, received);
 		};
 
