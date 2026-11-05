@@ -3518,20 +3518,21 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FatalFirstStrikeDoesNotRewardUnexecute
 	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
 	attacker->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
 		BonusType::TWO_HEX_ATTACK_BREATH, BonusSource::OTHER, 1, BonusSourceID()));
+	const BattleHex attackerHex = attacker->getPosition();
 	BattleHex front;
 	BattleHex behind;
 	BattleHex safe;
-	for(const auto & nearby : attacker->getPosition().getNeighbouringTiles())
+	for(const auto & nearby : attackerHex.getNeighbouringTiles())
 	{
 		if(!nearby.isAvailable() || battle()->battleGetUnitByPos(nearby))
 			continue;
-		const auto direction = BattleHex::mutualPosition(attacker->getPosition(), nearby);
+		const auto direction = BattleHex::mutualPosition(attackerHex, nearby);
 		if(direction == BattleHex::NONE)
 			continue;
 		const auto rear = nearby.cloneInDirection(direction, false);
 		if(!rear.isAvailable() || battle()->battleGetUnitByPos(rear))
 			continue;
-		for(const auto & other : attacker->getPosition().getNeighbouringTiles())
+		for(const auto & other : attackerHex.getNeighbouringTiles())
 		{
 			if(other.isAvailable() && other != nearby && other != rear
 				&& !battle()->battleGetUnitByPos(other))
