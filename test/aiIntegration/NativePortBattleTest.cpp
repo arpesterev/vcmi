@@ -2494,22 +2494,39 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotThreatSpreadsArcherCover)
 		<< "Baseline guard must choose a normal archer screen";
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_EQ(BattleHex::getDistance(callback->action->target.front().hexValue, archerHex), 1);
+	// One DecisionCallback records exactly one command per stack activation.
+	// Compare two separately initialized AI decisions on the same unchanged
+	// authoritative battle rather than faking a second activation event.
+	policy.reset();
+	callback.reset();
 	splash->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
 		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
 	ASSERT_TRUE(splash->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
 	ASSERT_TRUE(battle()->battleCanShoot(splash));
 
-	policy->activeStack(battleID, guard);
-	ASSERT_TRUE(callback->action.has_value());
-	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+	auto splashCallback = std::make_shared<DecisionCallback>(player);
+	splashCallback->onBattleStarted(battle());
+	auto splashPolicy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(splashPolicy, nullptr);
+	splashPolicy->playerID = player;
+	auto splashEnvironment = std::make_shared<NativePortEnvironment>(
+		makeCallback(player), splashCallback);
+	splashPolicy->initBattleInterface(splashEnvironment, splashCallback, prefs);
+	splashPolicy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	splashPolicy->activeStack(battleID, guard);
+	ASSERT_TRUE(splashCallback->action.has_value());
+	ASSERT_EQ(splashCallback->action->actionType, EActionType::WALK)
 		<< "Source-derived splash warning should change the selected screen";
-	ASSERT_FALSE(callback->action->target.empty());
-	const BattleHex destination = callback->action->target.front().hexValue;
+	ASSERT_FALSE(splashCallback->action->target.empty());
+	const BattleHex destination = splashCallback->action->target.front().hexValue;
 	EXPECT_EQ(BattleHex::getDistance(destination, archerHex), 2)
 		<< "Splash-aware guard should not cluster adjacent to its archer";
-	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *splashCallback->action))
 		<< "The native server rejected the independently selected cover movement";
-	policy.reset();
+	splashPolicy.reset();
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.damage, 0);
 }
