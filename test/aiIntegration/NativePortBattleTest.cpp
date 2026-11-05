@@ -4484,7 +4484,12 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedArcherAimsAtBetterWideTailShot)
 	shooter->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::SHOOTS_ALL_ADJACENT,
 		BonusSource::OTHER, 1, BonusSourceID()));
-	const BattleHex widePosition(shooter->getPosition().toInt() + 8);
+	// Keep the wide target and its tail-adjacent companions outside the
+	// hypnotized shooter's one-turn melee reach. The published TUM rule
+	// compares outgoing + incoming melee damage, which can legitimately
+	// outrank splash fire. This regression isolates the *ranged* aim choice;
+	// a separate regression compares melee against shooting explicitly.
+	const BattleHex widePosition(shooter->getPosition().toInt() + 11);
 	ASSERT_TRUE(widePosition.isAvailable());
 	ASSERT_EQ(battle()->battleGetUnitByPos(widePosition), nullptr);
 	CStack * wide = addStack(BattleSide::ATTACKER, CreatureID(102), widePosition, 10);
