@@ -110,6 +110,17 @@ inline auto selectLegalNNWarMachineTarget(const Targets & targets, IsLegal isLeg
 	return best;
 }
 
+// V13 also handles engine-owned military machines before building its neural
+// observation. Validate the event actor first: a dead or missing machine must
+// neither dispatch a server action nor reach ONNX. This does not make machine
+// choices neural predictions.
+template<typename Stack>
+inline void requireNNV13LivingActiveStack(const Stack * activeStack)
+{
+	if(!activeStack || !activeStack->alive())
+		throw std::runtime_error("MMAI V13: active creature is missing or no longer alive");
+}
+
 // V13 reconstructs an action from a cached Battlefield observation. Its
 // active-stack wrapper must still refer to the creature delivered by the
 // current VCMI activeStack event. Otherwise a valid ONNX hex/action mask can

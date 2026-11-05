@@ -314,6 +314,11 @@ void BAI::activeStack(const BattleID & bid, const CStack * astack)
 
 void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 {
+	// The V13 actor-identity guard below protects ONNX actions, but engine-
+	// owned catapult/tower/tent actions are dispatched earlier. Refuse stale
+	// or dead active-stack events before either path; never enter BattleAI
+	// as a substitute for a strict neural decision.
+	requireNNV13LivingActiveStack(astack);
 	auto ba = maybeBuildAutoAction(astack, bid);
 
 	if(ba)

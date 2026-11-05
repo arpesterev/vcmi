@@ -337,6 +337,40 @@ TEST(MMAINNOutputValidation, V13StrictRejectsInvalidModelActionWithoutResampling
 	EXPECT_NO_THROW(enforceNNV13SingleLiveAction(false, false, 42));
 }
 
+TEST(MMAINNOutputValidation, V13RejectsDeadOrMissingEngineOwnedMachineActor)
+{
+	using MMAI::BAI::requireNNV13LivingActiveStack;
+	struct Creature
+	{
+		bool living;
+		bool alive() const { return living; }
+	};
+	const Creature active{true};
+	const Creature dead{false};
+	int dispatched = 0;
+	const auto dispatchEngineOwnedAction = [&dispatched](const Creature * stack)
+	{
+		requireNNV13LivingActiveStack(stack);
+		++dispatched;
+	};
+
+	EXPECT_NO_THROW(dispatchEngineOwnedAction(&active));
+	EXPECT_EQ(dispatched, 1);
+	EXPECT_THROW(dispatchEngineOwnedAction(&dead), std::runtime_error);
+	EXPECT_THROW(dispatchEngineOwnedAction(static_cast<const Creature *>(nullptr)), std::runtime_error);
+	EXPECT_EQ(dispatched, 1);
+
+	try
+	{
+		requireNNV13LivingActiveStack(&dead);
+		FAIL() << "V13 accepted a dead engine-owned war-machine actor";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("active creature is missing or no longer alive"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V13RejectsStaleOrDeadActiveCreatureBeforeModelDispatch)
 {
 	using MMAI::BAI::requireNNV13ActionActor;
