@@ -4068,14 +4068,17 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeFirstStrikeReducesAreaShotCollatera
 		}
 	}
 	ASSERT_TRUE(neighbouringCell.isValid());
-	const CStack * secondary = addStack(BattleSide::DEFENDER, CreatureID(0), neighbouringCell, 100);
-	ASSERT_NE(secondary, nullptr);
+	auto * neighbour = addStack(BattleSide::DEFENDER, CreatureID(2), neighbouringCell, 35);
+	ASSERT_NE(neighbour, nullptr);
 	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
 		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
-	defender->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
-		BonusType::RANGED_RETALIATION, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
-	defender->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
-		BonusType::FIRST_STRIKE, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	for(CStack * rangedDefender : {defender, neighbour})
+	{
+		rangedDefender->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+			BonusType::RANGED_RETALIATION, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+		rangedDefender->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+			BonusType::FIRST_STRIKE, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	}
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -4083,14 +4086,21 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeFirstStrikeReducesAreaShotCollatera
 	callback->onBattleStarted(battle());
 	auto view = callback->getBattle(battleID);
 	ASSERT_TRUE(view->battleCanShoot(shooter, defender->getPosition()));
-	ASSERT_TRUE(view->battleCanShoot(defender, shooter->getPosition()));
-	ASSERT_TRUE(defender->ableToRetaliate());
+	ASSERT_TRUE(view->battleCanShoot(shooter, neighbour->getPosition()));
 	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const auto firstDecision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
+	ASSERT_EQ(firstDecision.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(firstDecision.target.empty());
+	CStack * primary = firstDecision.target.front().unitValue == defender->unitId() ? defender : neighbour;
+	CStack * secondary = primary == defender ? neighbour : defender;
+	ASSERT_EQ(firstDecision.target.front().unitValue, primary->unitId());
+	ASSERT_TRUE(view->battleCanShoot(primary, shooter->getPosition()));
+	ASSERT_TRUE(primary->ableToRetaliate());
 	const auto nativeSplash = view->getAttackedBattleUnits(
-		shooter, defender, defender->getPosition(), true);
+		shooter, primary, primary->getPosition(), true);
 	ASSERT_NE(std::find(nativeSplash.begin(), nativeSplash.end(), secondary), nativeSplash.end())
 		<< "The actual area shot must reach a second living enemy";
-	BattleAttackInfo counter(defender, shooter, 0, true);
+	BattleAttackInfo counter(primary, shooter, 0, true);
 	const auto preemptive = view->battleEstimateDamage(counter);
 	ASSERT_GT(preemptive.damage.min, 0);
 	auto survivingShooter = shooter->acquireState();
@@ -4106,10 +4116,6 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeFirstStrikeReducesAreaShotCollatera
 	EXPECT_LT(view->battleEstimateDamage(reducedCollateral).damage.max,
 		view->battleEstimateDamage(originalCollateral).damage.max)
 		<< "Preemptive casualties must reduce the projected area volley";
-	const auto firstDecision = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
-	ASSERT_EQ(firstDecision.actionType, EActionType::SHOOT);
-	ASSERT_FALSE(firstDecision.target.empty());
-	EXPECT_EQ(firstDecision.target.front().unitValue, defender->unitId());
 	const int64_t oldShooterHealth = shooter->getAvailableHealth();
 	const int64_t oldSecondaryHealth = secondary->getAvailableHealth();
 
