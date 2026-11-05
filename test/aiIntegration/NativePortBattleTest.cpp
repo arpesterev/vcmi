@@ -2100,7 +2100,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FarewellSpellChoosesNativeDamageAndCom
 	auto callback = std::make_shared<DecisionCallback>(player);
 	callback->onBattleStarted(battle());
 	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
-	const auto * hero = battle()->battleGetMyHero();
+	const auto * hero = callback->getBattle(battleID)->battleGetMyHero();
 	ASSERT_NE(hero, nullptr);
 	const auto initialMana = hero->mana;
 	const auto selected = AIIntegration::FHeroes2SpellPolicy::choose(
