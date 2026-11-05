@@ -2248,6 +2248,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MagicArrowAvoidsWakingBlindedEnemy)
 	ASSERT_NE(other, nullptr);
 	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
 	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, blinded));
+	// This regression isolates damage-spell target valuation: the setup
+	// Blind was cast by the real server, but must not compete as an
+	// additional hero spell in the subsequent independent decision.
+	attackerSideHero->removeSpellFromSpellbook(SpellID::BLIND);
+	ASSERT_FALSE(attackerSideHero->spellbookContainsSpell(SpellID::BLIND));
 	ASSERT_TRUE(blinded->hasBonusOfType(BonusType::NOT_ACTIVE));
 	ASSERT_FALSE(blinded->isFrozen());
 	ASSERT_GT(blinded->getMovementRange(), 0u);
