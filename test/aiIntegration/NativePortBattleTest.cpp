@@ -1091,6 +1091,86 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeHasteAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 Unit::GetSpeed(false, true) returns STANDING for
+// Blind/Paralyze. VCMI may retain the raw speed of an incapacitated unit:
+// spell scoring must not award movement value to a Haste that cannot make
+// that unit act. This is a VCMI control-state projection, not a claim that
+// Heroes II and III have identical spell implementations.
+TEST_F(AIIntegrationNativeBattle, fheroes2HasteDoesNotRewardBlindedArcherSpeed)
+{
+	prepareBattle(CreatureID(0), 1, CreatureID(0), 70);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * active = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			active = unit.get();
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), active);
+	const BattleHex shooterHex(active->getPosition().toInt() + GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	const CStack * shooter = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 25);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+
+	teachBattleSpell(attackerSideHero, SpellID::HASTE, 6);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]()
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		EXPECT_NE(policy, nullptr);
+		if(!policy)
+			return std::make_pair(std::optional<BattleAction>{}, false);
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = true;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, active);
+		return std::make_pair(callback->action, callback->spellAction);
+	};
+	const auto targetsShooter = [&](const BattleAction & action)
+	{
+		return std::any_of(action.target.begin(), action.target.end(), [&](const auto & target)
+		{
+			return target.unitValue == shooter->unitId() || target.hexValue == shooter->getPosition();
+		});
+	};
+	const auto before = decide();
+	ASSERT_TRUE(before.first.has_value());
+	ASSERT_TRUE(before.second) << "Uncontrolled high-value archer should attract native Haste: "
+		<< before.first->toString();
+	EXPECT_EQ(before.first->spell, SpellID(SpellID::HASTE));
+	EXPECT_TRUE(targetsShooter(*before.first));
+
+	teachBattleSpell(defenderSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, shooter));
+	ASSERT_TRUE(shooter->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GT(shooter->getMovementRange(), 0u)
+		<< "Native blinded stack must retain raw speed to exercise the regression";
+	ASSERT_EQ(battle()->battleActiveUnit(), active);
+	const auto after = decide();
+	ASSERT_TRUE(after.first.has_value());
+	if(after.second)
+	{
+		EXPECT_EQ(after.first->spell, SpellID(SpellID::HASTE));
+		EXPECT_FALSE(targetsShooter(*after.first))
+			<< "A still-blinded archer has STANDING effective speed: " << after.first->toString();
+	}
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after.first))
+		<< "The real server rejected the independently selected action";
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeSlowAndCompletesBattle)
 {
 	// A slower melee army can benefit from reducing enemy Cavalier speed.
