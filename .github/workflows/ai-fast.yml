@@ -243,6 +243,8 @@ jobs:
                       'V15RejectsInvalidValueHead',
                       'V13V15WarMachineTargetsOnlyLivingShootableEnemies',
                       'V13V15RejectNonFiniteObservationBeforeInference',
+                      'RejectsScriptedFallbackForStrictOrInvalidActiveActor',
+                      'V13RejectsDeadOrMissingEngineOwnedMachineActor',
                       'V13RejectsStaleOrDeadActiveCreatureBeforeModelDispatch',
                       'V13RejectsIllegalTargetBeforeEngineDispatch',
                       'V13StrictRejectsInvalidModelActionWithoutResampling',
