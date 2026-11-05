@@ -8,6 +8,8 @@
 #pragma once
 
 #include <cmath>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -57,6 +59,17 @@ inline void requireNNV15ActionCandidates(std::size_t activeActionCount)
 {
 	if(activeActionCount == 0)
 		throw std::runtime_error("MMAI V15: observation has no active creature actions before ONNX inference");
+}
+
+// V15 action nodes are identified by int64 values in ONNX, but the battle
+// interface returns a signed int action ID. Reject a malformed or oversized
+// graph ID before narrowing it: truncation could otherwise dispatch a
+// different, apparently legal creature action instead of the model's choice.
+inline int checkedNNV15ActionId(std::int64_t actionId)
+{
+	if(actionId < 0 || actionId > std::numeric_limits<int>::max())
+		throw std::runtime_error("MMAI V15: ONNX-selected action ID is outside the VCMI action range");
+	return static_cast<int>(actionId);
 }
 
 // V15 emits a critic value in addition to the action head. Although the
