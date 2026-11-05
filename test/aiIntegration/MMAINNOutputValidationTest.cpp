@@ -286,6 +286,30 @@ TEST(MMAINNOutputValidation, StrictLiveBattleRejectsGymResetButAllowsGraphAction
 	EXPECT_NO_THROW(enforceStrictNNLiveBattleAction(false, ACTION_RETREAT));
 }
 
+TEST(MMAINNOutputValidation, V13RejectsIllegalTargetBeforeEngineDispatch)
+{
+	using MMAI::BAI::requireNNV13LegalTarget;
+	const int target = 7;
+	const auto legal = [](const int *) { return true; };
+
+	// An accepted V13 ONNX action must still resolve to the same legal
+	// living engine target at dispatch, even if event updates made a
+	// formerly legal action-mask entry stale.
+	EXPECT_NO_THROW(requireNNV13LegalTarget(&target, legal, "SHOOT"));
+	EXPECT_THROW(requireNNV13LegalTarget(&target,
+		[](const int *) { return false; }, "SHOOT"), std::runtime_error);
+	EXPECT_THROW(requireNNV13LegalTarget(&target,
+		[](const int *) { return false; }, "AMOVE"), std::runtime_error);
+
+	bool queriedMissingTarget = false;
+	EXPECT_THROW(requireNNV13LegalTarget(static_cast<const int *>(nullptr),
+		[&queriedMissingTarget](const int *) {
+			queriedMissingTarget = true;
+			return true;
+		}, "AMOVE"), std::runtime_error);
+	EXPECT_FALSE(queriedMissingTarget);
+}
+
 TEST(MMAINNOutputValidation, V15RejectsStaleActiveCreatureBeforeActionConversion)
 {
 	using MMAI::BAI::requireNNV15ActionActor;
