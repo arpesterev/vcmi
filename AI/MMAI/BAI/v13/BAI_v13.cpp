@@ -346,6 +346,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	}
 
 	state->onActiveStack(astack);
+	const auto actorHexAtObservation = astack->getPosition();
 
 	if(maybeCastSpell(astack, bid))
 		return;
@@ -382,6 +383,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	{
 		auto t0 = std::chrono::steady_clock::now();
 		auto a = getNonRenderAction();
+		requireNNObservedActorAtHex(astack, actorHexAtObservation,
+			[this](const BattleHex & hex) { return battle->battleGetStackByPos(hex); }, "V13");
 		auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 		getActionTotalMs += dt;
 		getActionTotalCalls += 1;
@@ -419,6 +422,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 		{
 			logger.debug("Action is VALID: %d: %s ", a, state->action->name());
 			errcounter = 0;
+			requireNNObservedActorAtHex(astack, actorHexAtObservation,
+				[this](const BattleHex & hex) { return battle->battleGetStackByPos(hex); }, "V13");
 			cb->battleMakeUnitAction(bid, *ba);
 			break;
 		}

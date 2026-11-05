@@ -405,6 +405,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	}
 
 	state->onActiveStack(astack, roundcounter);
+	const auto actorHexAtObservation = astack->getPosition();
 
 	if(maybeCastSpell(astack, bid))
 		return;
@@ -421,6 +422,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 	auto t0 = std::chrono::steady_clock::now();
 	int a = getNonRenderAction();
+	requireNNObservedActorAtHex(astack, actorHexAtObservation,
+		[this](const BattleHex & hex) { return battle->battleGetStackByPos(hex); }, "V15");
 	auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 	getActionTotalMs += static_cast<int>(dt);
 	getActionTotalCalls += 1;
@@ -455,6 +458,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	if(isMMAIAutoVerify())
 		Verify(state.get());
 
+	requireNNObservedActorAtHex(astack, actorHexAtObservation,
+		[this](const BattleHex & hex) { return battle->battleGetStackByPos(hex); }, "V15");
 	cb->battleMakeUnitAction(bid, ba);
 }
 

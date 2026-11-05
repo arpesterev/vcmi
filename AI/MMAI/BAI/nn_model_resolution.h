@@ -166,6 +166,18 @@ inline void requireNNV15ObservedTargetAtHex(const Stack * target, const Hex & ob
 			+ " target no longer occupies its observed hex");
 }
 
+// V13/V15 decisions are bound to the actor position observed by ONNX.
+// A later event can move the living actor; never reinterpret a model choice
+// from its new hex. The occupant lookup is the live VCMI battle callback.
+template<typename Stack, typename Hex, typename LiveLookup>
+inline void requireNNObservedActorAtHex(const Stack * actor, const Hex & observedHex,
+                                        LiveLookup liveAtHex, const char * version)
+{
+	if(!actor || !actor->alive() || !(actor->getPosition() == observedHex) || liveAtHex(observedHex) != actor)
+		throw std::runtime_error(std::string("MMAI ") + version
+			+ ": model actor no longer occupies its observed hex");
+}
+
 // V13 SHOOT encodes the selected target through an observation hex.
 // Re-check that exact hex at dispatch: a still-living observed stack might
 // have moved elsewhere, and reconstructing a shot using its *new* position

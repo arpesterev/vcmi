@@ -697,6 +697,50 @@ TEST(MMAINNOutputValidation, RejectsUnexpectedTerminalOnnxAction)
 	EXPECT_THROW(requireNNModelTerminalReset(42), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13V15RejectMovedOrReplacedObservedActorBeforeDispatch)
+{
+	using MMAI::BAI::requireNNObservedActorAtHex;
+	struct Stack
+	{
+		int hex;
+		bool living = true;
+		bool alive() const { return living; }
+		int getPosition() const { return hex; }
+	};
+	Stack actor{12};
+	Stack replacement{12};
+	const Stack * occupant = &actor;
+	int lookups = 0;
+	const auto liveAtHex = [&occupant, &lookups](int hex) -> const Stack *
+	{
+		++lookups;
+		return hex == 12 ? occupant : nullptr;
+	};
+	for(const char * version : {"V13", "V15"})
+		EXPECT_NO_THROW(requireNNObservedActorAtHex(&actor, 12, liveAtHex, version));
+
+	actor.hex = 13; // same living actor moved after observation
+	for(const char * version : {"V13", "V15"})
+		EXPECT_THROW(requireNNObservedActorAtHex(&actor, 12, liveAtHex, version), std::runtime_error);
+	actor.hex = 12;
+
+	occupant = &replacement; // another living creature replaced actor
+	for(const char * version : {"V13", "V15"})
+		EXPECT_THROW(requireNNObservedActorAtHex(&actor, 12, liveAtHex, version), std::runtime_error);
+	occupant = nullptr;
+	EXPECT_THROW(requireNNObservedActorAtHex(&actor, 12, liveAtHex, "V15"), std::runtime_error);
+
+	occupant = &actor;
+	actor.living = false;
+	const int previousLookups = lookups;
+	EXPECT_THROW(requireNNObservedActorAtHex(&actor, 12, liveAtHex, "V13"), std::runtime_error);
+	EXPECT_THROW(requireNNObservedActorAtHex(static_cast<const Stack *>(nullptr), 12, liveAtHex, "V15"), std::runtime_error);
+	EXPECT_EQ(lookups, previousLookups); // null/dead actors never query VCMI
+
+	actor.living = true;
+	EXPECT_NO_THROW(requireNNObservedActorAtHex(&actor, 12, liveAtHex, "V15"));
+}
+
 TEST(MMAINNOutputValidation, V15RejectsMovedOrReplacedObservedTargetBeforeDispatch)
 {
 	using MMAI::BAI::requireNNV15ObservedTargetAtHex;
