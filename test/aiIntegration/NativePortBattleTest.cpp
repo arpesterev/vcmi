@@ -3609,8 +3609,9 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeRangedFirstStrikeExecutesBeforeOpen
 	auto reducedShooter = shooter->acquireState();
 	int64_t expectedCounter = firstCounter.damage.min
 		+ (firstCounter.damage.max - firstCounter.damage.min) / 2;
-	reducedShooter->damage(std::clamp<int64_t>(
-		expectedCounter, 0, reducedShooter->getAvailableHealth()));
+	expectedCounter = std::clamp<int64_t>(
+		expectedCounter, 0, reducedShooter->getAvailableHealth());
+	reducedShooter->damage(expectedCounter);
 	ASSERT_TRUE(reducedShooter->alive());
 	ASSERT_LT(reducedShooter->getCount(), shooter->getCount());
 	BattleAttackInfo reducedOpening(reducedShooter.get(), defender, 0, true);
