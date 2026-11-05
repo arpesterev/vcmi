@@ -4557,7 +4557,6 @@ TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieB
 TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSplash)
 {
 	prepareBattle(CreatureID(7), 1, CreatureID(0), 500); // Crusader vs Peasants
-	std::cerr << "HOMM3_LETHAL_STAGE prepared" << std::endl;
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	CStack * crusader = nullptr;
@@ -4571,7 +4570,6 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSpl
 	}
 	ASSERT_NE(crusader, nullptr);
 	ASSERT_NE(primary, nullptr);
-	std::cerr << "HOMM3_LETHAL_STAGE units found" << std::endl;
 	ASSERT_EQ(battle()->battleActiveUnit(), crusader);
 	crusader->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::ATTACKS_ALL_ADJACENT,
@@ -4585,7 +4583,6 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSpl
 	primary->setPosition(adjacent[0]);
 	CStack * secondary = const_cast<CStack *>(
 		addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[1], 500));
-	std::cerr << "HOMM3_LETHAL_STAGE placed second stack" << std::endl;
 	ASSERT_NE(secondary, nullptr);
 	const auto addPreemptiveCounter = [](CStack * defender)
 	{
@@ -4596,10 +4593,8 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSpl
 	};
 	addPreemptiveCounter(primary);
 	addPreemptiveCounter(secondary);
-	std::cerr << "HOMM3_LETHAL_STAGE bonuses added" << std::endl;
-	const auto beforePrimary = primary->getAvailableHealth();
-	const auto beforeSecondary = secondary->getAvailableHealth();
 	const auto beforeCrusader = crusader->getAvailableHealth();
+	const ui32 crusaderID = static_cast<ui32>(crusader->unitId());
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
@@ -4616,7 +4611,6 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSpl
 		ASSERT_GE(preview.damage.min, beforeCrusader)
 			<< "The real host must guarantee a fatal first strike for either target";
 	}
-	std::cerr << "HOMM3_LETHAL_STAGE damage preview completed" << std::endl;
 	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
@@ -4628,15 +4622,14 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSpl
 		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
 		battle()->getSideHero(BattleSide::ATTACKER),
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
-	std::cerr << "HOMM3_LETHAL_STAGE before chooseAction" << std::endl;
 	policy->activeStack(battleID, crusader);
-	std::cerr << "HOMM3_LETHAL_STAGE after chooseAction" << std::endl;
 	ASSERT_TRUE(callback->action.has_value());
 	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
 	ASSERT_GE(callback->action->target.size(), 2u);
 	const CStack * chosen = dynamic_cast<const CStack *>(
 		view->battleGetUnitByPos(callback->action->target[1].hexValue));
 	ASSERT_TRUE(chosen == primary || chosen == secondary);
+	const ui32 chosenID = static_cast<ui32>(chosen->unitId());
 	std::vector<ui32> order;
 	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
 	{
@@ -4646,15 +4639,13 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalNativeFirstStrikePreventsPhantomSpl
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "VCMI rejected the independent HoMM3 melee command";
 	recorder.onAttackBeforeApply = {};
-	std::cerr << "HOMM3_LETHAL_STAGE engine action accepted" << std::endl;
 	ASSERT_FALSE(order.empty());
-	EXPECT_EQ(order.front(), static_cast<ui32>(chosen->unitId()))
+	EXPECT_EQ(order.front(), chosenID)
 		<< "The engine must execute the chosen target's FIRST_STRIKE first";
-	EXPECT_EQ(std::count(order.begin(), order.end(), static_cast<ui32>(crusader->unitId())), 0u)
+	EXPECT_EQ(std::count(order.begin(), order.end(), crusaderID), 0)
 		<< "A killed attacker must not execute its hypothetical multi-target strike";
-	EXPECT_EQ(crusader->getAvailableHealth(), 0);
-	EXPECT_EQ(primary->getAvailableHealth(), beforePrimary);
-	EXPECT_EQ(secondary->getAvailableHealth(), beforeSecondary);
+	// A terminal battle frees its CStack objects. Check native attack packets
+	// and the recorded result instead of dereferencing ended-battle units.
 	policy.reset();
 	EXPECT_GT(recorder.damage, 0);
 	EXPECT_FALSE(recorder.battleResults.empty())
