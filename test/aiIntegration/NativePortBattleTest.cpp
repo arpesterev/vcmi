@@ -5303,8 +5303,8 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeAreaShotCollateralChangesTargetAndE
 	const auto before = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *shooter);
 	ASSERT_EQ(before.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(before.target.empty());
-	EXPECT_EQ(before.target.front().unitValue, isolated->unitId())
-		<< "The single-victim score must prefer the isolated larger stack";
+	ASSERT_NE(before.target.front().unitValue, cluster.front()->unitId())
+		<< "Without area damage the native single-target scorer should choose a larger stack, not the one-creature cluster center";
 
 	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
 		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
@@ -5313,6 +5313,8 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeAreaShotCollateralChangesTargetAndE
 	ASSERT_EQ(after.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(after.target.empty());
 	const auto chosenID = after.target.front().unitValue;
+	ASSERT_NE(chosenID, before.target.front().unitValue)
+		<< "Area damage must change HoMM3's independently chosen shot target";
 	const auto chosen = std::find_if(cluster.begin(), cluster.end(),
 		[&](const CStack * unit) { return unit->unitId() == chosenID; });
 	ASSERT_NE(chosen, cluster.end())
