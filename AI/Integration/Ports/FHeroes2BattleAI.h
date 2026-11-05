@@ -863,6 +863,26 @@ private:
 		for(const auto * victim : additionalVictims)
 			if(victim != &target)
 				evaluate(*victim);
+		// The pinned fheroes2 archerDecision values outgoing ranged damage,
+		// but Heroes II has no equivalent to VCMI's RANGED_RETALIATION.
+		// A legal native countershot must be included in the net exchange.
+		// battleEstimateDamage's retaliation output omits ranged return fire:
+		// estimate the reverse shot only if the initial hit cannot certainly
+		// kill the primary victim, and the native engine permits retaliation.
+		BattleAttackInfo first(&shooter, &target, 0, true);
+		first.attackerPos = shooter.getPosition();
+		const auto opening = battle.battleEstimateDamage(first);
+		const bool certainKill = target.getAvailableHealth() > 0
+			&& opening.damage.min >= target.getAvailableHealth();
+		if(!certainKill && target.hasBonusOfType(BonusType::RANGED_RETALIATION)
+			&& !shooter.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
+			&& target.ableToRetaliate()
+			&& battle.battleCanShoot(&target, shooter.getPosition()))
+		{
+			BattleAttackInfo counter(&target, &shooter, 0, true);
+			counter.attackerPos = target.getPosition();
+			priority -= lossValue(shooter, battle.battleEstimateDamage(counter));
+		}
 		return {Ports::FHeroes2::catastrophicFriendlyFire(friendlyDamage, enemyDamage), priority};
 	}
 
