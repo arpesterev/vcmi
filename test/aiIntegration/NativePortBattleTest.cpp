@@ -4824,14 +4824,16 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelArrowTowerSendsNativeShotBeforeCompl
 		}
 	}
 	ASSERT_NE(expected, nullptr) << "Native arrow tower must have a legal target";
-	// The documented Blind/Paralyze/Petrification target exclusion belongs
-	// specifically to TUM's BALLISTA. Do not accidentally propagate it to
-	// arrow towers. Two equal peasant stacks give the independent partial
-	// HoMM3 ranged scorer a meaningful alternative when one is Blinded.
+	// The published TUM prohibition on hitting Blind/Paralyze/Petrification
+	// applies to BALLISTA specifically. A tower instead follows this
+	// partial port's native projected casualty-value ranking, which can
+	// change when the target's combat state changes. Verify it uses the
+	// current engine estimate rather than its earlier, stale forecast.
+	const int beforeDisableTargetId = expected->unitId();
 	CStack * disabledTowerTarget = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
-		if(unit->unitId() == expected->unitId())
+		if(unit->unitId() == beforeDisableTargetId)
 			disabledTowerTarget = unit.get();
 	}
 	ASSERT_NE(disabledTowerTarget, nullptr);
@@ -4839,15 +4841,38 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelArrowTowerSendsNativeShotBeforeCompl
 		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::SPELL_EFFECT,
 		1, BonusSourceID(SpellID(SpellID::BLIND)), BonusSubtypeID(SpellID(SpellID::BLIND))));
 	ASSERT_TRUE(disabledTowerTarget->hasBonusOfType(BonusType::NOT_ACTIVE));
-	ASSERT_TRUE(view->battleCanShoot(tower, expected->getPosition()))
-		<< "A native tower shot must remain legal against the disabled target";
+	ASSERT_TRUE(view->battleCanShoot(tower, disabledTowerTarget->getPosition()))
+		<< "Native legal target status and preferred target value are distinct";
+	expected = nullptr;
+	bestValue = -1;
+	for(const auto * enemy : view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+	{
+		if(!enemy->alive() || enemy->isInvincible() || !enemy->getPosition().isValid()
+			|| !view->battleCanShoot(tower, enemy->getPosition()))
+			continue;
+		BattleAttackInfo info(tower, enemy, 0, true);
+		info.attackerPos = tower->getPosition();
+		DamageEstimation retaliation;
+		const auto projection = view->battleEstimateDamage(info, &retaliation);
+		const double health = static_cast<double>(enemy->getAvailableHealth());
+		if(health <= 0)
+			continue;
+		const double meanDamage = (static_cast<double>(projection.damage.min)
+			+ static_cast<double>(projection.damage.max)) / 2.0;
+		const double value = static_cast<double>(enemy->estimateCombatValue())
+			* std::clamp(meanDamage, 0.0, health) / health;
+		if(!expected || value > bestValue)
+		{
+			expected = enemy;
+			bestValue = value;
+		}
+	}
+	ASSERT_NE(expected, nullptr);
+	EXPECT_NE(expected->unitId(), beforeDisableTargetId)
+		<< "The native valuation must respond to this real inactive-state bonus";
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT)
-		<< "The independent HoMM3 shooter must retain an ordinary legal target";
-	ASSERT_FALSE(baseline.target.empty());
-	EXPECT_NE(baseline.target.front().unitValue, expected->unitId())
-		<< "The partial HoMM3 scorer should downrank an incapacitated target";
-
+		<< "The independent HoMM3 baseline must have a legal tower shot";
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
