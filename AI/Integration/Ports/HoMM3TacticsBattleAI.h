@@ -403,9 +403,34 @@ private:
 			const bool canShootAdjacent = !enemy->hasBonus(restricted)
 				|| enemy->hasBonus(Selector::type()(BonusType::FREE_SHOOTING).And(restricted.Not()));
 			const auto limitedRange = enemy->getBonus(Selector::type()(BonusType::LIMITED_SHOOTING_RANGE));
+			const bool canShootNow = battle.battleCanShoot(enemy);
+			// Moving our active stack can unpin an archer which cannot shoot
+			// from the CURRENT board position. Recheck its other blockers
+			// rather than treating today's disabled shot as a permanent
+			// future state. Berserk units are blocked by either owner.
+			const bool berserk = enemy->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+			const bool moverPinsNow = engagesFootprints(attacker.getHexes(), enemy->getHexes())
+				&& (berserk || battle.battleMatchOwner(enemy, &attacker));
+			bool anotherBlockerRemains = false;
+			if(!canShootNow && enemy->canShoot() && moverPinsNow)
+			{
+				for(const auto * unit : battle.battleGetUnitsIf([](const battle::Unit * unit) { return unit->alive(); }))
+				{
+					if(unit == enemy || unit == &attacker)
+						continue;
+					if((berserk || battle.battleMatchOwner(enemy, unit))
+						&& engagesFootprints(unit->getHexes(), enemy->getHexes()))
+					{
+						anotherBlockerRemains = true;
+						break;
+					}
+				}
+			}
+			const bool canShootAfterMove = Ports::HoMM3::projectedShooterReadyAfterMoverLeaves(
+				canShootNow, enemy->canShoot(), moverPinsNow, anotherBlockerRemains);
 			const bool canShoot = enemy->isShooter()
 				&& Ports::HoMM3::projectedNativeRangedThreat(
-					battle.battleCanShoot(enemy), blocked, enemy->canShootBlocked(),
+					canShootAfterMove, blocked, enemy->canShootBlocked(),
 					canShootAdjacent, limitedRange != nullptr,
 					limitedRange ? limitedRange->val : 0,
 					BattleHex::getDistance(enemy->getPosition(), cell));
