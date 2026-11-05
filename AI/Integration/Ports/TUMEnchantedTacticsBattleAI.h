@@ -140,7 +140,7 @@ private:
 		const int legalShots = static_cast<int>(std::clamp<int64_t>(
 			attacks, 1, stack.shots.available()));
 		const CStack * selected = nullptr;
-		double bestValue = -1;
+		double bestValue = 0.0;
 		for(const auto * enemy : targets)
 		{
 			if(!enemy->alive() || enemy->isInvincible() || !enemy->getPosition().isValid()
@@ -153,18 +153,18 @@ private:
 			// Use the engine's ACTUAL affected-unit list, not distance guesses,
 			// before considering this otherwise-legal shot. Arrow towers do
 			// not inherit the published ballista-only prohibition.
-			if(preserveDisabledTargets)
-			{
-				const auto impacted = battle.getAttackedBattleUnits(
-					&stack, enemy, enemy->getPosition(), true);
-				if(std::any_of(impacted.begin(), impacted.end(),
-					[&](const battle::Unit * hit)
-					{
-						return hit && battle.battleGetOwner(hit) != battle.battleGetOwner(&stack)
-							&& hasDisabledEffect(*hit);
-					}))
-					continue;
-			}
+			// The same native impact list drives both the ballista's
+			// disabled-target veto and collateral-aware casualty evaluation.
+			// Area shots can hit friendly stacks as well as additional enemies.
+			const auto impacted = battle.getAttackedBattleUnits(
+				&stack, enemy, enemy->getPosition(), true);
+			if(preserveDisabledTargets && std::any_of(impacted.begin(), impacted.end(),
+				[&](const battle::Unit * hit)
+				{
+					return hit && battle.battleGetOwner(hit) != battle.battleGetOwner(&stack)
+						&& hasDisabledEffect(*hit);
+				}))
+				continue;
 			// VCMI resolves ranged FIRST_STRIKE retaliation before the siege
 			// machine fires its opening shot. A guaranteed lethal countershot
 			// therefore leaves no volley to value. This is a host-engine safety
@@ -190,19 +190,37 @@ private:
 			// available. Rank legal native shots by projected combat value
 			// removed, not the untouched stack's entire strength. This remains
 			// an engine-specific partial projection, never ERA/DLL parity.
-			BattleAttackInfo info(&stack, enemy, 0, true);
-			info.attackerPos = stack.getPosition();
-			DamageEstimation retaliation;
-			const auto damage = battle.battleEstimateDamage(info, &retaliation);
-			const double health = static_cast<double>(enemy->getAvailableHealth());
-			if(health <= 0)
-				continue;
-			const double expectedDamage = (static_cast<double>(damage.damage.min)
-				+ static_cast<double>(damage.damage.max)) / 2.0;
-			const double value = Ports::TUM::projectedSiegeVolleyLoss(
-				static_cast<double>(enemy->estimateCombatValue()), health,
-				std::max(0.0, expectedDamage), legalShots);
-			if(!selected || value > bestValue)
+			const auto projectedLoss = [&](const battle::Unit & hit)
+			{
+				const double health = static_cast<double>(hit.getAvailableHealth());
+				if(health <= 0)
+					return 0.0;
+				BattleAttackInfo info(&stack, &hit, 0, true);
+				info.attackerPos = stack.getPosition();
+				info.defenderPos = hit.getPosition();
+				const auto damage = battle.battleEstimateDamage(info, nullptr);
+				const double expectedDamage = (static_cast<double>(damage.damage.min)
+					+ static_cast<double>(damage.damage.max)) / 2.0;
+				return Ports::TUM::projectedSiegeVolleyLoss(
+					static_cast<double>(hit.estimateCombatValue()), health,
+					std::max(0.0, expectedDamage), legalShots);
+			};
+			// The unpublished TUM targeting formula is not reproduced here.
+			// For VCMI area attacks, discount projected damage to our own units
+			// instead of incorrectly rewarding a shot that harms both armies.
+			double value = projectedLoss(*enemy);
+			for(const auto * hit : impacted)
+			{
+				if(!hit || !hit->alive() || hit->isInvincible()
+					|| hit->unitId() == enemy->unitId())
+					continue;
+				const double collateral = projectedLoss(*hit);
+				value += battle.battleGetOwner(hit) == battle.battleGetOwner(&stack)
+					? -collateral : collateral;
+			}
+			// DEFEND is safer than spending ammunition on net harmful shots.
+			// Native VCMI, not a scripted fallback, executes the chosen action.
+			if(value > bestValue)
 			{
 				selected = enemy;
 				bestValue = value;
