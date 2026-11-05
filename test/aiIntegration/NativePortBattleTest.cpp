@@ -4378,10 +4378,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DragonBreathValuesNativeSecondaryVicti
 		return unit->unitId() == (primary == front ? rear->unitId() : front->unitId());
 	})) << "FHeroes2 must select a legal breath vector affecting both real enemies";
 
+	// Ordinary melee damage is carried by BattleAttack::bsa, not by the
+	// separate StacksInjured packet used for spell and ability injuries.
+	// Observe the authoritative attack BEFORE it applies to the live stacks.
 	std::set<int> injured;
-	recorder.onInjuriesBeforeApply = [&](const StacksInjured & pack)
+	recorder.onAttackBeforeApply = [&](const BattleAttack & pack)
 	{
-		for(const auto & injury : pack.stacks)
+		for(const auto & injury : pack.bsa)
 			if(injury.damageAmount > 0)
 				injured.insert(injury.stackAttacked);
 	};
@@ -4389,7 +4392,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DragonBreathValuesNativeSecondaryVicti
 		<< "Engine rejected FHeroes2's selected multi-hex attack";
 	EXPECT_TRUE(injured.count(front->unitId())) << "Native server did not damage the first breath target";
 	EXPECT_TRUE(injured.count(rear->unitId())) << "Native server did not damage the rear breath target";
-	recorder.onInjuriesBeforeApply = {};
+	recorder.onAttackBeforeApply = {};
 	policy.reset();
 	runToCompletion(std::nullopt, false);
 	EXPECT_GT(recorder.meleeAttacks, 0);
