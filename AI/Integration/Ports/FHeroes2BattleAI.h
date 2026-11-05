@@ -636,7 +636,12 @@ private:
 				continue;
 			const double value = strength(*enemy);
 			enemyStrength += value;
-			if(enemy->isShooter() && enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
+			// Pinned fheroes2 analyzeBattleState excludes immovable archers
+			// from AREA_SHOT pressure. Native Blind/Paralyze can leave the
+			// creature's ranged bonus intact while forbidding its next action;
+			// do not project a future splash threat from such a stack.
+			if(enemy->isShooter() && !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				&& enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
 				&& battle.battleCanShoot(enemy))
 				areaShotStrength += value;
 		}
