@@ -33,6 +33,32 @@ int main()
 						require(rangedAttackValue(target, difficulty) == 1001 / divisor, "HoMM3 target weighting changed");
 					}
 
+	// The pinned getSimpleAttackEffect subtracts our losses and may be
+	// negative. The source's getRangedAttackValue retains the signed long
+	// before applying its time/disable divisor. VCMI's return-fire is a
+	// host-only way to create that negative result; zero-clamping ranked
+	// distinct dangerous shots equally in HoMM3OriginalTactics.
+	require(HoMM3::signedProjectedAttackEffect(-175.9) == -175,
+		"HoMM3 must retain a harmful net ranged exchange");
+	require(HoMM3::signedProjectedAttackEffect(-19.0) == -19,
+		"HoMM3 must distinguish differently harmful shots");
+	require(HoMM3::signedProjectedAttackEffect(0) == 0,
+		"HoMM3 net-zero attacks remain neutral");
+	require(HoMM3::signedProjectedAttackEffect(42.9) == 42,
+		"HoMM3 signed effect truncates toward zero");
+	require(HoMM3::signedProjectedAttackEffect(-1e20) == std::numeric_limits<int32_t>::min(),
+		"HoMM3 negative attack effect must saturate without overflow");
+	require(HoMM3::signedProjectedAttackEffect(1e20) == std::numeric_limits<int32_t>::max(),
+		"HoMM3 positive attack effect must saturate without overflow");
+	require(rangedAttackValue({-175, false, false, true, 2}, false) == -87,
+		"HoMM3 ranged target ranking must preserve signed source division");
+	require(rangedAttackValue({-175, true, false, true, 2}, false) == -17,
+		"HoMM3 incapacitation weighting preserves negative source values");
+	try { HoMM3::signedProjectedAttackEffect(std::numeric_limits<double>::quiet_NaN()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::signedProjectedAttackEffect(std::numeric_limits<double>::infinity()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// HoMM3 check_adjacent_hexes: on equal melee value and one-turn
 	// reachability, Cavalier/Champion prefer the greater path cost.
 	require(preferEqualValueMeleeHex(6, 4, true), "Jouster prefers a longer equal-value charge");
