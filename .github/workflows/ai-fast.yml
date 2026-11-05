@@ -361,7 +361,8 @@ jobs:
           from xml.etree import ElementTree as ET
           root = ET.parse('mmai-real-neural-battle.xml').getroot()
           cases = list(root.iter('testcase'))
-          expected = {'mmaiWithRealNeuralModelCompletesRealBattle',
+          expected = {'mmaiFirstAidWithoutWoundsUsesEngineAutoHealRealBattle',
+                      'mmaiWithRealNeuralModelCompletesRealBattle',
                       'mmaiDefenderNeuralModelCompletesRealBattle',
                       'mmaiSiegeDefenderNeuralModelCompletesRealBattle',
                       'mmaiBothNeuralSidesFightRealBattle',
@@ -375,11 +376,11 @@ jobs:
                       'mmaiRangedAttackerAgainstFHeroes2InfantryRealBattle',
                       'mmaiDefenderAgainstFHeroes2RangedAttackerRealBattle'}
           names = {case.get('name') for case in cases}
-          if len(cases) != 13 or names != expected:
+          if len(cases) != 14 or names != expected:
               raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
           if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
               raise RuntimeError('An MMAI neural integration test failed or was skipped')
-          print('Verified: twelve model-gated MMAI battle cases plus one negative real-ONNX training-side check; engine siege packets are not necessarily MMAI decisions')
+          print('Verified: thirteen model-gated MMAI battle cases (including engine-owned first aid) plus one negative ONNX side check; war machines are not neural commands')
           PY
 
       - name: Save compiled C++ objects for later develop builds
