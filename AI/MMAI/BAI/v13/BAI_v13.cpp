@@ -471,7 +471,13 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction()
 			}
 			break;
 			case HexAction::SHOOT:
-				ASSERT(stack != nullptr, "no target to shoot");
+				if(!stack || !stack->cstack)
+					throw std::runtime_error("MMAI V13: model SHOOT has no target");
+				requireNNV13LegalTarget(stack->cstack,
+					[this, acstack](const CStack * target)
+					{
+						return battle->battleCanShoot(acstack, target->getPosition());
+					}, "SHOOT");
 				res = std::make_shared<BattleAction>(BattleAction::makeShotAttack(acstack, stack->cstack));
 				break;
 			case HexAction::AMOVE_TR:
@@ -483,9 +489,14 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction()
 			{
 				const auto & edir = AMOVE_TO_EDIR.at(EI(action->hexaction));
 				auto nbh = bhex.cloneInDirection(edir, false); // neighbouring bhex
-				ASSERT(nbh.isAvailable(), "mask allowed attack to an unavailable hex #" + std::to_string(nbh.toInt()));
+				if(!nbh.isAvailable())
+					throw std::runtime_error("MMAI V13: model AMOVE has an unavailable target hex");
 				const auto * estack = battle->battleGetStackByPos(nbh);
-				ASSERT(estack != nullptr, "no enemy stack for melee attack");
+				requireNNV13LegalTarget(estack,
+					[this, acstack, &bhex](const CStack * target)
+					{
+						return battle->isMeleeAttackPossible(acstack, target, bhex);
+					}, "AMOVE");
 				res = std::make_shared<BattleAction>(BattleAction::makeMeleeAttack(acstack, nbh, bhex));
 			}
 			break;
@@ -496,13 +507,19 @@ std::shared_ptr<BattleAction> BAI::buildBattleAction()
 			case HexAction::AMOVE_2L:
 			case HexAction::AMOVE_2TL:
 			{
-				ASSERT(acstack->doubleWide(), "got AMOVE_2 action for a single-hex stack");
+				if(!acstack->doubleWide())
+					throw std::runtime_error("MMAI V13: model AMOVE_2 requires a double-wide creature");
 				const auto & edir = AMOVE_TO_EDIR.at(EI(action->hexaction));
 				auto obh = acstack->occupiedHex(bhex);
 				auto nbh = obh.cloneInDirection(edir, false); // neighbouring bhex
-				ASSERT(nbh.isAvailable(), "mask allowed attack to an unavailable hex #" + std::to_string(nbh.toInt()));
+				if(!nbh.isAvailable())
+					throw std::runtime_error("MMAI V13: model AMOVE has an unavailable target hex");
 				const auto * estack = battle->battleGetStackByPos(nbh);
-				ASSERT(estack != nullptr, "no enemy stack for melee attack");
+				requireNNV13LegalTarget(estack,
+					[this, acstack, &bhex](const CStack * target)
+					{
+						return battle->isMeleeAttackPossible(acstack, target, bhex);
+					}, "AMOVE");
 				res = std::make_shared<BattleAction>(BattleAction::makeMeleeAttack(acstack, nbh, bhex));
 			}
 			break;
