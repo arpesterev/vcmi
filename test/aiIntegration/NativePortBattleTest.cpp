@@ -4297,6 +4297,92 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherUsesUpstreamMeleeDamageDi
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 archerDecision uses outgoing HP damage minus incoming
+// retaliation for an engaged shooter. Heroes II has no melee FIRST_STRIKE,
+// but VCMI can counter BEFORE the archer's own swing. The adapter must
+// choose against the still-surviving shooter count without modifying the
+// actual stack or silently switching to a scripted battle policy.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlockedArcherAvoidsPreemptiveMeleeCounter)
+{
+	prepareBattle(CreatureID(19), 60, CreatureID(16), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	std::vector<BattleHex> adjacent;
+	for(const auto & hex : shooter->getPosition().getNeighbouringTiles())
+		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex))
+			adjacent.push_back(hex);
+	ASSERT_GE(adjacent.size(), 2u);
+	auto * first = addStack(BattleSide::DEFENDER, CreatureID(19), adjacent[0], 12);
+	auto * second = addStack(BattleSide::DEFENDER, CreatureID(19), adjacent[1], 12);
+	ASSERT_NE(first, nullptr);
+	ASSERT_NE(second, nullptr);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GE(static_cast<int>(first->getMovementRange()) + 2,
+		static_cast<int>(shooter->getMovementRange()))
+		<< "The engaged archer must not take the safe-escape branch";
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_FALSE(view->meleeAttackHexes(shooter, first, shooter->getPosition()).empty());
+	ASSERT_FALSE(view->meleeAttackHexes(shooter, second, shooter->getPosition()).empty());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const auto * originallyChosen = view->battleGetUnitByPos(callback->action->target[1].hexValue);
+	ASSERT_TRUE(originallyChosen == first || originallyChosen == second);
+	const auto * safeTarget = originallyChosen == first ? second : first;
+	const_cast<CStack *>(originallyChosen)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(19))));
+	ASSERT_TRUE(originallyChosen->ableToRetaliate());
+	BattleAttackInfo counter(originallyChosen, shooter, 0, false);
+	counter.attackerPos = originallyChosen->getPosition();
+	counter.defenderPos = shooter->getPosition();
+	const auto forecast = view->battleEstimateDamage(counter);
+	ASSERT_GT(forecast.damage.min, 0);
+	ASSERT_LT(forecast.damage.max, shooter->getAvailableHealth());
+	const auto initialHealth = shooter->getAvailableHealth();
+	const auto initialCount = shooter->getCount();
+	callback->action.reset();
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), safeTarget)
+		<< "A native preemptive counter must reduce the blocked archer's expected melee value";
+	EXPECT_EQ(shooter->getAvailableHealth(), initialHealth);
+	EXPECT_EQ(shooter->getCount(), initialCount)
+		<< "First-strike preview must not damage a live stack";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native server rejected the independently chosen safe melee target";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2BlockedFastArcherEscapesAdjacentSlowMelee)
 {
 	// In pinned fheroes2 archerDecision, retreat is evaluated even when a
