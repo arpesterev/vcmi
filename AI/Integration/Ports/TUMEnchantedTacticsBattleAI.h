@@ -12,6 +12,7 @@
 
 #include "HoMM3TacticsBattleAI.h"
 #include "SourceTactics.h"
+#include "../../../lib/mapObjects/CGHeroInstance.h"
 
 namespace AIIntegration
 {
@@ -128,6 +129,10 @@ private:
 		// Estimating only the FIRST shot misprices a killable low-health target
 		// against a durable target during the same ballista activation.
 		// Never project more shots than the war machine has ammunition.
+		// With no shots, the native action is DEFEND; do not call clamp()
+		// with an upper bound smaller than its lower bound.
+		if(!stack.shots.canUse())
+			return BattleAction::makeDefend(&stack);
 		int64_t attacks = stack.getTotalAttacks(true);
 		if(const auto * hero = battle.battleGetFightingHero(stack.unitSide()))
 			attacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
