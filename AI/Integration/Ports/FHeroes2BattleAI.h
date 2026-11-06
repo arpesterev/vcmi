@@ -532,7 +532,9 @@ private:
 		{
 			if(const auto wall = approachSiegeWall(battle, stack, available, enemies))
 				return *wall;
-			return BattleAction::makeDefend(&stack);
+			// Pinned planUnitTurn issues SKIP if meleeUnitOffense cannot find
+			// a reachable target (including a siege-wall fallback).
+			return BattleAction::makeNoAction(&stack);
 		}
 
 		if(stack.hasBonusOfType(BonusType::FLYING))
@@ -550,7 +552,9 @@ private:
 			}
 			if(nearest.isValid() && nearest != stack.getPosition())
 				return BattleAction::makeMove(&stack, nearest);
-			return BattleAction::makeDefend(&stack);
+			// No displacement is possible: source planUnitTurn skips instead
+			// of awarding a native Heroes III defensive-stat bonus.
+			return BattleAction::makeNoAction(&stack);
 		}
 
 		// Pinned fheroes2 findOptimalPositionForSubsequentAttack evaluates
@@ -574,7 +578,8 @@ private:
 		{
 			if(const auto wall = approachSiegeWall(battle, stack, available, enemies))
 				return *wall;
-			return BattleAction::makeDefend(&stack);
+			// An unreachable predecessor chain supplies no source command.
+			return BattleAction::makeNoAction(&stack);
 		}
 		// Predecessors arrive from far to near; source visits near to far.
 		std::reverse(pathSteps.begin(), pathSteps.end());
@@ -1531,7 +1536,9 @@ private:
 		{
 			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
 				return *cover;
-			return BattleAction::makeDefend(&stack);
+			// Pinned meleeUnitDefense may find neither an attack nor a screen.
+			// planUnitTurn then emits SKIP, not a native DEFEND bonus.
+			return BattleAction::makeNoAction(&stack);
 		}
 		return approach(battle, stack, reachability, available, enemies,
 			stance.cautiousOffensive);
