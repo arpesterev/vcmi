@@ -2717,6 +2717,57 @@ TEST_F(AIIntegrationNativeBattle, fheroes2StrategicFarewellCastThenNativeRetreat
 }
 
 
+// Pinned ihhub/fheroes2 ai_battle.cpp::planUnitTurn checks the entire
+// BagArtifacts when deciding to save a hero from an overwhelming army.
+// Heroes III keeps unequipped artifacts in a separate backpack; carrying
+// an artifact there must not silently turn the same source retreat into FIGHT.
+TEST_F(AIIntegrationNativeBattle, fheroes2CarriedBackpackArtifactTriggersNativeRetreat)
+{
+	prepareBattle(CreatureID(19), 1, CreatureID(16), 600);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	gameState()->players.at(player).human = false;
+	const ArtifactPosition backpackSlot(ArtifactPosition::BACKPACK_START);
+	ASSERT_TRUE(gameHandler->giveHeroNewArtifact(attackerSideHero, ArtifactID(7), backpackSlot))
+		<< "A real carried artifact must be placed in the hero's backpack";
+	ASSERT_NE(attackerSideHero->getArt(backpackSlot), nullptr);
+	ASSERT_EQ(attackerSideHero->getArt(ArtifactPosition::RIGHT_HAND), nullptr)
+		<< "The source BagArtifacts decision must not depend on wearing the weapon";
+	attackerSideHero->mana = 0; // Isolate withdrawal without farewell spells.
+
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanFlee());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	policy->initBattleInterface(environment, callback);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::RETREAT)
+		<< "FHeroes2 must value carried backpack artifacts in its source withdrawal decision";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI server rejected the policy-selected retreat";
+	ASSERT_EQ(recorder.battleResults.size(), 1u);
+	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
+	if(recorder.battleResults.back().questionID != QuestionID::NONE)
+		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+	EXPECT_TRUE(gameState()->currentBattles.empty());
+	EXPECT_EQ(recorder.acceptedResults, 1);
+	callback->onBattleEnded(battleID);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2WithdrawalPrefersRetreatWhenNativeSurrenderIsAlsoLegal)
 {
 	// Pinned ai_battle.cpp:828-870 chooses SURRENDER only if RETREAT is
