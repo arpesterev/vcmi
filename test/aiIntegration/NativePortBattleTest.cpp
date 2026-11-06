@@ -4596,6 +4596,87 @@ TEST_F(AIIntegrationNativeBattle, homm3PinnedArcherRecoversRealShootingAfterMove
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Pinned ai_tactical.cpp::checkAdjacentHexes compares signed long value
+// before the Cavalier's path-cost tie break. Force several native legal
+// approaches to the same certainly lethal one-Peasant strike. The remote
+// immobile enemy keeps the server battle alive without creating landing
+// threat, so the independent HoMM3 policy must select the longer charge.
+TEST_F(AIIntegrationNativeBattle, homm3CavalierUsesSourceLongTieBreakInServerBattle)
+{
+	prepareBattle(CreatureID(10), 2, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	CStack * remote = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			remote = unit.get();
+	}
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_NE(remote, nullptr);
+	ASSERT_TRUE(cavalier->hasBonusOfType(BonusType::JOUSTING));
+	remote->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::STACKS_SPEED,
+		BonusSource::OTHER, -100, BonusSourceID()));
+	ASSERT_EQ(std::max(0, static_cast<int>(remote->getMovementRange())), 0);
+
+	const BattleHex nearbyHex(cavalier->getPosition().toInt() + 5);
+	ASSERT_TRUE(nearbyHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearbyHex), nullptr);
+	const CStack * nearTarget = addStack(BattleSide::DEFENDER, CreatureID(0), nearbyHex, 1);
+	ASSERT_NE(nearTarget, nullptr);
+	const auto reach = battle()->getReachability(cavalier);
+	const auto available = battle()->battleGetAvailableHexes(reach, cavalier, false);
+	int longest = -1;
+	int shortest = std::numeric_limits<int>::max();
+	for(const auto & hex : available)
+	{
+		if(!hex.isAvailable() || battle()->meleeAttackHexes(cavalier, nearTarget, hex).empty())
+			continue;
+		const int distance = reach.distances[hex.toInt()];
+		if(distance < 0)
+			continue;
+		longest = std::max(longest, distance);
+		shortest = std::min(shortest, distance);
+	}
+	ASSERT_LT(shortest, longest) << "A native equal-kill Cavalier charge needs distinct path costs";
+
+	const BattleID battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	policy->activeStack(battleID, cavalier);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const BattleHex from = callback->action->target.front().hexValue;
+	EXPECT_EQ(callback->action->target[1].hexValue, nearTarget->getPosition());
+	ASSERT_TRUE(from.isValid());
+	EXPECT_EQ(reach.distances[from.toInt()], longest)
+		<< "Source long-valued equal attack ranks must favor the longest Cavalier charge";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The real VCMI server rejected HoMM3's independently chosen charge";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
 	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
