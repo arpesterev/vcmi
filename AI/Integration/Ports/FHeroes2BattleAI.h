@@ -1198,10 +1198,14 @@ private:
 		if(sorted.empty())
 			return BattleAction::makeDefend(&stack);
 
-		if(stack.isShooter() && battle.battleCanShoot(&stack))
-			for(const auto & candidate : sorted)
-				if(battle.battleCanShoot(&stack, candidate.unit->getPosition()))
-					return BattleAction::makeShotAttack(&stack, candidate.unit);
+		// Pinned ai_battle.cpp::berserkTurn selects nearestUnits.front()
+		// for an unengaged archer: it never skips a nearer creature to
+		// shoot a more distant one. VCMI may forbid the source's shot,
+		// so check the exact nearest target and then use only native-legal
+		// melee/movement candidates instead of silently retargeting.
+		if(stack.isShooter() && battle.battleCanShoot(&stack)
+			&& battle.battleCanShoot(&stack, sorted.front().unit->getPosition()))
+			return BattleAction::makeShotAttack(&stack, sorted.front().unit);
 
 		const auto routes = battle.getReachability(&stack);
 		auto available = battle.battleGetAvailableHexes(routes, &stack, false);
