@@ -651,12 +651,23 @@ private:
 		const auto gate = battle.battleGetGateState();
 		if(gate != EGateState::CLOSED && gate != EGateState::BLOCKED)
 			return false;
-		const auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		// Hypnotize changes the authoritative controller without changing
+		// VCMI's original-side ONLY_MINE/ONLY_ENEMY collections. A captured
+		// former defender may already be INSIDE the walls: it must break the
+		// defensive hold, while a captured former attacker must not.
+		auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		const auto originalAllies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		enemies.insert(enemies.end(), originalAllies.begin(), originalAllies.end());
+		const auto controller = battle.battleGetOwner(&active);
+		enemies.erase(std::remove_if(enemies.begin(), enemies.end(), [&](const CStack * enemy)
+		{
+			return !enemy->alive() || battle.battleGetOwner(enemy) == controller;
+		}), enemies.end());
 		if(enemies.empty())
 			return false;
 		return std::none_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 		{
-			return enemy->alive() && enemy->getPosition().isValid()
+			return enemy->getPosition().isValid()
 				&& (Ports::TUM::footprintBreachesCastle(enemy->getHexes(), [&](const BattleHex & hex)
 				{
 					return hex.isValid() && battle.battleIsInsideWalls(hex);

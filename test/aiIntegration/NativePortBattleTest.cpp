@@ -3333,6 +3333,86 @@ TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndComp
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 }
 
+TEST_F(AIIntegrationNativeBattle, tumSiegeGuardStopsHoldingWhenHypnotizedGarrisonBreachesFromInside)
+{
+	// TUM's siege hold is justified only when the enemy is outside intact
+	// fortifications. A real Hypnotize can transfer an archer still standing
+	// behind the walls to the attacking player without changing unitSide().
+	prepareSiege(true, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->battleGetGateState(), EGateState::CLOSED);
+	const CStack * guard = nullptr;
+	const CStack * archer = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(!unit->alive() || unit->unitSide() != BattleSide::DEFENDER)
+			continue;
+		if(unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+		else if(unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+	}
+	ASSERT_NE(guard, nullptr);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_TRUE(battle()->battleIsInsideWalls(guard->getPosition()));
+	ASSERT_TRUE(battle()->battleIsInsideWalls(archer->getPosition()));
+
+	const auto battleID = battle()->getBattleID();
+	const auto defender = battle()->sideToPlayer(BattleSide::DEFENDER);
+	const auto attacker = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(defender);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = defender;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(defender), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::DEFEND)
+		<< "The genuine closed-gate siege must initially justify the TUM hold";
+	callback->action.reset();
+
+	teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HYPNOTIZE, archer))
+		<< "The attacker must capture the interior garrison through a native spell";
+	ASSERT_TRUE(archer->isHypnotized());
+	ASSERT_EQ(view->battleGetOwner(archer), attacker);
+	ASSERT_EQ(view->battleGetOwner(guard), defender);
+	ASSERT_EQ(archer->unitSide(), BattleSide::DEFENDER)
+		<< "The engine must retain the original side while transferring control";
+	ASSERT_TRUE(view->battleIsInsideWalls(archer->getPosition()));
+	const auto staleEnemies = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+	ASSERT_TRUE(std::none_of(staleEnemies.begin(), staleEnemies.end(),
+		[&](const CStack * enemy) { return enemy->unitId() == archer->unitId(); }))
+		<< "This fixture must exercise the original-side enemy-list mismatch";
+
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *guard);
+	ASSERT_NE(baseline.actionType, EActionType::DEFEND)
+		<< "The explicit partial HoMM3 baseline must distinguish the broken siege hold";
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, baseline.actionType)
+		<< "An interior controlled enemy must disable TUM's siege-only DEFEND override";
+	std::cout << "AI_TUM_SIEGE_HYPNOTIZE homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+
+	battle()->activeStack = guard->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, defender, *callback->action))
+		<< "Native VCMI refused the post-Hypnotize TUM siege action";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumWideSiegeDefenderHoldsOnlyWhenBothOccupiedCellsAreSheltered)
 {
 	// Exercise the actual TUM adapter with a double-wide castle garrison.
