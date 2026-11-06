@@ -672,9 +672,14 @@ private:
 			// from AREA_SHOT pressure. Native Blind/Paralyze can leave the
 			// creature's ranged bonus intact while forbidding its next action;
 			// do not project a future splash threat from such a stack.
+			// Source ai_battle.cpp::analyzeBattleState uses !isHandFighting():
+			// physical contact suppresses AREA_SHOT spacing even if Heroes III
+			// FREE_SHOOTING makes the native ranged action legal. Query the
+			// actual occupied footprints; this is a tactical choice, not a
+			// change to the engine's permission to shoot.
 			if(enemy->isShooter() && !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
 				&& enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
-				&& battle.battleCanShoot(enemy))
+				&& !battle.battleIsUnitBlocked(enemy))
 				areaShotStrength += value;
 		}
 		const bool avoidSplashGrouping = enemyStrength > 0
