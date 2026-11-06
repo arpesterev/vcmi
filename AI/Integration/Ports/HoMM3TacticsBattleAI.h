@@ -617,17 +617,51 @@ private:
 	}
 
 
+	// Pinned checkAdjacentHexes uses enemy_attacks[hex], computed from
+	// actual target/path information. Cache each hostile unit's native
+	// one-activation landing hexes once, before ranking our candidate
+	// attacks. A geometric speed radius alone incorrectly projects melee
+	// attacks THROUGH closed fortress walls and blocking obstacles.
+	// This is still not the original HoMM3 precomputed target/threat map.
+	struct MeleeThreatSource
+	{
+		const CStack * stack;
+		BattleHexArray reachableOrigins;
+	};
+
+	static std::vector<MeleeThreatSource> collectThreatSources(CPlayerBattleCallback & battle,
+		const CStack & attacker, const std::vector<const CStack *> & enemies)
+	{
+		std::vector<MeleeThreatSource> sources;
+		sources.reserve(enemies.size());
+		for(const auto * enemy : enemies)
+		{
+			BattleHexArray reachableOrigins;
+			if(enemy->alive() && enemy->getPosition().isValid()
+				&& !enemy->isCatapult() && !enemy->isFirstAidTent()
+				&& !isIncapacitated(*enemy) && !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				&& battle.battleCanAttackUnit(enemy, &attacker))
+			{
+				const auto reach = battle.getReachability(enemy);
+				reachableOrigins = battle.battleGetAvailableHexes(reach, enemy, true);
+			}
+			sources.push_back({enemy, std::move(reachableOrigins)});
+		}
+		return sources;
+	}
+
 	// Source checkAdjacentHexes adds the precomputed enemy_attacks[hex].
-	// VCMI projection: strongest POSSIBLE next action by any other enemy.
-	// Distances bound reach but do not reconstruct the original threat field.
+	// VCMI projection: strongest POSSIBLE next action by any other enemy,
+	// subject to host pathfinding and hypothetical head/tail contact.
 	// Primary target's immediate retaliation is in exchangeValue, so skip it.
 	static double projectedCellThreat(CPlayerBattleCallback & battle,
 		const CStack & attacker, const CStack & primaryTarget, BattleHex destination,
-		BattleHex cell, const std::vector<const CStack *> & enemies)
+		BattleHex cell, const std::vector<MeleeThreatSource> & threats)
 	{
 		double worstLoss = 0;
-		for(const auto * enemy : enemies)
+		for(const auto & threat : threats)
 		{
+			const auto * enemy = threat.stack;
 			// The pinned findEnemyAttacks source excludes stacks which cannot
 			// act (including the source's incapacitating spell guard). A Blind
 			// or Paralyze target is still physically present and may be attacked,
@@ -686,14 +720,17 @@ private:
 					canShootAdjacent, limitedRange != nullptr,
 					limitedRange ? limitedRange->val : 0,
 					BattleHex::getDistance(enemy->getPosition(), cell));
-			const int movement = std::max(0, static_cast<int>(enemy->getMovementRange()));
-			// A shooter-only war machine or arrow tower is not a melee attacker,
-			// even when its hex borders our prospective landing position. The
-			// source's enemy threat census excludes enemies that cannot attack;
-			// ask VCMI about the actual unit/owner/melee capability before
-			// estimating a hypothetical counterattack. Shooting remains separate.
-			const bool canMelee = distance > 0 && distance <= movement + 1
-				&& battle.battleCanAttackUnit(enemy, &attacker);
+			// A speed/distance bound invents attacks through intact siege
+			// walls. Use the enemy's *real* one-turn reachable head positions
+			// and ask native geometry whether each origin can hit the given
+			// future HEAD or TAIL of our active stack. For wide enemies the
+			// engine also considers their trailing occupied hex.
+			// War machines with no melee capability have no origins.
+			const bool canMelee = std::any_of(threat.reachableOrigins.begin(),
+				threat.reachableOrigins.end(), [&](BattleHex origin)
+				{
+					return battle.meleeAttackHexes(enemy, &attacker, origin, destination).contains(cell);
+				});
 			for(const bool shooting : {false, true})
 			{
 				if((shooting && !canShoot) || (!shooting && !canMelee))
@@ -713,17 +750,17 @@ private:
 
 	static double projectedLandingThreat(CPlayerBattleCallback & battle,
 		const CStack & attacker, const CStack & primaryTarget, BattleHex destination,
-		const std::vector<const CStack *> & enemies)
+		const std::vector<MeleeThreatSource> & threats)
 	{
 		const auto occupied = attacker.getHexes(destination);
 		if(occupied.empty())
 			return 0;
 		const double head = projectedCellThreat(battle, attacker, primaryTarget,
-			destination, occupied.front(), enemies);
+			destination, occupied.front(), threats);
 		if(occupied.size() == 1)
 			return head;
 		const double tail = projectedCellThreat(battle, attacker, primaryTarget,
-			destination, occupied.back(), enemies);
+			destination, occupied.back(), threats);
 		return Ports::HoMM3::moreExposedFootprintThreat(head, tail);
 	}
 
@@ -991,6 +1028,11 @@ public:
 		// unchanged while validating this HoMM3-only attack-position slice.
 		const auto shooterPins = avoidFastDecoys ? std::vector<ShooterPin>{}
 			: calculateShooterPins(battle, stack, enemies);
+		// Reuse native enemy reachability across every candidate hex/aim:
+		// this must not run a fresh BFS for each projected threat cell.
+		// TUM deliberately receives no HoMM3-only landing threat.
+		const auto threatSources = avoidFastDecoys ? std::vector<MeleeThreatSource>{}
+			: collectThreatSources(battle, stack, enemies);
 
 		const CStack * target = nullptr;
 		BattleHex attackFrom;
@@ -1018,7 +1060,7 @@ public:
 				// composes this baseline with avoidFastDecoys=true; keep its
 				// tactical choices unchanged while this HoMM3 slice evolves.
 				const double landingThreat = avoidFastDecoys ? 0.0
-					: projectedLandingThreat(battle, stack, *enemy, hex, enemies);
+					: projectedLandingThreat(battle, stack, *enemy, hex, threatSources);
 				// A wide target can expose several distinct legal hit hexes from
 				// this landing position. Breath/splash depends on WHICH hex is
 				// struck. Pinned checkAdjacentHexes explores each enemy hex;
