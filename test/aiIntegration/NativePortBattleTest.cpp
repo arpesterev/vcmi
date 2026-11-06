@@ -5830,7 +5830,9 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 {
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
-	setArmy(attackerSideHero, CreatureID(0), 60);
+	// A small valuable Griffin group makes a meaningful HoMM3 target,
+	// while the TUM tower must still honor actual Hypnotize ownership.
+	setArmy(attackerSideHero, CreatureID(4), 5);
 	ASSERT_TRUE(gameHandler->insertNewStack(
 		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 15));
 	const auto * town = findFirst<CGTownInstance>();
@@ -5858,13 +5860,12 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 	{
 		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
 			tower = unit.get();
-		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
-		{
-			if(unit->unitSlot() == SlotID(0))
-				controlled = unit.get();
-			else if(unit->unitSlot() == SlotID(1))
-				actualEnemy = unit.get();
-		}
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->unitSlot() == SlotID(0)
+			&& unit->creatureId() == CreatureID(4))
+			controlled = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->unitSlot() == SlotID(1)
+			&& unit->creatureId() == CreatureID(0))
+			actualEnemy = unit.get();
 	}
 	ASSERT_NE(tower, nullptr);
 	ASSERT_NE(controlled, nullptr);
