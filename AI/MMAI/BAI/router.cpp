@@ -195,6 +195,33 @@ void Router::initBattleInterface(std::shared_ptr<Environment> ENV, std::shared_p
 	cb = CB;
 	colorname = cb->getPlayerID().value().toString();
 	bai.reset();
+
+	// Initialize all explicitly configured neural battle roles before the
+	// first activeStack event. A GUI autobattle must not discover missing or
+	// incompatible ONNX weights only after dispatching the first battle turn.
+	// Models are cached by GetModel and reused unchanged at battleStart.
+	// Unconfigured role variants retain their existing parent resolution.
+	if(neuralOnly)
+	{
+		const auto * repo = GetModelRepository();
+		bool hasConfiguredBattleRole = false;
+		for(const auto & [key, path] : repo->paths)
+		{
+			const bool attacker = key == "attacker" || key == "attacker.siege";
+			const bool defender = key == "defender" || key == "defender.siege";
+			if(!attacker && !defender)
+				continue;
+
+			hasConfiguredBattleRole = true;
+			auto * model = GetModel(key, true);
+			validateModelSide(model->getSide(), attacker ? Schema::Side::LEFT : Schema::Side::RIGHT, true, key);
+			logAi->info("MMAI: preloaded neural role %s from %s (schema V%d, side %d)",
+				key, path, model->getVersion(), static_cast<int>(model->getSide()));
+		}
+
+		if(!hasConfiguredBattleRole)
+			throw std::runtime_error("MMAI: no configured attacker/defender neural model roles; refusing scripted fallback");
+	}
 }
 
 void Router::initBattleInterface(std::shared_ptr<Environment> ENV, std::shared_ptr<CBattleCallback> CB, AutocombatPreferences prefs)
