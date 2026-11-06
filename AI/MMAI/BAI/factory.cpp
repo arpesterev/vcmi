@@ -15,6 +15,7 @@
 #include <onnxruntime_c_api.h>
 
 #include "BAI/nn_model_metadata.h"
+#include "BAI/nn_output_validation.h"
 #include "BAI/v13/BAI_v13.h"
 #include "BAI/v13/nn_model_v13.h"
 #include "BAI/v15/BAI_v15.h"
@@ -89,6 +90,9 @@ namespace
 // Factory method for versioned derived NNModel (e.g. NNModel::V1)
 std::shared_ptr<MMAI::Schema::IModel> CreateNNModel(const std::string & path, float temperature, uint64_t seed)
 {
+	// Report an invalid configured temperature before opening ONNX weights.
+	// No neural model or scripted substitute is constructed on this path.
+	validateNNModelSamplingTemperature(temperature);
 	auto container = CreateNNContainer(path);
 
 	if(container->version == 13)

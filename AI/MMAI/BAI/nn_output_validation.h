@@ -19,10 +19,18 @@ namespace MMAI::BAI
 // Shared by V13 and V15 before either greedy argmax or stochastic sampling.
 // A malformed ONNX output must never become an apparently legal combat action
 // because comparisons with NaN fail, nor reach a random distribution as Inf.
-inline void validateNNActionDistribution(const std::vector<float> & probabilities, float temperature)
+// Fail at NN model construction rather than after the first server action
+// when the config supplies a malformed sampling temperature. Greedy zero and
+// all finite nonnegative temperatures are valid for both exported schemas.
+inline void validateNNModelSamplingTemperature(float temperature)
 {
 	if(!std::isfinite(temperature) || temperature < 0.0f)
 		throw std::runtime_error("MMAI: non-finite or negative neural sampling temperature");
+}
+
+inline void validateNNActionDistribution(const std::vector<float> & probabilities, float temperature)
+{
+	validateNNModelSamplingTemperature(temperature);
 
 	if(probabilities.empty())
 		throw std::runtime_error("MMAI: neural action distribution is empty");

@@ -31,6 +31,25 @@ TEST(MMAINNOutputValidation, RejectsInvalidOnnxOutputBeforeGreedyOrSampling)
 	EXPECT_THROW(validateNNActionDistribution({0.3f, 0.7f}, -1.0f), std::runtime_error);
 }
 
+TEST(MMAINNOutputValidation, V13V15RejectInvalidSamplingTemperatureAtModelConstruction)
+{
+	using MMAI::BAI::validateNNModelSamplingTemperature;
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float inf = std::numeric_limits<float>::infinity();
+
+	// Both V13 and V15 permit deterministic (zero) or stochastic sampling.
+	EXPECT_NO_THROW(validateNNModelSamplingTemperature(0.0f));
+	EXPECT_NO_THROW(validateNNModelSamplingTemperature(1.0f));
+	EXPECT_NO_THROW(validateNNModelSamplingTemperature(10.0f));
+
+	// A malformed config must fail before weights are loaded or a model
+	// can be cached under the strict neural identity.
+	EXPECT_THROW(validateNNModelSamplingTemperature(-1.0f), std::runtime_error);
+	EXPECT_THROW(validateNNModelSamplingTemperature(nan), std::runtime_error);
+	EXPECT_THROW(validateNNModelSamplingTemperature(inf), std::runtime_error);
+	EXPECT_THROW(validateNNModelSamplingTemperature(-inf), std::runtime_error);
+}
+
 TEST(MMAINNOutputValidation, V13V15WarMachineTargetsOnlyLivingShootableEnemies)
 {
 	struct Candidate

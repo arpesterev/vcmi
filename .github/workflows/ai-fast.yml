@@ -240,6 +240,7 @@ jobs:
           from xml.etree import ElementTree as ET
           cases = list(ET.parse('mmai-onnx-output-contracts.xml').getroot().iter('testcase'))
           expected = {'RejectsInvalidOnnxOutputBeforeGreedyOrSampling',
+                      'V13V15RejectInvalidSamplingTemperatureAtModelConstruction',
                       'V15AcceptsOnlyScalarOrSingletonOnnxOutputs',
                       'V15RejectsInvalidValueHead',
                       'V15RejectsUnrepresentableNeuralActionIdBeforeDispatch',
