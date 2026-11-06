@@ -767,7 +767,7 @@ private:
 				BattleAttackInfo info(enemy, &attacker, origin.pathCost, false);
 				info.attackerPos = origin.hex;
 				info.defenderPos = cell;
-				worstLoss = std::max(worstLoss,
+				worstEnemyLoss = std::max(worstEnemyLoss,
 					lossValue(attacker, battle.battleEstimateDamage(info)));
 			}
 			accumulatedLoss = Ports::HoMM3::addIndependentEnemyThreat(
