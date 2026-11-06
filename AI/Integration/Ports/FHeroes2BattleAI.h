@@ -1491,9 +1491,26 @@ private:
 			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
 				return *cover;
 		}
-		const CStack * target = nullptr;
-		BattleHex targetHex;
-		Ports::FHeroes2::MeleeOutcome best;
+		// Pinned ai_battle.cpp::getMeleeBestOutcome/BestAttackOutcome uses
+		// positionValue as the PRIMARY priority, then the damage-derived
+		// attackValue. evaluatePotentialAttackPositions takes the maximum
+		// attack value of adjacent melee enemies and ADDS the values of
+		// distinct adjacent archers. Using only a target's own value here
+		// loses the incentive to block several archers from one position;
+		// using raw defender strength for attackValue changes the tie-break.
+		// Preserve that source ranking with native VCMI damage projections.
+		struct AttackCandidate
+		{
+			const CStack * enemy;
+			BattleHex aimedHex;
+			BattleHex from;
+			double attackValue;
+		};
+		std::vector<AttackCandidate> attackCandidates;
+		std::map<int, double> meleePositionValue;
+		std::map<int, double> shooterPositionValue;
+		std::map<int, double> allAdjacentPositionValue;
+		const bool allAdjacent = stack.hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT);
 		for(const auto * enemy : enemies)
 		{
 			for(const auto & hex : available)
@@ -1503,21 +1520,68 @@ private:
 				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
 				if(attackedHexes.empty())
 					continue;
-				// An area-melee creature can inflict different secondary hits
-				// from different legal attack vectors, even against the same wide
-				// primary target. Evaluate every cell the native engine permits.
+				// Wide targets and directional multi-target attacks can expose
+				// several legal aims. The source optimalAttackValue evaluates the
+				// best vector once for each (attack position, target) pair.
+				BattleHex bestAimedHex;
+				double attackValue = std::numeric_limits<double>::lowest();
 				for(const auto & aimedHex : attackedHexes)
 				{
 					const double value = meleeAreaAttackValue(battle, stack, *enemy,
 						hex, aimedHex, reachability.distances[hex.toInt()]);
-					const Ports::FHeroes2::MeleeOutcome candidate{hex.toInt(), strength(*enemy), value, true};
-					if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+					if(!bestAimedHex.isValid() || value > attackValue)
 					{
-						target = enemy;
-						targetHex = aimedHex;
-						best = candidate;
+						attackValue = value;
+						bestAimedHex = aimedHex;
 					}
 				}
+				if(!bestAimedHex.isValid())
+					continue;
+				attackCandidates.push_back({enemy, bestAimedHex, hex, attackValue});
+				const int index = hex.toInt();
+				if(allAdjacent)
+				{
+					// Hydra-style strikes already value all native victims. Do
+					// not count those same victims once per possible primary aim.
+					auto [it, inserted] = allAdjacentPositionValue.try_emplace(index, attackValue);
+					if(!inserted)
+						it->second = std::max(it->second, attackValue);
+				}
+				else if(enemy->isShooter())
+					shooterPositionValue[index] += attackValue;
+				else
+				{
+					auto [it, inserted] = meleePositionValue.try_emplace(index, attackValue);
+					if(!inserted)
+						it->second = std::max(it->second, attackValue);
+				}
+			}
+		}
+		const CStack * target = nullptr;
+		BattleHex targetHex;
+		Ports::FHeroes2::MeleeOutcome best;
+		for(const auto & attack : attackCandidates)
+		{
+			const int index = attack.from.toInt();
+			double positionValue = 0;
+			if(allAdjacent)
+				positionValue = allAdjacentPositionValue.at(index);
+			else
+			{
+				const auto melee = meleePositionValue.find(index);
+				if(melee != meleePositionValue.end())
+					positionValue = melee->second;
+				const auto shooters = shooterPositionValue.find(index);
+				if(shooters != shooterPositionValue.end())
+					positionValue += shooters->second;
+			}
+			const Ports::FHeroes2::MeleeOutcome candidate{
+				index, attack.attackValue, positionValue, true};
+			if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+			{
+				target = attack.enemy;
+				targetHex = attack.aimedHex;
+				best = candidate;
 			}
 		}
 		if(target)
