@@ -67,11 +67,10 @@ public:
 			else
 				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
 		}
-		// Keep a protected archer useful when only a wide target's tail can
-		// legally be shot. Ordinary legal head shots use the partial HoMM3 base.
+		// VCMI-only splash geometry correction for TUM-controlled archers.
 		else if(stack->isShooter())
 		{
-			if(const auto shot = chooseExposedWideTailShot(*battle, *stack))
+			if(const auto shot = chooseNativeWideSplashShot(*battle, *stack))
 				action = *shot;
 			else
 				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
@@ -127,14 +126,16 @@ private:
 	}
 
 
-	// VCMI-specific completion of the published TUM shooter-screen behavior.
-	// The partial HoMM3 baseline considers only a target's head for shooting.
-	// When every head is illegal but a wide tail is legal, select a native
-	// hex-aimed shot. This is NOT the undisclosed original ERA/DLL formula.
-	static std::optional<BattleAction> chooseExposedWideTailShot(
+
+	// Bounded VCMI splash-aim projection, not the closed TUM DLL formula.
+	// A wide target's head and tail are equally legal to shoot in current
+	// VCMI, but native SHOOTS_ALL_ADJACENT can hit different extra units.
+	// Preserve partial HoMM3 when no tail beats all legal head-shot values.
+	static std::optional<BattleAction> chooseNativeWideSplashShot(
 		CPlayerBattleCallback & battle, const CStack & stack)
 	{
-		if(!stack.isShooter() || !battle.battleCanShoot(&stack))
+		if(!stack.isShooter() || !stack.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
+			|| !battle.battleCanShoot(&stack))
 			return std::nullopt;
 		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 		const auto owner = battle.battleGetOwner(&stack);
@@ -147,43 +148,52 @@ private:
 		{
 			return lhs->unitId() < rhs->unitId();
 		});
-		for(const auto * target : targets)
-			if(battle.battleCanShoot(&stack, target->getPosition()))
-				return std::nullopt; // Standard legal head shot: preserve HoMM3.
-
-		BattleHex selectedAim;
-		double bestValue = 0.0;
-		bool selected = false;
+		double bestHeadValue = 0.0;
+		double bestTailValue = 0.0;
+		BattleHex bestTail;
+		bool hasTail = false;
+		const auto loss = [&](const battle::Unit & hit, BattleHex aim)
+		{
+			const double health = static_cast<double>(hit.getAvailableHealth());
+			if(health <= 0)
+				return 0.0;
+			BattleAttackInfo info(&stack, &hit, 0, true);
+			info.attackerPos = stack.getPosition();
+			info.defenderPos = aim;
+			const auto dmg = battle.battleEstimateDamage(info, nullptr);
+			const double expected = (static_cast<double>(dmg.damage.min)
+				+ static_cast<double>(dmg.damage.max)) / 2.0;
+			return static_cast<double>(hit.estimateCombatValue())
+				* std::min(health, std::max(0.0, expected)) / health;
+		};
 		for(const auto * target : targets)
 		{
-			if(target->getHexes().size() < 2)
-				continue;
-			for(const auto & hex : target->getHexes())
+			for(const auto & aim : target->getHexes())
 			{
-				if(hex == target->getPosition() || !hex.isValid()
-					|| !battle.battleCanShoot(&stack, hex))
+				if(!aim.isValid() || !battle.battleCanShoot(&stack, aim))
 					continue;
-				BattleAttackInfo attack(&stack, target, 0, true);
-				attack.attackerPos = stack.getPosition();
-				attack.defenderPos = hex;
-				const auto damage = battle.battleEstimateDamage(attack, nullptr);
-				const double estimated = (static_cast<double>(damage.damage.min)
-					+ static_cast<double>(damage.damage.max)) / 2.0;
-				const double health = static_cast<double>(target->getAvailableHealth());
-				if(health <= 0)
-					continue;
-				const double value = static_cast<double>(target->estimateCombatValue())
-					* std::min(health, std::max(0.0, estimated)) / health;
-				if(value > bestValue)
+				double value = loss(*target, aim);
+				const auto hits = battle.getAttackedBattleUnits(&stack, target, aim, true);
+				for(const auto * hit : hits)
 				{
-					selectedAim = hex;
-					bestValue = value;
-					selected = true;
+					if(!hit || !hit->alive() || hit->isInvincible()
+						|| hit->unitId() == target->unitId())
+						continue;
+					const double extra = loss(*hit, hit->getPosition());
+					value += battle.battleGetOwner(hit) == owner ? -extra : extra;
+				}
+				if(aim == target->getPosition())
+					bestHeadValue = std::max(bestHeadValue, value);
+				else if(value > bestTailValue)
+				{
+					bestTail = aim;
+					bestTailValue = value;
+					hasTail = true;
 				}
 			}
 		}
-		if(selected)
-			return BattleAction::makeShotAttack(&stack, selectedAim);
+		if(hasTail && bestTailValue > bestHeadValue)
+			return BattleAction::makeShotAttack(&stack, bestTail);
 		return std::nullopt;
 	}
 
