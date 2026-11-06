@@ -992,6 +992,7 @@ public:
 		BattleHex attackFrom;
 		BattleHex attackTo;
 		double bestExchange = -std::numeric_limits<double>::infinity();
+		int32_t bestDiscreteExchange = std::numeric_limits<int32_t>::min();
 		int bestPathCost = -1;
 		// Source ai_tactical.cpp breaks equal-value, same-turn melee ties
 		// toward the longer path only for Cavalier/Champion. All positions
@@ -1027,14 +1028,23 @@ public:
 						+ (avoidFastDecoys ? 0.0
 							: projectedCollateral(battle, stack, *enemy, hex, aimedHex, pathCost)
 							+ projectedRetaliationCollateral(battle, stack, *enemy, hex, pathCost, aimedHex));
-					if(!target || exchange > bestExchange
-						|| (exchange == bestExchange
-							&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
+					// Retail checkAdjacentHexes compares signed long attack-hex
+					// scores. Only HoMM3 uses that discrete ranking: the TUM
+					// composition retains its historical fractional baseline.
+					const int32_t discreteExchange = avoidFastDecoys ? 0
+						: Ports::HoMM3::discreteMeleeHexValue(exchange);
+					const bool improvesValue = avoidFastDecoys ? exchange > bestExchange
+						: discreteExchange > bestDiscreteExchange;
+					const bool equalValue = avoidFastDecoys ? exchange == bestExchange
+						: discreteExchange == bestDiscreteExchange;
+					if(!target || improvesValue || (equalValue
+						&& Ports::HoMM3::preferEqualValueMeleeHex(pathCost, bestPathCost, jouster)))
 					{
 						target = enemy;
 						attackFrom = hex;
 						attackTo = aimedHex;
 						bestExchange = exchange;
+						bestDiscreteExchange = discreteExchange;
 						bestPathCost = pathCost;
 					}
 					if(avoidFastDecoys)
