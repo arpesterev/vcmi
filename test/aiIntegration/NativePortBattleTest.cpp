@@ -3463,6 +3463,152 @@ TEST_F(AIIntegrationNativeBattle, fheroes2GuardPursuesRemoteArcherBlockerBeforeM
 // An engaged ally keeps source blocker priority even when its shot is legal.
 // Source: ihhub/fheroes2@0dbfe9f::ai_battle.cpp::meleeUnitDefense.
 // Heroes III FREE_SHOOTING changes native legality, not source contact priority.
+// fheroes2 ai_battle.cpp::analyzeBattleState excludes immovable archers
+// from _myRangedUnitsOnly, which meleeUnitDefense uses as its distance
+// penalty. Blind does not erase a stack from the source's covering loop.
+// Exercise a real native Blind cast against a reserve archer: it must change
+// pursuit weights without suppressing the two active blocked archers.
+// The native server, rather than a scripted outcome, must accept the move.
+TEST_F(AIIntegrationNativeBattle, fheroes2BlindedReserveArcherDoesNotDistortMultiTurnBlockerPriority)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex highHex(origin.toInt() + 7);
+	const BattleHex highBlockerHex(highHex.toInt() + 1);
+	const BattleHex lowHex(origin.toInt() + 4 * GameConstants::BFIELD_WIDTH + 3);
+	const BattleHex lowBlockerHex(lowHex.toInt() + 1);
+	const BattleHex reserveHex(origin.toInt() - 2 * GameConstants::BFIELD_WIDTH);
+	for(const auto & hex : {highHex, highBlockerHex, lowHex, lowBlockerHex, reserveHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	const auto * high = addStack(BattleSide::ATTACKER, CreatureID(2), highHex, 250);
+	const auto * highBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), highBlockerHex, 1);
+	const auto * low = addStack(BattleSide::ATTACKER, CreatureID(2), lowHex, 100);
+	const auto * lowBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), lowBlockerHex, 1);
+	const auto * reserve = addStack(BattleSide::ATTACKER, CreatureID(2), reserveHex, 5000);
+	ASSERT_NE(high, nullptr);
+	ASSERT_NE(highBlocker, nullptr);
+	ASSERT_NE(low, nullptr);
+	ASSERT_NE(lowBlocker, nullptr);
+	ASSERT_NE(reserve, nullptr);
+	ASSERT_EQ(BattleHex::getDistance(highHex, highBlockerHex), 1);
+	ASSERT_EQ(BattleHex::getDistance(lowHex, lowBlockerHex), 1);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto reachability = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(reachability, guard, false);
+	const int speed = static_cast<int>(guard->getMovementRange());
+	const auto futureStep = [&](const CStack * blocker) -> std::pair<int, BattleHex>
+	{
+		int distance = GameConstants::BFIELD_SIZE;
+		BattleHex goal;
+		for(const auto & from : blocker->getAttackableHexes(guard))
+		{
+			if(!from.isValid() || !view->isMeleeAttackPossible(guard, blocker, from))
+				continue;
+			const int candidate = static_cast<int>(reachability.distances[from.toInt()]);
+			if(candidate < distance || (candidate == distance
+				&& (!goal.isValid() || from.toInt() < goal.toInt())))
+			{
+				distance = candidate;
+				goal = from;
+			}
+		}
+		BattleHex step;
+		for(int i = 0; goal.isValid() && i < GameConstants::BFIELD_SIZE; ++i)
+		{
+			if(available.contains(goal) && goal != origin)
+			{
+				step = goal;
+				break;
+			}
+			const auto previous = reachability.predecessors[goal.toInt()];
+			if(!previous.isValid() || previous == goal)
+				break;
+			goal = previous;
+		}
+		return {distance, step};
+	};
+	const auto [highTravel, highStep] = futureStep(highBlocker);
+	const auto [lowTravel, lowStep] = futureStep(lowBlocker);
+	ASSERT_GT(highTravel, lowTravel) << "Two distinct, finite source-priority distances are required";
+	ASSERT_GT(lowTravel, speed) << "Neither blocker may be attacked on this turn";
+	ASSERT_LT(highTravel, GameConstants::BFIELD_SIZE);
+	ASSERT_TRUE(highStep.isValid());
+	ASSERT_TRUE(lowStep.isValid());
+	ASSERT_NE(highStep, lowStep);
+
+	const double highValue = high->estimateCombatValue();
+	const double lowValue = low->estimateCombatValue();
+	const double reserveValue = reserve->estimateCombatValue();
+	const double activeTotal = highValue + lowValue;
+	const double beforeTotal = activeTotal + reserveValue;
+	ASSERT_LT(highValue - beforeTotal * highTravel / 15.0,
+		lowValue - beforeTotal * lowTravel / 15.0)
+		<< "Before Blind, a massive mobile reserve must favor the closer screen";
+	ASSERT_GT(highValue - activeTotal * highTravel / 15.0,
+		lowValue - activeTotal * lowTravel / 15.0)
+		<< "After Blind, source distance weighting must favor the stronger archer";
+
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto decision = std::make_shared<DecisionCallback>(player);
+		decision->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), decision);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, decision, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, guard);
+		return decision->action;
+	};
+	const auto before = decide();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::WALK) << before->toString();
+	ASSERT_FALSE(before->target.empty());
+	EXPECT_EQ(before->target.front().hexValue, lowStep)
+		<< "Source defense-distance penalty should initially favor the closer blocked shooter";
+
+	teachBattleSpell(defenderSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, reserve));
+	ASSERT_TRUE(reserve->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(reserve->isShooter());
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto after = decide();
+	ASSERT_TRUE(after.has_value());
+	ASSERT_EQ(after->actionType, EActionType::WALK) << after->toString();
+	ASSERT_FALSE(after->target.empty());
+	EXPECT_EQ(after->target.front().hexValue, highStep)
+		<< "Incapacitated reserve must not inflate source _myRangedUnitsOnly";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "The authoritative VCMI server rejected the independently chosen pursuit move";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2GuardUnblocksFreeShootingArcherBeforeUnrelatedMelee)
 {
 	// Pinned fheroes2 ai_battle.cpp::meleeUnitDefense (1774, 2012-2039)
