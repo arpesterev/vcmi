@@ -22,6 +22,20 @@ namespace AIIntegration::Ports
 {
 namespace HoMM3
 {
+// Source: ai_tactical.cpp, type_AI_attack_hex_chooser::checkAdjacentHexes.
+// Its local attack-hex value and best_value are signed 32-bit retail longs.
+// Our VCMI damage/threat previews are fractional; compare their truncated
+// signed integer equivalents before the source's path-cost tie break.
+// This is a discrete host projection, not exact HoMM3 damage mathematics.
+inline int32_t discreteMeleeHexValue(double value)
+{
+	if(!std::isfinite(value))
+		throw std::invalid_argument("HoMM3 melee hex score must be finite");
+	return static_cast<int32_t>(std::clamp(std::trunc(value),
+		static_cast<double>(std::numeric_limits<int32_t>::min()),
+		static_cast<double>(std::numeric_limits<int32_t>::max())));
+}
+
 // Source: ai_tactical.cpp, type_AI_attack_hex_chooser::check_adjacent_hexes.
 // Once the attack value and turn count tie, Cavalier/Champion choose the
 // costlier approach to preserve jousting; other troops prefer a cheaper route.
