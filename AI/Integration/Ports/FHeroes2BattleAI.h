@@ -1069,12 +1069,13 @@ private:
 	static std::optional<BattleAction> blockedArcherMelee(CPlayerBattleCallback & battle,
 		const CStack & stack, const std::vector<const CStack *> & enemies)
 	{
-		// Both occupied hexes of a wide archer participate in native VCMI
-		// melee-contact checks; fheroes2 does not exclude wide shooters here.
-		// Unlike the still single-width retreat projection, this branch
-		// evaluates VCMI-legal contact from the stack's actual position.
+		// Pinned ai_battle.cpp::archerDecision enters its melee branch on
+		// isHandFighting(), *not* on the inability to shoot. Native Heroes III
+		// FREE_SHOOTING can allow a legal shot while a hostile is adjacent;
+		// keep the original melee-first decision but use native legal attacks.
+		// The VCMI contact query includes both cells of wide creatures.
 		if(!stack.hasBonusOfType(BonusType::SHOOTER)
-			|| battle.battleCanShoot(&stack) || !stack.getPosition().isValid())
+			|| !battle.battleIsUnitBlocked(&stack) || !stack.getPosition().isValid())
 			return std::nullopt;
 
 		const CStack * bestTarget = nullptr;
@@ -1318,6 +1319,12 @@ private:
 		}
 		if(const auto melee = blockedArcherMelee(battle, stack, enemies))
 			return *melee;
+		// A contact-blocked archer must never bypass the source's
+		// isHandFighting() branch merely because FREE_SHOOTING makes a shot
+		// legal in Heroes III. If no native melee aim exists, defend instead
+		// of silently replacing the source decision with ranged targeting.
+		if(stack.isShooter() && battle.battleIsUnitBlocked(&stack))
+			return BattleAction::makeDefend(&stack);
 
 		const CStack * shootingTarget = nullptr;
 		BattleHex shootingHex;
