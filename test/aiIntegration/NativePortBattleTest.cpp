@@ -5819,6 +5819,101 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The authoritative VCMI shooter eligibility query still uses a stack's
+// ORIGINAL battle side. After a real Hypnotize, a tower can therefore receive
+// a nominally legal shot against a former enemy now controlled by its owner.
+// TUM's partial native tower projection must respect the CURRENT owner when
+// choosing among those engine-legal targets. This regression proves a genuine
+// spell cast, a separately computed HoMM3 proposal, an accepted TUM tower
+// shot and a completed server siege, not the closed ERA/DLL's target formula.
+TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 15));
+	const auto * town = findFirst<CGTownInstance>();
+	ASSERT_NE(town, nullptr);
+	if(town->fortificationsLevel().wallsHealth <= 0)
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
+	if(town->fortificationsLevel().citadelHealth <= 0)
+		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CITADEL, true));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 80));
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 30);
+	const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
+	gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
+		attackerSideHero, defenderSideHero, layout, town);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * tower = nullptr;
+	const CStack * controlled = nullptr;
+	const CStack * actualEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
+			tower = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->unitSlot() == SlotID(0))
+				controlled = unit.get();
+			else if(unit->unitSlot() == SlotID(1))
+				actualEnemy = unit.get();
+		}
+	}
+	ASSERT_NE(tower, nullptr);
+	ASSERT_NE(controlled, nullptr);
+	ASSERT_NE(actualEnemy, nullptr);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, controlled))
+		<< "A real defending hero must cast Hypnotize in this native siege";
+	ASSERT_TRUE(controlled->isHypnotized());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(controlled), player);
+	ASSERT_NE(battle()->battleGetOwner(actualEnemy), player);
+
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(tower, controlled->getPosition()))
+		<< "Native shot legality deliberately preserves the former enemy side";
+	ASSERT_TRUE(view->battleCanShoot(tower, actualEnemy->getPosition()));
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, tower);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, actualEnemy->unitId())
+		<< "Tower must not shoot an original attacker now controlled by the defender";
+	std::cout << "AI_TUM_TOWER_HYPNOTIZE homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+
+	const auto beforeHealth = actualEnemy->getAvailableHealth();
+	const int beforeShots = recorder.shots;
+	battle()->activeStack = tower->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native server rejected the independent TUM tower shot";
+	EXPECT_GT(recorder.shots, beforeShots);
+	EXPECT_LT(actualEnemy->getAvailableHealth(), beforeHealth);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsMakesRealBallistaDecisions)
 {
 	startRecordedGame();
