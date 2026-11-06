@@ -640,7 +640,6 @@ private:
 			// beneficiaries: the source's cover loop still visits them.
 			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
 				&& friendly->hasBonusOfType(BonusType::SHOOTER)
-				&& friendly->getMovementRange() > 0
 				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				totalShooterStrength += strength(*friendly);
 		}
