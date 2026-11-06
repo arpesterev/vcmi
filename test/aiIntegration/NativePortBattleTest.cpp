@@ -5574,6 +5574,88 @@ TEST_F(AIIntegrationNativeBattle, homm3MultiVolleyAreaShotDamagesSecondaryOnBoth
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// A lethal first shot must stop the real VCMI multi-volley sequence, even
+// when a surviving friendly unit is next to the victim. HoMM3's pinned
+// simulateAttack models one shot, while this native adaptation models
+// subsequent shots only when the original target remains alive. Check the
+// actual server packets, not only the valuation helper.
+TEST_F(AIIntegrationNativeBattle, homm3LethalFirstAreaShotStopsFurtherNativeVolleys)
+{
+	prepareBattle(CreatureID(3), 30, CreatureID(0), 1); // Marksmen vs one Peasant
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * marksmen = nullptr;
+	CStack * peasant = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			marksmen = unit.get();
+		else
+			peasant = unit.get();
+	}
+	ASSERT_NE(marksmen, nullptr);
+	ASSERT_NE(peasant, nullptr);
+	ASSERT_EQ(marksmen->getTotalAttacks(true), 2);
+	const BattleHex enemyHex = peasant->getPosition();
+	BattleHex neighbour;
+	for(const auto & hex : enemyHex.getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			neighbour = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(neighbour.isValid());
+	CStack * friendly = addStack(BattleSide::ATTACKER, CreatureID(6), neighbour, 60);
+	ASSERT_NE(friendly, nullptr);
+	marksmen->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	battle()->activeStack = marksmen->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(marksmen, peasant->getPosition()));
+	const auto affected = view->getAttackedBattleUnits(
+		marksmen, peasant, peasant->getPosition(), true);
+	ASSERT_NE(std::find(affected.begin(), affected.end(), friendly), affected.end());
+	BattleAttackInfo firstShot(marksmen, peasant, 0, true);
+	ASSERT_GE(view->battleEstimateDamage(firstShot).damage.min, peasant->getAvailableHealth());
+	const auto friendlyHealth = friendly->getAvailableHealth();
+	const auto action = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *marksmen);
+	ASSERT_EQ(action.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(action.target.empty());
+	ASSERT_EQ(action.target.front().unitValue, peasant->unitId());
+
+	int volleys = 0;
+	int friendlySplashVolleys = 0;
+	const auto shooterID = static_cast<ui32>(marksmen->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(packet.stackAttacking != shooterID || !packet.shot() || packet.counter())
+			return;
+		++volleys;
+		for(const auto & victim : packet.bsa)
+			if(victim.stackAttacked == friendly->unitId())
+			{
+				++friendlySplashVolleys;
+				break;
+			}
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "VCMI rejected the independent HoMM3 one-kill area shot";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(volleys, 1) << "The second attack cannot target an already dead primary";
+	EXPECT_EQ(friendlySplashVolleys, 1);
+	EXPECT_LT(friendly->getAvailableHealth(), friendlyHealth);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Vanilla HoMM3 getRangedAttackValue prices one target. The real VCMI
 // SHOOTS_ALL_ADJACENT bonus adds a second signed effect: nearby enemy stacks
 // increase the shot value and friendly casualties decrease it. Prove that
