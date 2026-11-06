@@ -6495,6 +6495,17 @@ TEST_F(AIIntegrationNativeBattle, fheroes2NativeBlindAppliesSourceNonlethalDamag
 	EXPECT_LT(after, 0)
 		<< "A sub-half-health strike would wake Blind: source values it negatively";
 
+	// Independent pinned-source lethal branch: ai_battle_spell.cpp
+	// spellDamageValue uses Unit::GetSpeed(), which is STANDING under Blind.
+	// A lone disabled defender also has zero projected army speed, so the
+	// death premium is 3.5%, not the 7% reserved for faster units. Native
+	// getMovementRange() need not drop when the server applies NOT_ACTIVE.
+	const auto lethalDamage = target->getAvailableHealth();
+	const double lethal = AIIntegration::FHeroes2SpellPolicy::sourceDamageValue(
+		*playerView, *target, lethalDamage);
+	EXPECT_NEAR(lethal, static_cast<double>(target->estimateCombatValue()) * 1.035, 1e-6)
+		<< "Lethally damaging Blind must use source STANDING speed for the kill premium";
+
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
 	EXPECT_GT(recorder.damage, 0) << "Native armies must still fight to a result";
 }
