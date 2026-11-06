@@ -341,6 +341,8 @@ private:
 			// server can counter a shot when the victim can shoot back, is
 			// eligible for retaliation and the attacker does not block it.
 			// Preserve the first-strike bounds for any native secondary hits.
+			int64_t earlyRangedMin = 0;
+			int64_t earlyRangedMax = 0;
 			int64_t earlyMeleeMin = 0;
 			int64_t earlyMeleeMax = 0;
 			double received = 0.0;
@@ -360,6 +362,8 @@ private:
 							BattleAttackInfo counter(&victim, &stack, 0, true);
 							counter.attackerPos = victim.getPosition();
 							const auto firstCounter = battle.battleEstimateDamage(counter, nullptr);
+							earlyRangedMin = firstCounter.damage.min;
+							earlyRangedMax = firstCounter.damage.max;
 							received = (static_cast<double>(firstCounter.damage.min)
 								+ firstCounter.damage.max) / 2.0;
 							// In native VCMI FIRST_STRIKE fires before the hypnotized
@@ -441,27 +445,39 @@ private:
 			// Ordinary retaliation includes first-hit casualties; native melee
 			// and ranged FIRST_STRIKE occur before those casualties. Multi-hit
 			// and other special-attack sequencing remains outside this projection.
-			// A hypnotized ranged attacker with a native adjacent-splash shot
-			// can hit different former allies from a wide target's head and
-			// tail. Account for those actual impacted units rather than pricing
-			// only the aimed creature. Keep the projection bounded: FIRST_STRIKE
-			// survivor damage, spell-like splash and multi-shot sequencing need
-			// separate engine-specific evaluation before they can be included.
+			// Native ranged FIRST_STRIKE takes casualties before the opening
+			// shot, including every secondary SHOOTS_ALL_ADJACENT victim.
+			// Project collateral from the same two PRIVATE survivor states as
+			// the primary hit. Never count a splash shot from a dead shooter.
+			// This is a VCMI-specific bound, not the unavailable TUM DLL formula.
 			double friendlySplashLoss = 0.0;
-			if(shooting && !counterFirst && stack.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
+			if(shooting && stack.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
 			{
 				const auto impacted = battle.getAttackedBattleUnits(&stack, &victim, aimedHex, true, origin);
 				for(const auto * hit : impacted)
 				{
-					if(!hit || hit->unitId() == victim.unitId())
+					if(!hit || hit->unitId() == victim.unitId()
+						|| !hit->alive() || hit->isInvincible())
 						continue;
-					BattleAttackInfo splash(&stack, hit, distance, true);
-					splash.attackerPos = origin;
-					splash.defenderPos = hit->getPosition();
-					const auto preview = battle.battleEstimateDamage(splash, nullptr);
-					const double loss = std::clamp(
-						(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0,
-						0.0, static_cast<double>(hit->getAvailableHealth()));
+					const auto projectedSplash = [&](const battle::Unit & attacker)
+					{
+						BattleAttackInfo splash(&attacker, hit, distance, true);
+						splash.attackerPos = origin;
+						splash.defenderPos = hit->getPosition();
+						const auto preview = battle.battleEstimateDamage(splash, nullptr);
+						return std::clamp(
+							(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0,
+							0.0, static_cast<double>(hit->getAvailableHealth()));
+					};
+					const auto afterCounter = [&](int64_t counterDamage)
+					{
+						auto survivors = stack.acquireState();
+						survivors->damage(counterDamage);
+						return survivors->alive() ? projectedSplash(*survivors) : 0.0;
+					};
+					const double loss = counterFirst
+						? (afterCounter(earlyRangedMin) + afterCounter(earlyRangedMax)) / 2.0
+						: projectedSplash(stack);
 					if(battle.battleGetOwner(hit) == battle.battleGetOwner(&stack))
 						friendlySplashLoss += loss;
 					else

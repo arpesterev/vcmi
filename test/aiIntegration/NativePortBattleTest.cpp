@@ -5266,6 +5266,217 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedFirstStrikeRangedCounterPrecedesS
 	EXPECT_GT(recorder.shots, 1);
 }
 
+// Native VCMI regression for survivor-aware Hypnotize ranged splash.
+// This is a bounded engine adaptation, not equivalence to TUM's closed ERA/DLL.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedFirstStrikePricesNativeRangedSplashAfterCounter)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 20);
+	setArmy(defenderSideHero, CreatureID(0), 8);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 60));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(2)), CreatureID(2).toCreature(), 60));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+
+	CStack * hypnotized = nullptr;
+	CStack * ordinary = nullptr;
+	CStack * firstStriker = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() != BattleSide::ATTACKER || unit->creatureId() != CreatureID(2))
+			continue;
+		if(unit->unitSlot() == SlotID(0))
+			hypnotized = unit.get();
+		else if(unit->unitSlot() == SlotID(1))
+			ordinary = unit.get();
+		else if(unit->unitSlot() == SlotID(2))
+			firstStriker = unit.get();
+	}
+	ASSERT_NE(hypnotized, nullptr);
+	ASSERT_NE(ordinary, nullptr);
+	ASSERT_NE(firstStriker, nullptr);
+	ASSERT_TRUE(ordinary->canShoot());
+	ASSERT_TRUE(firstStriker->canShoot());
+	const BattleHex normalHex(hypnotized->getPosition().toInt() + 8);
+	const BattleHex firstHex(hypnotized->getPosition().toInt() + 9);
+	ASSERT_TRUE(normalHex.isAvailable());
+	ASSERT_TRUE(firstHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(normalHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(firstHex), nullptr);
+	ordinary->setPosition(normalHex);
+	firstStriker->setPosition(firstHex);
+	ASSERT_EQ(BattleHex::getDistance(normalHex, firstHex), 1);
+	// Native adjacent splash from the hypnotized stack must strike
+	// the ordinary shooter beside the early-countering first striker.
+	hypnotized->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SHOOTS_ALL_ADJACENT,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(hypnotized->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+
+	const auto ability = [&](BonusType kind, BonusSubtypeID subtype = BonusSubtypeID())
+	{
+		firstStriker->addNewBonus(std::make_shared<Bonus>(
+			BonusDuration::PERMANENT, kind, BonusSource::CREATURE_ABILITY,
+			1, BonusSourceID(CreatureID(2)), subtype));
+	};
+	ability(BonusType::RANGED_RETALIATION);
+	ability(BonusType::ATTACKS_NEAREST_CREATURE);
+	ability(BonusType::FREE_SHOOTING);
+	ability(BonusType::FIRST_STRIKE, BonusSubtypeID(BonusCustomSubtype::damageTypeRanged));
+	const auto firstStrikeSelector = Selector::typeSubtype(
+		BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged);
+	ASSERT_TRUE(firstStriker->hasBonus(firstStrikeSelector));
+	ASSERT_TRUE(firstStriker->hasBonusOfType(BonusType::RANGED_RETALIATION));
+
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, hypnotized));
+	ASSERT_TRUE(hypnotized->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(hypnotized), player);
+	battle()->activeStack = hypnotized->unitId();
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(hypnotized, ordinary->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(hypnotized, firstStriker->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(firstStriker, hypnotized->getPosition()));
+	const auto impacted = view->getAttackedBattleUnits(
+		hypnotized, firstStriker, firstStriker->getPosition(), true);
+	ASSERT_TRUE(std::any_of(impacted.begin(), impacted.end(), [&](const battle::Unit * hit)
+	{
+		return hit && hit->unitId() == ordinary->unitId();
+	})) << "The actual VCMI ranged shot must include the adjacent original ally";
+	ASSERT_TRUE(firstStriker->ableToRetaliate());
+
+	// Prove that first-strike order matters numerically: an undamaged
+	// countershot is stronger than one after the initial attack's losses.
+	BattleAttackInfo fullCounter(firstStriker, hypnotized, 0, true);
+	fullCounter.attackerPos = firstStriker->getPosition();
+	const auto fullCounterDamage = view->battleEstimateDamage(fullCounter, nullptr);
+	BattleAttackInfo firstShot(hypnotized, firstStriker, 0, true);
+	firstShot.attackerPos = hypnotized->getPosition();
+	const auto firstDamage = view->battleEstimateDamage(firstShot, nullptr);
+	ASSERT_GT(firstDamage.damage.min, 0);
+	ASSERT_LT(firstDamage.damage.max, firstStriker->getAvailableHealth());
+	const auto originalHealth = firstStriker->getAvailableHealth();
+	auto reduced = firstStriker->acquireState();
+	auto minShot = firstDamage.damage.min;
+	reduced->damage(minShot);
+	ASSERT_TRUE(reduced->alive());
+	BattleAttackInfo reducedCounter(reduced.get(), hypnotized, 0, true);
+	reducedCounter.attackerPos = firstStriker->getPosition();
+	const auto reducedCounterDamage = view->battleEstimateDamage(reducedCounter, nullptr);
+	ASSERT_GT(fullCounterDamage.damage.max, reducedCounterDamage.damage.max)
+		<< "A first-strike ranged counter must not be priced after casualties";
+
+	// TUM must also price its outgoing shot AFTER the server's FIRST_STRIKE,
+	// including the possibility that the entire hypnotized stack dies.
+	// All previews operate on copies, and must preserve both live health pools.
+	const auto hypnotizedHealth = hypnotized->getAvailableHealth();
+	const auto previewFollowUp = [&](int64_t counterDamage)
+	{
+		auto survivors = hypnotized->acquireState();
+		survivors->damage(counterDamage);
+		if(!survivors->alive())
+			return 0.0;
+		BattleAttackInfo followUp(survivors.get(), firstStriker, 0, true);
+		followUp.attackerPos = hypnotized->getPosition();
+		followUp.defenderPos = firstStriker->getPosition();
+		const auto estimate = view->battleEstimateDamage(followUp, nullptr);
+		return (static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0;
+	};
+	const double postCounterShot = (previewFollowUp(fullCounterDamage.damage.min)
+		+ previewFollowUp(fullCounterDamage.damage.max)) / 2.0;
+	// Independently price collateral from the post-FIRST_STRIKE survivors:
+	// the real server cannot fire this splash at full pre-counter strength.
+	const auto estimateCollateral = [&](const battle::Unit & attacker)
+	{
+		BattleAttackInfo splash(&attacker, ordinary, 0, true);
+		splash.attackerPos = hypnotized->getPosition();
+		splash.defenderPos = ordinary->getPosition();
+		const auto estimate = view->battleEstimateDamage(splash, nullptr);
+		return (static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0;
+	};
+	const auto collateralAfterCounter = [&](int64_t damage)
+	{
+		auto survivors = hypnotized->acquireState();
+		survivors->damage(damage);
+		return survivors->alive() ? estimateCollateral(*survivors) : 0.0;
+	};
+	const double collateralBeforeCounter = estimateCollateral(*hypnotized);
+	const double collateralAfter = (collateralAfterCounter(fullCounterDamage.damage.min)
+		+ collateralAfterCounter(fullCounterDamage.damage.max)) / 2.0;
+	ASSERT_LT(collateralAfter, collateralBeforeCounter);
+	ASSERT_GT(collateralAfter, 0.0);
+	const auto ordinaryHealthBefore = ordinary->getAvailableHealth();
+	const double preCounterShot = (static_cast<double>(firstDamage.damage.min)
+		+ firstDamage.damage.max) / 2.0;
+	ASSERT_LT(postCounterShot, preCounterShot)
+		<< "First-strike casualties must reduce TUM's outgoing shot projection";
+	EXPECT_EQ(hypnotized->getAvailableHealth(), hypnotizedHealth);
+	EXPECT_EQ(firstStriker->getAvailableHealth(), originalHealth);
+
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *hypnotized);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+	// The partial HoMM3 baseline may also value native splash; no forced
+	// divergence or exact unpublished TUM equivalence is claimed.
+	std::cout << "AI_TUM_HYPNOTIZE_RANGED_SPLASH baseline=" << baseline.toString()
+		<< " collateral_before=" << collateralBeforeCounter
+		<< " collateral_after=" << collateralAfter << '\\n';
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, hypnotized);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, firstStriker->unitId())
+		<< "TUM's independent damage-sum choice should include the early countershot";
+	EXPECT_EQ(firstStriker->getAvailableHealth(), originalHealth)
+		<< "A damage preview cannot modify the actual first-strike target";
+
+	std::vector<int> initialShotOrder;
+	const int firstStrikerId = firstStriker->unitId();
+	const int hypnotizedId = hypnotized->unitId();
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(!attack.shot())
+			return;
+		if(attack.stackAttacking == firstStrikerId && attack.counter())
+			initialShotOrder.push_back(firstStrikerId);
+		else if(attack.stackAttacking == hypnotizedId)
+			initialShotOrder.push_back(hypnotizedId);
+	};
+	const auto recordedDamage = recorder.damage;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected TUM's chosen shot against the first-strike defender";
+	ASSERT_GE(initialShotOrder.size(), 2u);
+	EXPECT_EQ(initialShotOrder[0], firstStrikerId)
+		<< "The authoritative server must execute FIRST_STRIKE before our shot";
+	EXPECT_EQ(initialShotOrder[1], hypnotizedId);
+	EXPECT_GT(recorder.damage, recordedDamage);
+	EXPECT_LT(ordinary->getAvailableHealth(), ordinaryHealthBefore)
+		<< "The real server must damage the secondary victim after FIRST_STRIKE";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 1);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumTacticsPropagatesDefenderVictory)
 {
 	prepareBattle(CreatureID(0), 2, CreatureID(0), 100);
