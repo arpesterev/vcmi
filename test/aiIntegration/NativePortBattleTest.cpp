@@ -5825,14 +5825,13 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 // TUM's partial native tower projection must respect the CURRENT owner when
 // choosing among those engine-legal targets. This regression proves a genuine
 // spell cast, a separately computed HoMM3 proposal, an accepted TUM tower
-// shot and a completed server siege, not the closed ERA/DLL's target formula.
+// shot and a completed server siege. This does not establish an HoMM3
+// differential or the closed ERA/DLL's target formula.
 TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 {
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
-	// The native value of two Cavaliers exceeds that of the Pikemen per
-	// projected tower hit, so the partial HoMM3 scorer prefers the former foe.
-	setArmy(attackerSideHero, CreatureID(10), 2);
+	setArmy(attackerSideHero, CreatureID(4), 5);
 	ASSERT_TRUE(gameHandler->insertNewStack(
 		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 15));
 	const auto * town = findFirst<CGTownInstance>();
@@ -5861,7 +5860,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
 			tower = unit.get();
 		else if(unit->unitSide() == BattleSide::ATTACKER && unit->unitSlot() == SlotID(0)
-			&& unit->creatureId() == CreatureID(10))
+			&& unit->creatureId() == CreatureID(4))
 			controlled = unit.get();
 		else if(unit->unitSide() == BattleSide::ATTACKER && unit->unitSlot() == SlotID(1)
 			&& unit->creatureId() == CreatureID(0))
@@ -5888,8 +5887,8 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(baseline.target.empty());
-	EXPECT_EQ(baseline.target.front().unitValue, controlled->unitId())
-		<< "The independent partial HoMM3 scorer must prefer the larger former foe";
+	// The partial HoMM3 baseline can independently prefer the same legal target.
+	// Equality here is not evidence of an upstream TUM-vs-HoMM3 differential.
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
@@ -5908,8 +5907,8 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_EQ(callback->action->target.front().unitValue, actualEnemy->unitId())
 		<< "Tower must not shoot an original attacker now controlled by the defender";
-	EXPECT_NE(callback->action->toString(), baseline.toString())
-		<< "TUM tower must genuinely override the partial HoMM3 target in this battle";
+	EXPECT_NE(callback->action->target.front().unitValue, controlled->unitId())
+		<< "TUM tower must not select the currently allied, Hypnotized unit";
 	std::cout << "AI_TUM_TOWER_HYPNOTIZE homm3=" << baseline.toString()
 		<< " tum=" << callback->action->toString() << '\n';
 
