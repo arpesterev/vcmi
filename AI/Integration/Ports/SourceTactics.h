@@ -397,6 +397,15 @@ inline bool holdMeleeForShooters(const ShooterProtection & state)
 		&& !state.opponentHasShooters && !state.opponentCanReachAnyFriendlyStack;
 }
 
+// Native reachability uses a negative distance for an unreachable hex. The
+// published TUM neutral-melee screen must react only to an enemy that can
+// ACTUALLY reach a friendly unit next movement turn. -1 <= speed is not a
+// legitimate path, even when VCMI allows a hypothetical melee contact hex.
+inline bool canReachNextTurn(int pathDistance, int movementRange)
+{
+	return pathDistance >= 0 && movementRange >= 0 && pathDistance <= movementRange;
+}
+
 /// AI Improvements.txt: a ballista must not break Blind, Paralyze or Petrification.
 inline bool ballistaMayTarget(bool blind, bool paralyzed, bool petrified)
 {
