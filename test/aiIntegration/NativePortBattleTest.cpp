@@ -1677,6 +1677,84 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkBlockedShooterPrefersMeleeEvenW
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned ai_battle.cpp::archerDecision tests isHandFighting() before
+// considering shots. In Heroes III, unrestricted FREE_SHOOTING can make
+// both the adjacent and distant shots legal despite contact. Check the
+// normal (non-Berserk) policy still independently chooses the native
+// melee branch, and that the authoritative battle server accepts it.
+TEST_F(AIIntegrationNativeBattle, fheroes2EngagedArcherPrefersMeleeDespiteNativeFreeShooting)
+{
+	prepareBattle(CreatureID(2), 70, CreatureID(2), 50);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const auto * acting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(acting, nullptr);
+	ASSERT_TRUE(acting->isShooter());
+	ASSERT_FALSE(acting->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	const BattleSide side = acting->unitSide();
+	const BattleSide enemySide = side == BattleSide::ATTACKER
+		? BattleSide::DEFENDER : BattleSide::ATTACKER;
+	const CStack * remote = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == enemySide && unit->isShooter() && unit->alive())
+			remote = unit.get();
+	ASSERT_NE(remote, nullptr);
+	const BattleHex nearHex(acting->getPosition().toInt()
+		+ (side == BattleSide::ATTACKER ? 1 : -1));
+	ASSERT_TRUE(nearHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearHex), nullptr);
+	ASSERT_GT(BattleHex::getDistance(acting->getPosition(), remote->getPosition()), 1);
+	const CStack * blocker = addStack(enemySide, CreatureID(2), nearHex, 15);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_GE(static_cast<int>(blocker->getMovementRange()) + 2,
+		static_cast<int>(acting->getMovementRange()))
+		<< "The adjacent archer must make a source safe-retreat attempt pointless";
+	ASSERT_EQ(battle()->battleActiveUnit(), acting);
+
+	// Only alter this battle fixture's bonus, never game rules.
+	const_cast<CStack *>(acting)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FREE_SHOOTING,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(battle()->battleIsUnitBlocked(acting));
+	ASSERT_TRUE(battle()->battleCanShoot(acting));
+	ASSERT_TRUE(battle()->battleCanShoot(acting, nearHex));
+	ASSERT_TRUE(battle()->battleCanShoot(acting, remote->getPosition()))
+		<< "The source policy must reject a genuinely legal alternative native shot";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(side);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto viewedBattle = callback->getBattle(battleID);
+	ASSERT_NE(viewedBattle, nullptr);
+	ASSERT_FALSE(viewedBattle->meleeAttackHexes(acting, blocker,
+		acting->getPosition()).empty());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), side, false);
+	policy->activeStack(battleID, acting);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_FALSE(callback->spellAction);
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Original archerDecision enters hand-to-hand branch before ranged targeting";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(viewedBattle->battleGetUnitByPos(callback->action->target[1].hexValue), blocker);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native server rejected FHeroes2's independently selected archer melee";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
 {
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
