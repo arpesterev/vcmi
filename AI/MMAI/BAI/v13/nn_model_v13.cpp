@@ -601,9 +601,18 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 		if(attrs.size() != nlinks)
 			throwf("unexpected attrs.size() for LinkType(%d): want: %d, have: %d", EI(type), nlinks, attrs.size());
 
+
+		// Each exporter link length is an int32 ONNX input. The combined
+		// edge count is an int64 ONNX axis and is duplicated for edge indices.
+		// Validate all three bounds before appending to the vectors, not
+		// after an overflowing cast or reserve multiplication.
+		const auto nextEdges = checkedNNObservationSum("V13 edges", ei_flat_src.size(), nlinks);
+		(void)checkedNNObservationAxis("V13 edges", nextEdges);
+		(void)checkedNNObservationProduct("V13 edge indices", nextEdges, 2u);
+
 		oss << nlinks << " ";
 
-		lengths.push_back(static_cast<int>(nlinks));
+		lengths.push_back(checkedNNObservationIntSize("V13 link length", nlinks));
 
 		ei_flat_src.insert(ei_flat_src.end(), srcinds.begin(), srcinds.end());
 		ei_flat_dst.insert(ei_flat_dst.end(), dstinds.begin(), dstinds.end());
@@ -617,7 +626,7 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 	auto sum_e = ei_flat_src.size();
 	auto ei_flat = std::vector<int64_t>{};
 
-	ei_flat.reserve(2 * sum_e);
+	ei_flat.reserve(checkedNNObservationProduct("V13 edge indices", sum_e, 2u));
 	ei_flat.insert(ei_flat.end(), ei_flat_src.begin(), ei_flat_src.end());
 	ei_flat.insert(ei_flat.end(), ei_flat_dst.begin(), ei_flat_dst.end());
 
@@ -626,9 +635,9 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 	std::ranges::copy(*state, estate.begin());
 
 	auto tensors = std::vector<Ort::Value>{};
-	tensors.push_back(toTensor("obs", estate, {static_cast<int64_t>(estate.size())}));
-	tensors.push_back(toTensor("ei_flat", ei_flat, {2, static_cast<int64_t>(sum_e)}));
-	tensors.push_back(toTensor("ea_flat", ea_flat, {static_cast<int64_t>(sum_e), 1}));
+	tensors.push_back(toTensor("obs", estate, {checkedNNObservationAxis("V13 obs", estate.size())}));
+	tensors.push_back(toTensor("ei_flat", ei_flat, {2, checkedNNObservationAxis("V13 edges", sum_e)}));
+	tensors.push_back(toTensor("ea_flat", ea_flat, {checkedNNObservationAxis("V13 edges", sum_e), 1}));
 	tensors.push_back(toTensor("lengths", lengths, {LT_COUNT}));
 
 	logAi->debug("Edge lengths: [ " + oss.str() + "]");
