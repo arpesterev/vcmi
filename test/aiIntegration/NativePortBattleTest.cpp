@@ -3483,7 +3483,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedReserveArcherDoesNotDistortMult
 	const BattleHex origin = guard->getPosition();
 	const BattleHex highHex(origin.toInt() + 7);
 	const BattleHex highBlockerHex(highHex.toInt() + 1);
-	const BattleHex lowHex(origin.toInt() + 4 * GameConstants::BFIELD_WIDTH + 3);
+	// The preceding native server run measured five route steps here, exactly
+	// the guard's five-hex movement range. Place the lower-priority blocker
+	// farther away so BOTH choices exercise multi-turn pursuit.
+	const BattleHex lowHex(origin.toInt() + 4 * GameConstants::BFIELD_WIDTH + 5);
 	const BattleHex lowBlockerHex(lowHex.toInt() + 1);
 	const BattleHex reserveHex(origin.toInt() - 2 * GameConstants::BFIELD_WIDTH);
 	for(const auto & hex : {highHex, highBlockerHex, lowHex, lowBlockerHex, reserveHex})
