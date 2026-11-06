@@ -5456,8 +5456,8 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeRepeatedHydraSplashSurvivesPrimary)
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 			adjacent.push_back(hex);
 	ASSERT_GE(adjacent.size(), 2u);
-	const CStack * first = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[0], 2000);
-	const CStack * second = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[1], 2000);
+	const CStack * first = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[0], 8000);
+	const CStack * second = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[1], 8000);
 	ASSERT_NE(first, nullptr);
 	ASSERT_NE(second, nullptr);
 	const int64_t beforeFirst = first->getAvailableHealth();
