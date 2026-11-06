@@ -5574,31 +5574,31 @@ TEST_F(AIIntegrationNativeBattle, homm3MultiVolleyAreaShotDamagesSecondaryOnBoth
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
-// A lethal first shot must stop the real VCMI multi-volley sequence, even
-// when a surviving friendly unit is next to the victim. HoMM3's pinned
-// simulateAttack models one shot, while this native adaptation models
-// subsequent shots only when the original target remains alive. Check the
-// actual server packets, not only the valuation helper.
+// A lethal first shot must stop the native multi-volley sequence, even
+// when an additional enemy would survive a longer battle. Pinned HoMM3
+// simulateAttack models one shot, while the VCMI adaptation replays later
+// volleys only if their original target remains alive. Use the actual
+// server's attack packets to prove the host-engine stopping rule.
 TEST_F(AIIntegrationNativeBattle, homm3LethalFirstAreaShotStopsFurtherNativeVolleys)
 {
-	prepareBattle(CreatureID(3), 30, CreatureID(0), 1); // Marksmen vs one Peasant
+	prepareBattle(CreatureID(3), 300, CreatureID(12), 1); // Marksmen vs Angel
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	CStack * marksmen = nullptr;
-	CStack * peasant = nullptr;
+	CStack * angel = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER)
 			marksmen = unit.get();
 		else
-			peasant = unit.get();
+			angel = unit.get();
 	}
 	ASSERT_NE(marksmen, nullptr);
-	ASSERT_NE(peasant, nullptr);
+	ASSERT_NE(angel, nullptr);
 	ASSERT_EQ(marksmen->getTotalAttacks(true), 2);
-	const BattleHex enemyHex = peasant->getPosition();
+	const BattleHex targetHex = angel->getPosition();
 	BattleHex neighbour;
-	for(const auto & hex : enemyHex.getNeighbouringTiles())
+	for(const auto & hex : targetHex.getNeighbouringTiles())
 	{
 		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
 		{
@@ -5607,8 +5607,8 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalFirstAreaShotStopsFurtherNativeVoll
 		}
 	}
 	ASSERT_TRUE(neighbour.isValid());
-	CStack * friendly = addStack(BattleSide::ATTACKER, CreatureID(6), neighbour, 60);
-	ASSERT_NE(friendly, nullptr);
+	CStack * bystander = addStack(BattleSide::DEFENDER, CreatureID(0), neighbour, 2);
+	ASSERT_NE(bystander, nullptr);
 	marksmen->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
 		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
 	battle()->activeStack = marksmen->unitId();
@@ -5619,20 +5619,22 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalFirstAreaShotStopsFurtherNativeVoll
 	callback->onBattleStarted(battle());
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
-	ASSERT_TRUE(view->battleCanShoot(marksmen, peasant->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(marksmen, angel->getPosition()));
 	const auto affected = view->getAttackedBattleUnits(
-		marksmen, peasant, peasant->getPosition(), true);
-	ASSERT_NE(std::find(affected.begin(), affected.end(), friendly), affected.end());
-	BattleAttackInfo firstShot(marksmen, peasant, 0, true);
-	ASSERT_GE(view->battleEstimateDamage(firstShot).damage.min, peasant->getAvailableHealth());
-	const auto friendlyHealth = friendly->getAvailableHealth();
+		marksmen, angel, angel->getPosition(), true);
+	ASSERT_NE(std::find(affected.begin(), affected.end(), bystander), affected.end())
+		<< "The first shot must have a real second enemy in its native area";
+	BattleAttackInfo firstShot(marksmen, angel, 0, true);
+	ASSERT_GE(view->battleEstimateDamage(firstShot).damage.min, angel->getAvailableHealth());
+	const auto bystanderHealth = bystander->getAvailableHealth();
 	const auto action = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *marksmen);
 	ASSERT_EQ(action.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(action.target.empty());
-	ASSERT_EQ(action.target.front().unitValue, peasant->unitId());
+	ASSERT_EQ(action.target.front().unitValue, angel->unitId())
+		<< "The valuable guaranteed-kill Angel must be the chosen first target";
 
 	int volleys = 0;
-	int friendlySplashVolleys = 0;
+	int splashVolleys = 0;
 	const auto shooterID = static_cast<ui32>(marksmen->unitId());
 	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
 	{
@@ -5640,18 +5642,18 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalFirstAreaShotStopsFurtherNativeVoll
 			return;
 		++volleys;
 		for(const auto & victim : packet.bsa)
-			if(victim.stackAttacked == friendly->unitId())
+			if(victim.stackAttacked == bystander->unitId())
 			{
-				++friendlySplashVolleys;
+				++splashVolleys;
 				break;
 			}
 	};
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
-		<< "VCMI rejected the independent HoMM3 one-kill area shot";
+		<< "VCMI rejected the independent HoMM3 lethal area shot";
 	recorder.onAttackBeforeApply = {};
-	EXPECT_EQ(volleys, 1) << "The second attack cannot target an already dead primary";
-	EXPECT_EQ(friendlySplashVolleys, 1);
-	EXPECT_LT(friendly->getAvailableHealth(), friendlyHealth);
+	EXPECT_EQ(volleys, 1) << "The second volley cannot target a killed Angel";
+	EXPECT_EQ(splashVolleys, 1);
+	EXPECT_LT(bystander->getAvailableHealth(), bystanderHealth);
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
