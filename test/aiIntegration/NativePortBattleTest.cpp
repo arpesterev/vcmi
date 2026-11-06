@@ -7105,7 +7105,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedFormerNeutralDoesNotCancelShooter
 	ASSERT_EQ(callback->action->actionType, EActionType::WAIT)
 		<< "A currently friendly Hypnotized former neutral cannot cancel neutral shooter protection";
 	std::cout << "AI_TUM_HYPNOTIZED_NEUTRAL_SCREEN homm3=" << baseline.toString()
-		<< " tum=" << callback->action->toString() << '\\n';
+		<< " tum=" << callback->action->toString() << '\n';
 	battle()->activeStack = melee->unitId();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "The native VCMI server rejected TUM's protective WAIT";
