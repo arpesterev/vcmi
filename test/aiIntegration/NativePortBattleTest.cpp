@@ -7029,6 +7029,92 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
  * non-melee unit in a WAIT/DEFEND screening loop. The bonus is fixture setup,
  * not a claim about a normal Peasant or the unavailable ERA/DLL internals.
  */
+// Hypnotize changes control, but VCMI's ONLY_ENEMY/ONLY_MINE lists can
+// continue exposing each stack under its original side. A controlled former
+// neutral is now our ally and must not cancel the published TUM rule that
+// melee WAIT while archers engage the remaining neutral-only opposition.
+// Require a real spell, separate HoMM3 decision, server-accepted WAIT and
+// a terminal native battle; this is not proof of closed ERA/DLL equivalence.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedFormerNeutralDoesNotCancelShooterScreen)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 40);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(neutral->id, SlotID(1)), CreatureID(0).toCreature(), 10));
+	teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * melee = nullptr;
+	const CStack * controlled = nullptr;
+	const CStack * hostile = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->getCount() == 10)
+				controlled = unit.get();
+			else if(unit->getCount() == 40)
+				hostile = unit.get();
+		}
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(controlled, nullptr);
+	ASSERT_NE(hostile, nullptr);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HYPNOTIZE, controlled))
+		<< "The neutral must change owner through an actual hero spell";
+	ASSERT_TRUE(controlled->isHypnotized());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_EQ(battle()->battleGetOwner(controlled), player);
+	ASSERT_EQ(battle()->battleGetOwner(hostile), PlayerColor::NEUTRAL);
+
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto visibleEnemies = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+	ASSERT_TRUE(std::any_of(visibleEnemies.begin(), visibleEnemies.end(),
+		[&](const CStack * unit) { return unit->unitId() == controlled->unitId(); }))
+		<< "The fixture must reproduce the stale native side-based enemy list";
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_NE(baseline.actionType, EActionType::WAIT);
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WAIT)
+		<< "A currently friendly Hypnotized former neutral cannot cancel neutral shooter protection";
+	std::cout << "AI_TUM_HYPNOTIZED_NEUTRAL_SCREEN homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\\n';
+	battle()->activeStack = melee->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native VCMI server rejected TUM's protective WAIT";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumNonMeleeFriendlyCannotEnterNeutralShooterScreen)
 {
 	startRecordedGame();
