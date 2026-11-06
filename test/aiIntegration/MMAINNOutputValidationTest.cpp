@@ -9,6 +9,7 @@
 #include "../../AI/MMAI/BAI/nn_model_metadata.h"
 #include "../../AI/MMAI/BAI/nn_model_resolution.h"
 #include "../../AI/MMAI/BAI/nn_v13_action_routing.h"
+#include "../../AI/MMAI/schema/v13/constants.h"
 
 #include <algorithm>
 #include <array>
@@ -196,6 +197,28 @@ TEST(MMAINNOutputValidation, V15RejectsOverflowDuringGraphFlatteningBeforeAlloca
 		EXPECT_NE(std::string(e.what()).find("edge_attr_flat"), std::string::npos);
 		EXPECT_NE(std::string(e.what()).find("overflows"), std::string::npos);
 	}
+}
+
+TEST(MMAINNOutputValidation, V13RejectsMissingLinkAndWrongSizedBattlefieldBeforeOnnx)
+{
+	using MMAI::BAI::requireNNV13LinkPayload;
+	using MMAI::BAI::requireNNV13BattlefieldObservation;
+	const auto expected = static_cast<std::size_t>(MMAI::Schema::V13::BATTLEFIELD_STATE_SIZE);
+	const std::vector<float> valid(expected, 0.0f);
+	const std::vector<float> shortState(expected - 1, 0.0f);
+	const std::vector<float> longState(expected + 1, 0.0f);
+
+	// A normal exported V13 observation remains untouched; malformed
+	// event-adapter payloads are rejected before flattening and ONNX Run.
+	EXPECT_NO_THROW(requireNNV13BattlefieldObservation(&valid, expected));
+	EXPECT_THROW(requireNNV13BattlefieldObservation(
+		static_cast<const std::vector<float> *>(nullptr), expected), std::runtime_error);
+	EXPECT_THROW(requireNNV13BattlefieldObservation(&shortState, expected), std::runtime_error);
+	EXPECT_THROW(requireNNV13BattlefieldObservation(&longState, expected), std::runtime_error);
+
+	const int existingLink = 1;
+	EXPECT_NO_THROW(requireNNV13LinkPayload(&existingLink, 0));
+	EXPECT_THROW(requireNNV13LinkPayload(static_cast<const int *>(nullptr), 1), std::runtime_error);
 }
 
 TEST(MMAINNOutputValidation, V13RejectsOversizedLinkCountsBeforeFlattening)

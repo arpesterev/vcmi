@@ -589,6 +589,7 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 		if(EI(type) != i)
 			throwf("unexpected link type: want: %d, have: %d", i, EI(type));
 
+		requireNNV13LinkPayload(links, EI(type));
 		const auto & srcinds = links->getSrcIndex();
 		const auto & dstinds = links->getDstIndex();
 		const auto & attrs = links->getAttributes();
@@ -629,6 +630,7 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 	ei_flat.insert(ei_flat.end(), ei_flat_dst.begin(), ei_flat_dst.end());
 
 	const auto * state = s->getBattlefieldState();
+	requireNNV13BattlefieldObservation(state, static_cast<std::size_t>(Schema::V13::BATTLEFIELD_STATE_SIZE));
 	auto estate = std::vector<float>(state->size());
 	std::ranges::copy(*state, estate.begin());
 

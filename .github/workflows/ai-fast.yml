@@ -256,6 +256,7 @@ jobs:
                       'V13V15RejectInvalidTensorElementCountsBeforeOnnxAllocation',
                       'V15RejectsOverflowDuringGraphFlatteningBeforeAllocation',
                       'V13RejectsOversizedLinkCountsBeforeFlattening',
+                      'V13RejectsMissingLinkAndWrongSizedBattlefieldBeforeOnnx',
                       'V13V15RejectMovedOrReplacedObservedActorBeforeDispatch',
                       'RejectsScriptedFallbackForStrictOrInvalidActiveActor',
                       'V13RejectsDeadOrMissingEngineOwnedMachineActor',

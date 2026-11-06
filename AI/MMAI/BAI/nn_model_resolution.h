@@ -27,6 +27,28 @@ inline void requireNNModelState(const State * state, int expectedVersion, const 
 			+ std::to_string(state->version()) + " (expected " + std::to_string(expectedVersion) + ")");
 }
 
+// V13 link and battlefield state pointers come from the live event adapter.
+// Reject a missing link payload or a truncated/oversized fixed observation
+// before dereferencing, allocating input buffers, or invoking ONNX.
+template<typename Link>
+inline void requireNNV13LinkPayload(const Link & link, int linkType)
+{
+	if(!link)
+		throw std::runtime_error("MMAI V13: missing link payload for type " + std::to_string(linkType)
+			+ " before ONNX inference");
+}
+
+template<typename State>
+inline void requireNNV13BattlefieldObservation(const State * state, std::size_t expectedSize)
+{
+	if(!state)
+		throw std::runtime_error("MMAI V13: missing battlefield observation before ONNX inference");
+	if(state->size() != expectedSize)
+		throw std::runtime_error("MMAI V13: battlefield observation has "
+			+ std::to_string(state->size()) + " elements (expected "
+			+ std::to_string(expectedSize) + ") before ONNX inference");
+}
+
 // V13 decodes the sampled index against the full schema action mask.
 // Fail before ONNX, not on a null pointer or an out-of-bounds lookup.
 template<typename Mask>
