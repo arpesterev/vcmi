@@ -5527,7 +5527,7 @@ TEST_F(AIIntegrationNativeBattle, homm3NonTargetableEnemyStillPresentDuringNativ
 	ASSERT_NE(invincibleOpponent, nullptr);
 	auto * mutableOpponent = const_cast<CStack *>(invincibleOpponent);
 	auto temporaryProtection = std::make_shared<Bonus>(
-		BonusDuration::PERMANENT, BonusType::INVINCIBLE, BonusSource::OTHER, 1);
+		BonusDuration::PERMANENT, BonusType::INVINCIBLE, BonusSource::OTHER, 1, BonusSourceID());
 	mutableOpponent->addNewBonus(temporaryProtection);
 	ASSERT_TRUE(invincibleOpponent->isInvincible());
 
