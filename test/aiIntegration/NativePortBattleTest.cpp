@@ -5601,7 +5601,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaPricesSurvivalOfVariableFirstStrike
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(11), 80);
-	setArmy(defenderSideHero, CreatureID(2), 100);
+	setArmy(defenderSideHero, CreatureID(2), 200);
 	ASSERT_TRUE(gameHandler->insertNewStack(
 		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 150));
 	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
