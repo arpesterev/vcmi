@@ -1515,6 +1515,86 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 ai_battle.cpp::berserkTurn shoots nearestUnits.front(),
+// never the first more distant target the native API happens to allow.
+// VCMI's restricted FREE_SHOOTING permits firing while engaged, but not at
+// an adjacent unit. The old partial port incorrectly skipped the closer
+// melee-only target and shot the remote archer. This directed server battle
+// requires a different, independently selected native melee command.
+TEST_F(AIIntegrationNativeBattle, fheroes2BerserkShooterDoesNotSkipAdjacentNearestForDistantShot)
+{
+	prepareBattle(CreatureID(2), 70, CreatureID(2), 50);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const auto * acting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(acting, nullptr);
+	ASSERT_TRUE(acting->isShooter());
+	const BattleSide side = acting->unitSide();
+	const BattleSide enemySide = side == BattleSide::ATTACKER
+		? BattleSide::DEFENDER : BattleSide::ATTACKER;
+	const CStack * remote = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == enemySide && unit->isShooter() && unit->alive())
+			remote = unit.get();
+	ASSERT_NE(remote, nullptr);
+	const BattleHex nearHex(acting->getPosition().toInt()
+		+ (side == BattleSide::ATTACKER ? 1 : -1));
+	ASSERT_TRUE(nearHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearHex), nullptr);
+	ASSERT_GT(BattleHex::getDistance(acting->getPosition(), remote->getPosition()), 1);
+	const CStack * nearest = addStack(enemySide, CreatureID(0), nearHex, 15);
+	ASSERT_NE(nearest, nullptr);
+	ASSERT_EQ(BattleHex::getDistance(acting->getPosition(), nearest->getPosition()), 1);
+	ASSERT_EQ(battle()->battleActiveUnit(), acting);
+
+	// Native "Steel Elves" rule projection: a blocked archer can shoot
+	// past the adjacent creature, but must melee that adjacent creature.
+	// This bonus is fixture-only: no creature or gameplay rule is changed.
+	auto * mutableActing = const_cast<CStack *>(acting);
+	mutableActing->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::FREE_SHOOTING, BonusSource::OTHER, 1, BonusSourceID(),
+		BonusSubtypeID(BonusCustomSubtype::freeShootingExceptAdjacent)));
+	const auto * caster = enemySide == BattleSide::ATTACKER ? attackerSideHero : defenderSideHero;
+	teachBattleSpell(const_cast<CGHeroInstance *>(caster), SpellID::BERSERK, 6);
+	ASSERT_TRUE(castOn(const_cast<CGHeroInstance *>(caster), SpellID::BERSERK, acting));
+	ASSERT_TRUE(acting->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	ASSERT_TRUE(battle()->battleCanShoot(acting))
+		<< "Restricted native free shooting must allow a distant shot while engaged";
+	ASSERT_FALSE(battle()->battleCanShoot(acting, nearHex))
+		<< "The adjacent Berserk target must be melee-only under native rules";
+	ASSERT_TRUE(battle()->battleCanShoot(acting, remote->getPosition()))
+		<< "A distant native-legal shot is required to expose the old retargeting bug";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(side);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), side, false);
+	policy->activeStack(battleID, acting);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_FALSE(callback->spellAction);
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Berserk archer must not skip its nearest melee-only unit to shoot farther";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(battle()->battleGetUnitByPos(callback->action->target[1].hexValue), nearest);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI server rejected nearest-unit Berserk melee";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
 {
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
