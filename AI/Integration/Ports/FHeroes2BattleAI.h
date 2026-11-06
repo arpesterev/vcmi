@@ -778,8 +778,8 @@ private:
 		for(const auto * shooter : friends)
 		{
 			// The pinned meleeUnitDefense scans contact with friendly archers,
-// even if a Heroes III FREE_SHOOTING bonus makes their shot legal.
-// Determine blockers by actual occupied hexes below, not shot legality.
+			// even if a Heroes III FREE_SHOOTING bonus makes their shot legal.
+			// Determine blockers by occupied hexes, not shot legality.
 			if(shooter == &guard || !shooter->alive() || !shooter->getPosition().isValid()
 				|| !shooter->isShooter())
 				continue;
@@ -791,8 +791,8 @@ private:
 			Ports::FHeroes2::MeleeOutcome bestOutcome;
 			for(const auto * enemy : enemies)
 			{
-				// Lack of a shot can also result from a spell or empty ammo.
-				// Only real enemy contact can make a unit an archer blocker.
+				// Only actual enemy contact makes a blocker. Native FREE_SHOOTING,
+				// Forgetfulness or ammunition state cannot redefine that contact.
 				const auto enemyHexes = enemy->getHexes();
 				const bool adjacent = std::any_of(shooterHexes.begin(),
 					shooterHexes.end(), [&](const BattleHex & friendlyHex)
@@ -887,14 +887,14 @@ private:
 		for(const auto * shooter : friends)
 		{
 			// Native FREE_SHOOTING must not hide a physical blocker from the
-// source's future melee defense. The adjacency check below is authoritative.
+			// source's future melee defense. Contact is checked below.
 			if(shooter == &guard || !shooter->alive() || !shooter->isShooter()
 				|| !shooter->getPosition().isValid())
 				continue;
 			for(const auto * blocker : enemies)
 			{
-				// Lack of ammunition and magical shot suppression are not
-				// evidence of a physically engaged archer.
+				// Check the real footprint: neither a permitted native shot nor
+				// an unavailable shot alone establishes physical contact.
 				bool adjacent = false;
 				for(const auto & shooterHex : shooter->getHexes())
 					for(const auto & blockerHex : blocker->getHexes())
