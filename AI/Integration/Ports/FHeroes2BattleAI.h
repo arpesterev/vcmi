@@ -1061,11 +1061,13 @@ private:
 			: std::nullopt;
 	}
 
-	// Pinned fheroes2 archerDecision: if escape failed and melee has blocked
-	// the shot, choose among *adjacent* enemies by raw hit-point damage minus
-	// expected retaliation. The ordinary melee evaluator instead compares
-	// combat-value losses, which is a different decision rule. Native VCMI
-	// damage estimates are used because fheroes2's combat simulator differs.
+	// Pinned fheroes2 archerDecision: if escape failed and an enemy is
+	// adjacent (isHandFighting), choose a melee attack by raw hit-point
+	// damage minus retaliation BEFORE considering any ranged attack.
+	// VCMI FREE_SHOOTING may permit a shot while engaged; that Heroes III
+	// legality exception does not override the Heroes II policy ordering.
+	// Native meleeAttackHexes checks actual legal adjacent attacks, while
+	// damage estimates remain VCMI-specific rather than Heroes II parity.
 	static std::optional<BattleAction> blockedArcherMelee(CPlayerBattleCallback & battle,
 		const CStack & stack, const std::vector<const CStack *> & enemies)
 	{
@@ -1073,8 +1075,7 @@ private:
 		// melee-contact checks; fheroes2 does not exclude wide shooters here.
 		// Unlike the still single-width retreat projection, this branch
 		// evaluates VCMI-legal contact from the stack's actual position.
-		if(!stack.hasBonusOfType(BonusType::SHOOTER)
-			|| battle.battleCanShoot(&stack) || !stack.getPosition().isValid())
+		if(!stack.hasBonusOfType(BonusType::SHOOTER) || !stack.getPosition().isValid())
 			return std::nullopt;
 
 		const CStack * bestTarget = nullptr;
