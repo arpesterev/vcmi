@@ -3945,7 +3945,6 @@ TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScript
 	// data, not the optional MMAI neural model mod.
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
 	ASSERT_FALSE(HasFatalFailure());
-	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
 	auto callback = std::make_shared<DecisionCallback>(player);
 	callback->onBattleStarted(battle());
@@ -3954,14 +3953,13 @@ TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScript
 	EXPECT_EQ(policy->dllName, "MMAI");
 	policy->playerID = player;
 	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
-	policy->initBattleInterface(environment, callback, AutocombatPreferences{});
 	try
 	{
-		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
-			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
-			battle()->getSideHero(BattleSide::ATTACKER),
-			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
-		FAIL() << "MMAI silently accepted a scripted model without the neural model mod";
+		// Strict MMAI preloads configured roles at interface initialization.
+		// A missing model must be rejected before the first battle event,
+		// not after a turn has already been offered to the neural policy.
+		policy->initBattleInterface(environment, callback, AutocombatPreferences{});
+		FAIL() << "MMAI silently accepted missing ONNX weights during preload";
 	}
 	catch(const std::runtime_error & error)
 	{
