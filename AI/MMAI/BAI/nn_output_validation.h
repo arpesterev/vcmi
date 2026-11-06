@@ -58,6 +58,39 @@ inline void validateNNObservationValues(const std::vector<float> & values, const
 				+ " at index " + std::to_string(i));
 }
 
+// V13/V15 tensors derive dimensions from live battle observations. Never
+// multiply signed dimensions before validating them: overflow is undefined
+// behavior, and sparse zero-edge graphs legitimately have a zero dimension.
+// Preserve all valid ONNX tensor sizes and values without normalization.
+inline void requireNNTensorElementCount(const std::string & name,
+                                        const std::vector<std::int64_t> & shape,
+                                        std::size_t elements)
+{
+	bool hasZeroDimension = false;
+	for(const auto dimension : shape)
+	{
+		if(dimension < 0)
+			throw std::runtime_error("MMAI: neural tensor '" + name + "' has a negative dimension");
+		hasZeroDimension |= dimension == 0;
+	}
+
+	std::size_t expected = hasZeroDimension ? 0 : 1;
+	if(!hasZeroDimension)
+	{
+		for(const auto dimension : shape)
+		{
+			const auto value = static_cast<std::uint64_t>(dimension);
+			if(value > std::numeric_limits<std::size_t>::max() / expected)
+				throw std::runtime_error("MMAI: neural tensor '" + name + "' element count overflows");
+			expected *= static_cast<std::size_t>(value);
+		}
+	}
+
+	if(expected != elements)
+		throw std::runtime_error("MMAI: neural tensor '" + name + "' element count mismatch: shape has "
+			+ std::to_string(expected) + " elements, data has " + std::to_string(elements));
+}
+
 // V15's dynamic graph may have no active creature-action nodes after
 // battle-event invalidation. Reject the snapshot before invoking ONNX:
 // zero-length action tensors are not a policy decision and must not be

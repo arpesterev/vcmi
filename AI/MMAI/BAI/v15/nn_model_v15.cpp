@@ -755,13 +755,9 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 template<typename T>
 Ort::Value NNModel::toTensor(const std::string & name, std::vector<T> & vec, const std::vector<int64_t> & shape)
 {
-	// Sanity check
-	int64_t numel = 1;
-	for(int64_t d : shape)
-		numel *= d;
-
-	if(numel != vec.size())
-		throwf("toTensor: %s: numel check failed: want: %d, have: %d", name, numel, vec.size());
+	// Reject invalid/overflowing graph shape before constructing an ONNX
+	// tensor, without changing valid V13/V15 observation contents.
+	requireNNTensorElementCount(name, shape, vec.size());
 	// Graph encoder failures must not turn into undefined neural decisions.
 	if constexpr(std::is_same_v<T, float>)
 		validateNNObservationValues(vec, name);

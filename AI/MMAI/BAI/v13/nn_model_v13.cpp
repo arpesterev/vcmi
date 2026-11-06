@@ -640,13 +640,9 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 template<typename T>
 Ort::Value NNModel::toTensor(const std::string & name, std::vector<T> & vec, const std::vector<int64_t> & shape) const
 {
-	// Sanity check
-	int64_t numel = 1;
-	for(int64_t d : shape)
-		numel *= d;
-
-	if(numel != vec.size())
-		throwf("toTensor: %s: numel check failed: want: %d, have: %d", name, numel, vec.size());
+	// Reject invalid/overflowing graph shape before constructing an ONNX
+	// tensor, without changing valid V13/V15 observation contents.
+	requireNNTensorElementCount(name, shape, vec.size());
 	// Reject corrupted battle attributes before they reach the V13 ONNX graph.
 	if constexpr(std::is_same_v<T, float>)
 		validateNNObservationValues(vec, name);

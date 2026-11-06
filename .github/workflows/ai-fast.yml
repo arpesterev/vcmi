@@ -246,6 +246,7 @@ jobs:
                       'V15RejectsUnrepresentableNeuralActionIdBeforeDispatch',
                       'V13V15WarMachineTargetsOnlyLivingShootableEnemies',
                       'V13V15RejectNonFiniteObservationBeforeInference',
+                      'V13V15RejectInvalidTensorElementCountsBeforeOnnxAllocation',
                       'V13V15RejectMovedOrReplacedObservedActorBeforeDispatch',
                       'RejectsScriptedFallbackForStrictOrInvalidActiveActor',
                       'V13RejectsDeadOrMissingEngineOwnedMachineActor',

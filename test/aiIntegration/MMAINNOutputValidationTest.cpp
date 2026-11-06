@@ -102,6 +102,37 @@ TEST(MMAINNOutputValidation, V13V15RejectNonFiniteObservationBeforeInference)
 	}
 }
 
+
+TEST(MMAINNOutputValidation, V13V15RejectInvalidTensorElementCountsBeforeOnnxAllocation)
+{
+	using MMAI::BAI::requireNNTensorElementCount;
+	const auto maxDimension = std::numeric_limits<std::int64_t>::max();
+
+	// Valid scalar and sparse graph tensors must remain supported.
+	EXPECT_NO_THROW(requireNNTensorElementCount("scalar", {}, 1));
+	EXPECT_NO_THROW(requireNNTensorElementCount("ei_flat", {2, 0}, 0));
+	EXPECT_NO_THROW(requireNNTensorElementCount("edge_attr_flat", {0, 4}, 0));
+	EXPECT_NO_THROW(requireNNTensorElementCount("x_Unit", {2, 3}, 6));
+
+	// Invalid event-adapter dimensions fail before ONNX allocation.
+	EXPECT_THROW(requireNNTensorElementCount("ei_flat", {-1, 3}, 0), std::runtime_error);
+	EXPECT_THROW(requireNNTensorElementCount("edge_attr_flat", {0, -1}, 0), std::runtime_error);
+	EXPECT_THROW(requireNNTensorElementCount("x_Unit", {maxDimension, 3}, 0), std::runtime_error);
+	EXPECT_THROW(requireNNTensorElementCount("x_Unit", {2, 3}, 5), std::runtime_error);
+	EXPECT_THROW(requireNNTensorElementCount("scalar", {}, 0), std::runtime_error);
+
+	try
+	{
+		requireNNTensorElementCount("x_Action", {maxDimension, 3}, 0);
+		FAIL() << "Overflowing neural shape reached ONNX allocation";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("x_Action"), std::string::npos);
+		EXPECT_NE(std::string(e.what()).find("overflows"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsUnrepresentableNeuralActionIdBeforeDispatch)
 {
 	using MMAI::BAI::checkedNNV15ActionId;
