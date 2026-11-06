@@ -4682,8 +4682,9 @@ TEST_F(AIIntegrationNativeBattle, homm3CavalierUsesSourceLongTieBreakInServerBat
 // must pass each opposing melee origin (and its actual path cost) to the
 // authoritative VCMI damage preview, rather than pricing every origin as
 // a zero-distance strike from the stack's current position. This fixture
-// establishes the native origin-dependent estimate and an accepted real
-// server battle; it does NOT establish source-executable decision parity.
+// establishes distinct native origin/path inputs and an accepted real
+// server battle; it does NOT assume different native damage estimates or
+// establish source-executable decision parity.
 TEST_F(AIIntegrationNativeBattle, homm3NativeJousterPathDependentDamagePreviewAndBattle)
 {
 	prepareBattle(CreatureID(10), 4, CreatureID(0), 100);
