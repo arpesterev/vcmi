@@ -822,6 +822,37 @@ private:
 				info.defenderPos = cell;
 				worstEnemyLoss = std::max(worstEnemyLoss,
 					lossValue(attacker, battle.battleEstimateDamage(info)));
+				// Pinned simulateAttack returns after a single ranged hit,
+				// whereas the VCMI host fires ordinary extra volleys.
+				// Re-evaluate each against a detached surviving victim; the
+				// total is capped by actual available HP. This is a conservative
+				// threat bound, not the retail enemy_attacks field: intervening
+				// counterfire and random on-hit abilities remain unmodeled.
+				int volleys = enemy->getTotalAttacks(true);
+				if(const auto * hero = battle.battleGetFightingHero(enemy->unitSide()))
+					volleys += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+						BonusSubtypeID(enemy->creatureId()));
+				volleys = std::min(volleys, enemy->shots.available());
+				if(volleys > 1)
+				{
+					auto remainingShooter = enemy->acquireState();
+					auto remainingVictim = attacker.acquireState();
+					for(int shot = 0; shot < volleys && remainingVictim->alive(); ++shot)
+					{
+						BattleAttackInfo volley(remainingShooter.get(), remainingVictim.get(), 0, true);
+						volley.attackerPos = enemy->getPosition();
+						volley.defenderPos = cell;
+						const auto estimate = battle.battleEstimateDamage(volley);
+						int64_t hit = estimate.damage.min
+							+ (estimate.damage.max - estimate.damage.min) / 2;
+						hit = std::clamp<int64_t>(hit, 0, remainingVictim->getAvailableHealth());
+						remainingVictim->damage(hit);
+					}
+					const auto lost = attacker.getAvailableHealth() - remainingVictim->getAvailableHealth();
+					if(attacker.getAvailableHealth() > 0)
+						worstEnemyLoss = std::max(worstEnemyLoss,
+							stackValue * static_cast<double>(lost) / attacker.getAvailableHealth());
+				}
 			}
 			for(const auto & origin : threat.reachableOrigins)
 			{
