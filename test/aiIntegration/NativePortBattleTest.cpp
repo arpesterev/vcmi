@@ -5581,7 +5581,7 @@ TEST_F(AIIntegrationNativeBattle, homm3MultiVolleyAreaShotDamagesSecondaryOnBoth
 // server's attack packets to prove the host-engine stopping rule.
 TEST_F(AIIntegrationNativeBattle, homm3LethalFirstAreaShotStopsFurtherNativeVolleys)
 {
-	prepareBattle(CreatureID(3), 300, CreatureID(12), 1); // Marksmen vs Angel
+	prepareBattle(CreatureID(3), 500, CreatureID(12), 1); // Marksmen vs Angel
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
 	CStack * marksmen = nullptr;
