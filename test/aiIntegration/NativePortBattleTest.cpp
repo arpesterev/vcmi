@@ -6324,6 +6324,18 @@ TEST_F(AIIntegrationNativeBattle, homm3RangedTargetTimeUsesNativeSiegeReachabili
 	const uint32_t pathSteps = reach.distToNearestNeighbour(cavalry, garrisonArcher);
 	EXPECT_GT(pathSteps, static_cast<uint32_t>(geometricDistance - 1))
 		<< "Closed fortifications must not be valued as unobstructed hex distance";
+	// HoMM3OriginalTactics now uses these exact native reachable origins
+	// when projecting a melee enemy's next-turn landing threat. Prove the
+	// real cavalry cannot attack the sheltered archer through closed walls
+	// even though straight-line hex distance is much shorter.
+	const auto attackOrigins = battle()->battleGetAvailableHexes(reach, cavalry, true);
+	ASSERT_FALSE(attackOrigins.empty());
+	EXPECT_TRUE(std::none_of(attackOrigins.begin(), attackOrigins.end(),
+		[&](BattleHex origin)
+		{
+			return !battle()->meleeAttackHexes(
+				cavalry, garrisonArcher, origin, garrisonArcher->getPosition()).empty();
+		})) << "Blocked native melee paths must not become projected enemy attacks";
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "", true);
 	EXPECT_FALSE(recorder.battleResults.empty());
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
