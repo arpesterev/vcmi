@@ -1207,8 +1207,10 @@ private:
 		{
 			return Ports::FHeroes2::preferBerserkCandidate(a.priority, b.priority);
 		});
+		// A battle may expose no selectable opponent (e.g. only invincible
+		// towers). SKIP must not add a defensive stance in that case.
 		if(sorted.empty())
-			return BattleAction::makeDefend(&stack);
+			return BattleAction::makeNoAction(&stack);
 
 		// Pinned ai_battle.cpp::berserkTurn selects nearestUnits.front()
 		// for an unengaged archer: it never skips a nearer creature to
@@ -1291,9 +1293,10 @@ private:
 				goal = previous;
 			}
 		}
-		// Source issues SKIP when no unit has a reachable future cell.
-		// Native VCMI's no-op creature order is DEFEND.
-		return BattleAction::makeDefend(&stack);
+		// Pinned fheroes2 berserkTurn issues SKIP when no future attack cell
+		// is reachable. VCMI NO_ACTION maps to SkipTurnAction (ACTED) and
+		// does not grant the DEFEND stat bonus or trigger DEFEND events.
+		return BattleAction::makeNoAction(&stack);
 	}
 
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
