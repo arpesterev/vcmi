@@ -109,6 +109,12 @@ jobs:
           /usr/bin/time -f 'AI and launcher stage elapsed: %e seconds'
           cmake --build --preset linux-gcc-test --target vcmitest vcmiserver vcmilauncher --parallel 3
 
+      # The MMAI GUI preload recovery lives in CPlayerInterface, which is
+      # not built by the server/test/launcher-only targets above.
+      - name: Compile MMAI GUI preloading and error presentation
+        if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'feature/mmai-') }}
+        run: cmake --build --preset linux-gcc-test --target vcmiclientcommon --parallel 3
+
       - name: Report compiler cache efficiency
         if: always()
         run: ccache --show-stats || true
