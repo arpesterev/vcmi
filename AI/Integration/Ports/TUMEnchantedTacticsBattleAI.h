@@ -666,8 +666,27 @@ private:
 
 	static bool shouldProtectShooters(CPlayerBattleCallback & battle, const CStack & active)
 	{
-		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-		const auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		// VCMI's ONLY_MINE / ONLY_ENEMY collections retain original sides
+		// after a real Hypnotize transfer. Assemble both sides, then partition
+		// by the engine's CURRENT owner. Otherwise a controlled former neutral
+		// falsely stops the published neutral shooter screen, while a stolen
+		// friendly shooter can be mistaken for someone worth protecting.
+		auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		auto enemies = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		std::vector<const CStack *> allVisible;
+		allVisible.reserve(friends.size() + enemies.size());
+		allVisible.insert(allVisible.end(), friends.begin(), friends.end());
+		allVisible.insert(allVisible.end(), enemies.begin(), enemies.end());
+		friends.clear();
+		enemies.clear();
+		const auto owner = battle.battleGetOwner(&active);
+		for(const auto * unit : allVisible)
+		{
+			if(battle.battleGetOwner(unit) == owner)
+				friends.push_back(unit);
+			else
+				enemies.push_back(unit);
+		}
 		if(enemies.empty() || friends.empty())
 			return false;
 
