@@ -77,6 +77,23 @@ int main()
 		HoMM3::projectedRangedTargetTime(6, 0, false)}, false) == 20,
 		"A stationary nonattacker still receives the source distant-threat discount");
 
+	// Pinned checkAdjacentHexes keeps signed long hex values. A host
+	// preview may differ by less than one combat point: the original path
+	// tie-break then decides, rather than an accidental double comparison.
+	require(HoMM3::discreteMeleeHexValue(11.9) == 11,
+		"HoMM3 melee hex value truncates positive estimates");
+	require(HoMM3::discreteMeleeHexValue(-11.9) == -11,
+		"HoMM3 melee hex value truncates negative estimates toward zero");
+	require(HoMM3::discreteMeleeHexValue(14.1) == HoMM3::discreteMeleeHexValue(14.9)
+		&& preferEqualValueMeleeHex(6, 4, true),
+		"HoMM3 Cavalier resolves sub-point equality by longer source path");
+	require(HoMM3::discreteMeleeHexValue(-1e20) == std::numeric_limits<int32_t>::min(),
+		"HoMM3 source long score clamps negative overflow");
+	require(HoMM3::discreteMeleeHexValue(1e20) == std::numeric_limits<int32_t>::max(),
+		"HoMM3 source long score clamps positive overflow");
+	try { HoMM3::discreteMeleeHexValue(std::numeric_limits<double>::quiet_NaN()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// HoMM3 check_adjacent_hexes: on equal melee value and one-turn
 	// reachability, Cavalier/Champion prefer the greater path cost.
 	require(preferEqualValueMeleeHex(6, 4, true), "Jouster prefers a longer equal-value charge");
