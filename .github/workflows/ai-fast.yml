@@ -247,6 +247,7 @@ jobs:
                       'V13V15WarMachineTargetsOnlyLivingShootableEnemies',
                       'V13V15RejectNonFiniteObservationBeforeInference',
                       'V13V15RejectInvalidTensorElementCountsBeforeOnnxAllocation',
+                      'V15RejectsOverflowDuringGraphFlatteningBeforeAllocation',
                       'V13V15RejectMovedOrReplacedObservedActorBeforeDispatch',
                       'RejectsScriptedFallbackForStrictOrInvalidActiveActor',
                       'V13RejectsDeadOrMissingEngineOwnedMachineActor',
