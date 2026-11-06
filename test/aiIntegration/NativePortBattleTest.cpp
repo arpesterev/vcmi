@@ -2718,11 +2718,12 @@ TEST_F(AIIntegrationNativeBattle, fheroes2StrategicFarewellCastThenNativeRetreat
 
 
 // Pinned planUnitTurn::hasValuableArtifacts checks artifact *bonuses*,
-// not mere inventory occupancy. Heroes III spellbooks are stored as special
-// equipment, and must not act like a bonus-bearing Heroes II artifact.
-// The second decision in the SAME live battle adds a bonus-bearing backpack
-// weapon to isolate that distinction before a real server-accepted RETREAT.
-TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeSpellbookDoesNotTriggerSourceRetreat)
+// not mere inventory occupancy. The Heroes III Grail has no combat bonus
+// in core artifact data, and no direct equivalent in Heroes II. This narrow
+// source-predicate projection intentionally does not assign it an invented
+// bonus. The second decision in the SAME live battle adds a bonus-bearing
+// backpack weapon to isolate that distinction before a server RETREAT.
+TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeGrailDoesNotTriggerSourceRetreat)
 {
 	prepareBattle(CreatureID(19), 1, CreatureID(16), 600);
 	ASSERT_FALSE(HasFatalFailure());
@@ -2742,7 +2743,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeSpellbookDoesNotTriggerSource
 		if(slot != ArtifactPosition::SPELLBOOK)
 			ASSERT_EQ(attackerSideHero->getArt(slot), nullptr)
 				<< "The baseline hero must carry no other equipment";
-	ASSERT_TRUE(attackerSideHero->artifactsInBackpack.empty());
+	// Distinguish a bare Heroes III inventory entry from a bonus-bearing
+	// original-style artifact. The Grail is economically important in H3,
+	// but core config/artifacts.json defines no combat bonuses for it.
+	const ArtifactPosition grailSlot(ArtifactPosition::BACKPACK_START);
+	ASSERT_TRUE(gameHandler->giveHeroNewArtifact(attackerSideHero, ArtifactID::GRAIL, grailSlot));
+	const auto * grail = attackerSideHero->getArt(grailSlot);
+	ASSERT_NE(grail, nullptr);
+	ASSERT_NE(grail->getType(), nullptr);
+	EXPECT_TRUE(grail->getType()->getExportedBonusList().empty());
+	EXPECT_TRUE(grail->getType()->instanceBonuses.empty());
+	EXPECT_TRUE(grail->getExportedBonusList().empty());
+	ASSERT_EQ(attackerSideHero->artifactsInBackpack.size(), 1u);
 	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
 	ASSERT_NE(active, nullptr);
 	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
@@ -2765,10 +2777,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeSpellbookDoesNotTriggerSource
 	policy->activeStack(battleID, active);
 	ASSERT_TRUE(callback->action.has_value());
 	EXPECT_NE(callback->action->actionType, EActionType::RETREAT)
-		<< "An empty spellbook is not a bonus-bearing source artifact";
+		<< "An H3 Grail carries no source-equivalent bonus and must not force source retreat";
 	EXPECT_NE(callback->action->actionType, EActionType::SURRENDER);
 
-	const ArtifactPosition backpackSlot(ArtifactPosition::BACKPACK_START);
+	const ArtifactPosition backpackSlot(ArtifactPosition::BACKPACK_START + 1);
 	ASSERT_TRUE(gameHandler->giveHeroNewArtifact(attackerSideHero, ArtifactID(7), backpackSlot));
 	const auto * weapon = attackerSideHero->getArt(backpackSlot);
 	ASSERT_NE(weapon, nullptr);
