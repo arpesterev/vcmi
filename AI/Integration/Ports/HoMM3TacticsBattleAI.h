@@ -828,11 +828,12 @@ private:
 				// total is capped by actual available HP. This is a conservative
 				// threat bound, not the retail enemy_attacks field: intervening
 				// counterfire and random on-hit abilities remain unmodeled.
-				int volleys = enemy->getTotalAttacks(true);
-				if(const auto * hero = battle.battleGetFightingHero(enemy->unitSide()))
-					volleys += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
-						BonusSubtypeID(enemy->creatureId()));
-				volleys = std::min(volleys, enemy->shots.available());
+				// The opponent hero is intentionally hidden from a player-scoped
+				// CBattleInfo callback. battleGetFightingHero(enemy->unitSide())
+				// would THROW_INVALID_CALL, not return a public bonus value.
+				// Therefore count intrinsic/stack attacks only; additional
+				// enemy-hero grants remain an explicitly unported information gap.
+				const int volleys = std::min(enemy->getTotalAttacks(true), enemy->shots.available());
 				if(volleys > 1)
 				{
 					auto remainingShooter = enemy->acquireState();
