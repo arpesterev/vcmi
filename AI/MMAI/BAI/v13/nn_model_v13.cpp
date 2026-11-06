@@ -606,13 +606,11 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 		// edge count is an int64 ONNX axis and is duplicated for edge indices.
 		// Validate all three bounds before appending to the vectors, not
 		// after an overflowing cast or reserve multiplication.
-		const auto nextEdges = checkedNNObservationSum("V13 edges", ei_flat_src.size(), nlinks);
-		(void)checkedNNObservationAxis("V13 edges", nextEdges);
-		(void)checkedNNObservationProduct("V13 edge indices", nextEdges, 2u);
+		const int linkLength = checkedNNV13LinkLength(ei_flat_src.size(), nlinks);
 
 		oss << nlinks << " ";
 
-		lengths.push_back(checkedNNObservationIntSize("V13 link length", nlinks));
+		lengths.push_back(linkLength);
 
 		ei_flat_src.insert(ei_flat_src.end(), srcinds.begin(), srcinds.end());
 		ei_flat_dst.insert(ei_flat_dst.end(), dstinds.begin(), dstinds.end());
