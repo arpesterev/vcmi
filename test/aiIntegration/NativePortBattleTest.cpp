@@ -5581,6 +5581,61 @@ TEST_F(AIIntegrationNativeBattle, homm3TwoEnemyThreatProjectsIntoNativeMeleeBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Distinct native hostile stacks must now contribute to the landing-risk
+// approximation rather than being collapsed into the strongest ONE.
+// An ordinary archer and two separate Peasant stacks provide three legal
+// threats in this test. An independently chosen action must be accepted by
+// the actual server and the fight must reach a terminal result. This does
+// not establish an isolated position-choice delta or retail HoMM3 parity.
+TEST_F(AIIntegrationNativeBattle, homm3IndependentEnemyThreatsCompleteNativeServerBattle)
+{
+	prepareBattle(CreatureID(10), 24, CreatureID(2), 16);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	const BattleHex first(cavalier->getPosition().toInt() + 5);
+	const BattleHex second(cavalier->getPosition().toInt() + 3);
+	ASSERT_TRUE(first.isAvailable());
+	ASSERT_TRUE(second.isAvailable());
+	ASSERT_NE(first, second);
+	ASSERT_EQ(battle()->battleGetUnitByPos(first), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(second), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), first, 6), nullptr);
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), second, 6), nullptr);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, cavalier);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "The partial HoMM3 scorer must choose a real melee command";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native game handler rejected HoMM3's independently chosen action";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Pinned ai_tactical.cpp::type_AI_spellcaster::findEnemyAttacks visits
 // every enemy army, independent of the active stack's legal attack targets.
 // An INVINCIBLE VCMI creature cannot be hit but can still threaten a landing

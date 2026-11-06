@@ -678,10 +678,15 @@ private:
 		const CStack & attacker, const CStack & primaryTarget, BattleHex destination,
 		BattleHex cell, const std::vector<MeleeThreatSource> & threats)
 	{
-		double worstLoss = 0;
+		// Every enemy may act after the selected melee strike. Count at most
+		// one attack per enemy, yet do not discard other enemies entirely.
+		// Saturating at the full stack's value avoids fictitious overkill.
+		double accumulatedLoss = 0;
+		const double stackValue = std::max(0.0, static_cast<double>(attacker.estimateCombatValue()));
 		for(const auto & threat : threats)
 		{
 			const auto * enemy = threat.stack;
+			double worstEnemyLoss = 0;
 			// The pinned findEnemyAttacks source excludes stacks which cannot
 			// act (including the source's incapacitating spell guard). A Blind
 			// or Paralyze target is still physically present and may be attacked,
@@ -752,7 +757,7 @@ private:
 				BattleAttackInfo info(enemy, &attacker, 0, true);
 				info.attackerPos = enemy->getPosition();
 				info.defenderPos = cell;
-				worstLoss = std::max(worstLoss,
+				worstEnemyLoss = std::max(worstEnemyLoss,
 					lossValue(attacker, battle.battleEstimateDamage(info)));
 			}
 			for(const auto & origin : threat.reachableOrigins)
@@ -765,8 +770,10 @@ private:
 				worstLoss = std::max(worstLoss,
 					lossValue(attacker, battle.battleEstimateDamage(info)));
 			}
+			accumulatedLoss = Ports::HoMM3::addIndependentEnemyThreat(
+				accumulatedLoss, worstEnemyLoss, stackValue);
 		}
-		return -worstLoss;
+		return -accumulatedLoss;
 	}
 
 	static double projectedLandingThreat(CPlayerBattleCallback & battle,

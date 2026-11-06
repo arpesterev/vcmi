@@ -243,6 +243,26 @@ int main()
 	try { HoMM3::projectedRangedTargetTime(2, -1, false); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
+	// The original checkAdjacentHexes reads a per-hex enemy_attacks field.
+	// The still-partial VCMI projection must account for distinct attackers:
+	// select one strongest action per enemy, sum the independent losses and
+	// bound casualties by the landing army's original combat value. Do not
+	// add a single enemy's shot and melee threat twice.
+	require(HoMM3::addIndependentEnemyThreat(0, 25, 100) == 25,
+		"First hostile stack contributes its actual projected attack");
+	require(HoMM3::addIndependentEnemyThreat(25, 30, 100) == 55,
+		"Distinct enemy threats must accumulate rather than keep only maximum");
+	require(HoMM3::addIndependentEnemyThreat(85, 30, 100) == 100,
+		"Independent threats cannot kill more than the whole active stack");
+	require(HoMM3::addIndependentEnemyThreat(25, 0, 100) == 25,
+		"Inactive or unreachable opponents add no imagined threat");
+	require(HoMM3::addIndependentEnemyThreat(1e308, 1e308, 100) == 100,
+		"Finite extreme projections saturate without yielding infinity");
+	try { HoMM3::addIndependentEnemyThreat(1, -1, 100); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::addIndependentEnemyThreat(0, 1, std::numeric_limits<double>::quiet_NaN()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// Source checkAdjacentHexes combines a wide stack's per-cell threats
 	// using min, so the more exposed cell dominates, not their average.
 	require(HoMM3::moreExposedFootprintThreat(-50, -10) == -50,

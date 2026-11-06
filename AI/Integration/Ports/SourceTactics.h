@@ -158,6 +158,21 @@ inline bool nativeTargetCanAttack(bool canMelee, bool canShootNow)
 	return canMelee || canShootNow;
 }
 
+// The pinned checkAdjacentHexes consults a precomputed enemy_attacks[cell]
+// field. Its generator is not yet reproduced. In the native approximation,
+// each distinct hostile stack can take at most one ordinary next action:
+// combine the strongest shot or melee approach PER enemy, but never value
+// casualties above the total combat value of our landing stack. Taking the
+// global maximum misses independent threats from other living enemies.
+// This is a bounded VCMI threat proxy, not a recovery of the retail field.
+inline double addIndependentEnemyThreat(double accumulatedLoss, double nextEnemyLoss, double stackValue)
+{
+	if(!std::isfinite(accumulatedLoss) || !std::isfinite(nextEnemyLoss) || !std::isfinite(stackValue)
+		|| accumulatedLoss < 0 || nextEnemyLoss < 0 || stackValue < 0)
+		throw std::invalid_argument("HoMM3 threat projection needs finite nonnegative combat values");
+	return std::min(stackValue, accumulatedLoss + nextEnemyLoss);
+}
+
 // checkAdjacentHexes uses the lower enemy_attacks score for two occupied
 // hexes. Native projected incoming-damage scores are negative (danger).
 inline double moreExposedFootprintThreat(double head, double tail)
