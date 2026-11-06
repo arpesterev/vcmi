@@ -1589,6 +1589,101 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkUnitExecutesNativeActionAndBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 ai_battle.cpp::berserkTurn: if no unit can be attacked
+// this turn, findNearestCellNextToUnit supplies a reachable future melee
+// position and getUnitMovementTarget produces the first legal move. The VCMI
+// port must follow a real path predecessor, not merely minimize hex distance.
+// This is native path evidence, not an executable Heroes II oracle.
+TEST_F(AIIntegrationNativeBattle, fheroes2BerserkPursuesReachableFutureAttackCellOnNativePath)
+{
+	prepareBattle(CreatureID(0), 45, CreatureID(0), 40);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const auto * acting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(acting, nullptr);
+	ASSERT_FALSE(acting->isShooter());
+	const BattleSide side = acting->unitSide();
+	const BattleSide enemySide = side == BattleSide::ATTACKER
+		? BattleSide::DEFENDER : BattleSide::ATTACKER;
+	const CStack * opponent = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == enemySide && unit->alive())
+			opponent = unit.get();
+	ASSERT_NE(opponent, nullptr);
+
+	auto * caster = enemySide == BattleSide::ATTACKER ? attackerSideHero : defenderSideHero;
+	teachBattleSpell(caster, SpellID::BERSERK, 6);
+	ASSERT_TRUE(castOn(caster, SpellID::BERSERK, acting));
+	ASSERT_TRUE(acting->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	ASSERT_EQ(battle()->battleActiveUnit(), acting);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(side);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto route = view->getReachability(acting);
+	const auto available = view->battleGetAvailableHexes(route, acting, false);
+	int shortest = GameConstants::BFIELD_SIZE;
+	BattleHex goal;
+	for(const auto & from : opponent->getAttackableHexes(acting))
+	{
+		if(!from.isValid() || !view->isMeleeAttackPossible(acting, opponent, from))
+			continue;
+		const int cost = static_cast<int>(route.distances[from.toInt()]);
+		if(cost < shortest || (cost == shortest
+			&& (!goal.isValid() || from.toInt() < goal.toInt())))
+		{
+			shortest = cost;
+			goal = from;
+		}
+	}
+	ASSERT_TRUE(goal.isValid());
+	ASSERT_GT(shortest, static_cast<int>(acting->getMovementRange()))
+		<< "Fixture must require future-turn melee pursuit";
+	ASSERT_LT(shortest, GameConstants::BFIELD_SIZE);
+	BattleHex firstStep;
+	for(int i = 0; i < GameConstants::BFIELD_SIZE; ++i)
+	{
+		if(available.contains(goal) && goal != acting->getPosition())
+		{
+			firstStep = goal;
+			break;
+		}
+		const auto previous = route.predecessors[goal.toInt()];
+		if(!previous.isValid() || previous == goal)
+			break;
+		goal = previous;
+	}
+	ASSERT_TRUE(firstStep.isValid())
+		<< "Fixture needs a complete native multi-turn predecessor route";
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), side, false);
+	policy->activeStack(battleID, acting);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Berserk must approach its reachable future melee target";
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().hexValue, firstStep)
+		<< "Source-derived pursuit must use native path, not geometric guess";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The authoritative server rejected a compelled future-target move";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Pinned fheroes2 ai_battle.cpp::berserkTurn shoots nearestUnits.front(),
 // never the first more distant target the native API happens to allow.
 // VCMI's restricted FREE_SHOOTING permits firing while engaged, but not at
