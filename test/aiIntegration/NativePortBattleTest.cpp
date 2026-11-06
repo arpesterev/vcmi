@@ -3361,6 +3361,120 @@ TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotThreatSpreadsArcherCover)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned ai_battle.cpp::analyzeBattleState counts AREA_SHOT pressure only
+// when the area shooter is NOT hand-fighting. Heroes III FREE_SHOOTING can
+// still authorize a real native shot during physical contact; that native
+// permission must not silently override the Heroes II spacing policy.
+// Compare two independent decisions on the same server battle, then submit
+// the resulting movement to the authoritative engine and finish the fight.
+TEST_F(AIIntegrationNativeBattle, fheroes2EngagedAreaShooterDoesNotSpreadCoverDespiteNativeFreeShooting)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex original = guard->getPosition();
+	const BattleHex archerHex(original.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex threatHex(archerHex.toInt() + 5);
+	for(const auto & hex : {archerHex, threatHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	const auto * archer = addStack(BattleSide::ATTACKER, CreatureID(2), archerHex, 120);
+	const auto * threat = addStack(BattleSide::DEFENDER, CreatureID(0), threatHex, 15);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(threat, nullptr);
+	ASSERT_LE(BattleHex::getDistance(archerHex, threatHex),
+		static_cast<int>(threat->getMovementRange()) + 1);
+	ASSERT_GT(BattleHex::getDistance(original, threatHex),
+		static_cast<int>(guard->getMovementRange()) + 1);
+
+	BattleHex splashHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(!candidate.isAvailable() || candidate.getX() < 11
+			|| battle()->battleGetUnitByPos(candidate) != nullptr
+			|| BattleHex::getDistance(candidate, original) <= static_cast<int>(guard->getMovementRange()) + 1
+			|| BattleHex::getDistance(candidate, threatHex) < 3)
+			continue;
+		splashHex = candidate;
+		break;
+	}
+	ASSERT_TRUE(splashHex.isValid());
+	auto * splash = addStack(BattleSide::DEFENDER, CreatureID(45), splashHex, 12);
+	ASSERT_NE(splash, nullptr);
+	ASSERT_TRUE(splash->isShooter());
+	splash->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(splash->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT));
+	ASSERT_FALSE(battle()->battleIsUnitBlocked(splash));
+	ASSERT_TRUE(battle()->battleCanShoot(splash));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, guard);
+		return callback->action;
+	};
+	const auto before = decide();
+	ASSERT_TRUE(before.has_value());
+	ASSERT_EQ(before->actionType, EActionType::WALK);
+	ASSERT_FALSE(before->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(before->target.front().hexValue, archerHex), 2)
+		<< "Unengaged area shooter requires a two-hex screen";
+
+	BattleHex engagedHex;
+	for(const auto & hex : splash->getSurroundingHexes())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			engagedHex = hex;
+			break;
+		}
+	ASSERT_TRUE(engagedHex.isValid());
+	ASSERT_NE(addStack(BattleSide::ATTACKER, CreatureID(0), engagedHex, 1), nullptr);
+	ASSERT_TRUE(battle()->battleIsUnitBlocked(splash))
+		<< "A real hostile stack must engage the area shooter";
+	// Keep native shooting legal to expose the original battleCanShoot bug.
+	splash->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::FREE_SHOOTING, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(battle()->battleCanShoot(splash))
+		<< "Native Heroes III permission must survive actual melee contact";
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const auto after = decide();
+	ASSERT_TRUE(after.has_value());
+	ASSERT_EQ(after->actionType, EActionType::WALK)
+		<< "Source engaged-area rule should keep ordinary close cover";
+	ASSERT_FALSE(after->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(after->target.front().hexValue, archerHex), 1)
+		<< "Physical contact, not VCMI shot legality, controls source splash spacing";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
+		<< "VCMI rejected the source-ordered native cover step";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Pinned fheroes2 analyzeBattleState counts AREA_SHOT pressure only for
 // mobile archers. Blind does not erase the VCMI creature's area-shot bonus,
 // but it must remove the extra spacing requirement from shooter coverage.
