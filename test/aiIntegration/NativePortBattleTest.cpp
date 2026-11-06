@@ -1004,8 +1004,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CastleGarrisonHoldsItsMeleeLineForShoo
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
 	policy->activeStack(battleID, infantry);
 	ASSERT_TRUE(callback->action.has_value());
-	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
-		<< "Defender must use intact fortifications as cover for its shooter";
+	EXPECT_EQ(callback->action->actionType, EActionType::NO_ACTION)
+		<< "Source defense without a legal command must SKIP, not gain a Heroes III defense bonus";
 	runToCompletion(std::nullopt, false);
 }
 
@@ -3554,7 +3554,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedReserveArcherDoesNotDistortMult
 	const BattleHex origin = guard->getPosition();
 	const BattleHex highHex(origin.toInt() + 7);
 	const BattleHex highBlockerHex(highHex.toInt() + 1);
-	const BattleHex lowHex(origin.toInt() + 4 * GameConstants::BFIELD_WIDTH + 3);
+	// The preceding native server run measured five route steps here, exactly
+	// the guard's five-hex movement range. Place the lower-priority blocker
+	// farther away so BOTH choices exercise multi-turn pursuit.
+	const BattleHex lowHex(origin.toInt() + 4 * GameConstants::BFIELD_WIDTH + 5);
 	const BattleHex lowBlockerHex(lowHex.toInt() + 1);
 	const BattleHex reserveHex(origin.toInt() - 2 * GameConstants::BFIELD_WIDTH);
 	for(const auto & hex : {highHex, highBlockerHex, lowHex, lowBlockerHex, reserveHex})
@@ -3562,11 +3565,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedReserveArcherDoesNotDistortMult
 		ASSERT_TRUE(hex.isAvailable());
 		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
 	}
-	const auto * high = addStack(BattleSide::ATTACKER, CreatureID(2), highHex, 250);
-	const auto * highBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), highBlockerHex, 1);
+	const auto * high = addStack(BattleSide::ATTACKER, CreatureID(2), highHex, 200);
+	const auto * highBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), highBlockerHex, 2000);
 	const auto * low = addStack(BattleSide::ATTACKER, CreatureID(2), lowHex, 100);
 	const auto * lowBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), lowBlockerHex, 1);
-	const auto * reserve = addStack(BattleSide::ATTACKER, CreatureID(2), reserveHex, 5000);
+	const auto * reserve = addStack(BattleSide::ATTACKER, CreatureID(2), reserveHex, 1500);
 	ASSERT_NE(high, nullptr);
 	ASSERT_NE(highBlocker, nullptr);
 	ASSERT_NE(low, nullptr);
@@ -3630,6 +3633,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedReserveArcherDoesNotDistortMult
 	const double reserveValue = reserve->estimateCombatValue();
 	const double activeTotal = highValue + lowValue;
 	const double beforeTotal = activeTotal + reserveValue;
+	// The source's defensive stance needs BOTH the power-ratio and the
+	// mobile-shooter-fraction gates. An overwhelmingly large reserve made
+	// the old fixture offensive, so it exercised generic approach rather
+	// than either archer-blocker priority. Keep the blinded shooters in
+	// army strength, but exclude them from the mobile-shooter numerator.
+	double enemyStrength = 0;
+	for(const auto & unit : battle()->stacks)
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER)
+			enemyStrength += unit->estimateCombatValue();
+	ASSERT_GT(enemyStrength, 0);
+	ASSERT_LE(guard->estimateCombatValue() + beforeTotal, 10.0 * enemyStrength);
+	ASSERT_GT(activeTotal / (guard->estimateCombatValue() + beforeTotal), 0.15);
 	ASSERT_LT(highValue - beforeTotal * highTravel / 15.0,
 		lowValue - beforeTotal * lowTravel / 15.0)
 		<< "Before Blind, a massive mobile reserve must favor the closer screen";
@@ -4191,8 +4206,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedMeleeStopsProjectingShooterCove
 	ASSERT_EQ(battle()->battleActiveUnit(), guard);
 	const auto after = decide();
 	ASSERT_TRUE(after.has_value());
-	EXPECT_EQ(after->actionType, EActionType::DEFEND)
-		<< "An incapacitated distant enemy must not force an unnecessary archer screen";
+	EXPECT_EQ(after->actionType, EActionType::NO_ACTION)
+		<< "An incapacitated distant enemy must not force a screen or invent DEFEND";
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
 		<< "The native server rejected the source-derived choice after disabling the threat";
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
@@ -4356,8 +4371,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerA
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
 	policy->activeStack(battleID, guard);
 	ASSERT_TRUE(callback->action.has_value());
-	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
-		<< "A hypnotized enemy may not reposition to screen its controller's archers: "
+	EXPECT_EQ(callback->action->actionType, EActionType::NO_ACTION)
+		<< "A hypnotized enemy must SKIP instead of screening its controller's archers: "
 		<< callback->action->toString();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Engine rejected the hypnotized unit's defensive command";
@@ -4601,8 +4616,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideGuardDoesNotInventNarrowEnemyTailT
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
 	policy->activeStack(battleID, guard);
 	ASSERT_TRUE(callback->action.has_value());
-	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
-		<< "A phantom tail must not trigger a defensive cover move: " << callback->action->toString();
+	EXPECT_EQ(callback->action->actionType, EActionType::NO_ACTION)
+		<< "A phantom tail must not trigger cover or an unearned DEFEND: " << callback->action->toString();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Engine rejected the guard's actual defensive action";
 	policy.reset();
@@ -6406,8 +6421,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideCastleDefenderKeepsShelteredStance
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
 	policy->activeStack(battleID, guard);
 	ASSERT_TRUE(callback->action.has_value());
-	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND)
-		<< "A fully sheltered wide castle guard should favor the ranged castle defense";
+	EXPECT_EQ(callback->action->actionType, EActionType::NO_ACTION)
+		<< "A sheltered wide castle guard without a legal source command must SKIP";
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 }
