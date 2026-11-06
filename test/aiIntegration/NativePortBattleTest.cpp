@@ -1595,6 +1595,89 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkShooterDoesNotSkipAdjacentNeare
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Independent pinned-source regression: fheroes2 berserkTurn checks
+// !isHandFighting() before any ranged command. VCMI's unrestricted
+// FREE_SHOOTING is a Heroes III mechanic and does not override that
+// source-policy ordering. Verify an actual alternative legal SHOOT
+// exists, yet FHeroes2 chooses melee and the server accepts it.
+TEST_F(AIIntegrationNativeBattle, fheroes2BerserkBlockedShooterPrefersMeleeEvenWithNativeFreeShooting)
+{
+	prepareBattle(CreatureID(2), 70, CreatureID(2), 50);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const auto * acting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(acting, nullptr);
+	ASSERT_TRUE(acting->isShooter());
+	const BattleSide side = acting->unitSide();
+	const BattleSide enemySide = side == BattleSide::ATTACKER
+		? BattleSide::DEFENDER : BattleSide::ATTACKER;
+	const CStack * remote = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == enemySide && unit->isShooter() && unit->alive())
+			remote = unit.get();
+	ASSERT_NE(remote, nullptr);
+	const BattleHex nearHex(acting->getPosition().toInt()
+		+ (side == BattleSide::ATTACKER ? 1 : -1));
+	ASSERT_TRUE(nearHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearHex), nullptr);
+	ASSERT_GT(BattleHex::getDistance(acting->getPosition(), remote->getPosition()), 1);
+	const CStack * nearest = addStack(enemySide, CreatureID(0), nearHex, 15);
+	ASSERT_NE(nearest, nullptr);
+	ASSERT_EQ(BattleHex::getDistance(acting->getPosition(), nearest->getPosition()), 1);
+	ASSERT_EQ(battle()->battleActiveUnit(), acting);
+
+	// Heroes II berserkTurn requires !isHandFighting() before shooting.
+	// VCMI unrestricted FREE_SHOOTING (Bow of the Sharpshooter effect)
+	// permits a shot even while engaged. Keep the source's hand-fighting
+	// branch, projecting its decision onto a legal native melee attack.
+	// This bonus is fixture-only and does not modify gameplay rules.
+	auto * mutableActing = const_cast<CStack *>(acting);
+	mutableActing->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::FREE_SHOOTING, BonusSource::OTHER, 1, BonusSourceID(),
+		)));
+	const auto * caster = enemySide == BattleSide::ATTACKER ? attackerSideHero : defenderSideHero;
+	teachBattleSpell(const_cast<CGHeroInstance *>(caster), SpellID::BERSERK, 6);
+	ASSERT_TRUE(castOn(const_cast<CGHeroInstance *>(caster), SpellID::BERSERK, acting));
+	ASSERT_TRUE(acting->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	ASSERT_TRUE(battle()->battleCanShoot(acting))
+		<< "Unrestricted native free shooting must allow a shot while engaged";
+	ASSERT_TRUE(battle()->battleIsUnitBlocked(acting))
+		<< "Adjacent hostile must block the native Berserk shooter";
+	ASSERT_TRUE(battle()->battleCanShoot(acting, nearHex))
+		<< "Unrestricted native free shooting must allow the adjacent shot";
+	ASSERT_TRUE(battle()->battleCanShoot(acting, remote->getPosition()))
+		<< "Native free shooting must allow ranged targets, unlike source hand-fighting priority";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(side);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), side, false);
+	policy->activeStack(battleID, acting);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_FALSE(callback->spellAction);
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Pinned berserkTurn must select melee while hand-fighting, even if VCMI permits shooting";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(battle()->battleGetUnitByPos(callback->action->target[1].hexValue), nearest);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI server rejected the source-ordered Berserk melee";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
 {
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
