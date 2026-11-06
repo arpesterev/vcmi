@@ -6295,7 +6295,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaCannotTargetHypnotizedFriendlyForme
 	EXPECT_EQ(callback->action->target.front().unitValue, actualEnemy->unitId())
 		<< "A TUM war machine must not shoot its current Hypnotized ally";
 	std::cout << "AI_TUM_HYPNOTIZED_BALLISTA former_enemy_listed=" << formerEnemyInList
-		<< " baseline=" << baseline.toString() << " tum=" << callback->action->toString() << '\\n';
+		<< " baseline=" << baseline.toString() << " tum=" << callback->action->toString() << '\n';
 
 	const auto enemyHealthBefore = actualEnemy->getAvailableHealth();
 	const int shotsBefore = recorder.shots;
