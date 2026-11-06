@@ -2093,6 +2093,52 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SpellThreatPreservesForgottenArcherStr
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 ai_battle_spell.cpp::spellDamageValue penalizes nonlethal
+// damage which would wake a Blind/Paralyze target. VCMI's isFrozen()
+// recognizes STONE_GAZE only, so the old port gave blinded targets a
+// positive spell-damage priority, inverting the source heuristic.
+// Confirm the valuation against an actual server-applied Blind and then
+// complete the genuine battle without changing rules or fabricating casts.
+TEST_F(AIIntegrationNativeBattle, fheroes2NativeBlindAppliesSourceNonlethalDamageWakePenalty)
+{
+	prepareBattle(CreatureID(0), 70, CreatureID(0), 140);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * target = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			target = unit.get();
+	ASSERT_NE(target, nullptr);
+	ASSERT_GT(target->getAvailableHealth(), 4);
+	const auto damage = target->getAvailableHealth() / 4;
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto playerView = callback->getBattle(battle()->getBattleID());
+	ASSERT_NE(playerView, nullptr);
+	const double initial = AIIntegration::FHeroes2SpellPolicy::sourceDamageValue(
+		*playerView, *target, damage);
+	EXPECT_GT(initial, 0) << "An active target must have positive nonlethal damage value";
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, target));
+	ASSERT_TRUE(target->hasBonusOfType(BonusType::NOT_ACTIVE))
+		<< "The authoritative server must apply a genuine cannot-act status";
+	ASSERT_FALSE(target->isFrozen())
+		<< "VCMI isFrozen means Stone Gaze, not the native Blind status";
+	ASSERT_GT(target->estimateCombatValue(), 0)
+		<< "The directed target must retain nonzero combat value under Blind";
+	const double after = AIIntegration::FHeroes2SpellPolicy::sourceDamageValue(
+		*playerView, *target, damage);
+	const double fraction = static_cast<double>(damage) / target->getAvailableHealth();
+	EXPECT_NEAR(after, static_cast<double>(target->estimateCombatValue())
+		* (2 * fraction - 1), 1e-6);
+	EXPECT_LT(after, 0)
+		<< "A sub-half-health strike would wake Blind: source values it negatively";
+
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0) << "Native armies must still fight to a result";
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2FarewellSpellChoosesNativeDamageAndCompletesBattle)
 {
 	// Pinned planUnitTurn::farewellSpellcast uses selectBestSpell(..., true)
