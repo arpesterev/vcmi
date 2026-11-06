@@ -623,10 +623,20 @@ private:
 	// attacks. A geometric speed radius alone incorrectly projects melee
 	// attacks THROUGH closed fortress walls and blocking obstacles.
 	// This is still not the original HoMM3 precomputed target/threat map.
+	// Each hostile origin has a different native path cost (including charge
+	// distance). The source threat map is path-dependent; evaluating damage
+	// from a threat's CURRENT hex makes a mobile Cavalier appear stationary.
+	// This is still a VCMI estimate, not the retail HoMM3 threat field.
+	struct MeleeThreatOrigin
+	{
+		BattleHex hex;
+		int pathCost;
+	};
+
 	struct MeleeThreatSource
 	{
 		const CStack * stack;
-		BattleHexArray reachableOrigins;
+		std::vector<MeleeThreatOrigin> reachableOrigins;
 	};
 
 	static std::vector<MeleeThreatSource> collectThreatSources(CPlayerBattleCallback & battle,
@@ -636,14 +646,24 @@ private:
 		sources.reserve(enemies.size());
 		for(const auto * enemy : enemies)
 		{
-			BattleHexArray reachableOrigins;
+			std::vector<MeleeThreatOrigin> reachableOrigins;
 			if(enemy->alive() && enemy->getPosition().isValid()
 				&& !enemy->isCatapult() && !enemy->isFirstAidTent()
 				&& !isIncapacitated(*enemy) && !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
 				&& battle.battleCanAttackUnit(enemy, &attacker))
 			{
 				const auto reach = battle.getReachability(enemy);
-				reachableOrigins = battle.battleGetAvailableHexes(reach, enemy, true);
+				const auto available = battle.battleGetAvailableHexes(reach, enemy, true);
+				reachableOrigins.reserve(available.size());
+				for(const auto origin : available)
+				{
+					if(!origin.isAvailable())
+						continue;
+					const auto cost = reach.distances[origin.toInt()];
+					if(cost >= ReachabilityInfo::INFINITE_DIST)
+						continue;
+					reachableOrigins.push_back({origin, static_cast<int>(cost)});
+				}
 			}
 			sources.push_back({enemy, std::move(reachableOrigins)});
 		}
@@ -720,29 +740,30 @@ private:
 					canShootAdjacent, limitedRange != nullptr,
 					limitedRange ? limitedRange->val : 0,
 					BattleHex::getDistance(enemy->getPosition(), cell));
-			// A speed/distance bound invents attacks through intact siege
-			// walls. Use the enemy's *real* one-turn reachable head positions
-			// and ask native geometry whether each origin can hit the given
-			// future HEAD or TAIL of our active stack. For wide enemies the
-			// engine also considers their trailing occupied hex.
-			// War machines with no melee capability have no origins.
-			const bool canMelee = std::any_of(threat.reachableOrigins.begin(),
-				threat.reachableOrigins.end(), [&](BattleHex origin)
-				{
-					return battle.meleeAttackHexes(enemy, &attacker, origin, destination).contains(cell);
-				});
-			for(const bool shooting : {false, true})
+			// Project a hostile shot from its actual stationary position,
+			// but the VCMI melee strike from EACH legal origin and path cost.
+			// JOUSTING/charge damage depends on this cost. Using the current
+			// position and zero distance for every legal attack gives the
+			// landing threat map a false damage value even when its geometry
+			// is correct. Only the strongest possible native attack is priced.
+			// checkAdjacentHexes evaluates the future HEAD and TAIL separately.
+			if(canShoot)
 			{
-				if((shooting && !canShoot) || (!shooting && !canMelee))
-					continue;
-				BattleAttackInfo info(enemy, &attacker, 0, shooting);
-				// checkAdjacentHexes evaluates each occupied hex separately.
-				// The projected defender still occupies its old position in
-				// the live battle, so explicitly aim at the future HEAD or TAIL
-				// being scored. A head-only preview would silently discard the
-				// second cell's native attack geometry.
+				BattleAttackInfo info(enemy, &attacker, 0, true);
+				info.attackerPos = enemy->getPosition();
 				info.defenderPos = cell;
-				worstLoss = std::max(worstLoss, lossValue(attacker, battle.battleEstimateDamage(info)));
+				worstLoss = std::max(worstLoss,
+					lossValue(attacker, battle.battleEstimateDamage(info)));
+			}
+			for(const auto & origin : threat.reachableOrigins)
+			{
+				if(!battle.meleeAttackHexes(enemy, &attacker, origin.hex, destination).contains(cell))
+					continue;
+				BattleAttackInfo info(enemy, &attacker, origin.pathCost, false);
+				info.attackerPos = origin.hex;
+				info.defenderPos = cell;
+				worstLoss = std::max(worstLoss,
+					lossValue(attacker, battle.battleEstimateDamage(info)));
 			}
 		}
 		return -worstLoss;
