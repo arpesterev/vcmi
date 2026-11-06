@@ -1322,7 +1322,7 @@ private:
 		// their own legal shooting orders even when an enemy is adjacent:
 		// applying the source hand-fighting branch can send an illegal DEFEND.
 		// This is a documented Heroes II/III distinction, not source parity.
-		const bool nativeStationaryShooter = stack.creatureId() == CreatureID::BALLISTA || stack.isTurret();
+		const bool nativeStationaryShooter = stack.isBallista() || stack.isTurret();
 		if(!nativeStationaryShooter)
 		{
 			if(const auto melee = blockedArcherMelee(battle, stack, enemies))
