@@ -3634,6 +3634,80 @@ TEST_F(AIIntegrationNativeBattle, homm3GuaranteedLethalFirstHitHasNoPhantomCount
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned simulateAttack does not project a second ranged shot. The partial
+// VCMI landing map now prices an enemy Marksman's two actual volleys when
+// choosing a separate nearby melee target. Exercise that choice through the
+// native server, without asserting decision parity with the retail HoMM3 AI.
+TEST_F(AIIntegrationNativeBattle, homm3EnemyMarksmenDoubleVolleyThreatExecutesNativeBattle)
+{
+	prepareBattle(CreatureID(7), 15, CreatureID(3), 50); // Crusaders vs Marksmen
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * crusader = nullptr;
+	const CStack * marksmen = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(7))
+			crusader = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(3))
+			marksmen = unit.get();
+	}
+	ASSERT_NE(crusader, nullptr);
+	ASSERT_NE(marksmen, nullptr);
+	ASSERT_EQ(marksmen->getTotalAttacks(true), 2);
+	ASSERT_GE(marksmen->shots.available(), 2);
+	ASSERT_EQ(battle()->battleActiveUnit(), crusader);
+	BattleHex adjacent;
+	for(const auto & hex : crusader->getSurroundingHexes())
+	{
+		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex))
+		{
+			adjacent = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(adjacent.isValid());
+	const CStack * peasant = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent, 100);
+	ASSERT_NE(peasant, nullptr);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(marksmen, crusader->getPosition()));
+	const auto crusaderHealth = crusader->getAvailableHealth();
+	const auto marksmenHealth = marksmen->getAvailableHealth();
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, crusader);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	EXPECT_EQ(view->battleGetUnitByPos(action.target[1].hexValue), peasant);
+	EXPECT_EQ(crusader->getAvailableHealth(), crusaderHealth);
+	EXPECT_EQ(marksmen->getAvailableHealth(), marksmenHealth)
+		<< "Ranged threat projections must not mutate either live stack";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Native VCMI server rejected the HoMM3 melee decision";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Pinned ai_tactical.cpp::findEnemyAttacks excludes enemies which cannot
 // attack. A Ballista can shoot, but it is not a melee threat just because
 // its occupied hex is adjacent to a prospective attack landing cell.
