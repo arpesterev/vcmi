@@ -6272,6 +6272,8 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaCannotTargetHypnotizedFriendlyForme
 	const auto view = callback->getBattle(battleID);
 	ASSERT_NE(view, nullptr);
 	ASSERT_TRUE(view->battleCanShoot(ballista, actualEnemy->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(ballista, controlled->getPosition()))
+		<< "Engine legal-shot query still uses the target's original battle side; TUM must add an ownership veto";
 	const auto visibleEnemies = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 	const bool formerEnemyInList = std::any_of(visibleEnemies.begin(), visibleEnemies.end(),
 		[&](const CStack * enemy) { return enemy->unitId() == controlled->unitId(); });
