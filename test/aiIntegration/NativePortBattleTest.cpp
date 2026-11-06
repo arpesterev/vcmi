@@ -2743,9 +2743,13 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeGrailDoesNotTriggerSourceRetr
 	EXPECT_TRUE(book->getExportedBonusList().empty())
 		<< "The book must not contain an intrinsic combat bonus";
 	for(const auto & slot : ArtifactUtils::commonWornSlots())
+	{
 		if(slot != ArtifactPosition::SPELLBOOK)
+		{
 			ASSERT_EQ(attackerSideHero->getArt(slot), nullptr)
 				<< "The baseline hero must carry no other equipment";
+		}
+	}
 	// Distinguish a bare Heroes III inventory entry from a bonus-bearing
 	// original-style artifact. The Grail is economically important in H3,
 	// but core config/artifacts.json defines no combat bonuses for it.
