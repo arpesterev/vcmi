@@ -1633,8 +1633,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkBlockedShooterPrefersMeleeEvenW
 	// This bonus is fixture-only and does not modify gameplay rules.
 	auto * mutableActing = const_cast<CStack *>(acting);
 	mutableActing->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
-		BonusType::FREE_SHOOTING, BonusSource::OTHER, 1, BonusSourceID(),
-		)));
+		BonusType::FREE_SHOOTING, BonusSource::OTHER, 1, BonusSourceID()));
 	const auto * caster = enemySide == BattleSide::ATTACKER ? attackerSideHero : defenderSideHero;
 	teachBattleSpell(const_cast<CGHeroInstance *>(caster), SpellID::BERSERK, 6);
 	ASSERT_TRUE(castOn(const_cast<CGHeroInstance *>(caster), SpellID::BERSERK, acting));
