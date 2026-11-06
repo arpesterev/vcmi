@@ -4596,6 +4596,111 @@ TEST_F(AIIntegrationNativeBattle, homm3PinnedArcherRecoversRealShootingAfterMove
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Pinned getHexAttackValue / checkAdjacentHexes use the opponent's actual
+// shooting capability. In the native threat projection, an active Cavalier
+// may release its own pin but cannot release ANOTHER live friendly blocker.
+// Cache this stable blocker census once per choice, then execute the chosen
+// action on the real battle server. No retail source equivalence is claimed.
+TEST_F(AIIntegrationNativeBattle, homm3PinnedArcherRemainsBlockedWhenAnotherEnemyStackPinsIt)
+{
+	prepareBattle(CreatureID(10), 6, CreatureID(2), 1); // Cavalier, Archer
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	CStack * archer = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			cavalier = unit.get();
+		else if(unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+	}
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	BattleHex pinned;
+	for(const auto & hex : cavalier->getSurroundingHexes())
+		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex))
+		{
+			pinned = hex;
+			break;
+		}
+	ASSERT_TRUE(pinned.isValid());
+	archer->setPosition(pinned);
+	// The second native attacker-side stack must stay adjacent after the
+	// Cavalier leaves. Without the other-blocker census the future-threat
+	// approximation would incorrectly revive this Archer's ranged shot.
+	BattleHex secondBlocker;
+	for(const auto & hex : archer->getSurroundingHexes())
+		if(hex.isAvailable() && !battle()->battleGetUnitByPos(hex)
+			&& BattleHex::getDistance(hex, cavalier->getPosition()) > 1)
+		{
+			secondBlocker = hex;
+			break;
+		}
+	ASSERT_TRUE(secondBlocker.isValid());
+	const auto * blockingPeasant = addStack(BattleSide::ATTACKER, CreatureID(0), secondBlocker, 1);
+	ASSERT_NE(blockingPeasant, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	BattleHex otherTarget;
+	for(int i = 0; i < GameConstants::BFIELD_SIZE; ++i)
+	{
+		const BattleHex hex(i);
+		if(!hex.isAvailable() || battle()->battleGetUnitByPos(hex))
+			continue;
+		const int fromMover = BattleHex::getDistance(hex, cavalier->getPosition());
+		const int fromShooter = BattleHex::getDistance(hex, archer->getPosition());
+		if(fromMover >= 4 && fromMover <= 6 && fromShooter >= 5)
+		{
+			otherTarget = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(otherTarget.isValid());
+	const CStack * peasants = addStack(BattleSide::DEFENDER, CreatureID(0), otherTarget, 80);
+	ASSERT_NE(peasants, nullptr);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(archer->canShoot());
+	ASSERT_FALSE(view->battleCanShoot(archer))
+		<< "The native shooter must first be blocked by the active mover";
+
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, cavalier);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "The HoMM3 port must independently choose a native-legal melee action";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	ASSERT_EQ(view->battleGetUnitByPos(callback->action->target[1].hexValue), peasants)
+		<< "The strong distant target must induce a real move away from the pinned Archer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The VCMI server rejected HoMM3's selected melee movement";
+	EXPECT_FALSE(view->battleCanShoot(archer))
+		<< "The Archer must remain blocked by the other live adjacent enemy stack";
+	EXPECT_TRUE(blockingPeasant->alive())
+		<< "The second blocker must still exist when the Cavalier leaves";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0) << "The actual VCMI battle must execute melee";
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Pinned ai_tactical.cpp::checkAdjacentHexes compares signed long value
 // before the Cavalier's path-cost tie break. Force several native legal
 // approaches to the same certainly lethal one-Peasant strike. The remote
