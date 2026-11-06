@@ -19,6 +19,8 @@
 #include "../../../lib/CPlayerState.h"
 #include "../../../lib/entities/artifact/ArtifactUtils.h"
 #include "../../../lib/entities/artifact/ArtSlotInfo.h"
+#include "../../../lib/entities/artifact/CArtifact.h"
+#include "../../../lib/entities/artifact/CArtifactInstance.h"
 #include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/mapObjects/CGTownInstance.h"
 #include "../../../lib/CStack.h"
@@ -170,15 +172,17 @@ public:
 				const auto towns = player->getTowns();
 				const bool canRehire = heroes.size() > 1 || (!towns.empty()
 					&& !(towns.size() == 1 && hero->getVisitedTown() == towns.front()));
-				// Heroes II examines the hero's entire BagArtifacts, not only
-				// equipped items. A Heroes III backpack item would otherwise be
-				// silently ignored when deciding whether to save a doomed hero.
-				// VCMI owns the actual artifact slots and the retreat legality.
+				// Pinned fheroes2 planUnitTurn::hasValuableArtifacts checks for
+				// a *real bonus* on a carried artifact, not merely its presence.
+				// Heroes III distinguishes equipment and backpack storage; both
+				// count, but a bonus-free spellbook must not force a retreat.
+				// VCMI remains authoritative for each artifact's bonus data and
+				// for whether a RETREAT or SURRENDER action is legal.
 				const bool valuableArtifacts = std::any_of(
 					ArtifactUtils::commonWornSlots().begin(), ArtifactUtils::commonWornSlots().end(),
-					[&](const ArtifactPosition & slot) { return hero->getArt(slot) != nullptr; })
+					[&](const ArtifactPosition & slot) { return hasSourceValuableBonus(hero->getArt(slot)); })
 					|| std::any_of(hero->artifactsInBackpack.begin(), hero->artifactsInBackpack.end(),
-						[](const ArtSlotInfo & slot) { return slot.getArt() != nullptr && !slot.locked; });
+						[](const ArtSlotInfo & slot) { return !slot.locked && hasSourceValuableBonus(slot.getArt()); });
 				const int primarySkillTotal = hero->getPrimSkillLevel(PrimarySkill::ATTACK)
 					+ hero->getPrimSkillLevel(PrimarySkill::DEFENSE)
 					+ hero->getPrimSkillLevel(PrimarySkill::SPELL_POWER)
@@ -254,6 +258,26 @@ private:
 	std::shared_ptr<Environment> env;
 	AutocombatPreferences preferences;
 	bool humanAutocombat = false;
+
+	static bool hasSourceValuableBonus(const CArtifactInstance * artifact)
+	{
+		if(!artifact || !artifact->getType())
+			return false;
+		// Original ai_battle.cpp checks the artifact data's bonuses for
+		// BonusType != NONE. VCMI stores static, instance-defined and
+		// instance-earned bonuses separately. None of these is equivalent
+		// to a bare inventory slot, especially the Heroes III spellbook.
+		const auto meaningful = [](const std::shared_ptr<Bonus> & bonus)
+		{
+			return bonus && bonus->type != BonusType::NONE;
+		};
+		const auto * type = artifact->getType();
+		const auto & staticBonuses = type->getExportedBonusList();
+		const auto & instanceBonuses = artifact->getExportedBonusList();
+		return std::any_of(staticBonuses.begin(), staticBonuses.end(), meaningful)
+			|| std::any_of(type->instanceBonuses.begin(), type->instanceBonuses.end(), meaningful)
+			|| std::any_of(instanceBonuses.begin(), instanceBonuses.end(), meaningful);
+	}
 
 	static double strength(const battle::Unit & stack)
 	{
