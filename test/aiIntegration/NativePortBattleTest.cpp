@@ -6290,6 +6290,45 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeAttackerAndDefenderCompleteFortifie
 		<< "Both partial HoMM3 adapters must reach a native terminal result";
 }
 
+// The pinned getRangedAttackValue reads the enemy's goal time, not its
+// geometrical separation. A real castle wall can prevent a fast Cavalier
+// from reaching an archer even when their footprints are nearby. Assert the
+// server's path differs from straight-line contact, then exercise both
+// HoMM3OriginalTactics adapters through a terminal fortified siege.
+// This validates native reachability and execution, not retail AI parity.
+TEST_F(AIIntegrationNativeBattle, homm3RangedTargetTimeUsesNativeSiegeReachability)
+{
+	prepareSiege(true, CreatureID(0), 12);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->battleGetGateState(), EGateState::CLOSED);
+	const CStack * cavalry = nullptr;
+	const CStack * garrisonArcher = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(!unit->alive())
+			continue;
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalry = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			garrisonArcher = unit.get();
+	}
+	ASSERT_NE(cavalry, nullptr);
+	ASSERT_NE(garrisonArcher, nullptr);
+	ASSERT_TRUE(battle()->battleIsInsideWalls(garrisonArcher->getPosition()));
+	int geometricDistance = GameConstants::BFIELD_SIZE;
+	for(const auto & a : cavalry->getHexes())
+		for(const auto & b : garrisonArcher->getHexes())
+			geometricDistance = std::min(geometricDistance, static_cast<int>(BattleHex::getDistance(a, b)));
+	ASSERT_GT(geometricDistance, 0);
+	const auto reach = battle()->getReachability(cavalry);
+	const uint32_t pathSteps = reach.distToNearestNeighbour(cavalry, garrisonArcher);
+	EXPECT_GT(pathSteps, static_cast<uint32_t>(geometricDistance - 1))
+		<< "Closed fortifications must not be valued as unobstructed hex distance";
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "", true);
+	EXPECT_FALSE(recorder.battleResults.empty());
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndCompletesBattle)
 {
 	prepareSiege();
