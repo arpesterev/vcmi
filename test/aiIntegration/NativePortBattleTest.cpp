@@ -3494,11 +3494,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedReserveArcherDoesNotDistortMult
 		ASSERT_TRUE(hex.isAvailable());
 		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
 	}
-	const auto * high = addStack(BattleSide::ATTACKER, CreatureID(2), highHex, 250);
-	const auto * highBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), highBlockerHex, 1);
+	const auto * high = addStack(BattleSide::ATTACKER, CreatureID(2), highHex, 200);
+	const auto * highBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), highBlockerHex, 2000);
 	const auto * low = addStack(BattleSide::ATTACKER, CreatureID(2), lowHex, 100);
 	const auto * lowBlocker = addStack(BattleSide::DEFENDER, CreatureID(0), lowBlockerHex, 1);
-	const auto * reserve = addStack(BattleSide::ATTACKER, CreatureID(2), reserveHex, 5000);
+	const auto * reserve = addStack(BattleSide::ATTACKER, CreatureID(2), reserveHex, 1500);
 	ASSERT_NE(high, nullptr);
 	ASSERT_NE(highBlocker, nullptr);
 	ASSERT_NE(low, nullptr);
@@ -3562,6 +3562,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedReserveArcherDoesNotDistortMult
 	const double reserveValue = reserve->estimateCombatValue();
 	const double activeTotal = highValue + lowValue;
 	const double beforeTotal = activeTotal + reserveValue;
+	// The source's defensive stance needs BOTH the power-ratio and the
+	// mobile-shooter-fraction gates. An overwhelmingly large reserve made
+	// the old fixture offensive, so it exercised generic approach rather
+	// than either archer-blocker priority. Keep the blinded shooters in
+	// army strength, but exclude them from the mobile-shooter numerator.
+	double enemyStrength = 0;
+	for(const auto & unit : battle()->stacks)
+		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER)
+			enemyStrength += unit->estimateCombatValue();
+	ASSERT_GT(enemyStrength, 0);
+	ASSERT_LE(guard->estimateCombatValue() + beforeTotal, 10.0 * enemyStrength);
+	ASSERT_GT(activeTotal / (guard->estimateCombatValue() + beforeTotal), 0.15);
 	ASSERT_LT(highValue - beforeTotal * highTravel / 15.0,
 		lowValue - beforeTotal * lowTravel / 15.0)
 		<< "Before Blind, a massive mobile reserve must favor the closer screen";
