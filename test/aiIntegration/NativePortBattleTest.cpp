@@ -7054,7 +7054,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedFormerNeutralDoesNotCancelShooter
 
 	const CStack * melee = nullptr;
 	const CStack * controlled = nullptr;
-	const CStack * hostile = nullptr;
+	CStack * hostile = nullptr;
 	for(const auto & unit : battle()->stacks)
 	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
@@ -7070,6 +7070,15 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedFormerNeutralDoesNotCancelShooter
 	ASSERT_NE(melee, nullptr);
 	ASSERT_NE(controlled, nullptr);
 	ASSERT_NE(hostile, nullptr);
+	// The original neutral stacks deploy near each other. After Hypnotize,
+	// the remaining neutral can legitimately reach its former ally, which
+	// would disable the published hold for a DIFFERENT reason. Isolate the
+	// owner-list bug with an immobile neutral while archers can still shoot.
+	// Creature-source Paralyze is fixture setup; Hypnotize below is real.
+	hostile->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	ASSERT_TRUE(hostile->hasBonusOfType(BonusType::NOT_ACTIVE));
 	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HYPNOTIZE, controlled))
 		<< "The neutral must change owner through an actual hero spell";
 	ASSERT_TRUE(controlled->isHypnotized());
