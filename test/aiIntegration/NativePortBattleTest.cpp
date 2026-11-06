@@ -5836,9 +5836,13 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 	const auto * town = findFirst<CGTownInstance>();
 	ASSERT_NE(town, nullptr);
 	if(town->fortificationsLevel().wallsHealth <= 0)
+	{
 		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::FORT, true));
+	}
 	if(town->fortificationsLevel().citadelHealth <= 0)
+	{
 		ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CITADEL, true));
+	}
 	ASSERT_TRUE(gameHandler->insertNewStack(
 		StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 80));
 	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 30);
