@@ -128,7 +128,11 @@ class FHeroes2SpellPolicy
 		if(static_cast<double>(damage) >= health)
 			return strength + side.strength * (unit.getMovementRange() > side.averageSpeed() ? 0.07 : 0.035);
 		double fraction = static_cast<double>(damage) / health;
-		if(unit.isFrozen())
+		// Pinned ai_battle_spell.cpp::spellDamageValue applies the wake-up
+		// penalty to isImmovable() (Blind/Paralyze), not just petrification.
+		// VCMI's isFrozen() means STONE_GAZE only; native NOT_ACTIVE is
+		// the broader actual cannot-act status used by Blind and Paralyze.
+		if(unit.hasBonusOfType(BonusType::NOT_ACTIVE))
 			fraction += fraction - 1;
 		return strength * fraction;
 	}
@@ -153,6 +157,15 @@ public:
 		PlayerColor player, bool friendly)
 	{
 		return army(battle, player, friendly).shooters;
+	}
+
+	/// Source nonlethal spell-damage valuation of a live native stack.
+	/// Used by native regressions to distinguish Blind's wake-up penalty
+	/// from the unrelated VCMI STONE_GAZE-only isFrozen() predicate.
+	static double sourceDamageValue(const CPlayerBattleCallback & battle,
+		const CStack & target, int64_t damage)
+	{
+		return damageValue(target, damage, army(battle, battle.battleGetOwner(&target), true));
 	}
 
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
