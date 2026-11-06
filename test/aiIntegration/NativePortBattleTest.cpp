@@ -6529,3 +6529,136 @@ TEST_F(AIIntegrationNativeBattle, integrationFourExperimentalBackendsRemainDisti
 	}
 }
 #endif
+
+// Consolidated from green isolated source-parity FHeroes2 Draft regression.
+TEST_F(AIIntegrationNativeBattle, fheroes2RemoteFlyerVetoesFastArcherEscape)
+{
+	prepareBattle(CreatureID(19), 25, CreatureID(16), 10);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(19))
+			shooter = unit.get();
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const BattleHex initial = shooter->getPosition();
+	const BattleHex blockerHex(initial.toInt() + 1);
+	ASSERT_TRUE(blockerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(blockerHex), nullptr);
+	const auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(16), blockerHex, 10);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GT(static_cast<int>(shooter->getMovementRange()),
+		static_cast<int>(blocker->getMovementRange()) + 2);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	const auto decide = [&]() -> std::optional<BattleAction>
+	{
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		if(!policy)
+			return std::nullopt;
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, shooter);
+		return callback->action;
+	};
+	const auto noFlyer = decide();
+	ASSERT_TRUE(noFlyer.has_value());
+	ASSERT_EQ(noFlyer->actionType, EActionType::WALK) << noFlyer->toString();
+
+	BattleHex farHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(candidate.isAvailable() && candidate.getX() >= 10
+			&& battle()->battleGetUnitByPos(candidate) == nullptr
+			&& BattleHex::getDistance(candidate, initial) >= 6
+			&& BattleHex::getDistance(candidate, blockerHex) >= 4)
+		{
+			farHex = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(farHex.isValid());
+	const auto * flyer = addStack(BattleSide::DEFENDER, CreatureID(4), farHex, 1);
+	ASSERT_NE(flyer, nullptr);
+	ASSERT_TRUE(flyer->hasBonusOfType(BonusType::FLYING));
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const auto withFlyer = decide();
+	ASSERT_TRUE(withFlyer.has_value());
+	ASSERT_EQ(withFlyer->actionType, EActionType::WALK_AND_ATTACK)
+		<< "A remote flyer forces the source's adjacent-blocker melee: " << withFlyer->toString();
+	EXPECT_NE(withFlyer->actionType, noFlyer->actionType);
+	// Native makeMeleeAttack stores [attack-from, attacked-hex] in that order.
+	ASSERT_GE(withFlyer->target.size(), 2u);
+	EXPECT_EQ(battle()->battleGetUnitByPos(withFlyer->target.back().hexValue), blocker);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *withFlyer))
+		<< "Server rejected the chosen melee action";
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
+
+// Consolidated from green isolated source-parity FHeroes2 Draft regression.
+TEST_F(AIIntegrationNativeBattle, fheroes2NativeBlindAppliesSourceNonlethalDamageWakePenalty)
+{
+	prepareBattle(CreatureID(0), 70, CreatureID(0), 140);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * target = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			target = unit.get();
+	ASSERT_NE(target, nullptr);
+	ASSERT_GT(target->getAvailableHealth(), 4);
+	const auto damage = target->getAvailableHealth() / 4;
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto playerView = callback->getBattle(battle()->getBattleID());
+	ASSERT_NE(playerView, nullptr);
+	const double initial = AIIntegration::FHeroes2SpellPolicy::sourceDamageValue(
+		*playerView, *target, damage);
+	EXPECT_GT(initial, 0) << "An active target must have positive nonlethal damage value";
+
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, target));
+	ASSERT_TRUE(target->hasBonusOfType(BonusType::NOT_ACTIVE))
+		<< "The authoritative server must apply a genuine cannot-act status";
+	ASSERT_FALSE(target->isFrozen())
+		<< "VCMI isFrozen means Stone Gaze, not the native Blind status";
+	ASSERT_GT(target->estimateCombatValue(), 0)
+		<< "The directed target must retain nonzero combat value under Blind";
+	const double after = AIIntegration::FHeroes2SpellPolicy::sourceDamageValue(
+		*playerView, *target, damage);
+	const double fraction = static_cast<double>(damage) / target->getAvailableHealth();
+	EXPECT_NEAR(after, static_cast<double>(target->estimateCombatValue())
+		* (2 * fraction - 1), 1e-6);
+	EXPECT_LT(after, 0)
+		<< "A sub-half-health strike would wake Blind: source values it negatively";
+
+	// Independent pinned-source lethal branch: ai_battle_spell.cpp
+	// spellDamageValue uses Unit::GetSpeed(), which is STANDING under Blind.
+	// A lone disabled defender also has zero projected army speed, so the
+	// death premium is 3.5%, not the 7% reserved for faster units. Native
+	// getMovementRange() need not drop when the server applies NOT_ACTIVE.
+	const auto lethalDamage = target->getAvailableHealth();
+	const double lethal = AIIntegration::FHeroes2SpellPolicy::sourceDamageValue(
+		*playerView, *target, lethalDamage);
+	EXPECT_NEAR(lethal, static_cast<double>(target->estimateCombatValue()) * 1.035, 1e-6)
+		<< "Lethally damaging Blind must use source STANDING speed for the kill premium";
+
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0) << "Native armies must still fight to a result";
+}
+

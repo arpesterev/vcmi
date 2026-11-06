@@ -130,9 +130,23 @@ class FHeroes2SpellPolicy
 			return 0;
 		const double strength = static_cast<double>(unit.estimateCombatValue());
 		if(static_cast<double>(damage) >= health)
-			return strength + side.strength * (unit.getMovementRange() > side.averageSpeed() ? 0.07 : 0.035);
+		{
+			// Pinned ai_battle_spell.cpp::spellDamageValue uses Unit::GetSpeed(),
+			// which is STANDING for Blind/Paralyze, even when the creature's
+			// ordinary base speed is still nonzero. Native NOT_ACTIVE is the
+			// corresponding combat-disable projection, not VCMI isFrozen().
+			// Heroes II also considers its already-moved flag here; that
+			// difference is not silently inferred from VCMI movement range.
+			const int effectiveSpeed = unit.hasBonusOfType(BonusType::NOT_ACTIVE)
+				? 0 : static_cast<int>(unit.getMovementRange());
+			return strength + side.strength * (effectiveSpeed > side.averageSpeed() ? 0.07 : 0.035);
+		}
 		double fraction = static_cast<double>(damage) / health;
-		if(unit.isFrozen())
+		// Pinned ai_battle_spell.cpp::spellDamageValue applies the wake-up
+		// penalty to isImmovable() (Blind/Paralyze), not just petrification.
+		// VCMI's isFrozen() means STONE_GAZE only; native NOT_ACTIVE is
+		// the broader actual cannot-act status used by Blind and Paralyze.
+		if(unit.hasBonusOfType(BonusType::NOT_ACTIVE))
 			fraction += fraction - 1;
 		return strength * fraction;
 	}
@@ -157,6 +171,15 @@ public:
 		PlayerColor player, bool friendly)
 	{
 		return army(battle, player, friendly).shooters;
+	}
+
+	/// Source nonlethal spell-damage valuation of a live native stack.
+	/// Used by native regressions to distinguish Blind's wake-up penalty
+	/// from the unrelated VCMI STONE_GAZE-only isFrozen() predicate.
+	static double sourceDamageValue(const CPlayerBattleCallback & battle,
+		const CStack & target, int64_t damage)
+	{
+		return damageValue(target, damage, army(battle, battle.battleGetOwner(&target), true));
 	}
 
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
