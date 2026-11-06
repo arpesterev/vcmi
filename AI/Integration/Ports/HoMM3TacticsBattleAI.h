@@ -739,46 +739,87 @@ private:
 	{
 		if(!attacker.hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT))
 			return 0.0;
-		// FIRST_STRIKE + RANGED_RETALIATION in the host engine can hit
-		// the shooter before the area volley. The primary-target preview
-		// already accounts for that lost strength, but without this detached
-		// state the secondary-victim score would still price an impossible
-		// full-strength shot. Retail HoMM3 does not have this preemptive
-		// ranged counterattack; this is a VCMI-only tactical correction.
-		auto survivingAttacker = attacker.acquireState();
+		// Retail getRangedAttackValue considers one shot; VCMI can fire more,
+		// including hero-granted volleys. Mirror the same native ammunition
+		// and survival gates as the HoMM3-only primary exchange projection.
+		// This remains a host-specific approximation, not source equivalence.
+		int totalShots = attacker.getTotalAttacks(true);
+		if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
+			totalShots += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+				BonusSubtypeID(attacker.creatureId()));
+		totalShots = std::min(totalShots, attacker.shots.available());
+		if(totalShots <= 0)
+			return 0.0;
+		const auto expectedDamage = [](const DamageEstimation & estimate, int64_t available)
+		{
+			const int64_t midpoint = estimate.damage.min
+				+ (estimate.damage.max - estimate.damage.min) / 2;
+			return std::clamp<int64_t>(midpoint, 0, available);
+		};
+		auto remainingAttacker = attacker.acquireState();
+		auto remainingPrimary = primaryTarget.acquireState();
+		// Retain each original victim for its combat-value denominator, but
+		// estimate later volleys against independent post-hit unit states.
+		// Never mutate live battle units while choosing the opening shot.
+		std::vector<std::pair<const CStack *, decltype(primaryTarget.acquireState())>> secondaryStates;
+		for(const auto * affected : battle.getAttackedBattleUnits(
+			&attacker, &primaryTarget, primaryTarget.getPosition(), true))
+		{
+			const auto * secondary = dynamic_cast<const CStack *>(affected);
+			if(secondary && secondary != &primaryTarget && secondary != &attacker && secondary->alive())
+				secondaryStates.emplace_back(secondary, secondary->acquireState());
+		}
 		const bool firstStrike = primaryTarget.hasBonus(
 			Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
 			.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
-				BonusCustomSubtype::damageTypeRanged)));
-		if(firstStrike && !primaryTarget.hasBonusOfType(BonusType::NOT_ACTIVE)
-			&& primaryTarget.hasBonusOfType(BonusType::RANGED_RETALIATION)
+				BonusCustomSubtype::damageTypeRanged)))
+			&& !primaryTarget.hasBonusOfType(BonusType::NOT_ACTIVE);
+		const bool canReturnFire = primaryTarget.hasBonusOfType(BonusType::RANGED_RETALIATION)
 			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RANGED_RETALIATION)
 			&& primaryTarget.ableToRetaliate()
-			&& battle.battleCanShoot(&primaryTarget, attacker.getPosition()))
+			&& battle.battleCanShoot(&primaryTarget, attacker.getPosition());
+		if(firstStrike && canReturnFire)
 		{
 			BattleAttackInfo counter(&primaryTarget, &attacker, 0, true);
 			counter.attackerPos = primaryTarget.getPosition();
 			counter.defenderPos = attacker.getPosition();
 			const auto estimate = battle.battleEstimateDamage(counter);
-			int64_t received = estimate.damage.min
-				+ (estimate.damage.max - estimate.damage.min) / 2;
-			received = std::clamp<int64_t>(received, 0, survivingAttacker->getAvailableHealth());
-			survivingAttacker->damage(received);
-			if(!survivingAttacker->alive())
-				return 0.0;
+			remainingAttacker->damage(expectedDamage(estimate, remainingAttacker->getAvailableHealth()));
 		}
 		double value = 0.0;
-		for(const auto * affected : battle.getAttackedBattleUnits(
-			&attacker, &primaryTarget, primaryTarget.getPosition(), true))
+		for(int shot = 0; shot < totalShots && remainingAttacker->alive() && remainingPrimary->alive(); ++shot)
 		{
-			const auto * secondary = dynamic_cast<const CStack *>(affected);
-			if(!secondary || secondary == &primaryTarget || secondary == &attacker || !secondary->alive())
-				continue;
-			BattleAttackInfo info(survivingAttacker.get(), secondary, 0, true);
-			info.attackerPos = attacker.getPosition();
-			const double loss = lossValue(*secondary, battle.battleEstimateDamage(info));
-			value += Ports::HoMM3::collateralStrikeValue(
-				battle.battleGetOwner(secondary) != battle.battleGetOwner(&attacker), loss);
+			for(auto & entry : secondaryStates)
+			{
+				const auto * original = entry.first;
+				auto & remaining = entry.second;
+				if(!remaining->alive())
+					continue;
+				BattleAttackInfo info(remainingAttacker.get(), remaining.get(), 0, true);
+				info.attackerPos = attacker.getPosition();
+				const auto estimate = battle.battleEstimateDamage(info);
+				const int64_t lostHealth = expectedDamage(estimate, remaining->getAvailableHealth());
+				const double loss = static_cast<double>(original->estimateCombatValue())
+					* static_cast<double>(lostHealth) / static_cast<double>(original->getAvailableHealth());
+				value += Ports::HoMM3::collateralStrikeValue(
+					battle.battleGetOwner(original) != battle.battleGetOwner(&attacker), loss);
+				remaining->damage(lostHealth);
+			}
+			BattleAttackInfo primary(remainingAttacker.get(), remainingPrimary.get(), 0, true);
+			primary.attackerPos = attacker.getPosition();
+			const auto estimate = battle.battleEstimateDamage(primary);
+			remainingPrimary->damage(expectedDamage(estimate, remainingPrimary->getAvailableHealth()));
+			// Native ranged retaliation follows the opening volley, and can
+			// cancel further splash attacks by killing the shooter. It is not
+			// an original HoMM3 ability. One ordinary retaliation per sequence.
+			if(shot == 0 && !firstStrike && canReturnFire && remainingPrimary->alive())
+			{
+				BattleAttackInfo counter(remainingPrimary.get(), remainingAttacker.get(), 0, true);
+				counter.attackerPos = primaryTarget.getPosition();
+				counter.defenderPos = attacker.getPosition();
+				const auto counterEstimate = battle.battleEstimateDamage(counter);
+				remainingAttacker->damage(expectedDamage(counterEstimate, remainingAttacker->getAvailableHealth()));
+			}
 		}
 		if(!std::isfinite(value))
 			throw std::logic_error("Nonfinite HoMM3 ranged collateral projection");
