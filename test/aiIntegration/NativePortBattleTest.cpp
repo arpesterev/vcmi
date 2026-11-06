@@ -5885,6 +5885,10 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 		<< "Native shot legality deliberately preserves the former enemy side";
 	ASSERT_TRUE(view->battleCanShoot(tower, actualEnemy->getPosition()));
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
+	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(baseline.target.empty());
+	EXPECT_EQ(baseline.target.front().unitValue, controlled->unitId())
+		<< "The independent partial HoMM3 scorer must prefer the larger former foe";
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
@@ -5903,6 +5907,8 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 	ASSERT_FALSE(callback->action->target.empty());
 	EXPECT_EQ(callback->action->target.front().unitValue, actualEnemy->unitId())
 		<< "Tower must not shoot an original attacker now controlled by the defender";
+	EXPECT_NE(callback->action->toString(), baseline.toString())
+		<< "TUM tower must genuinely override the partial HoMM3 target in this battle";
 	std::cout << "AI_TUM_TOWER_HYPNOTIZE homm3=" << baseline.toString()
 		<< " tum=" << callback->action->toString() << '\n';
 
