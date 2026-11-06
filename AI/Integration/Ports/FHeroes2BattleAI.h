@@ -18,6 +18,7 @@
 #include "FHeroes2RetreatDecision.h"
 #include "../../../lib/CPlayerState.h"
 #include "../../../lib/entities/artifact/ArtifactUtils.h"
+#include "../../../lib/entities/artifact/ArtSlotInfo.h"
 #include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/mapObjects/CGTownInstance.h"
 #include "../../../lib/CStack.h"
@@ -169,9 +170,15 @@ public:
 				const auto towns = player->getTowns();
 				const bool canRehire = heroes.size() > 1 || (!towns.empty()
 					&& !(towns.size() == 1 && hero->getVisitedTown() == towns.front()));
+				// Heroes II examines the hero's entire BagArtifacts, not only
+				// equipped items. A Heroes III backpack item would otherwise be
+				// silently ignored when deciding whether to save a doomed hero.
+				// VCMI owns the actual artifact slots and the retreat legality.
 				const bool valuableArtifacts = std::any_of(
 					ArtifactUtils::commonWornSlots().begin(), ArtifactUtils::commonWornSlots().end(),
-					[&](const ArtifactPosition & slot) { return hero->getArt(slot) != nullptr; });
+					[&](const ArtifactPosition & slot) { return hero->getArt(slot) != nullptr; })
+					|| std::any_of(hero->artifactsInBackpack.begin(), hero->artifactsInBackpack.end(),
+						[](const ArtSlotInfo & slot) { return slot.getArt() != nullptr && !slot.locked; });
 				const int primarySkillTotal = hero->getPrimSkillLevel(PrimarySkill::ATTACK)
 					+ hero->getPrimSkillLevel(PrimarySkill::DEFENSE)
 					+ hero->getPrimSkillLevel(PrimarySkill::SPELL_POWER)
