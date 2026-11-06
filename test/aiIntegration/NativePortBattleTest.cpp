@@ -2770,9 +2770,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeGrailDoesNotTriggerSourceRetr
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
 	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
-	AutocombatPreferences prefs;
-	prefs.enableSpellsUsage = false;
-	policy->initBattleInterface(environment, callback, prefs);
+	// Use the native AI overload: the three-argument callback denotes
+	// human autocombat and deliberately bypasses source hero withdrawal.
+	// Hero mana is zero above, so farewell casting is already impossible.
+	policy->initBattleInterface(environment, callback);
 	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
 		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
 		battle()->getSideHero(BattleSide::ATTACKER),
@@ -2800,7 +2801,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeGrailDoesNotTriggerSourceRetr
 	ASSERT_EQ(recorder.battleResults.size(), 1u);
 	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
 	if(recorder.battleResults.back().questionID != QuestionID::NONE)
-		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		{
+			ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		}
 	EXPECT_TRUE(gameState()->currentBattles.empty());
 	EXPECT_EQ(recorder.acceptedResults, 1);
 	callback->onBattleEnded(battleID);
@@ -2851,7 +2854,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CarriedBackpackArtifactTriggersNativeR
 	ASSERT_EQ(recorder.battleResults.size(), 1u);
 	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
 	if(recorder.battleResults.back().questionID != QuestionID::NONE)
-		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		{
+			ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		}
 	EXPECT_TRUE(gameState()->currentBattles.empty());
 	EXPECT_EQ(recorder.acceptedResults, 1);
 	callback->onBattleEnded(battleID);
