@@ -672,6 +672,7 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 
 		for(size_t i = 0; i < nodes.size(); ++i)
 		{
+			requireNNV15GraphElementType(nodes[i], nodeSpec.type, "node " + nodeSpec.name);
 			auto out = std::span<float>(flat.data() + (i * attrSize), attrSize);
 			const auto encoded = nodes[i]->encode(out);
 			if(encoded != nodeSpec.attrSize)
@@ -698,9 +699,13 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 		lengths.push_back(checkedNNObservationIntSize("edge_lengths", edges.size()));
 		edgeLengthLog << edgeSpec.srcName << "_" << edgeSpec.relName << "_" << edgeSpec.dstName << "=" << edges.size() << " ";
 
+		const auto expectedSourceType = nodeTypeByName(edgeSpec.srcName);
+		const auto expectedTargetType = nodeTypeByName(edgeSpec.dstName);
 		for(const auto * edge : edges)
 		{
+			requireNNV15GraphElementType(edge, edgeSpec.type, "edge " + edgeSpec.relName);
 			const auto [src, dst] = edge->endpoints();
+			requireNNV15GraphEdgeEndpoints(src, dst, expectedSourceType, expectedTargetType, edgeSpec.relName);
 			ei_flat_src.push_back(graph->getNodeIndex(src));
 			ei_flat_dst.push_back(graph->getNodeIndex(dst));
 

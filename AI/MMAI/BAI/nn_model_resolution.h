@@ -36,6 +36,31 @@ inline void requireNNV13ActionMask(const Mask * mask, size_t expectedSize)
 		throw std::runtime_error("MMAI V13: missing or incorrect action mask size before ONNX inference");
 }
 
+// The ONNX edge/node flattening path consumes pointers supplied by the
+// battle graph. A stale or malformed event graph must fail with a diagnosed
+// error, not dereference null or encode a different element type.
+template<typename Element, typename Type>
+inline void requireNNV15GraphElementType(const Element * element, Type expectedType, const std::string & label)
+{
+	if(!element)
+		throw std::runtime_error("MMAI V15: missing graph " + label + " before ONNX inference");
+	if(element->getType() != expectedType)
+		throw std::runtime_error("MMAI V15: unexpected graph " + label + " type before ONNX inference");
+}
+
+// Exported edge relations assume specific endpoint node types. Checking the
+// real graph endpoints prevents a corrupted relation from becoming a valid
+// but semantically different neural observation.
+template<typename Node, typename Type>
+inline void requireNNV15GraphEdgeEndpoints(const Node * source, const Node * target,
+                                            Type sourceType, Type targetType, const std::string & relation)
+{
+	if(!source || !target)
+		throw std::runtime_error("MMAI V15: null graph edge endpoint for " + relation + " before ONNX inference");
+	if(source->getType() != sourceType || target->getType() != targetType)
+		throw std::runtime_error("MMAI V15: wrong graph edge endpoint type for " + relation + " before ONNX inference");
+}
+
 // Only unconfigured keys may inherit a parent model as a cache alias.
 inline bool mayCacheResolvedNNModel(const std::map<std::string, std::string> & configuredPaths,
                                    const std::string & key, const std::string & resolvedPath)

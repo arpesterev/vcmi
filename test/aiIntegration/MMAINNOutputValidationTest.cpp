@@ -1236,4 +1236,33 @@ TEST(MMAINNOutputValidation, StrictNeuralRejectsRepeatedAnsiRenderRequests)
 	EXPECT_NO_THROW(requireStrictNNRenderProgress(false, STRICT_NN_RENDER_REQUEST_LIMIT + 1));
 }
 
+TEST(MMAINNOutputValidation, V15RejectsInvalidGraphElementsAndEndpointsBeforeOnnx)
+{
+	using MMAI::BAI::requireNNV15GraphElementType;
+	using MMAI::BAI::requireNNV15GraphEdgeEndpoints;
+	struct Element
+	{
+		int type;
+		int getType() const { return type; }
+	};
+
+	const Element source{1};
+	const Element target{2};
+	const Element unrelated{3};
+	const Element edge{4};
+
+	EXPECT_NO_THROW(requireNNV15GraphElementType(&source, 1, "node Unit"));
+	EXPECT_NO_THROW(requireNNV15GraphElementType(&edge, 4, "edge UnitToAction"));
+	EXPECT_THROW(requireNNV15GraphElementType(static_cast<const Element *>(nullptr), 1, "node Unit"), std::runtime_error);
+	EXPECT_THROW(requireNNV15GraphElementType(static_cast<const Element *>(nullptr), 4, "edge UnitToAction"), std::runtime_error);
+	EXPECT_THROW(requireNNV15GraphElementType(&source, 2, "node Unit"), std::runtime_error);
+	EXPECT_THROW(requireNNV15GraphElementType(&edge, 5, "edge UnitToAction"), std::runtime_error);
+
+	EXPECT_NO_THROW(requireNNV15GraphEdgeEndpoints(&source, &target, 1, 2, "UnitToAction"));
+	EXPECT_THROW(requireNNV15GraphEdgeEndpoints(static_cast<const Element *>(nullptr), &target, 1, 2, "UnitToAction"), std::runtime_error);
+	EXPECT_THROW(requireNNV15GraphEdgeEndpoints(&source, static_cast<const Element *>(nullptr), 1, 2, "UnitToAction"), std::runtime_error);
+	EXPECT_THROW(requireNNV15GraphEdgeEndpoints(&unrelated, &target, 1, 2, "UnitToAction"), std::runtime_error);
+	EXPECT_THROW(requireNNV15GraphEdgeEndpoints(&source, &unrelated, 1, 2, "UnitToAction"), std::runtime_error);
+}
+
 #endif

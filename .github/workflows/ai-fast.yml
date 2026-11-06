@@ -263,6 +263,7 @@ jobs:
                       'V13RejectsMeleeApproachOutsideLiveEngineReachability',
                       'V15RejectsStaleActiveCreatureBeforeActionConversion',
                       'V15RejectsEmptyActionGraphBeforeOnnxInference',
+                      'V15RejectsInvalidGraphElementsAndEndpointsBeforeOnnx',
                       'V15RejectsInactiveGraphActionBeforeServerDispatch',
                       'V15RejectsMoveOutsideLiveEngineReachability',
                       'V15RejectsMeleeApproachOutsideLiveEngineReachability',
