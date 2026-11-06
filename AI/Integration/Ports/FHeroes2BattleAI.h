@@ -1389,7 +1389,11 @@ private:
 				if(const auto wall = approachSiegeWall(battle, stack, steps, defenders))
 					return *wall;
 			}
-			return BattleAction::makeDefend(&stack);
+			// Pinned ai_battle.cpp::archerDecision produces no command when there
+			// is no selectable target; planUnitTurn then issues SKIP, not DEFEND.
+			// Native VCMI-only invincible targets must not create a free defense
+			// bonus for an archer that cannot target them.
+			return BattleAction::makeNoAction(&stack);
 		}
 		// Source archerDecision describes a mobile creature, not Heroes III
 		// ballistae or fortress towers. Those native machine stacks must use
@@ -1403,10 +1407,10 @@ private:
 				return *melee;
 			// A contact-blocked creature archer must never bypass the source's
 			// isHandFighting() branch merely because FREE_SHOOTING makes a shot
-			// legal in Heroes III. If no native melee aim exists, defend instead
-			// of silently replacing the source decision with ranged targeting.
+			// legal in Heroes III. When no native melee aim exists, the source
+			// returns an empty action list, hence SKIP without a defense bonus.
 			if(stack.isShooter() && battle.battleIsUnitBlocked(&stack))
-				return BattleAction::makeDefend(&stack);
+				return BattleAction::makeNoAction(&stack);
 		}
 
 		const CStack * shootingTarget = nullptr;
@@ -1443,10 +1447,12 @@ private:
 				return BattleAction::makeShotAttack(&stack, shootingHex);
 			return BattleAction::makeShotAttack(&stack, shootingTarget);
 		}
-		// Do not replace rejected friendly-fire shots with a different target
-		// chosen by the generic, target-only melee scorer.
+		// If every otherwise legal AREA_SHOT fails the source's catastrophic
+		// friendly-fire cutoff, archerDecision emits no command and
+		// planUnitTurn issues SKIP. Heroes III DEFEND would silently award
+		// additional defense, changing the pinned source policy.
 		if(hasLegalShot)
-			return BattleAction::makeDefend(&stack);
+			return BattleAction::makeNoAction(&stack);
 		if(!stack.getPosition().isValid())
 			return BattleAction::makeDefend(&stack);
 
