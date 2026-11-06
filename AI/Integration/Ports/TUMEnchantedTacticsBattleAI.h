@@ -596,7 +596,11 @@ private:
 			{
 				if(!hex.isValid() || !battle.isMeleeAttackPossible(&enemy, friendly, hex))
 					continue;
-				if(reach.distances[hex.toInt()] <= static_cast<int>(enemy.getMovementRange()))
+				// A legal melee-contact hex can still have no path to it. VCMI
+				// records that as a negative distance; it must not count as a
+				// next-turn neutral threat that breaks the archer screen.
+				if(Ports::TUM::canReachNextTurn(reach.distances[hex.toInt()],
+					static_cast<int>(enemy.getMovementRange())))
 					return true;
 			}
 		}
