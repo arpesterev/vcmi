@@ -7358,13 +7358,24 @@ TEST_F(AIIntegrationNativeBattle, tumWideNeutralShooterScreenUsesNativeFootprint
 	ASSERT_TRUE(callback->action.has_value());
 	EXPECT_EQ(callback->action->actionType, EActionType::WAIT);
 	EXPECT_NE(callback->action->toString(), baseline.toString());
+	// Record the exact protected archer before BattleResult releases the
+	// native unit. An arbitrary SHOOT from another stack must not count
+	// as evidence that TUM's melee WAIT enabled this firing line.
+	const int protectedArcherId = archer->unitId();
 	battle()->activeStack = melee->unitId();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Server rejected TUM's wide-neutral shooter-screen WAIT";
 	policy.reset();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByUnit[protectedArcherId][EActionType::SHOOT], 0)
+		<< "The protected archer must actually fire a native engine-accepted shot";
 	EXPECT_GT(recorder.shots, 0);
 	EXPECT_GT(recorder.damage, 0);
+	ASSERT_EQ(recorder.battleResults.size(), 1u);
+	std::cout << "AI_TUM_WIDE_NEUTRAL_SCREEN archer=" << protectedArcherId
+		<< " archer_shots=" << lastAcceptedActionTypesByUnit[protectedArcherId][EActionType::SHOOT]
+		<< " winner=" << (recorder.battleResults.back().winner == BattleSide::ATTACKER
+			? "ATTACKER" : "DEFENDER") << '\n';
 }
 
 // A ballista's native SHOOTER and legal-fire flags must not turn it into
