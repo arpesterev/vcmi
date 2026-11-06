@@ -5502,6 +5502,66 @@ TEST_F(AIIntegrationNativeBattle, homm3TwoEnemyThreatProjectsIntoNativeMeleeBatt
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned ai_tactical.cpp::type_AI_spellcaster::findEnemyAttacks visits
+// every enemy army, independent of the active stack's legal attack targets.
+// An INVINCIBLE VCMI creature cannot be hit but can still threaten a landing
+// hex. Exercise the independent HoMM3 choice with such an opponent, then
+// remove this fixture-only bonus so the real battle can terminate. This does
+// not isolate a change in chosen hex or imply retail threat-map parity.
+TEST_F(AIIntegrationNativeBattle, homm3NonTargetableEnemyStillPresentDuringNativeThreatSelection)
+{
+	prepareBattle(CreatureID(10), 24, CreatureID(2), 16);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+
+	const BattleHex near(cavalier->getPosition().toInt() + 5);
+	ASSERT_TRUE(near.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(near), nullptr);
+	const auto * invincibleOpponent = addStack(BattleSide::DEFENDER, CreatureID(0), near, 6);
+	ASSERT_NE(invincibleOpponent, nullptr);
+	auto * mutableOpponent = const_cast<CStack *>(invincibleOpponent);
+	auto temporaryProtection = std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::INVINCIBLE, BonusSource::OTHER, 1);
+	mutableOpponent->addNewBonus(temporaryProtection);
+	ASSERT_TRUE(invincibleOpponent->isInvincible());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto opponents = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+	ASSERT_NE(std::find(opponents.begin(), opponents.end(), invincibleOpponent), opponents.end())
+		<< "The invincible opponent is still an enemy on the actual server";
+	ASSERT_TRUE(view->battleCanAttackUnit(invincibleOpponent, cavalier))
+		<< "Non-targetable opponent must retain native melee attack capability";
+	const auto reach = view->getReachability(invincibleOpponent);
+	ASSERT_FALSE(view->battleGetAvailableHexes(reach, invincibleOpponent, true).empty())
+		<< "Opponent must have real native reachable attack origins";
+
+	const auto chosen = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *cavalier);
+	ASSERT_TRUE(chosen.actionType == EActionType::WALK_AND_ATTACK
+		|| chosen.actionType == EActionType::WALK)
+		<< "A remaining target must yield a native advancing action";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, chosen))
+		<< "Real VCMI server rejected the independent HoMM3 action";
+
+	// Test-only invincibility is removed after the checked first decision.
+	// The genuine server then resolves the same armies to a terminal result.
+	mutableOpponent->removeBonus(temporaryProtection);
+	ASSERT_FALSE(invincibleOpponent->isInvincible());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.battleResults.empty());
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3BlindEnemyDoesNotProjectAFalseLandingThreat)
 {
 	// Pinned HoMM3 findEnemyAttacks excludes incapacitated stacks. Apply
