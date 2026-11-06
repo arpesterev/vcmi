@@ -68,9 +68,12 @@ public:
 				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
 		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
-			// A ranged creature with no available shot is still a shooter, not
-			// a melee screen. The published hold/fortify overrides govern melee.
-			&& !stack->isShooter() && shouldProtectShooters(*battle, *stack))
+			// The published archer screen protects a MOBILE MELEE formation.
+			// A modded non-melee stack (e.g. native SIEGE_WEAPON) must not
+			// wait for a melee attack it can never make. Ranged creatures
+			// remain shooters even when their ammunition is exhausted.
+			&& stack->isMeleeAttacker() && !stack->isShooter()
+			&& shouldProtectShooters(*battle, *stack))
 		{
 			// AI Improvements.txt explicitly permits waiting for neutral melee
 			// while friendly shooters work. Preserve the unit's later-turn
@@ -80,7 +83,8 @@ public:
 				: BattleAction::makeWait(stack);
 		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
-			&& !stack->isShooter() && shouldHoldFortifiedSiege(*battle, *stack))
+			&& stack->isMeleeAttacker() && !stack->isShooter()
+			&& shouldHoldFortifiedSiege(*battle, *stack))
 			action = BattleAction::makeDefend(stack);
 		else
 			action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);

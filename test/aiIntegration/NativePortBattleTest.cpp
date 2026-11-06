@@ -6927,6 +6927,97 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 // the "friendly archers" that justify TUM's neutral-melee screening rule.
 // The machine remains controlled by its separate, documented ballista policy.
 // This is a VCMI-specific interpretation, not a recovered hidden ERA rule.
+
+/*
+ * The published TUM neutral hold protects allied archers using MELEE troops.
+ * A native SIEGE_WEAPON bonus can remove an otherwise ordinary creature's
+ * melee capability without turning it into a shooter. Do not strand that
+ * non-melee unit in a WAIT/DEFEND screening loop. The bonus is fixture setup,
+ * not a claim about a normal Peasant or the unavailable ERA/DLL internals.
+ */
+TEST_F(AIIntegrationNativeBattle, tumNonMeleeFriendlyCannotEnterNeutralShooterScreen)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(0), 55);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	ASSERT_EQ(neutral->getOwner(), PlayerColor::UNFLAGGABLE);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	CStack * melee = nullptr;
+	const CStack * archer = nullptr;
+	const CStack * opponent = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			opponent = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(opponent, nullptr);
+	ASSERT_TRUE(melee->isMeleeAttacker());
+	ASSERT_FALSE(melee->isShooter());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_EQ(battle()->sideToPlayer(BattleSide::DEFENDER), PlayerColor::NEUTRAL);
+	ASSERT_TRUE(view->battleCanShoot(archer, opponent->getPosition()));
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+
+	const auto ordinaryBaseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_NE(ordinaryBaseline.actionType, EActionType::WAIT);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WAIT)
+		<< "A genuine melee unit screens a live neutral encounter for friendly archers";
+	callback->action.reset();
+
+	melee->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SIEGE_WEAPON, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_FALSE(melee->isMeleeAttacker());
+	ASSERT_FALSE(melee->isShooter());
+	ASSERT_FALSE(view->battleCanAttackUnit(melee, opponent));
+	const auto nonMeleeBaseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->toString(), nonMeleeBaseline.toString())
+		<< "Non-melee units must use the explicitly partial HoMM3 fallback";
+	ASSERT_NE(callback->action->actionType, EActionType::WAIT);
+
+	battle()->activeStack = melee->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The authoritative server rejected the chosen non-melee action";
+	const int unitId = melee->unitId();
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByUnit[unitId][nonMeleeBaseline.actionType], 0);
+	EXPECT_GT(recorder.shots, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaAloneDoesNotMakeMeleeWaitForShooters)
 {
 	startRecordedGame();
