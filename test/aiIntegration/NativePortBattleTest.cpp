@@ -5696,6 +5696,70 @@ TEST_F(AIIntegrationNativeBattle, homm3NonTargetableEnemyStillPresentDuringNativ
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned getHexAttackValue does not filter hostile shooters by whether
+// the active stack can damage them. Check this HoMM3-only census against a
+// native INVINCIBLE archer, then resolve an actual VCMI server battle.
+// This does not establish a decision difference or retail parity.
+TEST_F(AIIntegrationNativeBattle, homm3NonTargetableShooterPinCensusExecutesNativeBattle)
+{
+	prepareBattle(CreatureID(10), 24, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_TRUE(cavalier->doubleWide());
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+
+	const BattleHex shooterHex(cavalier->getPosition().toInt() + 5);
+	const BattleHex meleeHex(cavalier->getPosition().toInt() + 3);
+	ASSERT_TRUE(shooterHex.isAvailable());
+	ASSERT_TRUE(meleeHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(meleeHex), nullptr);
+	const auto * shooter = addStack(BattleSide::DEFENDER, CreatureID(2), shooterHex, 12);
+	const auto * meleeTarget = addStack(BattleSide::DEFENDER, CreatureID(0), meleeHex, 8);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(meleeTarget, nullptr);
+	auto * mutableShooter = const_cast<CStack *>(shooter);
+	auto protection = std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::INVINCIBLE, BonusSource::OTHER, 1, BonusSourceID());
+	mutableShooter->addNewBonus(protection);
+	ASSERT_TRUE(shooter->isInvincible());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto opponents = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+	ASSERT_NE(std::find(opponents.begin(), opponents.end(), shooter), opponents.end());
+	ASSERT_TRUE(view->battleCanShoot(shooter, cavalier->getPosition()))
+		<< "Non-targetable shooter must retain a real ranged threat";
+	ASSERT_TRUE(view->battleCanAttackUnit(cavalier, meleeTarget));
+	const auto reach = view->getReachability(cavalier);
+	const auto available = view->battleGetAvailableHexes(reach, cavalier, false);
+	bool legalMelee = false;
+	for(const auto & from : available)
+		if(from.isAvailable() && !view->meleeAttackHexes(cavalier, meleeTarget, from).empty())
+			legalMelee = true;
+	ASSERT_TRUE(legalMelee);
+	const auto chosen = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *cavalier);
+	ASSERT_EQ(chosen.actionType, EActionType::WALK_AND_ATTACK)
+		<< "HoMM3 must independently select native melee: " << chosen.toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, chosen))
+		<< "Native server rejected the HoMM3 decision";
+	mutableShooter->removeBonus(protection);
+	ASSERT_FALSE(shooter->isInvincible());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.battleResults.empty());
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3BlindEnemyDoesNotProjectAFalseLandingThreat)
 {
 	// Pinned HoMM3 findEnemyAttacks excludes incapacitated stacks. Apply

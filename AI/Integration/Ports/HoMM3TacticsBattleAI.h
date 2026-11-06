@@ -1054,18 +1054,20 @@ public:
 		// TUM explicitly invokes this baseline with avoidFastDecoys=true.
 		// Keep that independent experimental backend's existing decisions
 		// unchanged while validating this HoMM3-only attack-position slice.
+		// Pinned getHexAttackValue checks all hostile neighboring shooters,
+		// regardless of whether our current stack can legally attack them.
+		// An INVINCIBLE VCMI shooter remains dangerous and may be pinned.
+		// Keep the shooter census separate from the attack-target filter.
+		// TUM's independent composition retains its old baseline.
+		const auto allOpponents = avoidFastDecoys ? std::vector<const CStack *>{}
+			: battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 		const auto shooterPins = avoidFastDecoys ? std::vector<ShooterPin>{}
-			: calculateShooterPins(battle, stack, enemies);
+			: calculateShooterPins(battle, stack, allOpponents);
 		// Reuse native enemy reachability across every candidate hex/aim:
 		// this must not run a fresh BFS for each projected threat cell.
 		// TUM deliberately receives no HoMM3-only landing threat.
-		// Pinned findEnemyAttacks scans *every* live opposing army, not only
-		// targets this particular stack may attack. An INVINCIBLE opponent,
-		// for example, cannot be selected as our victim but can still damage
-		// our landing stack. Keep attack targets and threat sources separate.
-		// TUM's explicit baseline continues to bypass this HoMM3-only field.
-		const auto allOpponents = avoidFastDecoys ? std::vector<const CStack *>{}
-			: battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		// Pinned findEnemyAttacks likewise scans *every* live opposing army,
+		// including opponents that cannot be selected as our attack target.
 		const auto threatSources = avoidFastDecoys ? std::vector<MeleeThreatSource>{}
 			: collectThreatSources(battle, stack, allOpponents);
 
