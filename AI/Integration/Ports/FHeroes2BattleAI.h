@@ -782,8 +782,10 @@ private:
 		double chosenShooterValue = std::numeric_limits<double>::lowest();
 		for(const auto * shooter : friends)
 		{
+			// Source meleeUnitDefense scans actual enemy contact with friendly
+			// archers. Heroes III FREE_SHOOTING does not erase that contact.
 			if(shooter == &guard || !shooter->alive() || !shooter->getPosition().isValid()
-				|| !shooter->isShooter() || battle.battleCanShoot(shooter))
+				|| !shooter->isShooter())
 				continue;
 
 			const auto shooterHexes = shooter->getHexes();
@@ -888,8 +890,10 @@ private:
 		int bestTravel = GameConstants::BFIELD_SIZE;
 		for(const auto * shooter : friends)
 		{
+			// The source's future defender movement prioritizes physical
+			// blockers even when VCMI permits the engaged archer to shoot.
 			if(shooter == &guard || !shooter->alive() || !shooter->isShooter()
-				|| !shooter->getPosition().isValid() || battle.battleCanShoot(shooter))
+				|| !shooter->getPosition().isValid())
 				continue;
 			for(const auto * blocker : enemies)
 			{
