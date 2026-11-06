@@ -9,6 +9,7 @@
 #include "schema/base.h"
 #include <exception>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -141,6 +142,21 @@ inline void requireNNV15ActiveAction(const ActionPtr & action)
 {
 	if(!action || !action->isActive)
 		throw std::runtime_error("MMAI V15: model selected an inactive graph action");
+}
+
+// The V15 inference head reports action-node IDs, which must resolve back to
+// the exact action graph used for the observation. A stale or malformed graph
+// can contain an active ID without a corresponding node. The original direct
+// getNode(...)->name() dereferenced null before the server-dispatch guard.
+// Reject the broken ONNX/action-graph contract rather than substituting a
+// different action or crashing the client.
+template<typename Node>
+inline const Node * requireNNV15SelectedGraphActionNode(const Node * node, std::int64_t actionId)
+{
+	if(!node)
+		throw std::runtime_error("MMAI V15: ONNX action " + std::to_string(actionId)
+			+ " has no matching graph node");
+	return node;
 }
 
 // V15 MOVE graph actions are legal only while their destination is still

@@ -630,8 +630,12 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	const int dispatchAction = checkedNNV15ActionId(saction);
 	(void)checkedNNV15ActionId(gaction);
 
-	const auto sname = graph->getNode(ET::NODE_ACTION, saction)->name();
-	const auto gname = graph->getNode(ET::NODE_ACTION, gaction)->name();
+	// A valid ONNX action ID is not enough if the event graph has lost its
+	// corresponding node. Report the original selection, never remap it.
+	const auto * sampleNode = requireNNV15SelectedGraphActionNode(graph->getNode(ET::NODE_ACTION, saction), saction);
+	const auto * greedyNode = requireNNV15SelectedGraphActionNode(graph->getNode(ET::NODE_ACTION, gaction), gaction);
+	const auto sname = sampleNode->name();
+	const auto gname = greedyNode->name();
 
 	logAi->debug(
 		"greedy: %d (prob=%.2f conf=%.2f value=%.4f). Detail: active_index=%d %s", gaction, greedy.prob, greedy.confidence, value, greedy.index, gname

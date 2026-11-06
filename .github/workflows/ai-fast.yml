@@ -251,6 +251,7 @@ jobs:
                       'V15AcceptsOnlyScalarOrSingletonOnnxOutputs',
                       'V15RejectsInvalidValueHead',
                       'V15RejectsUnrepresentableNeuralActionIdBeforeDispatch',
+                      'V15RejectsMissingSampledOrGreedyGraphActionNode',
                       'V13V15WarMachineTargetsOnlyLivingShootableEnemies',
                       'V13V15RejectNonFiniteObservationBeforeInference',
                       'V13V15RejectInvalidTensorElementCountsBeforeOnnxAllocation',

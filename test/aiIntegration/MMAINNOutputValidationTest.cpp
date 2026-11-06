@@ -288,6 +288,30 @@ TEST(MMAINNOutputValidation, V15RejectsUnrepresentableNeuralActionIdBeforeDispat
 	}
 }
 
+TEST(MMAINNOutputValidation, V15RejectsMissingSampledOrGreedyGraphActionNode)
+{
+	using MMAI::BAI::requireNNV15SelectedGraphActionNode;
+
+	struct ActionNode { int id; };
+	const ActionNode present{7};
+
+	// Both sampled and greedy ONNX action IDs must resolve to the original
+	// graph. Neither path may dereference null or silently remap an ID.
+	EXPECT_EQ(requireNNV15SelectedGraphActionNode(&present, 7), &present);
+	EXPECT_THROW(requireNNV15SelectedGraphActionNode(static_cast<const ActionNode *>(nullptr), 7), std::runtime_error);
+	EXPECT_THROW(requireNNV15SelectedGraphActionNode(static_cast<const ActionNode *>(nullptr), 9), std::runtime_error);
+
+	try
+	{
+		requireNNV15SelectedGraphActionNode(static_cast<const ActionNode *>(nullptr), 9);
+		FAIL() << "Missing greedy action node went undiagnosed";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("ONNX action 9"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15AcceptsOnlyScalarOrSingletonOnnxOutputs)
 {
 	using MMAI::BAI::requireNNV15ScalarOutputShape;
