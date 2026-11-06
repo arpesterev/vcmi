@@ -1203,7 +1203,14 @@ private:
 		// shoot a more distant one. VCMI may forbid the source's shot,
 		// so check the exact nearest target and then use only native-legal
 		// melee/movement candidates instead of silently retargeting.
-		if(stack.isShooter() && battle.battleCanShoot(&stack)
+		// Source berserkTurn checks !isHandFighting() before the shot.
+		// Native unrestricted FREE_SHOOTING can permit shots even while an
+		// adjacent creature blocks the stack; that VCMI permission does not
+		// change the pinned fheroes2 melee-first policy. Native
+		// battleIsUnitBlocked also treats adjacent allies as blocking a
+		// Berserk stack, matching the source's compelled-turn semantics.
+		if(stack.isShooter() && !battle.battleIsUnitBlocked(&stack)
+			&& battle.battleCanShoot(&stack)
 			&& battle.battleCanShoot(&stack, sorted.front().unit->getPosition()))
 			return BattleAction::makeShotAttack(&stack, sorted.front().unit);
 
