@@ -7378,6 +7378,122 @@ TEST_F(AIIntegrationNativeBattle, tumWideNeutralShooterScreenUsesNativeFootprint
 			? "ATTACKER" : "DEFENDER") << '\n';
 }
 
+
+TEST_F(AIIntegrationNativeBattle, tumProtectedArcherTakesNativeTailOnlyShot)
+{
+	// Restricted free shooting is a VCMI test bonus, not a recovered ERA rule.
+	// It allows firing when blocked but prohibits adjacent-hex shots.
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(102), 2);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	const CStack * melee = nullptr;
+	CStack * archer = nullptr;
+	CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			melee = unit.get();
+		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			archer = unit.get();
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(102))
+			enemy = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(enemy, nullptr);
+	const BattleHex center(80);
+	for(const auto & hex : enemy->getHexes(center))
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	enemy->setPosition(center);
+	const auto footprint = enemy->getHexes();
+	ASSERT_EQ(footprint.size(), 2u);
+	const BattleHex head = enemy->getPosition();
+	const BattleHex tail = *std::find_if(footprint.begin(), footprint.end(),
+		[&](const BattleHex & hex) { return hex != head; });
+	BattleHex archerPos = BattleHex::INVALID;
+	for(const auto & hex : head.getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && BattleHex::getDistance(hex, tail) > 1
+			&& battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			archerPos = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(archerPos.isValid());
+	archer->setPosition(archerPos);
+	archer->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FREE_SHOOTING, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(2)), BonusSubtypeID(BonusCustomSubtype::freeShootingExceptAdjacent)));
+	enemy->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(102)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_EQ(battle()->sideToPlayer(BattleSide::DEFENDER), PlayerColor::NEUTRAL);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(archer));
+	ASSERT_FALSE(view->battleCanShoot(archer, head));
+	ASSERT_TRUE(view->battleCanShoot(archer, tail));
+	const auto baseArcher = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *archer);
+	const auto baseMelee = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_NE(baseArcher.actionType, EActionType::SHOOT);
+	ASSERT_NE(baseMelee.actionType, EActionType::WAIT);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WAIT);
+	const int meleeId = melee->unitId();
+	battle()->activeStack = meleeId;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	policy->activeStack(battleID, archer);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_EQ(callback->action->target.size(), 1u);
+	EXPECT_EQ(callback->action->target.front().hexValue, tail);
+	EXPECT_NE(callback->action->toString(), baseArcher.toString());
+	const int archerId = archer->unitId();
+	const auto healthBefore = enemy->getAvailableHealth();
+	const int shotsBefore = recorder.shots;
+	battle()->activeStack = archerId;
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native server rejected TUM's legal tail-only archer shot";
+	EXPECT_GT(recorder.shots, shotsBefore);
+	EXPECT_LT(enemy->getAvailableHealth(), healthBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(lastAcceptedActionTypesByUnit[meleeId][EActionType::WAIT], 0);
+	EXPECT_GT(lastAcceptedActionTypesByUnit[archerId][EActionType::SHOOT], 0);
+	ASSERT_EQ(recorder.battleResults.size(), 1u);
+	std::cout << "AI_TUM_TAIL_ONLY_ARCHER hoMM3=" << baseArcher.toString()
+		<< " tum=SHOOT winner=" << (recorder.battleResults.back().winner == BattleSide::ATTACKER
+			? "ATTACKER" : "DEFENDER") << '\n';
+}
+
 // A ballista's native SHOOTER and legal-fire flags must not turn it into
 // the "friendly archers" that justify TUM's neutral-melee screening rule.
 // The machine remains controlled by its separate, documented ballista policy.

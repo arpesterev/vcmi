@@ -67,6 +67,15 @@ public:
 			else
 				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
 		}
+		// Keep a protected archer useful when only a wide target's tail can
+		// legally be shot. Ordinary legal head shots use the partial HoMM3 base.
+		else if(stack->isShooter())
+		{
+			if(const auto shot = chooseExposedWideTailShot(*battle, *stack))
+				action = *shot;
+			else
+				action = HoMM3TacticsBattleAI::chooseAction(*battle, *stack, true);
+		}
 		else if(!stack->isCatapult() && !stack->isFirstAidTent()
 			// The published archer screen protects a MOBILE MELEE formation.
 			// A modded non-melee stack (e.g. native SIEGE_WEAPON) must not
@@ -115,6 +124,67 @@ private:
 			disabledBy(SpellID(SpellID::BLIND)),
 			disabledBy(SpellID(SpellID::PARALYZE)),
 			disabledBy(SpellID(SpellID::STONE_GAZE)));
+	}
+
+
+	// VCMI-specific completion of the published TUM shooter-screen behavior.
+	// The partial HoMM3 baseline considers only a target's head for shooting.
+	// When every head is illegal but a wide tail is legal, select a native
+	// hex-aimed shot. This is NOT the undisclosed original ERA/DLL formula.
+	static std::optional<BattleAction> chooseExposedWideTailShot(
+		CPlayerBattleCallback & battle, const CStack & stack)
+	{
+		if(!stack.isShooter() || !battle.battleCanShoot(&stack))
+			return std::nullopt;
+		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		const auto owner = battle.battleGetOwner(&stack);
+		vstd::erase_if(targets, [&](const CStack * target)
+		{
+			return !target->alive() || target->isInvincible()
+				|| !target->getPosition().isValid() || battle.battleGetOwner(target) == owner;
+		});
+		std::sort(targets.begin(), targets.end(), [](const CStack * lhs, const CStack * rhs)
+		{
+			return lhs->unitId() < rhs->unitId();
+		});
+		for(const auto * target : targets)
+			if(battle.battleCanShoot(&stack, target->getPosition()))
+				return std::nullopt; // Standard legal head shot: preserve HoMM3.
+
+		BattleHex selectedAim;
+		double bestValue = 0.0;
+		bool selected = false;
+		for(const auto * target : targets)
+		{
+			if(target->getHexes().size() < 2)
+				continue;
+			for(const auto & hex : target->getHexes())
+			{
+				if(hex == target->getPosition() || !hex.isValid()
+					|| !battle.battleCanShoot(&stack, hex))
+					continue;
+				BattleAttackInfo attack(&stack, target, 0, true);
+				attack.attackerPos = stack.getPosition();
+				attack.defenderPos = hex;
+				const auto damage = battle.battleEstimateDamage(attack, nullptr);
+				const double estimated = (static_cast<double>(damage.damage.min)
+					+ static_cast<double>(damage.damage.max)) / 2.0;
+				const double health = static_cast<double>(target->getAvailableHealth());
+				if(health <= 0)
+					continue;
+				const double value = static_cast<double>(target->estimateCombatValue())
+					* std::min(health, std::max(0.0, estimated)) / health;
+				if(value > bestValue)
+				{
+					selectedAim = hex;
+					bestValue = value;
+					selected = true;
+				}
+			}
+		}
+		if(selected)
+			return BattleAction::makeShotAttack(&stack, selectedAim);
+		return std::nullopt;
 	}
 
 	// Shared legal-target and native damage evaluation for the two distinct
