@@ -4195,7 +4195,8 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathAfterSurvivableFirstStrike)
 	ASSERT_LT(counter.damage.max, guard->getAvailableHealth())
 		<< "Fixture requires a nonfatal native FIRST_STRIKE";
 	auto survivors = guard->acquireState();
-	survivors->damage(counter.damage.max);
+	int64_t worstCounterDamage = counter.damage.max;
+	survivors->damage(worstCounterDamage);
 	ASSERT_TRUE(survivors->alive());
 	BattleAttackInfo postCounterBreath(survivors.get(), rear, 0, false);
 	postCounterBreath.attackerPos = origin;
