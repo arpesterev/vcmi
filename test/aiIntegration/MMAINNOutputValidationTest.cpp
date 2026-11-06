@@ -155,7 +155,9 @@ TEST(MMAINNOutputValidation, V15RejectsOverflowDuringGraphFlatteningBeforeAlloca
 	EXPECT_THROW(checkedNNObservationIntSize("edge_lengths",
 		static_cast<std::size_t>(std::numeric_limits<int>::max()) + 1u), std::runtime_error);
 	if(maxSize > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+	{
 		EXPECT_THROW(checkedNNObservationAxis("x_Action", maxSize), std::runtime_error);
+	}
 
 	try
 	{
