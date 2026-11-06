@@ -6007,7 +6007,7 @@ TEST_F(AIIntegrationNativeBattle, homm3NativeAttackerAndDefenderCompleteFortifie
 	prepareSiege(false, CreatureID(0), 10);
 	ASSERT_FALSE(HasFatalFailure());
 	ASSERT_EQ(battle()->battleGetGateState(), EGateState::CLOSED);
-	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "", true);
 	EXPECT_FALSE(recorder.catapultAttacks.empty())
 		<< "Native siege must resolve real server catapult packets";
 	EXPECT_FALSE(recorder.battleResults.empty())
