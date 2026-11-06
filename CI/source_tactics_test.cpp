@@ -272,6 +272,15 @@ int main()
 	cover.opponentHasShooters = false;
 	cover.opponentIsNeutral = false;
 	require(!TUM::holdMeleeForShooters(cover), "Do not apply neutral-only rule to an enemy hero");
+	// The real TUM adapter consumes the native reachability-map distance.
+	// In particular, an unreachable melee-contact hex is encoded as -1,
+	// which previously compared as <= every positive movement allowance.
+	require(!TUM::canReachNextTurn(-1, 4), "Unreachable contact must not break the neutral shooter screen");
+	require(!TUM::canReachNextTurn(-10, 4), "Any negative native distance must be rejected");
+	require(TUM::canReachNextTurn(0, 0), "A reachable occupied hex needs no movement");
+	require(TUM::canReachNextTurn(4, 4), "A contact at the exact speed boundary is a real threat");
+	require(!TUM::canReachNextTurn(5, 4), "Out-of-range reachable contact cannot break the screen");
+	require(!TUM::canReachNextTurn(0, -1), "Negative movement is not a legal threat");
 	for(int effects = 0; effects < 8; ++effects)
 		require(TUM::ballistaMayTarget(effects & 1, effects & 2, effects & 4) == (effects == 0), "Do not wake disabled targets with a ballista");
 	// The engine's Artillery grant can make a ballista fire twice. A
