@@ -4143,6 +4143,148 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathScoresAndHitsNativeSecondar
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// TUM Hypnotize: a survivable FIRST_STRIKE counters before the breath
+// still hits two former allies. Creature bonuses are test-only fixtures;
+// independent HoMM3 and TUM decisions use the same native battlefield.
+TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathAfterSurvivableFirstStrike)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex frontHex(origin.toInt() + 1);
+	const BattleHex rearHex(origin.toInt() + 2);
+	ASSERT_TRUE(frontHex.isAvailable());
+	ASSERT_TRUE(rearHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(frontHex), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(rearHex), nullptr);
+	auto * front = addStack(BattleSide::ATTACKER, CreatureID(0), frontHex, 6);
+	const auto * rear = addStack(BattleSide::ATTACKER, CreatureID(0), rearHex, 1);
+	ASSERT_NE(front, nullptr);
+	ASSERT_NE(rear, nullptr);
+	guard->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::TWO_HEX_ATTACK_BREATH,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(guard->hasBonusOfType(BonusType::TWO_HEX_ATTACK_BREATH));
+	front->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FIRST_STRIKE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(0)), BonusSubtypeID(BonusCustomSubtype::damageTypeMelee)));
+	ASSERT_TRUE(front->ableToRetaliate());
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, guard));
+	ASSERT_TRUE(guard->isHypnotized());
+	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	ASSERT_EQ(battle()->battleGetOwner(guard), player);
+	battle()->activeStack = guard->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	BattleAttackInfo preemptive(front, guard, 0, false);
+	preemptive.attackerPos = frontHex;
+	preemptive.defenderPos = origin;
+	const auto counter = view->battleEstimateDamage(preemptive, nullptr);
+	ASSERT_GT(counter.damage.min, 0);
+	ASSERT_LT(counter.damage.max, guard->getAvailableHealth())
+		<< "Fixture requires a nonfatal native FIRST_STRIKE";
+	auto survivors = guard->acquireState();
+	survivors->damage(counter.damage.max);
+	ASSERT_TRUE(survivors->alive());
+	BattleAttackInfo postCounterBreath(survivors.get(), rear, 0, false);
+	postCounterBreath.attackerPos = origin;
+	postCounterBreath.defenderPos = rearHex;
+	ASSERT_GT(view->battleEstimateDamage(postCounterBreath, nullptr).damage.min, 0);
+	const auto initialSplash = view->getAttackedBattleUnits(
+		guard, front, frontHex, false, origin);
+	ASSERT_TRUE(std::any_of(initialSplash.begin(), initialSplash.end(),
+		[&](const battle::Unit * hit) { return hit->unitId() == rear->unitId(); }))
+		<< "The real VCMI melee footprint must include the second former ally";
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *guard);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::DEFENDER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const BattleHex attackFrom = callback->action->target[0].hexValue;
+	const BattleHex aimed = callback->action->target[1].hexValue;
+	EXPECT_EQ(aimed, frontHex)
+		<< "TUM should value the surviving extra breath victim";
+	const auto * primary = view->battleGetUnitByPos(aimed);
+	ASSERT_NE(primary, nullptr);
+	ASSERT_NE(primary->unitId(), guard->unitId())
+		<< "A Hypnotized stack must never target itself after a controller swap";
+	ASSERT_NE(view->battleGetOwner(primary), view->battleGetOwner(guard))
+		<< "Hypnotized attacks must target the actual opposing controller";
+	const auto extra = view->getAttackedBattleUnits(
+		guard, primary, aimed, false, attackFrom);
+	ASSERT_FALSE(extra.empty())
+		<< "Hypnotized TUM must prefer an actual two-victim breath strike"
+		<< " proposed=" << callback->action->toString()
+		<< " baseline=" << baseline.toString()
+		<< " origin=" << origin.toInt()
+		<< " front=" << frontHex.toInt()
+		<< " rear=" << rearHex.toInt()
+		<< " attack_from=" << attackFrom.toInt()
+		<< " aimed=" << aimed.toInt()
+		<< " primary_id=" << primary->unitId()
+		<< " reachable_origin=" << view->getReachability(guard).isReachable(origin)
+		<< " legal_origin_front="
+		<< view->meleeAttackHexes(guard, front, origin).contains(frontHex);
+	std::cout << "AI_TUM_HYPNOTIZE_MELEE_SPLASH homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+	// Observe the actual BattleAttack packet before its damage applies.
+	// A lethal action may end the entire battle and invalidate CStack pointers.
+	const int frontId = front->unitId();
+	const int rearId = rear->unitId();
+	const int guardId = guard->unitId();
+	std::vector<int> nativeAttackOrder;
+	std::set<int> nativeHitIds;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.stackAttacking == frontId && attack.counter())
+			nativeAttackOrder.push_back(frontId);
+		else if(attack.stackAttacking == guardId)
+			nativeAttackOrder.push_back(guardId);
+		for(const auto & injury : attack.bsa)
+			if(injury.damageAmount > 0
+				&& (injury.stackAttacked == frontId || injury.stackAttacked == rearId))
+				nativeHitIds.insert(injury.stackAttacked);
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative VCMI rejected the independent TUM multihex melee attack";
+	recorder.onAttackBeforeApply = {};
+	ASSERT_GE(nativeAttackOrder.size(), 2u);
+	EXPECT_EQ(nativeAttackOrder[0], frontId);
+	EXPECT_EQ(nativeAttackOrder[1], guardId);
+	EXPECT_EQ(nativeHitIds.size(), 2u)
+		<< "Real server damage must include both the primary and secondary former ally";
+	policy.reset();
+	// The manually accepted Hypnotize breath strike may decide the exchange
+	// before the opposing policy receives a turn. The independent HoMM3
+	// first decision was already sampled above; continuation here proves a
+	// genuine terminal server result, not a mixed-policy head-to-head duel.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics", "TUMEnchantedTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Source-published TUM Hypnotize values incoming retaliation as a benefit,
 // but an already exhausted stack cannot deliver it. Compare the native
 // HoMM3 net-exchange baseline with the TUM positive-exchange policy, execute

@@ -318,6 +318,9 @@ private:
 			// The native damage preview omits RANGED_RETALIATION. The VCMI
 			// server can counter a shot when the victim can shoot back, is
 			// eligible for retaliation and the attacker does not block it.
+			// Preserve the first-strike bounds for any native secondary hits.
+			int64_t earlyMeleeMin = 0;
+			int64_t earlyMeleeMax = 0;
 			double received = 0.0;
 			if((!guaranteedKill || counterFirst || meleeCounterFirst) && victim.ableToRetaliate())
 			{
@@ -389,6 +392,8 @@ private:
 					counter.attackerPos = victim.getPosition();
 					counter.defenderPos = origin;
 					const auto firstCounter = battle.battleEstimateDamage(counter, nullptr);
+					earlyMeleeMin = firstCounter.damage.min;
+					earlyMeleeMax = firstCounter.damage.max;
 					received = (static_cast<double>(firstCounter.damage.min)
 						+ firstCounter.damage.max) / 2.0;
 					const auto dealtAfterCounter = [&](int64_t counterDamage)
@@ -441,13 +446,11 @@ private:
 						dealt += loss;
 				}
 			}
-			// TUM values all damage dealt by a Hypnotized creature, not just
-			// the unit explicitly aimed at. The native VCMI attack footprint
-			// supplies real extra melee victims (breath and other multihex
-			// attacks). This is separate from the ranged adjacent-splash rule.
-			// FIRST_STRIKE survival and multi-hit timing are still partial:
-			// do not price extra melee hits before a preemptive counterstrike.
-			if(!shooting && !meleeCounterFirst)
+			// A hypnotized attacker that survives melee FIRST_STRIKE can
+			// still hit secondary victims with native breath/multihex attacks.
+			// Preview these victims from the SAME private post-counter states
+			// used for the primary attack, without altering live battle stacks.
+			if(!shooting)
 			{
 				const auto impacted = battle.getAttackedBattleUnits(
 					&stack, &victim, aimedHex, false, origin);
@@ -456,13 +459,25 @@ private:
 					if(!hit || hit->unitId() == victim.unitId()
 						|| !hit->alive() || hit->isInvincible())
 						continue;
-					BattleAttackInfo splash(&stack, hit, distance, false);
-					splash.attackerPos = origin;
-					splash.defenderPos = hit->getPosition();
-					const auto preview = battle.battleEstimateDamage(splash, nullptr);
-					const double loss = std::clamp(
-						(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0,
-						0.0, static_cast<double>(hit->getAvailableHealth()));
+					const auto projectedSplash = [&](const battle::Unit & attacker)
+					{
+						BattleAttackInfo splash(&attacker, hit, distance, false);
+						splash.attackerPos = origin;
+						splash.defenderPos = hit->getPosition();
+						const auto preview = battle.battleEstimateDamage(splash, nullptr);
+						return std::clamp(
+							(static_cast<double>(preview.damage.min) + preview.damage.max) / 2.0,
+							0.0, static_cast<double>(hit->getAvailableHealth()));
+					};
+					const auto afterCounter = [&](int64_t counterDamage)
+					{
+						auto survivors = stack.acquireState();
+						survivors->damage(counterDamage);
+						return survivors->alive() ? projectedSplash(*survivors) : 0.0;
+					};
+					const double loss = meleeCounterFirst
+						? (afterCounter(earlyMeleeMin) + afterCounter(earlyMeleeMax)) / 2.0
+						: projectedSplash(stack);
 					if(battle.battleGetOwner(hit) == battle.battleGetOwner(&stack))
 						friendlySplashLoss += loss;
 					else
