@@ -6275,6 +6275,8 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaCannotTargetHypnotizedFriendlyForme
 	const auto visibleEnemies = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 	const bool formerEnemyInList = std::any_of(visibleEnemies.begin(), visibleEnemies.end(),
 		[&](const CStack * enemy) { return enemy->unitId() == controlled->unitId(); });
+	ASSERT_TRUE(formerEnemyInList)
+		<< "The regression must exercise the native side-based target list despite Hypnotize ownership";
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
