@@ -2762,7 +2762,9 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CarriedBackpackArtifactTriggersNativeR
 	ASSERT_EQ(recorder.battleResults.size(), 1u);
 	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
 	if(recorder.battleResults.back().questionID != QuestionID::NONE)
-		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		{
+			ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+		}
 	EXPECT_TRUE(gameState()->currentBattles.empty());
 	EXPECT_EQ(recorder.acceptedResults, 1);
 	callback->onBattleEnded(battleID);
