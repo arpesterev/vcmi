@@ -175,7 +175,9 @@ public:
 				// Pinned fheroes2 planUnitTurn::hasValuableArtifacts checks for
 				// a *real bonus* on a carried artifact, not merely its presence.
 				// Heroes III distinguishes equipment and backpack storage; both
-				// count, but a bonus-free spellbook must not force a retreat.
+				// count if their native bonus data is nonempty. The H3 Grail
+				// is a notable bonus-free economic item absent from Heroes II;
+				// this source predicate does not estimate its strategic value.
 				// VCMI remains authoritative for each artifact's bonus data and
 				// for whether a RETREAT or SURRENDER action is legal.
 				const bool valuableArtifacts = std::any_of(
@@ -266,7 +268,8 @@ private:
 		// Original ai_battle.cpp checks the artifact data's bonuses for
 		// BonusType != NONE. VCMI stores static, instance-defined and
 		// instance-earned bonuses separately. None of these is equivalent
-		// to a bare inventory slot, especially the Heroes III spellbook.
+		// to bare inventory occupancy. This is a source-policy predicate,
+		// not a native Heroes III artifact economy assessment.
 		const auto meaningful = [](const std::shared_ptr<Bonus> & bonus)
 		{
 			return bonus && bonus->type != BonusType::NONE;
