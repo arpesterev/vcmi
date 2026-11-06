@@ -7270,11 +7270,17 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 	EXPECT_EQ(callback->action->actionType, EActionType::WAIT)
 		<< "TUM melee must preserve its later action while shooters engage neutral melee";
 	EXPECT_FALSE(melee->waited()) << "The first neutral-screening action must be a legal initial WAIT";
-	// In addition to the differential decision above, complete the battle
-	// through the real server. A fabricated winner is never accepted.
+	// In addition to the differential proposal above, verify the SAME
+	// melee stack is issued WAIT by the live engine. A player-level WAIT
+	// counter alone could pass because a different friendly unit waited.
+	// Capture the ID before BattleResult removes the authoritative stack.
+	const int screeningMeleeId = melee->unitId();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
-	EXPECT_GT(lastAcceptedActionTypesByPlayer[player][EActionType::WAIT], 0)
-		<< "The real server must accept TUM's neutral-screening WAIT, not just a callback proposal";
+	EXPECT_GT(lastAcceptedActionTypesByUnit[screeningMeleeId][EActionType::WAIT], 0)
+		<< "The actual screening melee must WAIT on the server, not only in a probe";
+	ASSERT_TRUE(lastFirstAcceptedActionTypeByUnit.contains(screeningMeleeId));
+	EXPECT_EQ(lastFirstAcceptedActionTypeByUnit.at(screeningMeleeId), EActionType::WAIT)
+		<< "The first authoritative melee decision must differ from HoMM3's approach";
 	EXPECT_GT(recorder.shots, 0);
 }
 
