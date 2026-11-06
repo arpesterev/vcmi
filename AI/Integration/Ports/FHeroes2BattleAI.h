@@ -1251,32 +1251,49 @@ private:
 				return BattleAction::makeMeleeAttack(&stack, targetHex, from);
 		}
 
-		const auto * nearestUnit = sorted.front().unit;
-		int startingDistance = GameConstants::BFIELD_SIZE;
-		for(const auto & a : stack.getHexes())
-			for(const auto & b : nearestUnit->getHexes())
-				startingDistance = std::min(startingDistance, static_cast<int>(BattleHex::getDistance(a, b)));
-		BattleHex best;
-		int bestDistance = startingDistance;
-		int bestCost = GameConstants::BFIELD_SIZE;
-		for(const auto & hex : available)
+		// Pinned ai_battle.cpp::berserkTurn does not walk geometrically
+		// toward nearestUnits.front() when no immediate attack is possible.
+		// It calls findNearestCellNextToUnit for each nearest candidate until
+		// one has a *reachable* future attack position. The former geometric
+		// fallback could walk into a siege obstruction forever or approach an
+		// unreachable unit while ignoring a reachable one. Use VCMI's full
+		// path-distance and predecessor graph, not straight-line proximity.
+		// Heroes II/III navigation and adjacency rules remain distinct.
+		for(const auto & candidate : sorted)
 		{
-			if(!hex.isAvailable() || hex == stack.getPosition())
-				continue;
-			int remaining = GameConstants::BFIELD_SIZE;
-			for(const auto & a : stack.getHexes(hex))
-				for(const auto & b : nearestUnit->getHexes())
-					remaining = std::min(remaining, static_cast<int>(BattleHex::getDistance(a, b)));
-			const int cost = static_cast<int>(routes.distances[hex.toInt()]);
-			if(remaining < bestDistance || (remaining == bestDistance && cost < bestCost))
+			BattleHex goal;
+			int shortest = GameConstants::BFIELD_SIZE;
+			for(const auto & from : candidate.unit->getAttackableHexes(&stack))
 			{
-				best = hex;
-				bestDistance = remaining;
-				bestCost = cost;
+				if(!from.isValid() || !battle.isMeleeAttackPossible(&stack, candidate.unit, from))
+					continue;
+				const int cost = static_cast<int>(routes.distances[from.toInt()]);
+				if(cost < shortest || (cost == shortest
+					&& (!goal.isValid() || from.toInt() < goal.toInt())))
+				{
+					shortest = cost;
+					goal = from;
+				}
+			}
+			if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
+				continue;
+			// The target is outside this turn's legal movement. Trace a
+			// server-reachable path back to the last legal first-turn step.
+			// A malformed/disconnected predecessor chain is not an excuse to
+			// manufacture a movement action or substitute a scripted policy.
+			for(int i = 0; i < GameConstants::BFIELD_SIZE; ++i)
+			{
+				if(available.contains(goal) && goal != stack.getPosition())
+					return BattleAction::makeMove(&stack, goal);
+				const auto previous = routes.predecessors[goal.toInt()];
+				if(!previous.isValid() || previous == goal)
+					break;
+				goal = previous;
 			}
 		}
-		return best.isValid() ? BattleAction::makeMove(&stack, best)
-			: BattleAction::makeDefend(&stack);
+		// Source issues SKIP when no unit has a reachable future cell.
+		// Native VCMI's no-op creature order is DEFEND.
+		return BattleAction::makeDefend(&stack);
 	}
 
 	static BattleAction chooseAction(CPlayerBattleCallback & battle, const CStack & stack)
