@@ -4023,11 +4023,11 @@ TEST_F(AIIntegrationNativeBattle, tumDoesNotAvoidIncapacitatedFastStackAsMobileD
 // A genuine VCMI Hypnotize spell transfers the melee unit's control to the
 // opposing army. TUM should then attack its former allies by maximizing
 // damage dealt plus retaliation received, rather than normal net exchange.
-// The two original battle sides can EACH contain a genuinely hypnotized unit.
-// An ally captured by the opposing hero is hostile to our captured attacker,
-// even though ONLY_MINE still lists that target under its original side.
-// Require the selected cross-side shot to be accepted by VCMI itself.
-TEST_F(AIIntegrationNativeBattle, tumDoubleHypnotizeTargetsCurrentHostileFormerAlly)
+// Hypnotize changes the current controller but does not change every native
+// legality rule's use of ORIGINAL battle sides. With both armies captured,
+// the engine currently cannot SHOOT an original ally even when hostile now.
+// Preserve the partial HoMM3 DEFEND rather than inventing a cross-side shot.
+TEST_F(AIIntegrationNativeBattle, tumDoubleHypnotizeRespectsNativeOriginalSideShotGate)
 {
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
@@ -4070,8 +4070,8 @@ TEST_F(AIIntegrationNativeBattle, tumDoubleHypnotizeTargetsCurrentHostileFormerA
 		[&](const CStack * unit) { return unit->unitId() == formerDefender->unitId(); }));
 	ASSERT_TRUE(std::any_of(originalFriends.begin(), originalFriends.end(),
 		[&](const CStack * unit) { return unit->unitId() == formerAttacker->unitId(); }));
-	ASSERT_TRUE(view->battleCanShoot(formerDefender, formerAttacker->getPosition()))
-		<< "The real engine must permit shooting an original ally now hostile under Hypnotize";
+	ASSERT_FALSE(view->battleCanShoot(formerDefender, formerAttacker->getPosition()))
+		<< "Native VCMI still forbids a shot at an original ally despite changed control";
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *formerDefender);
 
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
@@ -4087,19 +4087,15 @@ TEST_F(AIIntegrationNativeBattle, tumDoubleHypnotizeTargetsCurrentHostileFormerA
 		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
 	policy->activeStack(battleID, formerDefender);
 	ASSERT_TRUE(callback->action.has_value());
-	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
-	ASSERT_FALSE(callback->action->target.empty());
-	EXPECT_EQ(callback->action->target.front().unitValue, formerAttacker->unitId())
-		<< "TUM must include current hostile targets from both original battle sides";
-	std::cout << "AI_TUM_DOUBLE_HYPNOTIZE homm3=" << baseline.toString()
+	EXPECT_EQ(callback->action->toString(), baseline.toString())
+		<< "When no original-side attack is legal TUM preserves the partial HoMM3 baseline";
+	EXPECT_EQ(callback->action->actionType, EActionType::DEFEND);
+	std::cout << "AI_TUM_DOUBLE_HYPNOTIZE_NATIVE_GATE homm3=" << baseline.toString()
 		<< " tum=" << callback->action->toString() << '\n';
-	const auto healthBefore = formerAttacker->getAvailableHealth();
-	const int shotsBefore = recorder.shots;
+
 	battle()->activeStack = formerDefender->unitId();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
-		<< "The real server rejected the TUM shot at a former ally now hostile";
-	EXPECT_GT(recorder.shots, shotsBefore);
-	EXPECT_LT(formerAttacker->getAvailableHealth(), healthBefore);
+		<< "The real server should accept the legal TUM fallback DEFEND";
 	policy.reset();
 	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
 	EXPECT_GT(recorder.damage, 0);
