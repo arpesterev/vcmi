@@ -5997,6 +5997,23 @@ TEST_F(AIIntegrationNativeBattle, fheroes2WideCastleDefenderKeepsShelteredStance
 	EXPECT_FALSE(recorder.catapultAttacks.empty());
 }
 
+// HoMM3OriginalTactics has no complete retail siege policy yet. Exercise the
+// independent partial adapter on BOTH sides of a real, fortified VCMI battle.
+// The server handles catapult turns itself; catapult packets are evidence of
+// native siege progression, NOT a HoMM3-selected machine command. This is
+// deliberately a completion regression, not a retail decision-parity claim.
+TEST_F(AIIntegrationNativeBattle, homm3NativeAttackerAndDefenderCompleteFortifiedSiege)
+{
+	prepareSiege(false, CreatureID(0), 10);
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(battle()->battleGetGateState(), EGateState::CLOSED);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.catapultAttacks.empty())
+		<< "Native siege must resolve real server catapult packets";
+	EXPECT_FALSE(recorder.battleResults.empty())
+		<< "Both partial HoMM3 adapters must reach a native terminal result";
+}
+
 TEST_F(AIIntegrationNativeBattle, tumSiegeDefenderHoldsInsideIntactCastleAndCompletesBattle)
 {
 	prepareSiege();
