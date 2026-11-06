@@ -5429,7 +5429,7 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedFirstStrikePricesNativeRangedSpla
 	// divergence or exact unpublished TUM equivalence is claimed.
 	std::cout << "AI_TUM_HYPNOTIZE_RANGED_SPLASH baseline=" << baseline.toString()
 		<< " collateral_before=" << collateralBeforeCounter
-		<< " collateral_after=" << collateralAfter << '\\n';
+		<< " collateral_after=" << collateralAfter << '\n';
 	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
