@@ -4023,6 +4023,88 @@ TEST_F(AIIntegrationNativeBattle, tumDoesNotAvoidIncapacitatedFastStackAsMobileD
 // A genuine VCMI Hypnotize spell transfers the melee unit's control to the
 // opposing army. TUM should then attack its former allies by maximizing
 // damage dealt plus retaliation received, rather than normal net exchange.
+// The two original battle sides can EACH contain a genuinely hypnotized unit.
+// An ally captured by the opposing hero is hostile to our captured attacker,
+// even though ONLY_MINE still lists that target under its original side.
+// Require the selected cross-side shot to be accepted by VCMI itself.
+TEST_F(AIIntegrationNativeBattle, tumDoubleHypnotizeTargetsCurrentHostileFormerAlly)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 5);
+	setArmy(defenderSideHero, CreatureID(2), 5);
+	teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 30);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * formerAttacker = nullptr;
+	const CStack * formerDefender = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->creatureId() != CreatureID(2))
+			continue;
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			formerAttacker = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER)
+			formerDefender = unit.get();
+	}
+	ASSERT_NE(formerAttacker, nullptr);
+	ASSERT_NE(formerDefender, nullptr);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HYPNOTIZE, formerDefender));
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, formerAttacker));
+	ASSERT_TRUE(formerAttacker->isHypnotized());
+	ASSERT_TRUE(formerDefender->isHypnotized());
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_EQ(battle()->battleGetOwner(formerDefender), player);
+	ASSERT_NE(battle()->battleGetOwner(formerAttacker), player);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto originalEnemies = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+	const auto originalFriends = view->battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+	ASSERT_TRUE(std::any_of(originalEnemies.begin(), originalEnemies.end(),
+		[&](const CStack * unit) { return unit->unitId() == formerDefender->unitId(); }));
+	ASSERT_TRUE(std::any_of(originalFriends.begin(), originalFriends.end(),
+		[&](const CStack * unit) { return unit->unitId() == formerAttacker->unitId(); }));
+	ASSERT_TRUE(view->battleCanShoot(formerDefender, formerAttacker->getPosition()))
+		<< "The real engine must permit shooting an original ally now hostile under Hypnotize";
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *formerDefender);
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, formerDefender);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, formerAttacker->unitId())
+		<< "TUM must include current hostile targets from both original battle sides";
+	std::cout << "AI_TUM_DOUBLE_HYPNOTIZE homm3=" << baseline.toString()
+		<< " tum=" << callback->action->toString() << '\n';
+	const auto healthBefore = formerAttacker->getAvailableHealth();
+	const int shotsBefore = recorder.shots;
+	battle()->activeStack = formerDefender->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The real server rejected the TUM shot at a former ally now hostile";
+	EXPECT_GT(recorder.shots, shotsBefore);
+	EXPECT_LT(formerAttacker->getAvailableHealth(), healthBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumHypnotizedMeleeTargetsHighestCombinedDamage)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 8);
