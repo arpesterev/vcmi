@@ -15,6 +15,27 @@
 
 namespace MMAI::BAI
 {
+// Both ONNX versions require a live, version-compatible observation.
+// Validate before dereferencing supplementary data or making an inference.
+template<typename State>
+inline void requireNNModelState(const State * state, int expectedVersion, const char * adapter)
+{
+	if(!state)
+		throw std::runtime_error(std::string("MMAI ") + adapter + ": null state before ONNX inference");
+	if(state->version() != expectedVersion)
+		throw std::runtime_error(std::string("MMAI ") + adapter + ": incompatible observation version "
+			+ std::to_string(state->version()) + " (expected " + std::to_string(expectedVersion) + ")");
+}
+
+// V13 decodes the sampled index against the full schema action mask.
+// Fail before ONNX, not on a null pointer or an out-of-bounds lookup.
+template<typename Mask>
+inline void requireNNV13ActionMask(const Mask * mask, size_t expectedSize)
+{
+	if(!mask || mask->size() != expectedSize)
+		throw std::runtime_error("MMAI V13: missing or incorrect action mask size before ONNX inference");
+}
+
 // Only unconfigured keys may inherit a parent model as a cache alias.
 inline bool mayCacheResolvedNNModel(const std::map<std::string, std::string> & configuredPaths,
                                    const std::string & key, const std::string & resolvedPath)

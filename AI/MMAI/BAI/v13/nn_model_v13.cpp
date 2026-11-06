@@ -15,6 +15,7 @@
 #include "nn_model_v13.h"
 #include "BAI/nn_model_metadata.h"
 #include "BAI/nn_output_validation.h"
+#include "BAI/nn_model_resolution.h"
 #include "BAI/nn_v13_action_routing.h"
 #include "schema/base.h"
 #include "schema/v13/constants.h"
@@ -452,10 +453,8 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	const std::lock_guard<std::mutex> inferenceLock(inferenceMutex);
 	NestedLogTag _("getAction");
 	auto timer = ScopedTimer("call");
+	requireNNModelState(s, version, "V13");
 	auto any = s->getSupplementaryData();
-
-	if(s->version() != version)
-		throwf("getAction: unsupported IState version: want: %d, have: %d", version, s->version());
 
 	if(!any.has_value())
 		throw std::runtime_error("extractSupplementaryData: supdata is empty");
@@ -473,6 +472,8 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 		return MMAI::Schema::ACTION_RESET;
 	}
 
+	const auto * actionMask = s->getActionMask();
+	requireNNV13ActionMask(actionMask, static_cast<size_t>(Schema::V13::N_ACTIONS));
 	auto inputs = prepareInputsV13(s, sup);
 	auto outputs = container->session->Run(Ort::RunOptions(), inputNames.data(), inputs.data(), inputs.size(), outputNames.data(), outputNames.size());
 
@@ -533,8 +534,7 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 		actionTable.at(act0_sample.index).at(hex1_sample.index).at(hex2_sample.index), Schema::V13::N_ACTIONS);
 	const auto & gaction = actionTable.at(act0_greedy.index).at(hex1_greedy.index).at(hex2_greedy.index);
 
-	const auto & mask = s->getActionMask();
-	if(!mask->at(saction))
+	if(!actionMask->at(saction))
 		throwf("getAction: sampled action is masked"); // Incorrect mask?
 
 	auto sconf = act0_sample.confidence * hex1_sample.confidence * hex2_sample.confidence;

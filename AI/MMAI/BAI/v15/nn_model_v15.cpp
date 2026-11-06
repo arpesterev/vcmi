@@ -11,6 +11,7 @@
 #include "nn_model_v15.h"
 #include "BAI/nn_model_metadata.h"
 #include "BAI/nn_output_validation.h"
+#include "BAI/nn_model_resolution.h"
 
 #include "schema/base.h"
 #include "schema/v15/constants.h"
@@ -560,10 +561,8 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	const std::lock_guard<std::mutex> inferenceLock(inferenceMutex);
 	NestedLogTag _("getAction");
 	auto timer = ScopedTimer("call");
+	requireNNModelState(s, version, "V15");
 	auto any = s->getSupplementaryData();
-
-	if(s->version() != version)
-		throwf("getAction: unsupported IState version: want: %d, have: %d", version, s->version());
 
 	if(!any.has_value())
 		throw std::runtime_error("extractSupplementaryData: supdata is empty");
@@ -582,7 +581,10 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	if(!graph)
 		throwf("getAction: null graph");
 
-	const auto * gnode = graph->getNodes(ET::NODE_GLOBAL).at(0);
+	const auto & globalNodes = graph->getNodes(ET::NODE_GLOBAL);
+	if(globalNodes.empty() || !globalNodes.front())
+		throwf("getAction: graph has no global node before ONNX inference");
+	const auto * gnode = globalNodes.front();
 	using GA = S15::Graph::NodeAttributes::Global;
 
 	if(gnode->rawAttributes().at(EU(GA::BATTLE_WINNER)) != EU(S15::CombatResult::NONE))

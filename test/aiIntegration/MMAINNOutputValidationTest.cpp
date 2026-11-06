@@ -15,6 +15,33 @@
 
 #include <limits>
 
+TEST(MMAINNOutputValidation, V13V15RejectAbsentOrWrongVersionStateAndV13MaskBeforeOnnx)
+{
+	using MMAI::BAI::requireNNModelState;
+	using MMAI::BAI::requireNNV13ActionMask;
+	struct Observation
+	{
+		int schemaVersion;
+		int version() const { return schemaVersion; }
+	};
+	const Observation v13{13};
+	const Observation v15{15};
+
+	EXPECT_NO_THROW(requireNNModelState(&v13, 13, "V13"));
+	EXPECT_NO_THROW(requireNNModelState(&v15, 15, "V15"));
+	EXPECT_THROW(requireNNModelState(static_cast<const Observation *>(nullptr), 13, "V13"), std::runtime_error);
+	EXPECT_THROW(requireNNModelState(static_cast<const Observation *>(nullptr), 15, "V15"), std::runtime_error);
+	EXPECT_THROW(requireNNModelState(&v13, 15, "V15"), std::runtime_error);
+	EXPECT_THROW(requireNNModelState(&v15, 13, "V13"), std::runtime_error);
+
+	std::vector<bool> fullMask(6, true);
+	EXPECT_NO_THROW(requireNNV13ActionMask(&fullMask, 6));
+	EXPECT_THROW(requireNNV13ActionMask(static_cast<const std::vector<bool> *>(nullptr), 6), std::runtime_error);
+	EXPECT_THROW(requireNNV13ActionMask(&fullMask, 5), std::runtime_error);
+	fullMask.pop_back();
+	EXPECT_THROW(requireNNV13ActionMask(&fullMask, 6), std::runtime_error);
+}
+
 TEST(MMAINNOutputValidation, RejectsInvalidOnnxOutputBeforeGreedyOrSampling)
 {
 	using MMAI::BAI::validateNNActionDistribution;

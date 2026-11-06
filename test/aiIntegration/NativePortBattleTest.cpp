@@ -3985,6 +3985,17 @@ TEST_F(AIIntegrationNativeBattle, mmaiOppositeSideMetadataIsRejected)
 	auto model = MMAI::BAI::CreateNNModel(path);
 	ASSERT_NE(model, nullptr);
 	ASSERT_EQ(model->getType(), MMAI::Schema::ModelType::NN);
+	// The checksum-pinned real V15 ONNX instance must reject a missing
+	// event state before inference, not crash or use a scripted substitute.
+	try
+	{
+		(void)model->getAction(nullptr);
+		FAIL() << "MMAI accepted a null observation";
+	}
+	catch(const std::runtime_error & error)
+	{
+		EXPECT_NE(std::string(error.what()).find("null state before ONNX inference"), std::string::npos);
+	}
 
 	const auto attackerSide = static_cast<MMAI::Schema::Side>(static_cast<int>(BattleSide::ATTACKER));
 	const auto defenderSide = static_cast<MMAI::Schema::Side>(static_cast<int>(BattleSide::DEFENDER));
