@@ -464,60 +464,110 @@ private:
 			&& !attacker.hasBonusOfType(BonusType::MULTIHEX_ENEMY_ATTACK))
 			return 0.0;
 
-		// Native FIRST_STRIKE may kill the moving attacker BEFORE its own
-		// multi-head or breath attack is executed. The pinned Heroes III
-		// checkAdjacentHexes has no preemptive first-strike rule, so this is
-		// strictly a VCMI legality correction to the partial port. A certain
-		// lethal counter must never earn damage credit against bystanders.
-		const auto firstStrikeMelee = target.hasBonus(Selector::typeSubtype(
-			BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll)
-			.Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
-				BonusCustomSubtype::damageTypeMelee)));
-		// The counterattack happens before every collateral hit. A nonlethal
-		// FIRST_STRIKE can still remove creatures from the attacker, so pricing
-		// secondary damage with its untouched strength is also fictitious.
-		// Simulate the representative preemptive loss on a DETACHED stack.
-		// This is a VCMI host-rule adjustment; pinned getMultiHeadBonus and
-		// getBreathBonus do not perform such a preemptive counterattack.
-		auto survivingAttacker = attacker.acquireState();
-		if(firstStrikeMelee && !target.hasBonusOfType(BonusType::NOT_ACTIVE)
-			&& !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
-			&& !attacker.isInvincible() && target.ableToRetaliate()
-			&& !battle.isLongWeaponAttack(&attacker, &target, from))
+		// Pinned checkAdjacentHexes scores one multi-head/breath swing. VCMI
+		// performAttackSequence may execute another creature or hero-granted
+		// swing, provided BOTH primary combatants survive. Replay the native
+		// sequence on detached states so later collateral cannot be credited
+		// against a dead bystander or after the primary target is destroyed.
+		// This is an explicit host extension, not retail HoMM3 equivalence.
+		const auto expectedDamage = [](const DamageEstimation & estimate, int64_t available)
 		{
-			BattleAttackInfo firstCounter(&target, &attacker, 0, false);
-			firstCounter.attackerPos = target.getPosition();
-			firstCounter.defenderPos = from;
-			const auto counter = battle.battleEstimateDamage(firstCounter);
-			int64_t counterHit = counter.damage.min
-				+ (counter.damage.max - counter.damage.min) / 2;
-			counterHit = std::clamp<int64_t>(counterHit, 0, survivingAttacker->getAvailableHealth());
-			survivingAttacker->damage(counterHit);
-			if(!survivingAttacker->alive())
+			const int64_t midpoint = estimate.damage.min
+				+ (estimate.damage.max - estimate.damage.min) / 2;
+			return std::clamp<int64_t>(midpoint, 0, available);
+		};
+		int totalMeleeAttacks = attacker.getTotalAttacks(false);
+		if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
+			totalMeleeAttacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+				BonusSubtypeID(attacker.creatureId()));
+		if(totalMeleeAttacks <= 0)
+			return 0.0;
+
+		const auto firstStrikeSelector = Selector::typeSubtype(BonusType::FIRST_STRIKE,
+			BonusCustomSubtype::damageTypeAll).Or(Selector::typeSubtype(BonusType::FIRST_STRIKE,
+				BonusCustomSubtype::damageTypeMelee));
+		const bool firstStrike = target.hasBonus(firstStrikeSelector)
+			&& !target.hasBonusOfType(BonusType::NOT_ACTIVE);
+		const bool canCounter = !attacker.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+			&& !attacker.isInvincible() && target.ableToRetaliate()
+			&& !battle.isLongWeaponAttack(&attacker, &target, from);
+
+		auto remainingAttacker = attacker.acquireState();
+		auto remainingPrimary = target.acquireState();
+		if(firstStrike && canCounter)
+		{
+			BattleAttackInfo preemptive(&target, &attacker, 0, false);
+			preemptive.attackerPos = target.getPosition();
+			preemptive.defenderPos = from;
+			const auto damage = battle.battleEstimateDamage(preemptive);
+			int64_t counterHit = expectedDamage(damage, remainingAttacker->getAvailableHealth());
+			remainingAttacker->damage(counterHit);
+			if(!remainingAttacker->alive())
 				return 0.0;
 		}
 
-		double value = 0.0;
-		// Use the original stack for native footprint/aim geometry: removing
-		// creatures does not move a surviving stack. Use survivingAttacker
-		// ONLY for secondary damage, after the preemptive counter.
-		// The engine de-duplicates double-wide targets. A direct hit is
-		// already in exchangeValue; never score it as collateral.
+		// getAttackedCreatures uses the *real* legal attack-from/aim geometry
+		// and de-duplicates a wide stack. Keep each original unit for its
+		// combat-value denominator, but use a different detached state for
+		// successive hits and cap every victim's cumulative lost health.
+		std::vector<std::pair<const CStack *, decltype(target.acquireState())>> secondaryStates;
 		for(const auto * affected : battle.getAttackedCreatures(&attacker, attackTo, false, from).first)
 		{
 			const auto * secondary = dynamic_cast<const CStack *>(affected);
-			if(!secondary || secondary == &target || secondary == &attacker || !secondary->alive())
-				continue;
-			BattleAttackInfo info(survivingAttacker.get(), secondary, pathCost, false);
-			info.attackerPos = from;
-			const double loss = lossValue(*secondary, battle.battleEstimateDamage(info));
-			// Ownership, not immutable deployment side: Hypnotize can make
-			// a stack friendly or hostile for the current action.
-			value += Ports::HoMM3::collateralStrikeValue(
-				battle.battleGetOwner(secondary) != battle.battleGetOwner(&attacker), loss);
+			if(secondary && secondary != &target && secondary != &attacker && secondary->alive())
+				secondaryStates.emplace_back(secondary, secondary->acquireState());
+		}
+		if(secondaryStates.empty())
+			return 0.0;
+
+		double value = 0.0;
+		for(int attackIndex = 0; attackIndex < totalMeleeAttacks
+			&& remainingAttacker->alive() && remainingPrimary->alive(); ++attackIndex)
+		{
+			const int attackDistance = attackIndex == 0 ? pathCost : 0;
+			for(auto & entry : secondaryStates)
+			{
+				const auto * original = entry.first;
+				auto & remaining = entry.second;
+				if(!remaining->alive())
+					continue;
+				BattleAttackInfo info(remainingAttacker.get(), remaining.get(), attackDistance, false);
+				info.attackerPos = from;
+				const auto estimate = battle.battleEstimateDamage(info);
+				int64_t lostHealth = expectedDamage(estimate, remaining->getAvailableHealth());
+				const double loss = static_cast<double>(original->estimateCombatValue())
+					* static_cast<double>(lostHealth) / static_cast<double>(original->getAvailableHealth());
+				value += Ports::HoMM3::collateralStrikeValue(
+					battle.battleGetOwner(original) != battle.battleGetOwner(&attacker), loss);
+				remaining->damage(lostHealth);
+			}
+
+			BattleAttackInfo primary(remainingAttacker.get(), remainingPrimary.get(), attackDistance, false);
+			primary.attackerPos = from;
+			primary.defenderPos = attackTo;
+			DamageEstimation retaliation;
+			const auto primaryHit = battle.battleEstimateDamage(primary, &retaliation);
+			int64_t firstLoss = expectedDamage(primaryHit, remainingPrimary->getAvailableHealth());
+			remainingPrimary->damage(firstLoss);
+
+			// The native server permits at most one ordinary retaliation for a
+			// multi-strike activation. FIRST_STRIKE already happened before
+			// the opening swing; otherwise a surviving target counters now.
+			// Its casualties affect the following collateral previews, but
+			// direct counter damage is charged only in exchangeValue.
+			if(attackIndex == 0 && !firstStrike && canCounter && remainingPrimary->alive()
+				&& retaliation.damage.max > 0)
+			{
+				BattleAttackInfo counter(remainingPrimary.get(), remainingAttacker.get(), 0, false);
+				counter.attackerPos = target.getPosition();
+				counter.defenderPos = from;
+				const auto counterEstimate = battle.battleEstimateDamage(counter);
+				int64_t counterHit = expectedDamage(counterEstimate, remainingAttacker->getAvailableHealth());
+				remainingAttacker->damage(counterHit);
+			}
 		}
 		if(!std::isfinite(value))
-			throw std::logic_error("Nonfinite HoMM3 collateral attack projection");
+			throw std::logic_error("Nonfinite HoMM3 sequential collateral projection");
 		return value;
 	}
 
