@@ -10,6 +10,9 @@
 #include "schema/base.h"
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <vector>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -54,6 +57,34 @@ inline void requireNNV13TensorName(const char * actual, const char * expected, s
 	throw std::runtime_error("MMAI V13: unexpected ONNX " + std::string(kind) + " name at index "
 		+ std::to_string(index) + ": expected '" + expected + "', got '"
 		+ (actual ? actual : "<null>") + "'");
+}
+
+// Reject an incompatible ONNX interface when loading weights, before a real
+// VCMI battle reaches inference. A -1 expected dimension is dynamic; ONNX
+// symbolic axes also report -1 and may match fixed input dimensions.
+// Known positive dimensions must agree, and every tensor must have the
+// correct rank and element type. This does not validate learned weights.
+inline void requireNNModelTensorSignature(const std::string & name, int actualType, int expectedType,
+                                          const std::vector<int64_t> & actualShape,
+                                          std::initializer_list<int64_t> expectedShape)
+{
+	if(actualType != expectedType)
+		throw std::runtime_error("MMAI: ONNX tensor '" + name + "' has unexpected element type: "
+			+ std::to_string(actualType) + ", expected " + std::to_string(expectedType));
+	if(actualShape.size() != expectedShape.size())
+		throw std::runtime_error("MMAI: ONNX tensor '" + name + "' has unexpected rank: "
+			+ std::to_string(actualShape.size()) + ", expected " + std::to_string(expectedShape.size()));
+
+	std::size_t i = 0;
+	for(const auto expected : expectedShape)
+	{
+		const auto actual = actualShape[i];
+		if(actual < -1 || (expected >= 0 && actual >= 0 && actual != expected))
+			throw std::runtime_error("MMAI: ONNX tensor '" + name + "' has incompatible dimension "
+				+ std::to_string(i) + ": " + std::to_string(actual)
+				+ ", expected " + std::to_string(expected));
+		++i;
+	}
 }
 
 inline int parseNNModelVersion(const std::string & value)

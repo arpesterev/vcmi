@@ -270,6 +270,7 @@ jobs:
                       'V13RejectsInvalidRequiredHead',
                       'V13RejectsJaggedActionTableMetadata',
                       'V13RejectsIncorrectOnnxInputAndOutputNamesAtLoad',
+                      'V13V15RejectMalformedOnnxTensorSignaturesAtLoad',
                       'V13RejectsOutOfRangeActionTableEntries',
                       'V13RejectsDecodedActionOutsideLiveSchema',
                       'V15RejectsDuplicateNodeAndEdgeMetadataTypes',

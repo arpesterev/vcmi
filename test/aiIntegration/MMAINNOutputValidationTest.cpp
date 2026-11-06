@@ -178,6 +178,38 @@ V13TestSample v13TestGreedy(const std::vector<float> & probabilities)
 }
 }
 
+TEST(MMAINNOutputValidation, V13V15RejectMalformedOnnxTensorSignaturesAtLoad)
+{
+	using MMAI::BAI::requireNNModelTensorSignature;
+	constexpr int floatType = 1;
+	constexpr int intType = 2;
+
+	// Dynamic cardinalities and symbolic axes are compatible with exported
+	// V13/V15 schemas, including a zero-edge V15 graph.
+	EXPECT_NO_THROW(requireNNModelTensorSignature("x_Unit", floatType, floatType, {-1, 42}, {-1, 42}));
+	EXPECT_NO_THROW(requireNNModelTensorSignature("edge_index_flat", intType, intType, {2, -1}, {2, -1}));
+	EXPECT_NO_THROW(requireNNModelTensorSignature("value", floatType, floatType, {}, {}));
+	EXPECT_NO_THROW(requireNNModelTensorSignature("value", floatType, floatType, {1}, {1}));
+	EXPECT_NO_THROW(requireNNModelTensorSignature("edge_attr_flat", floatType, floatType, {0, 8}, {-1, 8}));
+
+	// Fail closed on a wrong dtype, rank, known-width mismatch or invalid
+	// negative dimension before the first inference touches a battle.
+	EXPECT_THROW(requireNNModelTensorSignature("x_Unit", intType, floatType, {-1, 42}, {-1, 42}), std::runtime_error);
+	EXPECT_THROW(requireNNModelTensorSignature("x_Unit", floatType, floatType, {42}, {-1, 42}), std::runtime_error);
+	EXPECT_THROW(requireNNModelTensorSignature("x_Unit", floatType, floatType, {-1, 41}, {-1, 42}), std::runtime_error);
+	EXPECT_THROW(requireNNModelTensorSignature("x_Unit", floatType, floatType, {-2, 42}, {-1, 42}), std::runtime_error);
+
+	try
+	{
+		requireNNModelTensorSignature("active_action_ids", floatType, intType, {-1}, {-1});
+		FAIL() << "Accepted a mismatched ONNX action-ID dtype";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("active_action_ids"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V13RejectsIncorrectOnnxInputAndOutputNamesAtLoad)
 {
 	using MMAI::BAI::requireNNV13TensorName;

@@ -435,6 +435,20 @@ std::vector<const char *> NNModel::readInputNames()
 			throwf("wrong input name at %d: want: %s, have: %s", ind, tailNames[i], res[ind]);
 	}
 
+	// Preflight the type/rank and known fixed axes of every model input.
+	// The exporter marks graph cardinalities as dynamic (symbolic -1).
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto spec = container->session->GetInputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	for(size_t i = 0; i < nodeOrder.size(); ++i)
+		check(i, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1, nodeOrder[i].attrSize});
+	check(nodeOrder.size(), ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {2, -1});
+	check(nodeOrder.size() + 1, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1, edgeAttrFlatSize});
+	check(nodeOrder.size() + 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {static_cast<int64_t>(edgeOrder.size())});
+	check(nodeOrder.size() + 3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {-1});
+
 	return res;
 }
 
@@ -469,6 +483,25 @@ std::vector<const char *> NNModel::readOutputNames()
 	for(size_t i = 0; i < expectedNames.size(); ++i)
 		if(expectedNames[i] != res[i])
 			throwf("wrong output name at %d: want: %s, have: %s", i, expectedNames[i], res[i]);
+
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto spec = container->session->GetOutputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	// The exporter allows a scalar [] or singleton [1] action/value head.
+	const auto actionShape = container->session->GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
+	const auto valueShape = container->session->GetOutputTypeInfo(2).GetTensorTypeAndShapeInfo().GetShape();
+	if(actionShape.empty())
+		check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {});
+	else
+		check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {1});
+	check(1, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1});
+	if(valueShape.empty())
+		check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {});
+	else
+		check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {1});
+	check(3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {-1});
 
 	return res;
 }

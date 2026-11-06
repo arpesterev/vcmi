@@ -329,6 +329,18 @@ std::vector<const char *> NNModel::readInputNames()
 	for(size_t i = 0; i < expectedNames.size(); ++i)
 		requireNNV13TensorName(res[i], expectedNames[i], i, "input");
 
+	// The exporter binds these positional tensors by name, dtype and rank.
+	// A foreign ONNX model must fail on load, not during the first live turn.
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto spec = container->session->GetInputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1});
+	check(1, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {2, -1});
+	check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1, 1});
+	check(3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {LT_COUNT});
+
 	return res;
 }
 
@@ -378,6 +390,18 @@ std::vector<const char *> NNModel::readOutputNames()
 	constexpr std::array<const char *, 6> expectedNames = {"act0_probs", "hex1_probs", "hex2_probs", "act0_mask", "hex1_mask", "hex2_mask"};
 	for(size_t i = 0; i < expectedNames.size(); ++i)
 		requireNNV13TensorName(res[i], expectedNames[i], i, "output");
+
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto spec = container->session->GetOutputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {4});
+	check(1, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {4, 165});
+	check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {165, 165});
+	check(3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {4});
+	check(4, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {4, 165});
+	check(5, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {165, 165});
 
 	return res;
 }
