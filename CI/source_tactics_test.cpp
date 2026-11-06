@@ -307,6 +307,21 @@ int main()
 	try { TUM::projectedSiegeVolleyLoss(100, 20,
 		std::numeric_limits<double>::infinity(), 2); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
+	// A neutral's wide occupied footprint can have a legal tail shot but no
+	// legal head shot. Guarding only its head abandons active allied archers.
+	const std::array<int, 2> wideShotCells{20, 19};
+	require(TUM::shooterCanHitAnyOccupiedCell(wideShotCells,
+		[](int cell) { return cell == 19; }),
+		"Native shooter screen must recognize a legal wide-target tail shot");
+	require(TUM::shooterCanHitAnyOccupiedCell(wideShotCells,
+		[](int cell) { return cell == 20; }),
+		"Native shooter screen must retain a legal wide-target head shot");
+	require(!TUM::shooterCanHitAnyOccupiedCell(wideShotCells,
+		[](int) { return false; }),
+		"No legal shot into either occupied cell means no firing line");
+	require(!TUM::shooterCanHitAnyOccupiedCell(std::array<int, 0>{},
+		[](int) { return true; }),
+		"An empty enemy footprint never creates a legal shot");
 	require(!TUM::creatureMayApplyEffect(true), "Do not recast existing effect");
 	require(TUM::creatureMayApplyEffect(false), "Allow a new effect");
 	// Siege hold is invalidated by a breach in either occupied cell of a

@@ -7280,6 +7280,87 @@ TEST_F(AIIntegrationNativeBattle, tumMeleeHoldsPositionToProtectShootersAgainstR
 
 
 
+// A native double-wide neutral still exposes two independent aimed cells.
+// A fixture-only Paralyze status isolates the shooter-support rule from the
+// next-turn reachability check. The boundary with head blocked and tail
+// legal is explicitly covered by the separate source predicate contract.
+TEST_F(AIIntegrationNativeBattle, tumWideNeutralShooterScreenUsesNativeFootprint)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 60);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 25));
+	gameHandler->createWanderingMonster({9, 9, 0}, CreatureID(102), 1);
+	const auto * neutral = findFirst<CGCreature>();
+	ASSERT_NE(neutral, nullptr);
+	gameHandler->battles->startBattle(attackerSideHero, neutral);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	const CStack * melee = nullptr;
+	const CStack * archer = nullptr;
+	CStack * wideEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+		{
+			if(unit->creatureId() == CreatureID(0))
+				melee = unit.get();
+			else if(unit->creatureId() == CreatureID(2))
+				archer = unit.get();
+		}
+		else if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(102))
+			wideEnemy = unit.get();
+	}
+	ASSERT_NE(melee, nullptr);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_NE(wideEnemy, nullptr);
+	ASSERT_EQ(wideEnemy->getHexes().size(), 2u);
+	ASSERT_FALSE(wideEnemy->isShooter());
+	wideEnemy->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::CREATURE_ABILITY,
+		1, BonusSourceID(CreatureID(102)), BonusSubtypeID(SpellID(SpellID::PARALYZE))));
+	ASSERT_TRUE(wideEnemy->hasBonusOfType(BonusType::NOT_ACTIVE));
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_EQ(battle()->sideToPlayer(BattleSide::DEFENDER), PlayerColor::NEUTRAL);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto occupied = wideEnemy->getHexes();
+	const bool headShot = view->battleCanShoot(archer, occupied[0]);
+	const bool tailShot = view->battleCanShoot(archer, occupied[1]);
+	ASSERT_TRUE(headShot || tailShot) << "Native wide neutral must expose a legal archer shot";
+	ASSERT_TRUE(AIIntegration::Ports::TUM::shooterCanHitAnyOccupiedCell(occupied,
+		[&](const BattleHex & hex) { return view->battleCanShoot(archer, hex); }));
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *melee);
+	ASSERT_NE(baseline.actionType, EActionType::WAIT);
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, melee);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_EQ(callback->action->actionType, EActionType::WAIT);
+	EXPECT_NE(callback->action->toString(), baseline.toString());
+	battle()->activeStack = melee->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Server rejected TUM's wide-neutral shooter-screen WAIT";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // A ballista's native SHOOTER and legal-fire flags must not turn it into
 // the "friendly archers" that justify TUM's neutral-melee screening rule.
 // The machine remains controlled by its separate, documented ballista policy.

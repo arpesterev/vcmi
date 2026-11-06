@@ -397,6 +397,15 @@ inline bool holdMeleeForShooters(const ShooterProtection & state)
 		&& !state.opponentHasShooters && !state.opponentCanReachAnyFriendlyStack;
 }
 
+// A shooter can have a legal native shot through the exposed TAIL of a
+// double-wide enemy even if its head is blocked by obstacles or siege geometry.
+// Keep the neutral archer screen if ANY occupied enemy cell can be shot.
+template<typename Footprint, typename CanShoot>
+inline bool shooterCanHitAnyOccupiedCell(const Footprint & occupied, CanShoot canShoot)
+{
+	return std::any_of(occupied.begin(), occupied.end(), canShoot);
+}
+
 // Native reachability uses a negative distance for an unreachable hex. The
 // published TUM neutral-melee screen must react only to an enemy that can
 // ACTUALLY reach a friendly unit next movement turn. -1 <= speed is not a

@@ -734,7 +734,11 @@ private:
 			return std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
 			{
 				return enemy->alive() && enemy->getPosition().isValid()
-					&& battle.battleCanShoot(friendly, enemy->getPosition());
+					&& Ports::TUM::shooterCanHitAnyOccupiedCell(enemy->getHexes(),
+						[&](const BattleHex & aimedHex)
+						{
+							return aimedHex.isValid() && battle.battleCanShoot(friendly, aimedHex);
+						});
 			});
 		});
 		state.opponentHasShooters = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
