@@ -5019,6 +5019,141 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindTurnsFastFlyerIntoPriorityDistant
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Pinned fheroes2 ai_battle.cpp::evaluatePotentialAttackPositions first
+// takes the best adjacent melee attack at a head position, then ADDS
+// the value of each distinct adjacent archer. BestAttackOutcome compares
+// that position score before an individual enemy's attack score.
+// Heroes III creature values, damage, hexes and action legality remain native.
+TEST_F(AIIntegrationNativeBattle, fheroes2MeleePositionAggregatesTwoAdjacentArcherThreats)
+{
+	prepareBattle(CreatureID(1), 100, CreatureID(0), 25);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * attacker = nullptr;
+	CStack * isolated = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(1))
+			attacker = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			isolated = unit.get();
+	}
+	ASSERT_NE(attacker, nullptr);
+	ASSERT_NE(isolated, nullptr);
+	ASSERT_FALSE(attacker->isShooter());
+	const BattleHex center(GameConstants::BFIELD_SIZE / 2);
+	ASSERT_TRUE(center.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(center), nullptr);
+	attacker->setPosition(center);
+	BattleHex isolatedHex;
+	for(const auto & hex : center.getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && hex.getX() < center.getX()
+			&& battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			isolatedHex = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(isolatedHex.isValid());
+	isolated->setPosition(isolatedHex);
+	ASSERT_FALSE(battle()->meleeAttackHexes(attacker, isolated, center).empty());
+
+	// Find two legal attack targets adjacent to the SAME reachable hex
+	// but separated from the individually more valuable melee enemy.
+	BattleHex clusterFrom;
+	std::vector<BattleHex> clusterHexes;
+	const auto initialReachability = battle()->getReachability(attacker);
+	const auto initialAvailable = battle()->battleGetAvailableHexes(initialReachability, attacker, false);
+	for(const auto & from : initialAvailable)
+	{
+		if(!from.isAvailable() || from.getX() < center.getX() + 2
+			|| BattleHex::getDistance(center, from) < 2)
+			continue;
+		std::vector<BattleHex> neighbours;
+		for(const auto & hex : from.getNeighbouringTiles())
+		{
+			if(hex.isAvailable() && hex.getX() >= from.getX()
+				&& battle()->battleGetUnitByPos(hex) == nullptr
+				&& BattleHex::getDistance(hex, isolatedHex) > 3)
+				neighbours.push_back(hex);
+		}
+		if(neighbours.size() >= 2)
+		{
+			clusterFrom = from;
+			clusterHexes.assign(neighbours.begin(), neighbours.begin() + 2);
+			break;
+		}
+	}
+	ASSERT_TRUE(clusterFrom.isValid());
+	const auto * firstArcher = addStack(BattleSide::DEFENDER, CreatureID(2), clusterHexes[0], 10);
+	const auto * secondArcher = addStack(BattleSide::DEFENDER, CreatureID(2), clusterHexes[1], 10);
+	ASSERT_NE(firstArcher, nullptr);
+	ASSERT_NE(secondArcher, nullptr);
+	ASSERT_TRUE(firstArcher->isShooter());
+	ASSERT_TRUE(secondArcher->isShooter());
+	const auto reachability = battle()->getReachability(attacker);
+	ASSERT_TRUE(battle()->battleGetAvailableHexes(reachability, attacker, false).contains(clusterFrom));
+	ASSERT_FALSE(battle()->meleeAttackHexes(attacker, firstArcher, clusterFrom).empty());
+	ASSERT_FALSE(battle()->meleeAttackHexes(attacker, secondArcher, clusterFrom).empty());
+	const auto nativeAttackValue = [&](const CStack * enemy, const BattleHex & from)
+	{
+		BattleAttackInfo info(attacker, enemy, reachability.distances[from.toInt()], false);
+		info.attackerPos = from;
+		DamageEstimation retaliation;
+		const auto damage = battle()->battleEstimateDamage(info, &retaliation);
+		const auto lostValue = [](const CStack * unit, const DamageEstimation & estimate)
+		{
+			const double health = static_cast<double>(unit->getAvailableHealth());
+			if(health <= 0)
+				return 0.0;
+			const double hitPoints = std::min(health,
+				(static_cast<double>(estimate.damage.min) + estimate.damage.max) / 2.0);
+			return unit->estimateCombatValue() * hitPoints / health;
+		};
+		return lostValue(enemy, damage) - lostValue(attacker, retaliation);
+	};
+	const double isolatedValue = nativeAttackValue(isolated, center);
+	const double firstValue = nativeAttackValue(firstArcher, clusterFrom);
+	const double secondValue = nativeAttackValue(secondArcher, clusterFrom);
+	ASSERT_GT(isolatedValue, std::max(firstValue, secondValue))
+		<< "The old independent-target scorer should prefer the isolated enemy";
+	ASSERT_GT(firstValue + secondValue, isolatedValue)
+		<< "The source position scorer must instead prefer blocking both archers";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	ASSERT_EQ(battle()->battleActiveUnit(), attacker);
+	policy->activeStack(battleID, attacker);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Source ranking must select a native melee action";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	const BattleHex selectedTarget = callback->action->target[1].hexValue;
+	const auto * selected = battle()->battleGetUnitByPos(selectedTarget);
+	EXPECT_TRUE(selected == firstArcher || selected == secondArcher)
+		<< "One attack position threatens both archers and must outrank the isolated enemy";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Real server rejected the independent FHeroes2 melee command";
+	EXPECT_GT(recorder.damage, 0);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2MeleeSplashChoosesActualNativeMultiTargetAttack)
 {
 	// Pinned ai_battle.cpp::optimalAttackValue scores all opponents hit by
