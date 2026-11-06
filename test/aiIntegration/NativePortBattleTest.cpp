@@ -2717,6 +2717,80 @@ TEST_F(AIIntegrationNativeBattle, fheroes2StrategicFarewellCastThenNativeRetreat
 }
 
 
+// Pinned planUnitTurn::hasValuableArtifacts checks artifact *bonuses*,
+// not mere inventory occupancy. Heroes III spellbooks are stored as special
+// equipment, and must not act like a bonus-bearing Heroes II artifact.
+// The second decision in the SAME live battle adds a bonus-bearing backpack
+// weapon to isolate that distinction before a real server-accepted RETREAT.
+TEST_F(AIIntegrationNativeBattle, fheroes2BonusFreeSpellbookDoesNotTriggerSourceRetreat)
+{
+	prepareBattle(CreatureID(19), 1, CreatureID(16), 600);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	gameState()->players.at(player).human = false;
+	teachSpell(attackerSideHero, SpellID::HASTE);
+	attackerSideHero->mana = 0;
+	const auto * book = attackerSideHero->getArt(ArtifactPosition::SPELLBOOK);
+	ASSERT_NE(book, nullptr);
+	ASSERT_NE(book->getType(), nullptr);
+	EXPECT_TRUE(book->getType()->getExportedBonusList().empty());
+	EXPECT_TRUE(book->getType()->instanceBonuses.empty());
+	EXPECT_TRUE(book->getExportedBonusList().empty())
+		<< "The book must not contain an intrinsic combat bonus";
+	for(const auto & slot : ArtifactUtils::commonWornSlots())
+		if(slot != ArtifactPosition::SPELLBOOK)
+			ASSERT_EQ(attackerSideHero->getArt(slot), nullptr)
+				<< "The baseline hero must carry no other equipment";
+	ASSERT_TRUE(attackerSideHero->artifactsInBackpack.empty());
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanFlee());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_NE(callback->action->actionType, EActionType::RETREAT)
+		<< "An empty spellbook is not a bonus-bearing source artifact";
+	EXPECT_NE(callback->action->actionType, EActionType::SURRENDER);
+
+	const ArtifactPosition backpackSlot(ArtifactPosition::BACKPACK_START);
+	ASSERT_TRUE(gameHandler->giveHeroNewArtifact(attackerSideHero, ArtifactID(7), backpackSlot));
+	const auto * weapon = attackerSideHero->getArt(backpackSlot);
+	ASSERT_NE(weapon, nullptr);
+	ASSERT_NE(weapon->getType(), nullptr);
+	EXPECT_FALSE(weapon->getType()->getExportedBonusList().empty())
+		<< "The source-positive artifact must actually carry a native VCMI bonus";
+	callback->action.reset();
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::RETREAT)
+		<< "Bonus-bearing backpack artifact should independently change the source decision";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The VCMI server must authorize and accept the policy-selected retreat";
+	ASSERT_EQ(recorder.battleResults.size(), 1u);
+	EXPECT_EQ(recorder.battleResults.back().winner, BattleSide::DEFENDER);
+	if(recorder.battleResults.back().questionID != QuestionID::NONE)
+		ASSERT_TRUE(gameHandler->answerQuestion(recorder.battleResults.back().questionID, 0, player));
+	EXPECT_TRUE(gameState()->currentBattles.empty());
+	EXPECT_EQ(recorder.acceptedResults, 1);
+	callback->onBattleEnded(battleID);
+}
+
 // Pinned ihhub/fheroes2 ai_battle.cpp::planUnitTurn checks the entire
 // BagArtifacts when deciding to save a hero from an overwhelming army.
 // Heroes III keeps unequipped artifacts in a separate backpack; carrying
