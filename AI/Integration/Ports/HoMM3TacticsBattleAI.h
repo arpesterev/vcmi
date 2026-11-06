@@ -742,7 +742,7 @@ private:
 					BattleHex::getDistance(enemy->getPosition(), cell));
 			// Project a hostile shot from its actual stationary position,
 			// but the VCMI melee strike from EACH legal origin and path cost.
-			// JOUSTING/charge damage depends on this cost. Using the current
+			// JOUSTING/charge modifiers may depend on this cost. Using the current
 			// position and zero distance for every legal attack gives the
 			// landing threat map a false damage value even when its geometry
 			// is correct. Only the strongest possible native attack is priced.
