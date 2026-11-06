@@ -1824,7 +1824,7 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UntargetableArcherUsesSourceSkipWithou
 	EXPECT_EQ(recorder.shots, 0);
 	EXPECT_EQ(recorder.meleeAttacks, 0);
 	EXPECT_EQ(recorder.damage, 0);
-	invincibleEnemy->removeBonuses(Selector::type(BonusType::INVINCIBLE));
+	invincibleEnemy->removeBonuses(Selector::type()(BonusType::INVINCIBLE));
 	ASSERT_FALSE(invincibleEnemy->isInvincible());
 	policy.reset();
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
