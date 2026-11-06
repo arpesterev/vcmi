@@ -1764,6 +1764,37 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkShooterDoesNotSkipAdjacentNeare
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// Source ai_battle.cpp::berserkTurn uses SKIP when no target is reachable.
+// The native equivalent is NO_ACTION, not DEFEND: the latter grants a
+// defense bonus and emits a DEFEND event. Exercise the actual server action
+// and then finish the remaining battle, rather than just checking an enum.
+TEST_F(AIIntegrationNativeBattle, fheroes2SourceSkipUsesServerNoActionWithoutDefenseBonus)
+{
+	prepareBattle(CreatureID(0), 35, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto * acting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(acting, nullptr);
+	ASSERT_FALSE(acting->hasBonusOfType(BonusType::UNIT_DEFENDING));
+	const auto unitId = acting->unitId();
+	const auto side = acting->unitSide();
+	const auto player = battle()->sideToPlayer(side);
+	const auto battleID = battle()->getBattleID();
+
+	const BattleAction skip = BattleAction::makeNoAction(acting);
+	ASSERT_EQ(skip.actionType, EActionType::NO_ACTION);
+	ASSERT_EQ(skip.stackNumber, unitId);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, skip))
+		<< "VCMI must accept the source SKIP projection as a real unit action";
+	const auto * after = battle()->battleGetStackByID(unitId);
+	ASSERT_NE(after, nullptr);
+	EXPECT_FALSE(after->hasBonusOfType(BonusType::UNIT_DEFENDING))
+		<< "Skipping a compelled turn must not grant the Heroes III defend bonus";
+	EXPECT_EQ(after->getPosition(), acting->getPosition());
+
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Independent pinned-source regression: fheroes2 berserkTurn checks
 // !isHandFighting() before any ranged command. VCMI's unrestricted
 // FREE_SHOOTING is a Heroes III mechanic and does not override that
