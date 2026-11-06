@@ -7422,9 +7422,30 @@ TEST_F(AIIntegrationNativeBattle, tumArcherChoosesWideTailWithNativeSplash)
 			&& BattleHex::getDistance(hex, head) > 1)
 			tailOnly.push_back(hex);
 	}
-	ASSERT_GE(tailOnly.size(), 2u);
-	const CStack * firstExtra = addStack(BattleSide::DEFENDER, CreatureID(0), tailOnly[0], 100);
-	const CStack * secondExtra = addStack(BattleSide::DEFENDER, CreatureID(0), tailOnly[1], 100);
+	// A head shot at either collateral victim must NOT splash onto the
+	// other. The tail is the only shared adjacent aim for all three targets.
+	// Otherwise a shot at one extra Peasant can tie the tail's damage,
+	// correctly preserving the partial HoMM3 baseline on an equal score.
+	BattleHex firstCollateral = BattleHex::INVALID;
+	BattleHex secondCollateral = BattleHex::INVALID;
+	for(size_t i = 0; i < tailOnly.size(); ++i)
+	{
+		for(size_t j = i + 1; j < tailOnly.size(); ++j)
+		{
+			if(BattleHex::getDistance(tailOnly[i], tailOnly[j]) > 1)
+			{
+				firstCollateral = tailOnly[i];
+				secondCollateral = tailOnly[j];
+				break;
+			}
+		}
+		if(firstCollateral.isValid())
+			break;
+	}
+	ASSERT_TRUE(firstCollateral.isValid());
+	ASSERT_TRUE(secondCollateral.isValid());
+	const CStack * firstExtra = addStack(BattleSide::DEFENDER, CreatureID(0), firstCollateral, 1000);
+	const CStack * secondExtra = addStack(BattleSide::DEFENDER, CreatureID(0), secondCollateral, 1000);
 	ASSERT_NE(firstExtra, nullptr);
 	ASSERT_NE(secondExtra, nullptr);
 	archer->addNewBonus(std::make_shared<Bonus>(
