@@ -5709,7 +5709,7 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaPricesSurvivalOfVariableFirstStrike
 	std::cout << "AI_TUM_FIRST_STRIKE_VARIABLE homm3=" << homm3.toString()
 		<< " tum=" << callback->action->toString()
 		<< " native_counter_min=" << counter.damage.min
-		<< " native_counter_max=" << counter.damage.max << '\\n';
+		<< " native_counter_max=" << counter.damage.max << '\n';
 
 	battle()->activeStack = ballista->unitId();
 	const int shotEventsBefore = recorder.shots;
