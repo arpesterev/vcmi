@@ -902,11 +902,16 @@ private:
 			return std::nullopt;
 		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
 		double allShooterStrength = 0;
+		// Pinned ai_battle.cpp::analyzeBattleState accumulates
+		// _myRangedUnitsOnly only for isArchers() && !isImmovable().
+		// Native Blind/Paralyze can retain SHOOTER and nonzero raw speed;
+		// disabled archers must not distort the defense-distance penalty.
+		// The source's meleeUnitDefense nevertheless visits every friendly
+		// archer, including immovable ones, as a possible beneficiary.
 		for(const auto * friendly : friends)
-			if(friendly != &guard && friendly->alive() && friendly->isShooter())
+			if(friendly != &guard && friendly->alive() && friendly->isShooter()
+				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				allShooterStrength += strength(*friendly);
-		if(allShooterStrength <= 0)
-			return std::nullopt;
 
 		// The source declines a remote two-turn screen if another immediate
 		// melee attack exists and the guard is too slow to reach the archer.
