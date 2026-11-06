@@ -1790,6 +1790,10 @@ TEST_F(AIIntegrationNativeBattle, fheroes2SourceSkipUsesServerNoActionWithoutDef
 	EXPECT_FALSE(after->hasBonusOfType(BonusType::UNIT_DEFENDING))
 		<< "Skipping a compelled turn must not grant the Heroes III defend bonus";
 	EXPECT_EQ(after->getPosition(), acting->getPosition());
+	EXPECT_EQ(recorder.meleeAttacks, 0);
+	EXPECT_EQ(recorder.shots, 0);
+	EXPECT_EQ(recorder.damage, 0)
+		<< "A source SKIP must not generate a native attack or damage packet";
 
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
 	EXPECT_GT(recorder.damage, 0);
