@@ -130,7 +130,17 @@ class FHeroes2SpellPolicy
 			return 0;
 		const double strength = static_cast<double>(unit.estimateCombatValue());
 		if(static_cast<double>(damage) >= health)
-			return strength + side.strength * (unit.getMovementRange() > side.averageSpeed() ? 0.07 : 0.035);
+		{
+			// Pinned ai_battle_spell.cpp::spellDamageValue uses Unit::GetSpeed(),
+			// which is STANDING for Blind/Paralyze, even when the creature's
+			// ordinary base speed is still nonzero. Native NOT_ACTIVE is the
+			// corresponding combat-disable projection, not VCMI isFrozen().
+			// Heroes II also considers its already-moved flag here; that
+			// difference is not silently inferred from VCMI movement range.
+			const int effectiveSpeed = unit.hasBonusOfType(BonusType::NOT_ACTIVE)
+				? 0 : static_cast<int>(unit.getMovementRange());
+			return strength + side.strength * (effectiveSpeed > side.averageSpeed() ? 0.07 : 0.035);
+		}
 		double fraction = static_cast<double>(damage) / health;
 		// Pinned ai_battle_spell.cpp::spellDamageValue applies the wake-up
 		// penalty to isImmovable() (Blind/Paralyze), not just petrification.
