@@ -5609,6 +5609,24 @@ TEST_F(AIIntegrationNativeBattle, homm3LethalFirstAreaShotStopsFurtherNativeVoll
 	ASSERT_TRUE(neighbour.isValid());
 	CStack * bystander = addStack(BattleSide::DEFENDER, CreatureID(0), neighbour, 2);
 	ASSERT_NE(bystander, nullptr);
+	// Keep one distant enemy alive after the lethal splash so the battle
+	// remains active while the server finishes delivering its first action.
+	// A terminal shot can destroy the test callback during its own call.
+	BattleHex reserveHex;
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex candidate(index);
+		if(candidate.isAvailable() && battle()->battleGetUnitByPos(candidate) == nullptr
+			&& BattleHex::getDistance(candidate, targetHex) >= 5
+			&& BattleHex::getDistance(candidate, marksmen->getPosition()) >= 3)
+		{
+			reserveHex = candidate;
+			break;
+		}
+	}
+	ASSERT_TRUE(reserveHex.isValid());
+	CStack * reserve = addStack(BattleSide::DEFENDER, CreatureID(0), reserveHex, 1);
+	ASSERT_NE(reserve, nullptr);
 	marksmen->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
 		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
 	battle()->activeStack = marksmen->unitId();
