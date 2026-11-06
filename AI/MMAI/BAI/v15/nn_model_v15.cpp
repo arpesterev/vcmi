@@ -663,17 +663,20 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 	{
 		const auto nodes = graph->getNodes(nodeSpec.type);
 		auto flat = std::vector<float>{};
-		flat.resize(nodes.size() * static_cast<size_t>(nodeSpec.attrSize), 0.0f);
+		if(nodeSpec.attrSize < 0)
+			throwf("negative node attribute size for %s", nodeSpec.name);
+		const auto attrSize = static_cast<size_t>(nodeSpec.attrSize);
+		flat.resize(checkedNNObservationProduct("x_" + nodeSpec.name, nodes.size(), attrSize), 0.0f);
 
 		for(size_t i = 0; i < nodes.size(); ++i)
 		{
-			auto out = std::span<float>(flat.data() + (i * static_cast<size_t>(nodeSpec.attrSize)), static_cast<size_t>(nodeSpec.attrSize));
+			auto out = std::span<float>(flat.data() + (i * attrSize), attrSize);
 			const auto encoded = nodes[i]->encode(out);
 			if(encoded != nodeSpec.attrSize)
 				throwf("unexpected encoded node size for %s: want: %d, have: %d", nodeSpec.name, nodeSpec.attrSize, encoded);
 		}
 
-		tensors.push_back(toTensor("x_" + nodeSpec.name, flat, {static_cast<int64_t>(nodes.size()), static_cast<int64_t>(nodeSpec.attrSize)}));
+		tensors.push_back(toTensor("x_" + nodeSpec.name, flat, {checkedNNObservationAxis("x_" + nodeSpec.name, nodes.size()), static_cast<int64_t>(nodeSpec.attrSize)}));
 
 		nodeShapeLog << nodeSpec.name << "={" << nodes.size() << ", " << nodeSpec.attrSize << "} ";
 	}
@@ -690,7 +693,7 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 	for(const auto & edgeSpec : edgeOrder)
 	{
 		const auto edges = graph->getEdges(edgeSpec.type);
-		lengths.push_back(static_cast<int>(edges.size()));
+		lengths.push_back(checkedNNObservationIntSize("edge_lengths", edges.size()));
 		edgeLengthLog << edgeSpec.srcName << "_" << edgeSpec.relName << "_" << edgeSpec.dstName << "=" << edges.size() << " ";
 
 		for(const auto * edge : edges)
@@ -700,7 +703,7 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 			ei_flat_dst.push_back(graph->getNodeIndex(dst));
 
 			const auto oldSize = ea_flat.size();
-			ea_flat.resize(oldSize + static_cast<size_t>(edgeAttrFlatSize), 0.0f);
+			ea_flat.resize(checkedNNObservationSum("edge_attr_flat", oldSize, static_cast<size_t>(edgeAttrFlatSize)), 0.0f);
 
 			if(edgeSpec.attrSize > 0)
 			{
@@ -721,23 +724,23 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 
 	const auto sumE = ei_flat_src.size();
 	auto ei_flat = std::vector<int64_t>{};
-	ei_flat.reserve(2 * sumE);
+	ei_flat.reserve(checkedNNObservationProduct("edge_index_flat", sumE, 2));
 	ei_flat.insert(ei_flat.end(), ei_flat_src.begin(), ei_flat_src.end());
 	ei_flat.insert(ei_flat.end(), ei_flat_dst.begin(), ei_flat_dst.end());
 
 	if(ei_flat_dst.size() != sumE)
 		throwf("unexpected ei_flat_dst.size(): want: %d, have: %d", sumE, ei_flat_dst.size());
-	if(ea_flat.size() != sumE * static_cast<size_t>(edgeAttrFlatSize))
-		throwf("unexpected ea_flat.size(): want: %d, have: %d", sumE * static_cast<size_t>(edgeAttrFlatSize), ea_flat.size());
+	if(ea_flat.size() != checkedNNObservationProduct("edge_attr_flat", sumE, static_cast<size_t>(edgeAttrFlatSize)))
+		throwf("unexpected ea_flat.size(): want: %d, have: %d", checkedNNObservationProduct("edge_attr_flat", sumE, static_cast<size_t>(edgeAttrFlatSize)), ea_flat.size());
 
 	auto activeActionIds = graph->getActiveActionIds();
 	if(activeActionIds.empty())
 		throwf("prepareInputs: no active actions");
 
-	tensors.push_back(toTensor("edge_index_flat", ei_flat, {2, static_cast<int64_t>(sumE)}));
-	tensors.push_back(toTensor("edge_attr_flat", ea_flat, {static_cast<int64_t>(sumE), static_cast<int64_t>(edgeAttrFlatSize)}));
-	tensors.push_back(toTensor("edge_lengths", lengths, {static_cast<int64_t>(edgeOrder.size())}));
-	tensors.push_back(toTensor("active_action_ids", activeActionIds, {static_cast<int64_t>(activeActionIds.size())}));
+	tensors.push_back(toTensor("edge_index_flat", ei_flat, {2, checkedNNObservationAxis("edge_index_flat", sumE)}));
+	tensors.push_back(toTensor("edge_attr_flat", ea_flat, {checkedNNObservationAxis("edge_attr_flat", sumE), static_cast<int64_t>(edgeAttrFlatSize)}));
+	tensors.push_back(toTensor("edge_lengths", lengths, {checkedNNObservationAxis("edge_lengths", edgeOrder.size())}));
+	tensors.push_back(toTensor("active_action_ids", activeActionIds, {checkedNNObservationAxis("active_action_ids", activeActionIds.size())}));
 
 	logAi->debug("Node shapes: " + nodeShapeLog.str());
 	logAi->debug("Edge lengths: " + edgeLengthLog.str());
