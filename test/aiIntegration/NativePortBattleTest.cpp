@@ -6231,12 +6231,14 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaCannotTargetHypnotizedFriendlyForme
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(0), 70);
-	setArmy(defenderSideHero, CreatureID(0), 80);
+	setArmy(defenderSideHero, CreatureID(0), 30);
 	ASSERT_TRUE(gameHandler->insertNewStack(
-		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 25));
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 15));
 	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
 	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
 		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	// Keep the controlled stack within the native Hypnotize health limit;
+	// 80 Peasants exceed the verified basic-mastery cast threshold.
 	teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
 	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
@@ -6250,9 +6252,9 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaCannotTargetHypnotizedFriendlyForme
 			ballista = unit.get();
 		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
 		{
-			if(unit->getCount() == 80)
+			if(unit->getCount() == 30)
 				controlled = unit.get();
-			else if(unit->getCount() == 25)
+			else if(unit->getCount() == 15)
 				actualEnemy = unit.get();
 		}
 	}
