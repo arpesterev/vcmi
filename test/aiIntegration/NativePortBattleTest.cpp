@@ -1767,6 +1767,70 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BerserkShooterDoesNotSkipAdjacentNeare
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The pinned ai_battle.cpp::archerDecision returns an empty command list if
+// no enemy can be selected; planUnitTurn emits SKIP, not DEFEND. Heroes III
+// adds native invincibility, which has no exact Heroes II equivalent: project
+// it through VCMI's own legality rather than inventing an attack or defense.
+// The independent FHeroes2 decision must reach the real server and complete.
+TEST_F(AIIntegrationNativeBattle, fheroes2UntargetableArcherUsesSourceSkipWithoutNativeDefendBonus)
+{
+	prepareBattle(CreatureID(45), 30, CreatureID(0), 40);
+	ASSERT_FALSE(HasFatalFailure());
+	CStack * shooter = nullptr;
+	CStack * invincibleEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(45))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			invincibleEnemy = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(invincibleEnemy, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	ASSERT_FALSE(shooter->hasBonusOfType(BonusType::UNIT_DEFENDING));
+	// Temporary native fixture bonus. It is removed after the first server
+	// action so the remaining real battle can finish without changing rules.
+	invincibleEnemy->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::INVINCIBLE, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(invincibleEnemy->isInvincible());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, shooter);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_FALSE(callback->spellAction);
+	ASSERT_EQ(callback->action->actionType, EActionType::NO_ACTION)
+		<< "Normal archer with no selectable opponent must use source SKIP, not VCMI DEFEND";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The authoritative server rejected FHeroes2's independently chosen SKIP";
+	const auto * after = battle()->battleGetStackByID(shooter->unitId());
+	ASSERT_NE(after, nullptr);
+	EXPECT_FALSE(after->hasBonusOfType(BonusType::UNIT_DEFENDING))
+		<< "A source SKIP must not grant native Heroes III defense";
+	EXPECT_EQ(recorder.shots, 0);
+	EXPECT_EQ(recorder.meleeAttacks, 0);
+	EXPECT_EQ(recorder.damage, 0);
+	invincibleEnemy->removeBonuses(Selector::type(BonusType::INVINCIBLE));
+	ASSERT_FALSE(invincibleEnemy->isInvincible());
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Source ai_battle.cpp::berserkTurn uses SKIP when no target is reachable.
 // The native equivalent is NO_ACTION, not DEFEND: the latter grants a
 // defense bonus and emits a DEFEND event. Exercise the actual server action
