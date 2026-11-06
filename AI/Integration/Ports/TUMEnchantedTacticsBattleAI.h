@@ -179,6 +179,13 @@ private:
 				static const auto rangedFirstStrike = Selector::typeSubtype(
 					BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeAll).Or(
 					Selector::typeSubtype(BonusType::FIRST_STRIKE, BonusCustomSubtype::damageTypeRanged));
+				// A nonlethal FIRST_STRIKE shot also removes war-machine HP
+				// BEFORE our volley. Carry both native damage bounds into the
+				// private survivor previews, rather than scoring a full-strength
+				// ballista that the server has already wounded.
+				int64_t earlyCounterMin = 0;
+				int64_t earlyCounterMax = 0;
+				bool preempted = false;
 				if(enemy->hasBonus(rangedFirstStrike)
 					&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
 					&& enemy->hasBonusOfType(BonusType::RANGED_RETALIATION)
@@ -192,6 +199,9 @@ private:
 					const auto counter = battle.battleEstimateDamage(preemptive, nullptr);
 					if(counter.damage.min >= stack.getAvailableHealth())
 						continue;
+					earlyCounterMin = counter.damage.min;
+					earlyCounterMax = counter.damage.max;
+					preempted = true;
 				}
 				// The TUM ballista and arrow-tower targeting formulas are not
 				// available. Rank legal native shots by projected combat value
@@ -202,15 +212,27 @@ private:
 					const double health = static_cast<double>(hit.getAvailableHealth());
 					if(health <= 0)
 						return 0.0;
-					BattleAttackInfo info(&stack, &hit, 0, true);
-					info.attackerPos = stack.getPosition();
-					info.defenderPos = hit.unitId() == enemy->unitId() ? aimedHex : hit.getPosition();
-					const auto damage = battle.battleEstimateDamage(info, nullptr);
-					const double expectedDamage = (static_cast<double>(damage.damage.min)
-						+ static_cast<double>(damage.damage.max)) / 2.0;
-					return Ports::TUM::projectedSiegeVolleyLoss(
-						static_cast<double>(hit.estimateCombatValue()), health,
-						std::max(0.0, expectedDamage), legalShots);
+					const auto lossFrom = [&](const battle::Unit & attacker)
+					{
+						BattleAttackInfo info(&attacker, &hit, 0, true);
+						info.attackerPos = stack.getPosition();
+						info.defenderPos = hit.unitId() == enemy->unitId() ? aimedHex : hit.getPosition();
+						const auto damage = battle.battleEstimateDamage(info, nullptr);
+						const double expectedDamage = (static_cast<double>(damage.damage.min)
+							+ static_cast<double>(damage.damage.max)) / 2.0;
+						return Ports::TUM::projectedSiegeVolleyLoss(
+							static_cast<double>(hit.estimateCombatValue()), health,
+							std::max(0.0, expectedDamage), legalShots);
+					};
+					if(!preempted)
+						return lossFrom(stack);
+					const auto survivorLoss = [&](int64_t counterDamage)
+					{
+						auto survivors = stack.acquireState();
+						survivors->damage(counterDamage);
+						return survivors->alive() ? lossFrom(*survivors) : 0.0;
+					};
+					return (survivorLoss(earlyCounterMin) + survivorLoss(earlyCounterMax)) / 2.0;
 				};
 				// The unpublished TUM targeting formula is not reproduced here.
 				// Rank all engine-reported collateral, not just the primary target.
