@@ -637,6 +637,14 @@ private:
 	{
 		const CStack * stack;
 		std::vector<MeleeThreatOrigin> reachableOrigins;
+		// The board does not change while choosing one HoMM3 action.
+		// Cache this shooter's present blockers and intrinsic capability
+		// once, not for every possible landing cell and melee target.
+		bool shooterReadyAfterMoverLeaves = false;
+		bool shooterCanShootBlocked = false;
+		bool shooterCanShootAdjacent = false;
+		bool shooterHasRangeLimit = false;
+		int shooterRange = 0;
 	};
 
 	static std::vector<MeleeThreatSource> collectThreatSources(CPlayerBattleCallback & battle,
@@ -665,7 +673,46 @@ private:
 					reachableOrigins.push_back({origin, static_cast<int>(cost)});
 				}
 			}
-			sources.push_back({enemy, std::move(reachableOrigins)});
+			MeleeThreatSource source{enemy, std::move(reachableOrigins)};
+			if(enemy->alive() && enemy->isShooter()
+				&& !isIncapacitated(*enemy) && !enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
+			{
+				const auto restricted = Selector::typeSubtype(BonusType::FREE_SHOOTING,
+					BonusCustomSubtype::freeShootingExceptAdjacent);
+				source.shooterCanShootBlocked = enemy->canShootBlocked();
+				source.shooterCanShootAdjacent = !enemy->hasBonus(restricted)
+					|| enemy->hasBonus(Selector::type()(BonusType::FREE_SHOOTING).And(restricted.Not()));
+				const auto limitedRange = enemy->getBonus(Selector::type()(BonusType::LIMITED_SHOOTING_RANGE));
+				source.shooterHasRangeLimit = limitedRange != nullptr;
+				source.shooterRange = limitedRange ? limitedRange->val : 0;
+				const bool canShootNow = battle.battleCanShoot(enemy);
+				// Moving the active stack can release a currently pinned shooter.
+				// Count OTHER remaining blockers using actual ownership, also
+				// retaining the native Berserk exception.
+				const bool berserk = enemy->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+				const bool moverPinsNow = engagesFootprints(attacker.getHexes(), enemy->getHexes())
+					&& (berserk || battle.battleMatchOwner(enemy, &attacker));
+				bool anotherBlockerRemains = false;
+				if(!canShootNow && enemy->canShoot() && moverPinsNow)
+				{
+					for(const auto * unit : battle.battleGetUnitsIf(
+						[](const battle::Unit * unit) { return unit->alive(); }))
+					{
+						if(unit == enemy || unit == &attacker)
+							continue;
+						if((berserk || battle.battleMatchOwner(enemy, unit))
+							&& engagesFootprints(unit->getHexes(), enemy->getHexes()))
+						{
+							anotherBlockerRemains = true;
+							break;
+						}
+					}
+				}
+				source.shooterReadyAfterMoverLeaves =
+					Ports::HoMM3::projectedShooterReadyAfterMoverLeaves(
+						canShootNow, enemy->canShoot(), moverPinsNow, anotherBlockerRemains);
+			}
+			sources.push_back(std::move(source));
 		}
 		return sources;
 	}
@@ -702,49 +749,15 @@ private:
 				distance = std::min(distance, static_cast<int>(BattleHex::getDistance(cell, enemyHex)));
 			if(distance == std::numeric_limits<int>::max())
 				continue;
-			// Project the shot at the future occupied cell. A normal archer
-			// loses its shot when engaged, but unrestricted FREE_SHOOTING
-			// (e.g. Sharpshooter's Bow) still permits adjacent shots.
-			// Respect LIMITED_SHOOTING_RANGE, too: querying
-			// battleCanShoot(enemy, cell) would reject this currently empty
-			// landing hex, not answer the hypothetical attack question.
+			// Future shooting depends on the landing footprint; shooter
+			// ability, other blockers and range are cached once per decision.
+			// Native enemy reachability/attack geometry remains unchanged.
 			const bool blocked = engagesFootprints(attacker.getHexes(destination), enemy->getHexes());
-			const auto restricted = Selector::typeSubtype(BonusType::FREE_SHOOTING,
-				BonusCustomSubtype::freeShootingExceptAdjacent);
-			const bool canShootAdjacent = !enemy->hasBonus(restricted)
-				|| enemy->hasBonus(Selector::type()(BonusType::FREE_SHOOTING).And(restricted.Not()));
-			const auto limitedRange = enemy->getBonus(Selector::type()(BonusType::LIMITED_SHOOTING_RANGE));
-			const bool canShootNow = battle.battleCanShoot(enemy);
-			// Moving our active stack can unpin an archer which cannot shoot
-			// from the CURRENT board position. Recheck its other blockers
-			// rather than treating today's disabled shot as a permanent
-			// future state. Berserk units are blocked by either owner.
-			const bool berserk = enemy->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
-			const bool moverPinsNow = engagesFootprints(attacker.getHexes(), enemy->getHexes())
-				&& (berserk || battle.battleMatchOwner(enemy, &attacker));
-			bool anotherBlockerRemains = false;
-			if(!canShootNow && enemy->canShoot() && moverPinsNow)
-			{
-				for(const auto * unit : battle.battleGetUnitsIf([](const battle::Unit * unit) { return unit->alive(); }))
-				{
-					if(unit == enemy || unit == &attacker)
-						continue;
-					if((berserk || battle.battleMatchOwner(enemy, unit))
-						&& engagesFootprints(unit->getHexes(), enemy->getHexes()))
-					{
-						anotherBlockerRemains = true;
-						break;
-					}
-				}
-			}
-			const bool canShootAfterMove = Ports::HoMM3::projectedShooterReadyAfterMoverLeaves(
-				canShootNow, enemy->canShoot(), moverPinsNow, anotherBlockerRemains);
-			const bool canShoot = enemy->isShooter()
-				&& Ports::HoMM3::projectedNativeRangedThreat(
-					canShootAfterMove, blocked, enemy->canShootBlocked(),
-					canShootAdjacent, limitedRange != nullptr,
-					limitedRange ? limitedRange->val : 0,
-					BattleHex::getDistance(enemy->getPosition(), cell));
+			const bool canShoot = Ports::HoMM3::projectedNativeRangedThreat(
+				threat.shooterReadyAfterMoverLeaves, blocked,
+				threat.shooterCanShootBlocked, threat.shooterCanShootAdjacent,
+				threat.shooterHasRangeLimit, threat.shooterRange,
+				BattleHex::getDistance(enemy->getPosition(), cell));
 			// Project a hostile shot from its actual stationary position,
 			// but the VCMI melee strike from EACH legal origin and path cost.
 			// JOUSTING/charge modifiers may depend on this cost. Using the current
