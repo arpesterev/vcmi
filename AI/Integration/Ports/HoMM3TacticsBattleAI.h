@@ -784,7 +784,8 @@ private:
 			counter.attackerPos = primaryTarget.getPosition();
 			counter.defenderPos = attacker.getPosition();
 			const auto estimate = battle.battleEstimateDamage(counter);
-			remainingAttacker->damage(expectedDamage(estimate, remainingAttacker->getAvailableHealth()));
+			int64_t preemptiveLoss = expectedDamage(estimate, remainingAttacker->getAvailableHealth());
+			remainingAttacker->damage(preemptiveLoss);
 		}
 		double value = 0.0;
 		for(int shot = 0; shot < totalShots && remainingAttacker->alive() && remainingPrimary->alive(); ++shot)
@@ -798,7 +799,7 @@ private:
 				BattleAttackInfo info(remainingAttacker.get(), remaining.get(), 0, true);
 				info.attackerPos = attacker.getPosition();
 				const auto estimate = battle.battleEstimateDamage(info);
-				const int64_t lostHealth = expectedDamage(estimate, remaining->getAvailableHealth());
+				int64_t lostHealth = expectedDamage(estimate, remaining->getAvailableHealth());
 				const double loss = static_cast<double>(original->estimateCombatValue())
 					* static_cast<double>(lostHealth) / static_cast<double>(original->getAvailableHealth());
 				value += Ports::HoMM3::collateralStrikeValue(
@@ -808,7 +809,8 @@ private:
 			BattleAttackInfo primary(remainingAttacker.get(), remainingPrimary.get(), 0, true);
 			primary.attackerPos = attacker.getPosition();
 			const auto estimate = battle.battleEstimateDamage(primary);
-			remainingPrimary->damage(expectedDamage(estimate, remainingPrimary->getAvailableHealth()));
+			int64_t primaryLoss = expectedDamage(estimate, remainingPrimary->getAvailableHealth());
+			remainingPrimary->damage(primaryLoss);
 			// Native ranged retaliation follows the opening volley, and can
 			// cancel further splash attacks by killing the shooter. It is not
 			// an original HoMM3 ability. One ordinary retaliation per sequence.
@@ -818,7 +820,8 @@ private:
 				counter.attackerPos = primaryTarget.getPosition();
 				counter.defenderPos = attacker.getPosition();
 				const auto counterEstimate = battle.battleEstimateDamage(counter);
-				remainingAttacker->damage(expectedDamage(counterEstimate, remainingAttacker->getAvailableHealth()));
+				int64_t counterLoss = expectedDamage(counterEstimate, remainingAttacker->getAvailableHealth());
+				remainingAttacker->damage(counterLoss);
 			}
 		}
 		if(!std::isfinite(value))
