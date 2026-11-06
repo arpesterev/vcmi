@@ -3036,6 +3036,204 @@ TEST_F(AIIntegrationNativeBattle, fheroes2GuardPursuesRemoteArcherBlockerBeforeM
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// An engaged ally keeps source blocker priority even when its shot is legal.
+// Source: ihhub/fheroes2@0dbfe9f::ai_battle.cpp::meleeUnitDefense.
+// Heroes III FREE_SHOOTING changes native legality, not source contact priority.
+TEST_F(AIIntegrationNativeBattle, fheroes2GuardUnblocksFreeShootingArcherBeforeUnrelatedMelee)
+{
+	// Pinned fheroes2 ai_battle.cpp::meleeUnitDefense (1774, 2012-2039)
+	// prioritizes an enemy in contact with a blocked friendly archer over
+	// a more valuable, immediately attackable, unrelated enemy.
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex original = guard->getPosition();
+	const BattleHex shooterHex(original.toInt() + 2 * GameConstants::BFIELD_WIDTH);
+	const BattleHex blockerHex(shooterHex.toInt() + 1);
+	const BattleHex baitHex(original.toInt() + 1);
+	for(const auto hex : {shooterHex, blockerHex, baitHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	const auto * shooter = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 120);
+	const auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(0), blockerHex, 1);
+	const auto * bait = addStack(BattleSide::DEFENDER, CreatureID(0), baitHex, 40);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_NE(bait, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_EQ(BattleHex::getDistance(shooterHex, blockerHex), 1);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter))
+		<< "Verify adjacent enemy actually blocks the ordinary native shot";
+	// Only this native battle fixture receives the Heroes III bonus.
+	const_cast<CStack *>(shooter)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FREE_SHOOTING,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(battle()->battleIsUnitBlocked(shooter))
+		<< "An enemy must still be physically adjacent";
+	ASSERT_TRUE(battle()->battleCanShoot(shooter))
+		<< "The alternative Heroes III shot must genuinely be legal";
+	ASSERT_GT(bait->estimateCombatValue(), blocker->estimateCombatValue());
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto viewedBattle = callback->getBattle(battleID);
+	ASSERT_NE(viewedBattle, nullptr);
+	const auto routes = viewedBattle->getReachability(guard);
+	const auto available = viewedBattle->battleGetAvailableHexes(routes, guard, false);
+	const auto hasNativeMelee = [&](const CStack * victim)
+	{
+		return std::any_of(available.begin(), available.end(), [&](const BattleHex & from)
+		{
+			return from.isAvailable()
+				&& !viewedBattle->meleeAttackHexes(guard, victim, from).empty();
+		});
+	};
+	ASSERT_TRUE(hasNativeMelee(blocker))
+		<< "The blocker must be directly attackable by the native guard";
+	ASSERT_TRUE(hasNativeMelee(bait))
+		<< "The unrelated bait must also offer a legal melee attack";
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK)
+		<< "Independent FHeroes2 defense must choose a native blocker attack";
+	ASSERT_GE(callback->action->target.size(), 2u);
+	EXPECT_EQ(viewedBattle->battleGetUnitByPos(callback->action->target[1].hexValue), blocker)
+		<< "The more valuable melee bait must not displace the archer's adjacent blocker";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI rejected a supposedly legal source-derived guard attack";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
+// An adjacent blocker still drives a legal multi-turn pursuit under FREE_SHOOTING.
+// Source: ihhub/fheroes2@0dbfe9f::ai_battle.cpp::meleeUnitDefense.
+// Heroes III FREE_SHOOTING changes native legality, not source contact priority.
+TEST_F(AIIntegrationNativeBattle, fheroes2GuardPursuesFreeShootingArcherBlockerOnNativeRoute)
+{
+	// fheroes2 ai_battle.cpp::meleeUnitDefense keeps the best *future*
+	// attack position on an engaged friendly archer's blocker. Exercise
+	// the VCMI projection where the blocker cannot be attacked this turn.
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	const BattleHex original = guard->getPosition();
+	const BattleHex shooterHex(original.toInt() + 6);
+	const BattleHex blockerHex(shooterHex.toInt() + 1);
+	const BattleHex baitHex(original.toInt() + GameConstants::BFIELD_WIDTH);
+	for(const auto hex : {shooterHex, blockerHex, baitHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	const auto * shooter = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 120);
+	const auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(0), blockerHex, 1);
+	const auto * bait = addStack(BattleSide::DEFENDER, CreatureID(0), baitHex, 40);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(blocker, nullptr);
+	ASSERT_NE(bait, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_EQ(BattleHex::getDistance(shooterHex, blockerHex), 1);
+	ASSERT_FALSE(battle()->battleCanShoot(shooter))
+		<< "Verify adjacent enemy actually blocks the ordinary native shot";
+	// Only this native battle fixture receives the Heroes III bonus.
+	const_cast<CStack *>(shooter)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FREE_SHOOTING,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(battle()->battleIsUnitBlocked(shooter))
+		<< "An enemy must still be physically adjacent";
+	ASSERT_TRUE(battle()->battleCanShoot(shooter))
+		<< "The alternative Heroes III shot must genuinely be legal";
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	const auto routes = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(routes, guard, false);
+	const auto canMeleeNow = [&](const CStack * victim)
+	{
+		return std::any_of(available.begin(), available.end(), [&](const BattleHex & from)
+		{
+			return from.isAvailable() && !view->meleeAttackHexes(guard, victim, from).empty();
+		});
+	};
+	ASSERT_FALSE(canMeleeNow(blocker))
+		<< "The engaged archer's blocker must require more than one turn";
+	ASSERT_TRUE(canMeleeNow(bait))
+		<< "The guard must have a genuine alternative immediate melee attack";
+	bool futureAttackPath = false;
+	for(const auto & from : blocker->getAttackableHexes(guard))
+	{
+		if(!from.isValid() || !view->isMeleeAttackPossible(guard, blocker, from))
+			continue;
+		const int travel = static_cast<int>(routes.distances[from.toInt()]);
+		futureAttackPath |= travel > static_cast<int>(guard->getMovementRange())
+			&& travel <= static_cast<int>(guard->getMovementRange()) * 2;
+	}
+	ASSERT_TRUE(futureAttackPath)
+		<< "Fixture must offer a finite two-turn VCMI path to the blocker";
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "FHeroes2 should advance on the remote shooter blocker before melee bait: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	ASSERT_TRUE(available.contains(destination))
+		<< "The model's multi-turn first step must be legal this turn";
+	EXPECT_LT(BattleHex::getDistance(destination, blockerHex),
+		BattleHex::getDistance(original, blockerHex));
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Native VCMI server rejected independent multi-turn blocker pursuit";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2AreaShotThreatSpreadsArcherCover)
 {
 	// Pinned ihhub/fheroes2 ai_battle.cpp: analyzeBattleState sets
