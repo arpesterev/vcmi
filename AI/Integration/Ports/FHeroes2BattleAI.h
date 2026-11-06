@@ -777,8 +777,11 @@ private:
 		double chosenShooterValue = std::numeric_limits<double>::lowest();
 		for(const auto * shooter : friends)
 		{
+			// The pinned meleeUnitDefense scans contact with friendly archers,
+// even if a Heroes III FREE_SHOOTING bonus makes their shot legal.
+// Determine blockers by actual occupied hexes below, not shot legality.
 			if(shooter == &guard || !shooter->alive() || !shooter->getPosition().isValid()
-				|| !shooter->isShooter() || battle.battleCanShoot(shooter))
+				|| !shooter->isShooter())
 				continue;
 
 			const auto shooterHexes = shooter->getHexes();
@@ -883,8 +886,10 @@ private:
 		int bestTravel = GameConstants::BFIELD_SIZE;
 		for(const auto * shooter : friends)
 		{
+			// Native FREE_SHOOTING must not hide a physical blocker from the
+// source's future melee defense. The adjacency check below is authoritative.
 			if(shooter == &guard || !shooter->alive() || !shooter->isShooter()
-				|| !shooter->getPosition().isValid() || battle.battleCanShoot(shooter))
+				|| !shooter->getPosition().isValid())
 				continue;
 			for(const auto * blocker : enemies)
 			{
