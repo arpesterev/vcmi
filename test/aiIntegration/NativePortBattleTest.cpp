@@ -5830,9 +5830,9 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 {
 	startRecordedGame();
 	ASSERT_FALSE(HasFatalFailure());
-	// A small valuable Griffin group makes a meaningful HoMM3 target,
-	// while the TUM tower must still honor actual Hypnotize ownership.
-	setArmy(attackerSideHero, CreatureID(4), 5);
+	// The native value of two Cavaliers exceeds that of the Pikemen per
+	// projected tower hit, so the partial HoMM3 scorer prefers the former foe.
+	setArmy(attackerSideHero, CreatureID(10), 2);
 	ASSERT_TRUE(gameHandler->insertNewStack(
 		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 15));
 	const auto * town = findFirst<CGTownInstance>();
@@ -5861,7 +5861,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerRespectsRealHypnotizeOwnership)
 		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
 			tower = unit.get();
 		else if(unit->unitSide() == BattleSide::ATTACKER && unit->unitSlot() == SlotID(0)
-			&& unit->creatureId() == CreatureID(4))
+			&& unit->creatureId() == CreatureID(10))
 			controlled = unit.get();
 		else if(unit->unitSide() == BattleSide::ATTACKER && unit->unitSlot() == SlotID(1)
 			&& unit->creatureId() == CreatureID(0))
