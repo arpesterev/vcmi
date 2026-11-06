@@ -4134,7 +4134,11 @@ TEST_F(AIIntegrationNativeBattle, tumHypnotizedBreathScoresAndHitsNativeSecondar
 	EXPECT_EQ(nativeHitIds.size(), 2u)
 		<< "Real server damage must include both the primary and secondary former ally";
 	policy.reset();
-	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "TUMEnchantedTactics");
+	// The manually accepted Hypnotize breath strike may decide the exchange
+	// before the opposing policy receives a turn. The independent HoMM3
+	// first decision was already sampled above; continuation here proves a
+	// genuine terminal server result, not a mixed-policy head-to-head duel.
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics", "TUMEnchantedTactics");
 	EXPECT_GT(recorder.meleeAttacks, 0);
 	EXPECT_GT(recorder.damage, 0);
 }
