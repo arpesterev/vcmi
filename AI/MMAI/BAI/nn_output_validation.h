@@ -123,6 +123,19 @@ inline std::int64_t checkedNNObservationAxis(const std::string & name, std::size
 	return static_cast<std::int64_t>(count);
 }
 
+// V13 flattens each link type into a shared edge-index tensor while
+// storing each type's length in int32. Reject an oversized individual link
+// or aggregate BEFORE insert/reserve, not after a narrowing cast. This is
+// only validation: valid edge order and ONNX observations are unchanged.
+inline int checkedNNV13LinkLength(std::size_t existingEdges, std::size_t newEdges)
+{
+	const auto length = checkedNNObservationIntSize("V13 link length", newEdges);
+	const auto totalEdges = checkedNNObservationSum("V13 edges", existingEdges, newEdges);
+	(void)checkedNNObservationAxis("V13 edges", totalEdges);
+	(void)checkedNNObservationProduct("V13 edge indices", totalEdges, 2u);
+	return length;
+}
+
 // V15's dynamic graph may have no active creature-action nodes after
 // battle-event invalidation. Reject the snapshot before invoking ONNX:
 // zero-length action tensors are not a policy decision and must not be
