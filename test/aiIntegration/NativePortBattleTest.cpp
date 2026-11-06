@@ -5481,6 +5481,99 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealRangedBattle)
 	EXPECT_GT(recorder.shots, 0);
 }
 
+// Retail getRangedAttackValue forecasts one shot. The native Marksman fires
+// twice, and SHOOTS_ALL_ADJACENT can injure a bystander on BOTH volleys.
+// This integration case proves the partial HoMM3 policy selects the legal
+// native shot, the server performs two distinct splash packets, and the battle
+// terminates. The bonus combination is VCMI-specific, not retail parity.
+TEST_F(AIIntegrationNativeBattle, homm3MultiVolleyAreaShotDamagesSecondaryOnBothNativeShots)
+{
+	prepareBattle(CreatureID(3), 12, CreatureID(6), 60); // Marksmen vs Swordsmen
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * marksmen = nullptr;
+	CStack * swordsmen = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			marksmen = unit.get();
+		else
+			swordsmen = unit.get();
+	}
+	ASSERT_NE(marksmen, nullptr);
+	ASSERT_NE(swordsmen, nullptr);
+	ASSERT_EQ(marksmen->getTotalAttacks(true), 2);
+	ASSERT_GE(marksmen->shots.available(), 2);
+	const BattleHex primaryPosition = swordsmen->getPosition();
+	BattleHex adjacent;
+	for(const auto & hex : primaryPosition.getNeighbouringTiles())
+	{
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			adjacent = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(adjacent.isValid());
+	CStack * neighbour = addStack(BattleSide::DEFENDER, CreatureID(6), adjacent, 60);
+	ASSERT_NE(neighbour, nullptr);
+	marksmen->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::OTHER, 1, BonusSourceID()));
+	battle()->activeStack = marksmen->unitId();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(marksmen, swordsmen->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(marksmen, neighbour->getPosition()));
+	const auto action = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *marksmen);
+	ASSERT_EQ(action.actionType, EActionType::SHOOT);
+	ASSERT_FALSE(action.target.empty());
+	const CStack * primary = action.target.front().unitValue == swordsmen->unitId() ? swordsmen : neighbour;
+	const CStack * secondary = primary == swordsmen ? neighbour : swordsmen;
+	ASSERT_EQ(action.target.front().unitValue, primary->unitId());
+	const auto nativeAffected = view->getAttackedBattleUnits(
+		marksmen, primary, primary->getPosition(), true);
+	ASSERT_NE(std::find(nativeAffected.begin(), nativeAffected.end(), secondary), nativeAffected.end());
+	const auto primaryHealth = primary->getAvailableHealth();
+	const auto secondaryHealth = secondary->getAvailableHealth();
+	BattleAttackInfo opening(marksmen, primary, 0, true);
+	const auto estimate = view->battleEstimateDamage(opening);
+	ASSERT_LT(estimate.damage.max * 2, primaryHealth)
+		<< "The primary must survive long enough for both engine volleys";
+	BattleAttackInfo splash(marksmen, secondary, 0, true);
+	ASSERT_LT(view->battleEstimateDamage(splash).damage.max * 2, secondaryHealth);
+
+	int volleys = 0;
+	int splashVolleys = 0;
+	const auto shooterID = static_cast<ui32>(marksmen->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(packet.stackAttacking != shooterID || !packet.shot() || packet.counter())
+			return;
+		++volleys;
+		for(const auto & victim : packet.bsa)
+			if(victim.stackAttacked == secondary->unitId())
+			{
+				++splashVolleys;
+				break;
+			}
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Native VCMI server rejected the independently selected HoMM3 splash shot";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(volleys, 2);
+	EXPECT_EQ(splashVolleys, 2) << "Both native shots must damage the same surviving secondary stack";
+	EXPECT_LT(primary->getAvailableHealth(), primaryHealth);
+	EXPECT_LT(secondary->getAvailableHealth(), secondaryHealth);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // Vanilla HoMM3 getRangedAttackValue prices one target. The real VCMI
 // SHOOTS_ALL_ADJACENT bonus adds a second signed effect: nearby enemy stacks
 // increase the shot value and friendly casualties decrease it. Prove that
