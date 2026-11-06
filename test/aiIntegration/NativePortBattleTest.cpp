@@ -4677,6 +4677,80 @@ TEST_F(AIIntegrationNativeBattle, homm3CavalierUsesSourceLongTieBreakInServerBat
 	EXPECT_FALSE(recorder.battleResults.empty());
 }
 
+// Pinned ai_tactical.cpp::checkAdjacentHexes accounts for a Cavalier's
+// charge path in its source ordering. The HoMM3-only landing-threat adapter
+// must pass each opposing melee origin (and its actual path cost) to the
+// authoritative VCMI damage preview, rather than pricing every origin as
+// a zero-distance strike from the stack's current position. This fixture
+// establishes the native origin-dependent estimate and an accepted real
+// server battle; it does NOT establish source-executable decision parity.
+TEST_F(AIIntegrationNativeBattle, homm3NativeJousterPathDependentDamagePreviewAndBattle)
+{
+	prepareBattle(CreatureID(10), 4, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * cavalier = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(10))
+			cavalier = unit.get();
+	ASSERT_NE(cavalier, nullptr);
+	ASSERT_TRUE(cavalier->hasBonusOfType(BonusType::JOUSTING));
+	const BattleHex nearbyHex(cavalier->getPosition().toInt() + 5);
+	ASSERT_TRUE(nearbyHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearbyHex), nullptr);
+	const CStack * nearTarget = addStack(BattleSide::DEFENDER, CreatureID(0), nearbyHex, 300);
+	ASSERT_NE(nearTarget, nullptr);
+
+	const auto reach = battle()->getReachability(cavalier);
+	const auto origins = battle()->battleGetAvailableHexes(reach, cavalier, true);
+	int shortest = std::numeric_limits<int>::max();
+	int longest = -1;
+	int64_t shortDamage = 0;
+	int64_t longDamage = 0;
+	for(const auto & origin : origins)
+	{
+		if(!origin.isAvailable() || !battle()->meleeAttackHexes(cavalier, nearTarget, origin).contains(nearbyHex))
+			continue;
+		const int pathCost = reach.distances[origin.toInt()];
+		if(pathCost < 0)
+			continue;
+		BattleAttackInfo info(cavalier, nearTarget, pathCost, false);
+		info.attackerPos = origin;
+		info.defenderPos = nearbyHex;
+		const auto estimated = battle()->battleEstimateDamage(info);
+		const int64_t representative = estimated.damage.min
+			+ (estimated.damage.max - estimated.damage.min) / 2;
+		if(pathCost < shortest)
+		{
+			shortest = pathCost;
+			shortDamage = representative;
+		}
+		if(pathCost > longest)
+		{
+			longest = pathCost;
+			longDamage = representative;
+		}
+	}
+	ASSERT_LT(shortest, longest) << "Threat preview needs distinct native Cavalier melee origins";
+	EXPECT_GT(longDamage, shortDamage)
+		<< "Path-specific native damage previews must retain real JOUSTING charge distance";
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto inspected = callback->getBattle(battleID);
+	ASSERT_NE(inspected, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), cavalier);
+	const auto action = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*inspected, *cavalier);
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Server rejected independent HoMM3 opening melee command";
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.meleeAttacks, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, homm3JousterLandingRiskPrecedesEqualDamageTieBreak)
 {
 	// Pinned HoMM3 checkAdjacentHexes adds enemy_attacks[hex] BEFORE the
