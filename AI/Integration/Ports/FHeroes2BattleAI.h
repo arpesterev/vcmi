@@ -1317,14 +1317,23 @@ private:
 			}
 			return BattleAction::makeDefend(&stack);
 		}
-		if(const auto melee = blockedArcherMelee(battle, stack, enemies))
-			return *melee;
-		// A contact-blocked archer must never bypass the source's
-		// isHandFighting() branch merely because FREE_SHOOTING makes a shot
-		// legal in Heroes III. If no native melee aim exists, defend instead
-		// of silently replacing the source decision with ranged targeting.
-		if(stack.isShooter() && battle.battleIsUnitBlocked(&stack))
-			return BattleAction::makeDefend(&stack);
+		// Source archerDecision describes a mobile creature, not Heroes III
+		// ballistae or fortress towers. Those native machine stacks must use
+		// their own legal shooting orders even when an enemy is adjacent:
+		// applying the source hand-fighting branch can send an illegal DEFEND.
+		// This is a documented Heroes II/III distinction, not source parity.
+		const bool nativeStationaryShooter = stack.creatureId() == CreatureID::BALLISTA || stack.isTurret();
+		if(!nativeStationaryShooter)
+		{
+			if(const auto melee = blockedArcherMelee(battle, stack, enemies))
+				return *melee;
+			// A contact-blocked creature archer must never bypass the source's
+			// isHandFighting() branch merely because FREE_SHOOTING makes a shot
+			// legal in Heroes III. If no native melee aim exists, defend instead
+			// of silently replacing the source decision with ranged targeting.
+			if(stack.isShooter() && battle.battleIsUnitBlocked(&stack))
+				return BattleAction::makeDefend(&stack);
+		}
 
 		const CStack * shootingTarget = nullptr;
 		BattleHex shootingHex;
