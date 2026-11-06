@@ -585,7 +585,9 @@ protected:
 			// remove the active stack while accepting the selected action.
 			const auto actingSide = active->unitSide();
 			const BattleHex origin = active->getPosition();
-			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action)) << "The engine rejected the selected action";
+			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+				<< "The engine rejected the selected action; last native pre-apply state:\n"
+				<< trace.str();
 			if(onAcceptedAction)
 				onAcceptedAction(action, actingSide, origin);
 			++decisions;
