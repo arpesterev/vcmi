@@ -1472,16 +1472,14 @@ private:
 				return *unblock;
 			if(const auto pursue = pursueShooterBlocker(battle, stack, reachability, available, allEnemies))
 				return *pursue;
-			const auto friendlyUnits = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-			const bool shootersCanFire = std::all_of(friendlyUnits.begin(), friendlyUnits.end(),
-				[&](const CStack * friendly)
-				{
-					return !friendly->alive() || !friendly->isShooter()
-						|| battle.battleCanShoot(friendly);
-				});
-			if(shootersCanFire)
-					if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
-						return *cover;
+			// Pinned fheroes2 meleeUnitDefense evaluates cover for every
+			// living isArchers() stack, without a global can-shoot gate.
+			// Heroes III FORGETFULNESS (or zero ammo) can prohibit a native
+			// shot while preserving the source's shooter classification.
+			// An unrelated melee target must not eclipse that defensive screen.
+			// Actual movement remains restricted to VCMI-reachable hexes.
+			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
+				return *cover;
 		}
 		const CStack * target = nullptr;
 		BattleHex targetHex;

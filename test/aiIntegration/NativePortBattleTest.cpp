@@ -3137,6 +3137,87 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveMeleeCoversThreatenedFriendly
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2ForgetfulnessDoesNotCancelSourceShooterScreen)
+{
+	// In pinned ai_battle.cpp::meleeUnitDefense, friendly isArchers()
+	// stacks participate in screening even if their present shot is not
+	// available. Native Heroes III Forgetfulness suppresses shooting, not
+	// the archer classification. An unrelated adjacent melee bait must
+	// not bypass the earlier source defensive-cover decision.
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 15);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+	ASSERT_NE(guard, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex origin = guard->getPosition();
+	const BattleHex shooterHex(origin.toInt() + 3 * GameConstants::BFIELD_WIDTH);
+	const BattleHex threatHex(shooterHex.toInt() + 5);
+	const BattleHex baitHex(origin.toInt() + 1);
+	for(const auto & hex : {shooterHex, threatHex, baitHex})
+	{
+		ASSERT_TRUE(hex.isAvailable());
+		ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+	}
+	const auto * shooter = addStack(BattleSide::ATTACKER, CreatureID(2), shooterHex, 120);
+	const auto * threat = addStack(BattleSide::DEFENDER, CreatureID(0), threatHex, 15);
+	const auto * bait = addStack(BattleSide::DEFENDER, CreatureID(0), baitHex, 1);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(threat, nullptr);
+	ASSERT_NE(bait, nullptr);
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_TRUE(battle()->battleCanShoot(shooter));
+	ASSERT_LE(BattleHex::getDistance(shooterHex, threatHex),
+		static_cast<int>(threat->getMovementRange()) + 1);
+	ASSERT_GT(BattleHex::getDistance(origin, threatHex),
+		static_cast<int>(guard->getMovementRange()) + 1);
+	ASSERT_FALSE(battle()->meleeAttackHexes(guard, bait, origin).empty())
+		<< "The unrelated adjacent bait must be a genuine native melee option";
+
+	teachBattleSpell(defenderSideHero, SpellID::FORGETFULNESS);
+	defenderSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::FORGETFULNESS, shooter))
+		<< "Use the native spell handler, not a mocked shooter state";
+	ASSERT_TRUE(shooter->isShooter());
+	ASSERT_FALSE(battle()->battleCanShoot(shooter));
+	ASSERT_GT(shooter->getMovementRange(), 0);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK)
+		<< "Forgetfulness may disable a shot, but must not divert the guard into unrelated melee: "
+		<< callback->action->toString();
+	ASSERT_FALSE(callback->action->target.empty());
+	const BattleHex destination = callback->action->target.front().hexValue;
+	EXPECT_EQ(BattleHex::getDistance(destination, shooterHex), 1)
+		<< "The independent source-derived decision must actually screen the threatened archer";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "The native battle server rejected the selected legal cover movement";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, fheroes2UnblockedShooterScreenOutranksUnrelatedMeleeAttack)
 {
 	// Pinned ihhub/fheroes2 ai_battle.cpp::meleeUnitDefense first screens
