@@ -171,6 +171,46 @@ TEST(MMAINNOutputValidation, V15RejectsOverflowDuringGraphFlatteningBeforeAlloca
 	}
 }
 
+TEST(MMAINNOutputValidation, V13RejectsOversizedLinkCountsBeforeFlattening)
+{
+	using MMAI::BAI::checkedNNV13LinkLength;
+	using MMAI::BAI::checkedNNObservationAxis;
+	using MMAI::BAI::checkedNNObservationProduct;
+	const auto intMax = static_cast<std::size_t>(std::numeric_limits<int>::max());
+	const auto sizeMax = std::numeric_limits<std::size_t>::max();
+
+	// Legal empty and nonempty V13 link types retain their original lengths.
+	EXPECT_EQ(checkedNNV13LinkLength(0u, 0u), 0);
+	EXPECT_EQ(checkedNNV13LinkLength(4u, 3u), 3);
+	EXPECT_EQ(checkedNNV13LinkLength(0u, intMax), std::numeric_limits<int>::max());
+
+	// ONNX lengths are int32: do not silently truncate a single link type.
+	EXPECT_THROW(checkedNNV13LinkLength(0u, intMax + 1u), std::runtime_error);
+
+	// Edge indices are flattened twice; reject aggregate overflow before
+	// allocating either index vector, including when a single link is small.
+	EXPECT_THROW(checkedNNV13LinkLength(sizeMax, 1u), std::runtime_error);
+	EXPECT_THROW(checkedNNV13LinkLength(sizeMax / 2u, 1u), std::runtime_error);
+	EXPECT_EQ(checkedNNObservationProduct("V13 edge indices", 3u, 2u), 6u);
+
+	// A 64-bit ONNX tensor axis is a separate bound from std::size_t.
+	if(sizeMax > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+	{
+		const auto overAxis = static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) + 1u;
+		EXPECT_THROW(checkedNNObservationAxis("V13 edges", overAxis), std::runtime_error);
+	}
+
+	try
+	{
+		checkedNNV13LinkLength(0u, intMax + 1u);
+		FAIL() << "Oversized V13 link length passed through to ONNX";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("V13 link length"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsUnrepresentableNeuralActionIdBeforeDispatch)
 {
 	using MMAI::BAI::checkedNNV15ActionId;
