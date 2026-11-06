@@ -133,6 +133,42 @@ TEST(MMAINNOutputValidation, V13V15RejectInvalidTensorElementCountsBeforeOnnxAll
 	}
 }
 
+TEST(MMAINNOutputValidation, V15RejectsOverflowDuringGraphFlatteningBeforeAllocation)
+{
+	using MMAI::BAI::checkedNNObservationProduct;
+	using MMAI::BAI::checkedNNObservationSum;
+	using MMAI::BAI::checkedNNObservationIntSize;
+	using MMAI::BAI::checkedNNObservationAxis;
+
+	const auto maxSize = std::numeric_limits<std::size_t>::max();
+	// Normal observations and sparse graphs are unchanged.
+	EXPECT_EQ(checkedNNObservationProduct("x_Unit", 3u, 5u), 15u);
+	EXPECT_EQ(checkedNNObservationProduct("edge_attr_flat", 0u, maxSize), 0u);
+	EXPECT_EQ(checkedNNObservationSum("edge_attr_flat", 0u, 6u), 6u);
+	EXPECT_EQ(checkedNNObservationIntSize("edge_lengths", 2u), 2);
+	EXPECT_EQ(checkedNNObservationAxis("active_action_ids", 3u), 3);
+
+	// Reject corrupted graph lengths before resize/reserve or ONNX casts.
+	EXPECT_THROW(checkedNNObservationProduct("x_Unit", maxSize, 2u), std::runtime_error);
+	EXPECT_THROW(checkedNNObservationProduct("edge_index_flat", maxSize, 2u), std::runtime_error);
+	EXPECT_THROW(checkedNNObservationSum("edge_attr_flat", maxSize, 1u), std::runtime_error);
+	EXPECT_THROW(checkedNNObservationIntSize("edge_lengths",
+		static_cast<std::size_t>(std::numeric_limits<int>::max()) + 1u), std::runtime_error);
+	if(maxSize > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+		EXPECT_THROW(checkedNNObservationAxis("x_Action", maxSize), std::runtime_error);
+
+	try
+	{
+		checkedNNObservationProduct("edge_attr_flat", maxSize, 3u);
+		FAIL() << "An overflowing V15 edge attribute buffer was accepted";
+	}
+	catch(const std::runtime_error & e)
+	{
+		EXPECT_NE(std::string(e.what()).find("edge_attr_flat"), std::string::npos);
+		EXPECT_NE(std::string(e.what()).find("overflows"), std::string::npos);
+	}
+}
+
 TEST(MMAINNOutputValidation, V15RejectsUnrepresentableNeuralActionIdBeforeDispatch)
 {
 	using MMAI::BAI::checkedNNV15ActionId;
