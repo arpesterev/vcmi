@@ -5428,6 +5428,107 @@ TEST_F(AIIntegrationNativeBattle, homm3HydraValuesAndExecutesNativeMultiTargetMe
 	EXPECT_GT(recorder.damage, 0);
 }
 
+
+// Pinned HoMM3 getMultiHeadBonus prices one legal splash swing. VCMI's
+// performAttackSequence may instead execute a second melee hit if the
+// primary and attacker survive. This fixture records each actual server
+// injury packet and guards against granting repeat collateral from a
+// dead primary. It does not establish Heroes III retail policy parity.
+TEST_F(AIIntegrationNativeBattle, homm3NativeRepeatedHydraSplashSurvivesPrimary)
+{
+	prepareBattle(CreatureID(110), 20, CreatureID(0), 1); // Hydra vs Peasant
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	CStack * hydra = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(110))
+			hydra = unit.get();
+	ASSERT_NE(hydra, nullptr);
+	ASSERT_TRUE(hydra->hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT));
+	hydra->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::ADDITIONAL_ATTACK,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(110))));
+	ASSERT_EQ(hydra->getTotalAttacks(false), 2);
+	ASSERT_EQ(battle()->battleActiveUnit(), hydra);
+
+	std::vector<BattleHex> adjacent;
+	for(const auto & hex : hydra->getSurroundingHexes())
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+			adjacent.push_back(hex);
+	ASSERT_GE(adjacent.size(), 2u);
+	const CStack * first = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[0], 2000);
+	const CStack * second = addStack(BattleSide::DEFENDER, CreatureID(0), adjacent[1], 2000);
+	ASSERT_NE(first, nullptr);
+	ASSERT_NE(second, nullptr);
+	const int64_t beforeFirst = first->getAvailableHealth();
+	const int64_t beforeSecond = second->getAvailableHealth();
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, hydra);
+	ASSERT_TRUE(callback->action.has_value());
+	const auto action = *callback->action;
+	ASSERT_EQ(action.actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_GE(action.target.size(), 2u);
+	const auto from = action.target.front().hexValue;
+	const auto aim = action.target[1].hexValue;
+	const auto affected = view->getAttackedCreatures(hydra, aim, false, from).first;
+	EXPECT_NE(std::find(affected.begin(), affected.end(), first), affected.end());
+	EXPECT_NE(std::find(affected.begin(), affected.end(), second), affected.end());
+	for(const auto * victim : {first, second})
+	{
+		BattleAttackInfo projected(hydra, victim, 0, false);
+		projected.attackerPos = from;
+		const auto estimate = view->battleEstimateDamage(projected);
+		ASSERT_LT(estimate.damage.max * 2, victim->getAvailableHealth())
+			<< "Both native Hydra swings must have a surviving bystander";
+	}
+	int nativeStrikes = 0;
+	int firstInjuries = 0;
+	int secondInjuries = 0;
+	const auto hydraID = static_cast<ui32>(hydra->unitId());
+	recorder.onAttackBeforeApply = [&](const BattleAttack & packet)
+	{
+		if(packet.stackAttacking != hydraID || packet.shot() || packet.counter())
+			return;
+		++nativeStrikes;
+		for(const auto & injury : packet.bsa)
+		{
+			if(injury.stackAttacked == first->unitId())
+				++firstInjuries;
+			if(injury.stackAttacked == second->unitId())
+				++secondInjuries;
+		}
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action))
+		<< "Native server rejected HoMM3's chosen repeated Hydra splash";
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(nativeStrikes, 2);
+	EXPECT_EQ(firstInjuries, 2);
+	EXPECT_EQ(secondInjuries, 2);
+	EXPECT_LT(first->getAvailableHealth(), beforeFirst);
+	EXPECT_LT(second->getAvailableHealth(), beforeSecond);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 // The original checkAdjacentHexes visits each occupied hex of a wide enemy.
 // In VCMI an attacker may also have several legal aim hexes from one landing;
 // the particular aim changes the engine's splash/breath footprint. This test
