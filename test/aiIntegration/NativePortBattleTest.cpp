@@ -1831,6 +1831,77 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UntargetableArcherUsesSourceSkipWithou
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// In the pinned ai_battle.cpp::planUnitTurn a meleeUnitDefense result with
+// no target cell produces SKIP. VCMI DEFEND is not an equivalent no-op:
+// it applies UNIT_DEFENDING. Keep the defensive decision independent of
+// whether native movement or an attack happens to be available.
+TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveInfantryWithoutCommandSkipsWithoutDefendBonus)
+{
+	prepareBattle(CreatureID(0), 40, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * guard = nullptr;
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			guard = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	}
+	ASSERT_NE(guard, nullptr);
+	ASSERT_NE(enemy, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	const BattleHex archerHex(guard->getPosition().toInt() + GameConstants::BFIELD_WIDTH);
+	ASSERT_TRUE(archerHex.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
+	const auto * archer = addStack(BattleSide::ATTACKER, CreatureID(2), archerHex, 15);
+	ASSERT_NE(archer, nullptr);
+	ASSERT_TRUE(archer->isShooter());
+	ASSERT_GT(archer->getMovementRange(), 0);
+	// A nearby friendly archer produces the source defensive stance, but
+	// the enemy is too far to threaten that shooter or receive melee.
+	ASSERT_GT(BattleHex::getDistance(enemy->getPosition(), archerHex),
+		static_cast<int>(enemy->getMovementRange()) + 1);
+	ASSERT_GT(BattleHex::getDistance(enemy->getPosition(), guard->getPosition()),
+		static_cast<int>(guard->getMovementRange()) + 1);
+	const double friendlyStrength = static_cast<double>(guard->estimateCombatValue())
+		+ archer->estimateCombatValue();
+	ASSERT_GT(static_cast<double>(archer->estimateCombatValue()) / friendlyStrength, 0.15);
+	ASSERT_LT(friendlyStrength, 10.0 * enemy->estimateCombatValue());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, guard);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::NO_ACTION)
+		<< "No source melee defense command means SKIP, never native DEFEND: "
+		<< callback->action->toString();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative native server rejected the independent source SKIP";
+	const auto * after = battle()->battleGetStackByID(guard->unitId());
+	ASSERT_NE(after, nullptr);
+	EXPECT_FALSE(after->hasBonusOfType(BonusType::UNIT_DEFENDING));
+	EXPECT_EQ(recorder.shots, 0);
+	EXPECT_EQ(recorder.meleeAttacks, 0);
+	EXPECT_EQ(recorder.damage, 0);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 // Source ai_battle.cpp::berserkTurn uses SKIP when no target is reachable.
 // The native equivalent is NO_ACTION, not DEFEND: the latter grants a
 // defense bonus and emits a DEFEND event. Exercise the actual server action
