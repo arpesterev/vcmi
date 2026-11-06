@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -89,6 +90,37 @@ inline void requireNNTensorElementCount(const std::string & name,
 	if(expected != elements)
 		throw std::runtime_error("MMAI: neural tensor '" + name + "' element count mismatch: shape has "
 			+ std::to_string(expected) + " elements, data has " + std::to_string(elements));
+}
+
+// V15 graph nodes and edges must be flattened *before* ONNX allocation.
+// Validate arithmetic before vector resize/reserve, span offsets, or
+// narrowing to ONNX int32/int64 dimensions. Sparse zero-edge graphs are valid.
+inline std::size_t checkedNNObservationProduct(const std::string & name, std::size_t count, std::size_t stride)
+{
+	if(stride != 0 && count > std::numeric_limits<std::size_t>::max() / stride)
+		throw std::runtime_error("MMAI: neural observation '" + name + "' size product overflows");
+	return count * stride;
+}
+
+inline std::size_t checkedNNObservationSum(const std::string & name, std::size_t count, std::size_t increment)
+{
+	if(count > std::numeric_limits<std::size_t>::max() - increment)
+		throw std::runtime_error("MMAI: neural observation '" + name + "' size sum overflows");
+	return count + increment;
+}
+
+inline int checkedNNObservationIntSize(const std::string & name, std::size_t count)
+{
+	if(count > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+		throw std::runtime_error("MMAI: neural observation '" + name + "' exceeds ONNX int32 length");
+	return static_cast<int>(count);
+}
+
+inline std::int64_t checkedNNObservationAxis(const std::string & name, std::size_t count)
+{
+	if(count > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+		throw std::runtime_error("MMAI: neural observation '" + name + "' exceeds ONNX int64 axis");
+	return static_cast<std::int64_t>(count);
 }
 
 // V15's dynamic graph may have no active creature-action nodes after
