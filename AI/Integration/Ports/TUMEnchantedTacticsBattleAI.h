@@ -279,12 +279,15 @@ private:
 	// spell internals are not claimed to have been reproduced.
 	static std::optional<BattleAction> chooseHypnotizedAttack(CPlayerBattleCallback & battle, const CStack & stack)
 	{
+		// VCMI's side-filtered stack lists retain ORIGINAL battle sides even
+		// after Hypnotize swaps their controllers. The spell can be active on
+		// both armies at once: a previously friendly unit captured by the
+		// opponent must remain a candidate for our captured stack's attack.
+		// Build the complete native candidate set, then filter by CURRENT
+		// controller below; the engine's legality checks remain authoritative.
 		auto targets = battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
-		// ONLY_ENEMY reflects the callback's visible side, not the current
-		// controller of each unit. Hypnotize can put the active stack itself
-		// in that collection: rejecting it explicitly prevents a self-attack.
-		// Use native battle ownership for every candidate, since a previously
-		// friendly stack may now be controlled by either side.
+		const auto originalFriends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		targets.insert(targets.end(), originalFriends.begin(), originalFriends.end());
 		vstd::erase_if(targets, [&](const CStack * target)
 		{
 			return target->unitId() == stack.unitId()
