@@ -5096,12 +5096,18 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MeleePositionAggregatesTwoAdjacentArch
 	ASSERT_TRUE(battle()->battleGetAvailableHexes(reachability, attacker, false).contains(clusterFrom));
 	ASSERT_FALSE(battle()->meleeAttackHexes(attacker, firstArcher, clusterFrom).empty());
 	ASSERT_FALSE(battle()->meleeAttackHexes(attacker, secondArcher, clusterFrom).empty());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto viewedBattle = callback->getBattle(battleID);
+	ASSERT_NE(viewedBattle, nullptr);
 	const auto nativeAttackValue = [&](const CStack * enemy, const BattleHex & from)
 	{
 		BattleAttackInfo info(attacker, enemy, reachability.distances[from.toInt()], false);
 		info.attackerPos = from;
 		DamageEstimation retaliation;
-		const auto damage = battle()->battleEstimateDamage(info, &retaliation);
+		const auto damage = viewedBattle->battleEstimateDamage(info, &retaliation);
 		const auto lostValue = [](const CStack * unit, const DamageEstimation & estimate)
 		{
 			const double health = static_cast<double>(unit->getAvailableHealth());
@@ -5121,10 +5127,6 @@ TEST_F(AIIntegrationNativeBattle, fheroes2MeleePositionAggregatesTwoAdjacentArch
 	ASSERT_GT(firstValue + secondValue, isolatedValue)
 		<< "The source position scorer must instead prefer blocking both archers";
 
-	const auto battleID = battle()->getBattleID();
-	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
-	auto callback = std::make_shared<DecisionCallback>(player);
-	callback->onBattleStarted(battle());
 	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
