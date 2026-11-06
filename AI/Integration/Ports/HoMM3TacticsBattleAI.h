@@ -839,18 +839,11 @@ private:
 		const int32_t effect = projectedAttackEffect(direct + (includeNativeInactive
 			? projectedRangedCollateral(battle, attacker, target) : 0.0), includeNativeInactive);
 		const int nativeMovement = std::max(0, static_cast<int>(target.getMovementRange()));
-		int distance = std::numeric_limits<int>::max();
-		for(const auto & enemyHex : target.getHexes())
-			for(const auto & friendlyHex : attacker.getHexes())
-				distance = std::min(distance,
-					static_cast<int>(BattleHex::getDistance(enemyHex, friendlyHex)));
-		if(distance == std::numeric_limits<int>::max())
-			throw std::logic_error("HoMM3 ranged target has no valid occupied footprint");
-		// Retail getRangedAttackValue uses the enemy's global AI target time;
-		// this partial port has no such goal map. Only the independent HoMM3
-		// policy projects time to adjacent melee contact, using BOTH occupied
-		// footprints and the pinned stationary-unit rule. TUM's explicitly
-		// composed partial baseline keeps its prior head-to-head estimate.
+		// Retail getRangedAttackValue uses the enemy's global AI goal time,
+		// which is not yet ported. In VCMI the target's *actual* reachability
+		// is a safer projection than raw hex distance: closed siege walls,
+		// obstacles and double-wide movement can make a nearby enemy unable
+		// to approach this shooter. TUM retains its old geometric estimate.
 		const int oldSpeed = std::max(1, nativeMovement);
 		const int oldHeadDistance = BattleHex::getDistance(attacker.getPosition(), target.getPosition());
 		const int oldTime = std::max(1, (oldHeadDistance + oldSpeed - 1) / oldSpeed);
@@ -874,8 +867,19 @@ private:
 				}
 			}
 		}
-		const int time = includeNativeInactive
-			? Ports::HoMM3::projectedRangedTargetTime(distance, nativeMovement, hasNativeShot) : oldTime;
+		int time = oldTime;
+		if(includeNativeInactive)
+		{
+			const auto nativeReach = battle.getReachability(&target);
+			const uint32_t steps = nativeReach.distToNearestNeighbour(&target, &attacker);
+			// INFINITE_DIST means there is no native melee path at all. Keep
+			// that distinction rather than treating a wall as one hex of travel.
+			// projectedRangedTargetTime expects distance = steps-to-contact + 1.
+			const int pathDistance = steps >= ReachabilityInfo::INFINITE_DIST
+				? ReachabilityInfo::INFINITE_DIST : static_cast<int>(steps) + 1;
+			time = Ports::HoMM3::projectedRangedTargetTime(
+				pathDistance, nativeMovement, hasNativeShot);
+		}
 		// Source enemy.cannotAttack includes available ranged attacks. VCMI's
 		// battleCanAttackUnit is melee-only: Ballista and other ranged-only
 		// units would otherwise be discounted even when they can shoot an ally.
