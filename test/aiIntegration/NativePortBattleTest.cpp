@@ -1022,6 +1022,78 @@ TEST_F(AIIntegrationNativeBattle, controlsBallistaAndCompletesBattle)
 	EXPECT_GT(ballistaShots, 0) << "Automatic server fire cannot substitute for an AI ballista decision";
 }
 
+// Heroes II's archerDecision is not a policy for Heroes III ballistae.
+// A VCMI ballista with fixture-local FREE_SHOOTING may legally fire despite
+// adjacent contact. The source creature archer hand-fighting branch must not
+// turn that legal native machine shot into a generic DEFEND. Activate the
+// ballista explicitly for this directed action, then finish the real battle.
+TEST_F(AIIntegrationNativeBattle, fheroes2EngagedBallistaRetainsLegalNativeShot)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 40);
+	setArmy(defenderSideHero, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	const CStack * ballista = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->isBallista())
+			ballista = unit.get();
+	ASSERT_NE(ballista, nullptr);
+	BattleHex adjacent;
+	for(const auto & hex : ballista->getSurroundingHexes())
+	{
+		if(hex.isAvailable() && battle()->battleGetUnitByPos(hex) == nullptr)
+		{
+			adjacent = hex;
+			break;
+		}
+	}
+	ASSERT_TRUE(adjacent.isAvailable());
+	ASSERT_NE(addStack(BattleSide::DEFENDER, CreatureID(0), adjacent, 1), nullptr);
+	ASSERT_TRUE(battle()->battleIsUnitBlocked(ballista));
+	const_cast<CStack *>(ballista)->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::FREE_SHOOTING,
+		BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_TRUE(battle()->battleCanShoot(ballista))
+		<< "The native engine must independently permit the shot despite contact";
+
+	// The fixture chooses the exact acting stack only for this directed
+	// decision. Real server validation and all subsequent turns are intact.
+	battle()->activeStack = ballista->unitId();
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	EXPECT_FALSE(callback->spellAction);
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT)
+		<< "VCMI war machine must not inherit the Heroes II mobile archer contact rule";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "Authoritative server rejected the independent native ballista shot";
+	policy.reset();
+	runToCompletion(std::nullopt, false);
+	EXPECT_GT(recorder.shots, 0);
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, completePortNameCannotSilentlySelectThePartialPolicy)
 {
 	EXPECT_THROW(AIFactory::createBattleAI("FHeroes2"), std::runtime_error);
