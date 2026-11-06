@@ -1031,8 +1031,15 @@ public:
 		// Reuse native enemy reachability across every candidate hex/aim:
 		// this must not run a fresh BFS for each projected threat cell.
 		// TUM deliberately receives no HoMM3-only landing threat.
+		// Pinned findEnemyAttacks scans *every* live opposing army, not only
+		// targets this particular stack may attack. An INVINCIBLE opponent,
+		// for example, cannot be selected as our victim but can still damage
+		// our landing stack. Keep attack targets and threat sources separate.
+		// TUM's explicit baseline continues to bypass this HoMM3-only field.
+		const auto allOpponents = avoidFastDecoys ? std::vector<const CStack *>{}
+			: battle.battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
 		const auto threatSources = avoidFastDecoys ? std::vector<MeleeThreatSource>{}
-			: collectThreatSources(battle, stack, enemies);
+			: collectThreatSources(battle, stack, allOpponents);
 
 		const CStack * target = nullptr;
 		BattleHex attackFrom;
