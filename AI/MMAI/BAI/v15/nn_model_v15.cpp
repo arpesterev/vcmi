@@ -439,7 +439,8 @@ std::vector<const char *> NNModel::readInputNames()
 	// The exporter marks graph cardinalities as dynamic (symbolic -1).
 	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
 	{
-		const auto spec = container->session->GetInputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		const auto typeInfo = container->session->GetInputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
 		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
 	};
 	for(size_t i = 0; i < nodeOrder.size(); ++i)
@@ -486,12 +487,17 @@ std::vector<const char *> NNModel::readOutputNames()
 
 	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
 	{
-		const auto spec = container->session->GetOutputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		const auto typeInfo = container->session->GetOutputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
 		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
 	};
 	// The exporter allows a scalar [] or singleton [1] action/value head.
-	const auto actionShape = container->session->GetOutputTypeInfo(0).GetTensorTypeAndShapeInfo().GetShape();
-	const auto valueShape = container->session->GetOutputTypeInfo(2).GetTensorTypeAndShapeInfo().GetShape();
+	// Keep the owning Ort::TypeInfo alive while reading each borrowed
+	// TensorTypeAndShapeInfo. Chaining temporaries is a use-after-free.
+	const auto actionType = container->session->GetOutputTypeInfo(0);
+	const auto valueType = container->session->GetOutputTypeInfo(2);
+	const auto actionShape = actionType.GetTensorTypeAndShapeInfo().GetShape();
+	const auto valueShape = valueType.GetTensorTypeAndShapeInfo().GetShape();
 	if(actionShape.empty())
 		check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {});
 	else

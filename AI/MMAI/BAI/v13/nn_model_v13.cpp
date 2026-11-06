@@ -333,7 +333,8 @@ std::vector<const char *> NNModel::readInputNames()
 	// A foreign ONNX model must fail on load, not during the first live turn.
 	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
 	{
-		const auto spec = container->session->GetInputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		const auto typeInfo = container->session->GetInputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
 		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
 	};
 	check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1});
@@ -393,7 +394,8 @@ std::vector<const char *> NNModel::readOutputNames()
 
 	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
 	{
-		const auto spec = container->session->GetOutputTypeInfo(i).GetTensorTypeAndShapeInfo();
+		const auto typeInfo = container->session->GetOutputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
 		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
 	};
 	check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {4});
