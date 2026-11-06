@@ -148,7 +148,12 @@ private:
 		double bestValue = 0.0;
 		for(const auto * enemy : targets)
 		{
+			// A hero-controlled Hypnotized former enemy can remain in the
+			// callback's side-based ONLY_ENEMY list. Its current battle owner
+			// is authoritative: neither a ballista nor an arrow tower may
+			// fire at a stack now controlled by the shooter's player.
 			if(!enemy->alive() || enemy->isInvincible() || !enemy->getPosition().isValid()
+				|| battle.battleGetOwner(enemy) == battle.battleGetOwner(&stack)
 				|| (preserveDisabledTargets && hasDisabledEffect(*enemy)))
 				continue;
 			// A wide enemy exposes independently legal head and tail shots.

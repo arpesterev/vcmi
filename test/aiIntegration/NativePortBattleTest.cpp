@@ -6221,6 +6221,94 @@ TEST_F(AIIntegrationNativeBattle, tumBallistaProjectedVolleyUsesRealArtillerySho
 	EXPECT_GT(recorder.damage, 0);
 }
 
+// The battlefield's side-based enemy list may still contain a defender
+// temporarily controlled by our hero's genuine Hypnotize spell. A TUM
+// manually controlled ballista must use current native ownership, not that
+// unit's original side, when choosing a shot. Unlike the hidden ERA/DLL,
+// this is a verifiable VCMI action-legality invariant.
+TEST_F(AIIntegrationNativeBattle, tumBallistaCannotTargetHypnotizedFriendlyFormerEnemy)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 70);
+	setArmy(defenderSideHero, CreatureID(0), 80);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 25));
+	giveArtifact(attackerSideHero, ArtifactID(ArtifactID::BALLISTA), ArtifactPosition::MACH1);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+
+	const CStack * ballista = nullptr;
+	const CStack * controlled = nullptr;
+	const CStack * actualEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->isBallista())
+			ballista = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+		{
+			if(unit->getCount() == 80)
+				controlled = unit.get();
+			else if(unit->getCount() == 25)
+				actualEnemy = unit.get();
+		}
+	}
+	ASSERT_NE(ballista, nullptr);
+	ASSERT_NE(controlled, nullptr);
+	ASSERT_NE(actualEnemy, nullptr);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HYPNOTIZE, controlled))
+		<< "A real hero spell must change control, not merely add a fixture flag";
+	ASSERT_TRUE(controlled->isHypnotized());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_EQ(battle()->battleGetOwner(controlled), player);
+	ASSERT_NE(battle()->battleGetOwner(actualEnemy), player);
+
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_NE(view, nullptr);
+	ASSERT_TRUE(view->battleCanShoot(ballista, actualEnemy->getPosition()));
+	const auto visibleEnemies = view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+	const bool formerEnemyInList = std::any_of(visibleEnemies.begin(), visibleEnemies.end(),
+		[&](const CStack * enemy) { return enemy->unitId() == controlled->unitId(); });
+	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *ballista);
+
+	auto policy = AIFactory::createBattleAI("TUMEnchantedTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, ballista);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+	ASSERT_FALSE(callback->action->target.empty());
+	EXPECT_EQ(callback->action->target.front().unitValue, actualEnemy->unitId())
+		<< "A TUM war machine must not shoot its current Hypnotized ally";
+	std::cout << "AI_TUM_HYPNOTIZED_BALLISTA former_enemy_listed=" << formerEnemyInList
+		<< " baseline=" << baseline.toString() << " tum=" << callback->action->toString() << '\\n';
+
+	const auto enemyHealthBefore = actualEnemy->getAvailableHealth();
+	const int shotsBefore = recorder.shots;
+	battle()->activeStack = ballista->unitId();
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+		<< "VCMI server rejected the real ballista shot at the remaining hostile stack";
+	EXPECT_GT(recorder.shots, shotsBefore);
+	EXPECT_LT(actualEnemy->getAvailableHealth(), enemyHealthBefore);
+	policy.reset();
+	runToCompletion(std::nullopt, false, "TUMEnchantedTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, tumBallistaSelectsUnblindedTargetWhenAnotherIsBlind)
 {
 	// TUM AI Improvements.txt excludes Blind, Paralyze and Petrification
