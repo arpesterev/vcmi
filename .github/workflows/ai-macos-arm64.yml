@@ -40,6 +40,8 @@ jobs:
           xcrun --find clang
           python3 -m unittest discover -s CI -p 'test_macos_ai_bundle.py' -v
           python3 -m unittest discover -s CI -p 'test_macos_packaging.py' -v
+          python3 -m unittest discover -s CI -p 'test_macos_ai_smoke.py' -v
+          python3 -m unittest discover -s CI -p 'test_macos_native_ai.py' -v
           python3 -m unittest discover -s CI -p 'test_verify_mmai_1_8.py' -v
           python3 CI/test_launcher_ai_selection.py
 
@@ -98,6 +100,8 @@ jobs:
           python3 CI/check_macos_ai_bundle.py --app "$mount/VCMI.app" \
             --build-cache "$build/CMakeCache.txt" --expected-sha "$GITHUB_SHA" \
             --output out/mac-ai-delivery/bundle-audit.json
+          python3 CI/smoke_macos_ai_bundle.py --app "$mount/VCMI.app" \
+            --expected-sha "$GITHUB_SHA" --output out/mac-ai-delivery/server-smoke.json
           cp "$build/$VCMI_PACKAGE_FILE_NAME.dmg" out/mac-ai-delivery/
           cp AI/Integration/MACOS_ARM64_ACCEPTANCE.md out/mac-ai-delivery/
           cp CI/verify_mmai_1_8.py CI/mmai_1_8_release.json out/mac-ai-delivery/
@@ -109,3 +113,55 @@ jobs:
           name: vcmi-four-ai-arm64-${{ github.sha }}
           if-no-files-found: error
           path: out/mac-ai-delivery/
+
+      - name: Prepare pinned internal-CI fixture for native tests
+        run: |
+          set -euo pipefail
+          command -v 7zz || command -v 7z || command -v 7za
+          fixture="$RUNNER_TEMP/vcmi-test-data-v2.0.7z"
+          curl --fail --location --proto '=https' --retry 3 --silent --show-error \
+            'https://github.com/vcmi-mods/vcmi-test-data/releases/download/v2.0/heroes3.7z' \
+            --output "$fixture"
+          echo "64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8  $fixture" | shasum -a 256 -c -
+
+      # The DMG and its packaged-server smoke are complete before tests are enabled.
+      # Do not run CPack again or add temporary fixture data to the deliverable.
+      - name: Configure native test target after packaging
+        run: |
+          set -euo pipefail
+          build="$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release"
+          cmake -S "$GITHUB_WORKSPACE" -B "$build" \
+            -DENABLE_TEST:BOOL=ON -DENABLE_MMAI_TEST:BOOL=OFF -DINSTALL_GTEST:BOOL=OFF
+
+      - name: Build native AI tests with isolated discovery HOME
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          build = Path(os.environ['GITHUB_WORKSPACE']) / 'out/build/macos-arm-conan-ninja-release'
+          with tempfile.TemporaryDirectory(prefix='vcmi-native-build-home-', dir=os.environ['RUNNER_TEMP']) as home:
+              subprocess.run(['cmake', '--build', str(build), '--target', 'vcmitest', '--parallel', '3'],
+                             env=dict(os.environ, HOME=home), check=True)
+          PY
+
+      - name: Run enumerated native ARM64 AI regression suites
+        id: native_ai
+        run: |
+          python3 CI/run_macos_native_ai.py \
+            --test-binary "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release/bin/vcmitest" \
+            --fixture-archive "$RUNNER_TEMP/vcmi-test-data-v2.0.7z" \
+            --source-sha "$GITHUB_SHA" --expected-native-count 306 --expected-forecast-count 8 \
+            --output-dir "$GITHUB_WORKSPACE/out/mac-ai-native"
+
+      - name: Keep native build-tree evidence separate from the application
+        if: ${{ !cancelled() && steps.native_ai.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vcmi-four-ai-native-arm64-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            out/mac-ai-native/*.json
+            out/mac-ai-native/*.xml
+            out/mac-ai-native/*.log

@@ -453,6 +453,96 @@ private:
 		return attackValue(battle, attacker, defender, from, aimedHex, false, distance);
 	}
 
+	struct MeleeAttackCandidate
+	{
+		const CStack * enemy;
+		BattleHex aimedHex;
+		BattleHex from;
+		double attackValue;
+		double positionValue = 0;
+	};
+
+	// evaluatePotentialAttackPositions aggregates each target once per native
+	// head/tail placement. The caller may include positions beyond this turn.
+	static std::vector<MeleeAttackCandidate> evaluateAttackPositions(CPlayerBattleCallback & battle,
+		const CStack & stack, const ReachabilityInfo & reachability,
+		const BattleHexArray & positions, const std::vector<const CStack *> & enemies)
+	{
+		std::vector<MeleeAttackCandidate> attackCandidates;
+		std::map<int, double> meleePositionValue;
+		std::map<int, double> shooterPositionValue;
+		std::map<int, double> allAdjacentPositionValue;
+		const bool allAdjacent = stack.hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT);
+		for(const auto * enemy : enemies)
+		{
+			if(!battle.battleCanAttackUnit(&stack, enemy))
+				continue;
+			for(const auto & hex : positions)
+			{
+				if(!hex.isAvailable() || !reachability.isReachable(hex))
+					continue;
+				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
+				if(attackedHexes.empty())
+					continue;
+				// Wide targets and directional multi-target attacks can expose
+				// several legal aims. The source optimalAttackValue evaluates the
+				// best vector once for each (attack position, target) pair.
+				BattleHex bestAimedHex;
+				double attackValue = std::numeric_limits<double>::lowest();
+				for(const auto & aimedHex : attackedHexes)
+				{
+					// Future turns cannot accumulate one native jousting charge
+					// across the full multi-turn route.
+					const int chargeDistance = std::min(reachability.distances[hex.toInt()], stack.getMovementRange());
+					const double value = meleeAreaAttackValue(battle, stack, *enemy,
+						hex, aimedHex, chargeDistance);
+					if(!bestAimedHex.isValid() || value > attackValue)
+					{
+						attackValue = value;
+						bestAimedHex = aimedHex;
+					}
+				}
+				if(!bestAimedHex.isValid())
+					continue;
+				attackCandidates.push_back({enemy, bestAimedHex, hex, attackValue});
+				const int index = hex.toInt();
+				if(allAdjacent)
+				{
+					// Hydra-style strikes already value all native victims. Do
+					// not count those same victims once per possible primary aim.
+					auto [it, inserted] = allAdjacentPositionValue.try_emplace(index, attackValue);
+					if(!inserted)
+						it->second = std::max(it->second, attackValue);
+				}
+				else if(enemy->isShooter())
+					shooterPositionValue[index] += attackValue;
+				else
+				{
+					auto [it, inserted] = meleePositionValue.try_emplace(index, attackValue);
+					if(!inserted)
+						it->second = std::max(it->second, attackValue);
+				}
+			}
+		}
+		for(auto & attack : attackCandidates)
+		{
+			const int index = attack.from.toInt();
+			double & positionValue = attack.positionValue;
+			if(allAdjacent)
+				positionValue = allAdjacentPositionValue.at(index);
+			else
+			{
+				const auto melee = meleePositionValue.find(index);
+				if(melee != meleePositionValue.end())
+					positionValue = melee->second;
+				const auto shooters = shooterPositionValue.find(index);
+				if(shooters != shooterPositionValue.end())
+					positionValue += shooters->second;
+			}
+		}
+		return attackCandidates;
+	}
+
 	static Ports::FHeroes2::Tactics tactics(CPlayerBattleCallback & battle, const CStack & stack,
 		const std::vector<const CStack *> & enemies)
 	{
@@ -971,7 +1061,8 @@ private:
 					// whose secondary victims make it the better blocker attack.
 					for(const auto & aimedHex : targets)
 					{
-						if(battle.battleGetUnitByPos(aimedHex) != enemy)
+						if(battle.battleGetUnitByPos(aimedHex) != enemy
+							|| !battle.battleCanAttackFromHex(available, &guard, aimedHex, from))
 							continue;
 						const double value = meleeAreaAttackValue(battle, guard, *enemy,
 							from, aimedHex, reachability.distances[from.toInt()]);
@@ -1027,15 +1118,25 @@ private:
 				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
 				allShooterStrength += strength(*friendly);
 
+		BattleHexArray potentialPositions;
+		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+			if(reachability.isReachable(BattleHex(index)))
+				potentialPositions.insert(BattleHex(index));
+		potentialPositions.sort([&](const BattleHex & left, const BattleHex & right)
+		{
+			const auto leftDistance = BattleHex::getDistance(guard.getPosition(), left);
+			const auto rightDistance = BattleHex::getDistance(guard.getPosition(), right);
+			return leftDistance != rightDistance ? leftDistance < rightDistance : left.toInt() < right.toInt();
+		});
+		const auto candidates = evaluateAttackPositions(battle, guard, reachability,
+			potentialPositions, enemies);
+
 		// The source declines a remote two-turn screen if another immediate
 		// melee attack exists and the guard is too slow to reach the archer.
-		const bool immediateMeleeExists = std::any_of(enemies.begin(), enemies.end(),
-			[&](const CStack * enemy)
+		const bool immediateMeleeExists = std::any_of(candidates.begin(), candidates.end(),
+			[&](const MeleeAttackCandidate & candidate)
 			{
-				return std::any_of(available.begin(), available.end(), [&](const BattleHex & from)
-				{
-					return from.isAvailable() && !battle.meleeAttackHexes(&guard, enemy, from).empty();
-				});
+				return battle.battleCanAttackFromHex(available, &guard, candidate.aimedHex, candidate.from);
 			});
 		const int speed = static_cast<int>(guard.getMovementRange());
 		BattleHex bestStep;
@@ -1048,37 +1149,50 @@ private:
 			if(shooter == &guard || !shooter->alive() || !shooter->isShooter()
 				|| !shooter->getPosition().isValid())
 				continue;
-			for(const auto * blocker : enemies)
+			int shortest = ReachabilityInfo::INFINITE_DIST;
+			const MeleeAttackCandidate * bestCandidate = nullptr;
+			Ports::FHeroes2::MeleeOutcome bestOutcome;
+			for(const auto & candidate : candidates)
 			{
-				// Lack of ammunition and magical shot suppression are not
-				// evidence of a physically engaged archer.
-				bool adjacent = false;
+				bool blocksShooter = false;
 				for(const auto & shooterHex : shooter->getHexes())
-					for(const auto & blockerHex : blocker->getHexes())
-						adjacent |= BattleHex::getDistance(shooterHex, blockerHex) == 1;
-				if(!adjacent)
+					for(const auto & blockerHex : candidate.enemy->getHexes())
+						blocksShooter |= BattleHex::getDistance(shooterHex, blockerHex) == 1;
+				if(!blocksShooter)
 					continue;
-
-				int shortest = GameConstants::BFIELD_SIZE;
-				BattleHex goal;
-				for(const auto & from : blocker->getAttackableHexes(&guard))
+				shortest = std::min(shortest,
+					static_cast<int>(reachability.distances[candidate.from.toInt()]));
+				const Ports::FHeroes2::MeleeOutcome outcome{
+					candidate.from.toInt(), candidate.attackValue, candidate.positionValue,
+					battle.battleCanAttackFromHex(available, &guard, candidate.aimedHex, candidate.from)};
+				if(!bestCandidate || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
 				{
-					if(!from.isValid() || !battle.isMeleeAttackPossible(&guard, blocker, from))
-						continue;
-					const int distance = static_cast<int>(reachability.distances[from.toInt()]);
-					if(distance < shortest || (distance == shortest
-						&& (!goal.isValid() || from.toInt() < goal.toInt())))
+					bestCandidate = &candidate;
+					bestOutcome = outcome;
+				}
+			}
+			if(!bestCandidate || bestOutcome.canAttackImmediately
+				|| (immediateMeleeExists && !guard.hasBonusOfType(BonusType::FLYING)
+					&& shortest > speed * 2))
+				continue;
+
+			BattleHex goal = bestCandidate->from;
+			BattleHex step;
+			if(guard.hasBonusOfType(BonusType::FLYING))
+			{
+				int remaining = BattleHex::getDistance(guard.getPosition(), goal);
+				for(const auto & landing : available)
+				{
+					const int distance = BattleHex::getDistance(landing, goal);
+					if(distance < remaining)
 					{
-						shortest = distance;
-						goal = from;
+						remaining = distance;
+						step = landing;
 					}
 				}
-				if(!goal.isValid() || shortest <= speed || shortest >= GameConstants::BFIELD_SIZE
-					|| (immediateMeleeExists && !guard.hasBonusOfType(BonusType::FLYING)
-						&& shortest > speed * 2))
-					continue;
-
-				BattleHex step;
+			}
+			else
+			{
 				for(int turns = 0; turns < GameConstants::BFIELD_SIZE; ++turns)
 				{
 					if(available.contains(goal) && goal != guard.getPosition())
@@ -1091,21 +1205,23 @@ private:
 						break;
 					goal = previous;
 				}
-				if(!step.isValid())
-					continue;
-				// Source defenseDistanceModifier = total shooter strength / 15.
-				const double priority = strength(*shooter)
-					- allShooterStrength * shortest / 15.0;
-				if(!bestStep.isValid() || priority > bestPriority
-					|| (priority == bestPriority && (shortest < bestTravel
-						|| (shortest == bestTravel && step.toInt() < bestStep.toInt()))))
-				{
-					bestPriority = priority;
-					bestTravel = shortest;
-					bestStep = step;
-				}
+			}
+			if(!step.isValid())
+				continue;
+			// Archer selection uses approach distance; the attack position uses
+			// aggregated threat, which can prefer a longer archer-blocking route.
+			const double priority = strength(*shooter)
+				- allShooterStrength * shortest / 15.0;
+			if(!bestStep.isValid() || priority > bestPriority
+				|| (priority == bestPriority && (shortest < bestTravel
+					|| (shortest == bestTravel && step.toInt() < bestStep.toInt()))))
+			{
+				bestPriority = priority;
+				bestTravel = shortest;
+				bestStep = step;
 			}
 		}
+
 		return bestStep.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&guard, bestStep))
 			: std::nullopt;
 	}
@@ -1785,84 +1901,17 @@ private:
 		// loses the incentive to block several archers from one position;
 		// using raw defender strength for attackValue changes the tie-break.
 		// Preserve that source ranking with native VCMI damage projections.
-		struct AttackCandidate
-		{
-			const CStack * enemy;
-			BattleHex aimedHex;
-			BattleHex from;
-			double attackValue;
-		};
-		std::vector<AttackCandidate> attackCandidates;
-		std::map<int, double> meleePositionValue;
-		std::map<int, double> shooterPositionValue;
-		std::map<int, double> allAdjacentPositionValue;
-		const bool allAdjacent = stack.hasBonusOfType(BonusType::ATTACKS_ALL_ADJACENT);
-		for(const auto * enemy : enemies)
-		{
-			for(const auto & hex : available)
-			{
-				if(!hex.isAvailable())
-					continue;
-				const auto attackedHexes = battle.meleeAttackHexes(&stack, enemy, hex);
-				if(attackedHexes.empty())
-					continue;
-				// Wide targets and directional multi-target attacks can expose
-				// several legal aims. The source optimalAttackValue evaluates the
-				// best vector once for each (attack position, target) pair.
-				BattleHex bestAimedHex;
-				double attackValue = std::numeric_limits<double>::lowest();
-				for(const auto & aimedHex : attackedHexes)
-				{
-					const double value = meleeAreaAttackValue(battle, stack, *enemy,
-						hex, aimedHex, reachability.distances[hex.toInt()]);
-					if(!bestAimedHex.isValid() || value > attackValue)
-					{
-						attackValue = value;
-						bestAimedHex = aimedHex;
-					}
-				}
-				if(!bestAimedHex.isValid())
-					continue;
-				attackCandidates.push_back({enemy, bestAimedHex, hex, attackValue});
-				const int index = hex.toInt();
-				if(allAdjacent)
-				{
-					// Hydra-style strikes already value all native victims. Do
-					// not count those same victims once per possible primary aim.
-					auto [it, inserted] = allAdjacentPositionValue.try_emplace(index, attackValue);
-					if(!inserted)
-						it->second = std::max(it->second, attackValue);
-				}
-				else if(enemy->isShooter())
-					shooterPositionValue[index] += attackValue;
-				else
-				{
-					auto [it, inserted] = meleePositionValue.try_emplace(index, attackValue);
-					if(!inserted)
-						it->second = std::max(it->second, attackValue);
-				}
-			}
-		}
+		const auto attackCandidates = evaluateAttackPositions(battle, stack,
+			reachability, available, enemies);
 		const CStack * target = nullptr;
 		BattleHex targetHex;
 		Ports::FHeroes2::MeleeOutcome best;
 		for(const auto & attack : attackCandidates)
 		{
-			const int index = attack.from.toInt();
-			double positionValue = 0;
-			if(allAdjacent)
-				positionValue = allAdjacentPositionValue.at(index);
-			else
-			{
-				const auto melee = meleePositionValue.find(index);
-				if(melee != meleePositionValue.end())
-					positionValue = melee->second;
-				const auto shooters = shooterPositionValue.find(index);
-				if(shooters != shooterPositionValue.end())
-					positionValue += shooters->second;
-			}
+			if(!battle.battleCanAttackFromHex(available, &stack, attack.aimedHex, attack.from))
+				continue;
 			const Ports::FHeroes2::MeleeOutcome candidate{
-				index, attack.attackValue, positionValue, true};
+				attack.from.toInt(), attack.attackValue, attack.positionValue, true};
 			if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
 			{
 				target = attack.enemy;

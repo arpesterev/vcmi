@@ -81,6 +81,81 @@ failures. Use normal macOS installation and consent UI. A macOS security block
 is an explicit delivery blocker until the user resolves it through the normal
 UI or a properly signed/notarized build is supplied.
 
+## Packaged server execution smoke
+
+After the static mounted-bundle audit, CI runs `CI/smoke_macos_ai_bundle.py`
+against that same read-only mounted app. It verifies the app seal again and
+executes `vcmiserver --help` and `vcmiserver --version` through
+`/usr/bin/arch -arm64`, each with a 30-second timeout. The server source handles
+these options before game-library initialization, so this check needs no game
+assets and does not start a listening game server.
+
+Each smoke run uses a fresh temporary HOME and a minimal environment without
+inherited `DYLD_*` overrides. The version output must match the exact source
+commit and report all user data/config/log/save/cache paths under that HOME.
+The temporary data is removed afterward. `server-smoke.json` records the
+commands, exit codes and outputs alongside the static audit. A successful
+static audit alone does not satisfy this execution check.
+
+The launcher has no `--help` or `--version` handler at the reviewed source
+`bbc23d095500a9a05fe5d6f33df37fd9fddfd645`: `launcher/main.cpp` constructs
+`QApplication`, prepares user directories, shows `MainWindow`, then runs the
+event loop. Do not execute guessed CLI options or call a timed-out GUI a passed
+launcher test. Launcher startup, four-choice persistence, neural inference and
+actual gameplay still require separate native acceptance.
+
+## Native build-tree AI regression gate
+
+The extended workflow preserves the audited DMG and server-smoke artifact
+before enabling tests in the same build directory. It then configures
+`ENABLE_TEST=ON`, `ENABLE_MMAI_TEST=OFF` and `INSTALL_GTEST=OFF`, and builds only
+`vcmitest` with three compile jobs. Core/server/MMAI objects are reused. Do not
+rerun Conan, change build type, or run CPack again after enabling tests. Test
+binaries and fixture data must not enter the application package.
+
+The post-link GoogleTest discovery runs with a temporary HOME. The subsequent
+`CI/run_macos_native_ai.py` runner creates another fresh HOME for actual tests,
+forces ARM64 execution, verifies the test executable's architecture/signature,
+and uses a minimal environment without inherited `DYLD_*`, GoogleTest controls
+or neural-model gates. The build-tree resources and Conan dependency paths are
+intentionally different from a portable app: do not apply the bundle rpath
+normalizer to this executable or change the dependency cache. A loader or
+signature failure is a test blocker, not a reason to bypass macOS protection.
+
+The reviewed next-candidate inventory contains 326 `AIIntegrationNativeBattle`
+cases and 8 `HoMM3ForecastQueueNative` cases. The runner enumerates the compiled
+binary, requires exactly the 20 named model-gated cases, excludes only those
+cases, then verifies that the selected inventory and XML identities agree.
+Expected genuine passes are 306 native battle cases, 8 forecast cases,
+48 `MMAINNOutputValidation` cases and 145 Nullkiller/resource-trading cases:
+**507 executed cases with zero skipped, disabled, failed or errored cases**.
+These are required results, not a claim that this Mac run has already passed.
+A source change that alters the inventory requires an explicit reviewed update
+to the expected counts. XML counts alone cannot substitute for matching names.
+
+The fixture is the existing Linux CI archive from
+[vcmi-test-data v2.0](https://github.com/vcmi-mods/vcmi-test-data/releases/tag/v2.0),
+asset `345320653`, `heroes3.7z`, 147,594 bytes, SHA-256
+`64247aeee0342c6f349576ba700a81e2de46de7b9aa19ca4881b8d59f5e0ced8`.
+Its README says "for VCMI Github Actions internal use only" and the repository
+has no license grant for redistribution. Use it solely for authorized internal
+VCMI CI. Keep it in temporary storage, never in the DMG or uploaded artifacts.
+Public availability does not grant broader redistribution rights. The runner
+verifies the archive, rejects unsafe paths/links, and checks the extracted
+10,478-file, 959,915-byte layout before using it under
+`HOME/Library/Application Support/vcmi`. It writes a temporary test-only preset
+for `vcmi` and `vcmi-test`, leaving ordinary user presets untouched.
+
+Only explicit JSON/XML/log reports are uploaded as a separate native-test
+artifact. A verified application artifact can therefore exist even if this
+later gate fails; inspect both results before describing runtime readiness.
+The compile estimate is 15–30 additional minutes for roughly 172 translation
+units, plus 2–5 minutes of execution, unmeasured on macOS. Test timeouts are
+300 seconds for native/forecast, 90 for output contracts and 900 for Nullkiller.
+Real neural-model inference is excluded from this gate and remains a separate
+acceptance requirement. Neither build-tree passes nor server CLI startup prove
+launcher selection persistence or packaged gameplay.
+
 ## Install the official MMAI mod
 
 Install and enable MMAI through the launcher's existing mod manager only when
@@ -190,10 +265,13 @@ hashes and result of each check. Do not mark checks passed before execution.
 
 ## Remaining limits
 
-- Native ARM64 run [42378843774](https://github.com/arpesterev/vcmi/actions/runs/42378843774)
-  at `18eecbddc10c41eeea82f55f79f89d41420d3261` built the app and DMG, but failed
-  the mounted audit on a Conan-cache `LC_RPATH` in `libQt5Widgets.5.dylib`. It
-  uploaded no artifact. The cleanup repair requires a new successful native run.
+- Native ARM64 run [42382614048](https://github.com/arpesterev/vcmi/actions/runs/42382614048)
+  at `ecd48d9296d3647685168ac8c03373e5d5479cbc` passed packaging and the mounted
+  audit for 35 ARM64 Mach-O images, including the deep/strict app seal. It
+  uploaded an artifact. This proves static package integrity at that commit,
+  not execution, gameplay or validation of a later source commit.
+- The packaged-server smoke is a subsequent check. Its Python contract tests
+  use mocked process results; actual execution requires a new native run.
 - No installed launcher, Apple Silicon inference or gameplay test has been
   executed by this delivery preparation.
 - Portable cleanup/audit tests use synthetic Mach-O tool responses. The CMake

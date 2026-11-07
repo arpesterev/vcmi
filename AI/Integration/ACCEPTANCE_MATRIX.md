@@ -63,22 +63,37 @@ Each backend must pass all gates:
 
 ## Established evidence boundaries
 
-- Commit `747784ed0f1984055bc70efc283e655662783d8d` passed both
-  [pre-merge](https://github.com/arpesterev/vcmi/actions/runs/42380278212) and
-  [post-merge](https://github.com/arpesterev/vcmi/actions/runs/42380715599) Linux
-  CI. The main native phase enumerated 291 tests: 271 passed and 20 were
-  explicitly model-gated. Separate V13/V15 phases exercised supplied official
-  weights. Those results apply to that commit, not automatically to later work.
+- Commit `bbc23d095500a9a05fe5d6f33df37fd9fddfd645` passed both
+  [pre-merge](https://github.com/arpesterev/vcmi/actions/runs/42384115632) and
+  [post-merge](https://github.com/arpesterev/vcmi/actions/runs/42384830098) Linux
+  CI. Its local native baseline enumerated 324 cases: 304 passed and 20 were
+  explicitly model-gated. Separate CI V13/V15 phases exercised supplied
+  official weights. Those results apply to that commit, not later changes.
+- The next locally tested increment adds two FHeroes2 defensive archer-support
+  cases and eight HoMM3 move-order/ownership-prefix cases. All 314 non-model
+  cases passed; 20 model-gated cases were explicitly skipped locally. ONNX
+  output contracts (48) and Nullkiller regressions (145) also passed. The
+  HoMM3 prefix kernel is test-only: it uses reconstructed source bodies with
+  controlled damage stubs and a constrained native snapshot. It does not yet
+  supply production combat forecasting. Missing phase history and created
+  units remain explicit unsupported mappings. Exact-commit CI is still
+  required for this increment.
 - Local execution of [pinned fheroes2](https://github.com/ihhub/fheroes2/tree/0dbfe9f386f33c2500842f4a59cd284d7f03d541) now supplies an independent no-UI source corpus:
   32 initial and 40 additional cases, each run uninstrumented and twice with
   observation. Source outcomes and RNG match across observation modes, and
   traces repeat. This does not equate Heroes II and Heroes III inputs or prove
   adapter parity. Four mapped native properties agree; complete ordered
   decision comparison remains unfinished. This reference corpus is not yet a CI gate.
-- ARM64 commit `18eecbddc10c41eeea82f55f79f89d41420d3261` compiled and created
-  a DMG, but the mounted audit rejected a Conan-cache rpath. No artifact from
-  that run is a deliverable. A repaired build must pass the strict audit and
-  upload before it can be offered for installation.
+- ARM64 commit `ecd48d9296d3647685168ac8c03373e5d5479cbc`
+  [passed packaging](https://github.com/arpesterev/vcmi/actions/runs/42382614048):
+  the mounted DMG, 35 thin ARM64 images, dependency closure and deep strict
+  application signature were verified. The DMG SHA-256 is
+  `3007995fc3a35aafdb4d040e477e72e4dfbea7c9db5e6d1ba53abed2d581e132`.
+  This ad-hoc-signed package predates `bbc23d0`; it is not notarized and does
+  not establish installed GUI or gameplay acceptance. The subsequent workflow
+  adds isolated packaged-server startup and 507 build-tree native checks;
+  those new Mac stages have not yet run. See
+  [the ARM64 acceptance procedure](MACOS_ARM64_ACCEPTANCE.md).
 
 ## Evidence and controls
 

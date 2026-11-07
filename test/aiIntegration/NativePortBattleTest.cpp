@@ -780,6 +780,161 @@ protected:
 			entry.second->onBattleEnded(battleID);
 	}
 
+	void checkFutureArcherBlockingPosition(CreatureID guardCreature, int guardCount)
+	{
+		prepareBattle(guardCreature, guardCount, CreatureID(0), 100);
+		ASSERT_FALSE(HasFatalFailure());
+		battle()->obstacles.clear();
+		CStack * guard = nullptr;
+		CStack * reserve = nullptr;
+		for(const auto & unit : battle()->stacks)
+		{
+			if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == guardCreature)
+				guard = unit.get();
+			if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+				reserve = unit.get();
+		}
+		ASSERT_NE(guard, nullptr);
+		ASSERT_NE(reserve, nullptr);
+		guard->setPosition(BattleHex(3, 5));
+		reserve->setPosition(BattleHex(15, 0));
+		guard->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+			BonusType::STACKS_SPEED, BonusSource::OTHER,
+			4 - static_cast<int>(guard->getMovementRange()), BonusSourceID()));
+		ASSERT_EQ(guard->getMovementRange(), 4u);
+		ASSERT_FALSE(guard->hasBonusOfType(BonusType::FLYING));
+		ASSERT_EQ(battle()->battleActiveUnit(), guard);
+		const auto * friendly = addStack(BattleSide::ATTACKER, CreatureID(2), BattleHex(9, 5), 60);
+		const auto * blocker = addStack(BattleSide::DEFENDER, CreatureID(0), BattleHex(10, 5), 1);
+		auto * archer = addStack(BattleSide::DEFENDER, CreatureID(2), BattleHex(14, 0), 1);
+		ASSERT_NE(friendly, nullptr);
+		ASSERT_NE(blocker, nullptr);
+		ASSERT_NE(archer, nullptr);
+		ASSERT_FALSE(battle()->battleCanShoot(friendly));
+
+		const auto battleID = battle()->getBattleID();
+		const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		const auto view = callback->getBattle(battleID);
+		ASSERT_NE(view, nullptr);
+		const double ownStrength = guard->estimateCombatValue() + friendly->estimateCombatValue();
+		const double enemyStrength = reserve->estimateCombatValue() + blocker->estimateCombatValue()
+			+ archer->estimateCombatValue();
+		ASSERT_LE(ownStrength, enemyStrength * 10);
+		ASSERT_GE(friendly->estimateCombatValue() / ownStrength, 0.15);
+		ASSERT_LE(archer->estimateCombatValue() / enemyStrength, 0.66);
+
+		const auto firstStep = [&](BattleHex goal, const ReachabilityInfo & routes,
+			const BattleHexArray & available)
+		{
+			for(int count = 0; count < GameConstants::BFIELD_SIZE && goal.isValid(); ++count)
+			{
+				if(available.contains(goal) && goal != guard->getPosition())
+					return goal;
+				const auto previous = routes.predecessors[goal.toInt()];
+				if(previous == goal)
+					break;
+				goal = previous;
+			}
+			return BattleHex();
+		};
+
+		// The farther shared position and the nearest blocker position have
+		// different native first steps. The wide case contacts the archer
+		// through its tail while the head contacts the allied shooter's blocker.
+		archer->setPosition(guard->doubleWide() ? BattleHex(7, 4) : BattleHex(11, 7));
+		ASSERT_GT(BattleHex::getDistance(archer->getPosition(), friendly->getPosition()), 1);
+		const auto routes = view->getReachability(guard);
+		const auto available = view->battleGetAvailableHexes(routes, guard, false);
+		int shortest = ReachabilityInfo::INFINITE_DIST;
+		BattleHex nearestGoal;
+		BattleHexArray clusterGoals;
+		BattleHexArray clusterSteps;
+		bool usesTail = false;
+		for(const auto & from : blocker->getAttackableHexes(guard))
+		{
+			if(!from.isAvailable() || !routes.isReachable(from)
+				|| view->meleeAttackHexes(guard, blocker, from).empty())
+				continue;
+			const int travel = static_cast<int>(routes.distances[from.toInt()]);
+			if(travel < shortest || (travel == shortest
+				&& (!nearestGoal.isValid() || from.toInt() < nearestGoal.toInt())))
+			{
+				shortest = travel;
+				nearestGoal = from;
+			}
+			if(view->meleeAttackHexes(guard, archer, from).empty())
+				continue;
+			clusterGoals.insert(from);
+			const BattleHex step = firstStep(from, routes, available);
+			ASSERT_TRUE(step.isValid());
+			clusterSteps.insert(step);
+			usesTail |= guard->doubleWide() && BattleHex::getDistance(from, archer->getPosition()) > 1;
+		}
+		ASSERT_TRUE(nearestGoal.isValid());
+		ASSERT_GT(shortest, static_cast<int>(guard->getMovementRange()));
+		ASSERT_FALSE(clusterGoals.empty());
+		for(const auto & goal : clusterGoals)
+		{
+			ASSERT_GT(static_cast<int>(routes.distances[goal.toInt()]), shortest);
+			for(const auto * victim : {blocker, static_cast<const CStack *>(archer)})
+			{
+				BattleAttackInfo preview(guard, victim, guard->getMovementRange(), false);
+				preview.attackerPos = goal;
+				const auto damage = view->battleEstimateDamage(preview);
+				ASSERT_GE(damage.damage.min, victim->getAvailableHealth())
+					<< "Both positive full-stack attack values must contribute to the future position";
+			}
+		}
+		const BattleHex nearestStep = firstStep(nearestGoal, routes, available);
+		ASSERT_TRUE(nearestStep.isValid());
+		ASSERT_FALSE(clusterSteps.contains(nearestStep));
+		if(guard->doubleWide())
+		{
+			ASSERT_TRUE(usesTail);
+		}
+		for(const auto & from : available)
+			ASSERT_TRUE(view->meleeAttackHexes(guard, blocker, from).empty());
+
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		ASSERT_NE(policy, nullptr);
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		std::vector<std::tuple<const CStack *, BattleHex, int64_t>> before;
+		for(const auto * unit : view->battleGetAllStacks())
+			before.emplace_back(unit, unit->getPosition(), unit->getAvailableHealth());
+		policy->activeStack(battleID, guard);
+		for(const auto & [unit, position, health] : before)
+		{
+			EXPECT_EQ(unit->getPosition(), position);
+			EXPECT_EQ(unit->getAvailableHealth(), health);
+		}
+		ASSERT_TRUE(callback->action.has_value());
+		ASSERT_EQ(callback->action->actionType, EActionType::WALK);
+		ASSERT_FALSE(callback->action->target.empty());
+		const BattleHex destination = callback->action->target.front().hexValue;
+		ASSERT_TRUE(available.contains(destination));
+		EXPECT_TRUE(clusterSteps.contains(destination))
+			<< "Future position must block the hostile archer while approaching the allied shooter's blocker";
+		EXPECT_NE(nearestStep, destination)
+			<< "Nearest blocker movement misses the source's future position value";
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
+			<< "Native server rejected the future-position first step";
+		EXPECT_EQ(guard->getPosition(), destination);
+		policy.reset();
+		runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+		EXPECT_GT(recorder.movementPackets, 0);
+		EXPECT_GT(recorder.damage, 0);
+	}
+
 	void verifyFHeroes2DifficultyWithdrawal(int enemyCount, const std::array<bool, 5> & retreats)
 	{
 		prepareBattle(CreatureID(0), 10, CreatureID(0), enemyCount);
@@ -19714,4 +19869,17 @@ TEST_F(AIIntegrationNativeBattle, fheroes2ArcherDeparturePreservesNativeStopping
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, selected));
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
 	EXPECT_GT(recorder.damage, 0);
+}
+
+// Pinned evaluatePotentialAttackPositions / BestAttackOutcome uses future
+// archer-blocking positions in meleeUnitDefense. Native movement and footprints
+// remain VCMI projections, not equal H2/H3 cell coordinates or combat values.
+TEST_F(AIIntegrationNativeBattle, fheroes2FutureBlockerRouteValuesAdjacentEnemyArcher)
+{
+	checkFutureArcherBlockingPosition(CreatureID(0), 40);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2WideFutureBlockerRouteValuesTailContact)
+{
+	checkFutureArcherBlockingPosition(CreatureID(110), 2);
 }

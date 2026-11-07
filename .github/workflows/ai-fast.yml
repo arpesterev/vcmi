@@ -131,10 +131,11 @@ jobs:
         id: native_battles
         run: |
           cd out/build/linux-gcc-test/bin
-          ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*' --gtest_list_tests > native-port-names.txt
+          ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*' --gtest_list_tests > native-port-names.txt
           grep -q '^AIIntegrationNativeBattle\.' native-port-names.txt
+          grep -q '^HoMM3ForecastQueueNative\.' native-port-names.txt
           status=0
-          timeout 180 ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*' \
+          timeout 180 ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*' \
             --gtest_output=xml:native-port-battles.xml > "$RUNNER_TEMP/native-battles.log" 2>&1 || status=$?
           tail -n 120 "$RUNNER_TEMP/native-battles.log"
           python3 - <<'PY'
