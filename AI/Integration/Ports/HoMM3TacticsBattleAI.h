@@ -12,6 +12,7 @@
 
 #include "SourceTactics.h"
 #include "HoMM3SpellPolicy.h"
+#include "HoMM3CombatValue.h"
 #include "../../../lib/CStack.h"
 #include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/battle/BattleAction.h"
@@ -103,6 +104,100 @@ private:
 		const double damage = std::min(health,
 			(static_cast<double>(estimate.damage.min) + static_cast<double>(estimate.damage.max)) / 2);
 		return static_cast<double>(target.estimateCombatValue()) * std::max(0.0, damage) / health;
+	}
+
+	// Source getUnitCombatValue over public native unit facts. VCMI modifiers,
+	// creature fight values and damage-reduction bonuses are host projections.
+	// Hidden controller Artillery is unknown and retains the neutral factor.
+	static double projectedUnitCombatValue(CPlayerBattleCallback & battle, const CStack & unit, bool ranged)
+	{
+		const auto attackModifier = [](const CStack & stack, bool shooting)
+		{
+			return static_cast<int64_t>(stack.getAttack(shooting)) - stack.unitType()->getAttack(shooting);
+		};
+		const auto defenseModifier = [](const CStack & stack)
+		{
+			return static_cast<int64_t>(stack.getDefense(false)) - stack.unitType()->getDefense(false);
+		};
+		int64_t lowestAttack = 0;
+		int64_t lowestDefense = 0;
+		bool first = true;
+		int64_t ordinarySideHealth = 0;
+		for(const auto * stack : battle.battleGetAllStacks())
+		{
+			if(!stack->alive() || stack->isTurret())
+				continue;
+			const auto attack = attackModifier(*stack, battle.battleCanShoot(stack));
+			const auto defense = defenseModifier(*stack);
+			if(first || attack < lowestAttack)
+				lowestAttack = attack;
+			if(first || defense < lowestDefense)
+				lowestDefense = defense;
+			first = false;
+			// Original group, not Hypnotize control. Native stationary support
+			// machines map to source immobilized; ordinary disabled troops count.
+			if(stack->unitSide() == unit.unitSide() && !stack->hasBonusOfType(BonusType::SIEGE_WEAPON)
+				&& !stack->isSummoned() && !stack->isAmmoCart() && !stack->isFirstAidTent())
+				ordinarySideHealth += stack->isClone() ? 1 : stack->getAvailableHealth();
+		}
+		Ports::HoMM3::UnitCombatValueFacts facts;
+		facts.attackDifference = attackModifier(unit, ranged) - lowestAttack;
+		facts.defenseDifference = defenseModifier(unit) - lowestDefense;
+		facts.baseFightValue = unit.unitType()->getFightValue();
+		facts.ranged = ranged;
+		facts.canShoot = battle.battleCanShoot(&unit);
+		facts.shooter = unit.isShooter();
+		facts.doubleRangedAttack = unit.getTotalAttacks(true) > 1;
+		facts.ballista = unit.isBallista();
+		if(facts.ballista && (battle.battleGetMySide() == BattleSide::ALL_KNOWING
+			|| battle.battleGetMySide() == unit.controllingSide()))
+		{
+			if(const auto * hero = battle.battleGetFightingHero(unit.controllingSide()))
+				facts.artilleryLevel = hero->getSecSkillLevel(SecondarySkill::ARTILLERY);
+		}
+		const auto allDamage = Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION,
+			BonusCustomSubtype::damageTypeAll);
+		const auto spell = Selector::sourceType()(BonusSource::SPELL_EFFECT);
+		const auto factor = [&](const CSelector & selector)
+		{
+			return std::max(0.0, 1.0 - unit.valOfBonuses(selector) / 100.0);
+		};
+		facts.defenderDamageFactor = factor(allDamage.And(spell.Not())) * factor(allDamage.And(spell))
+			* factor(Selector::typeSubtype(BonusType::GENERAL_DAMAGE_REDUCTION,
+				ranged ? BonusCustomSubtype::damageTypeRanged : BonusCustomSubtype::damageTypeMelee));
+		const bool blessed = unit.hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE);
+		const bool cursed = unit.hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE);
+		facts.alteredDamage = blessed || cursed;
+		facts.baseAverageDamage = std::max(1.0,
+			(static_cast<double>(unit.getMinDamage(ranged)) + unit.getMaxDamage(ranged)) / 2.0);
+		const int shift = unit.valOfBonuses(BonusType::ALWAYS_MAXIMUM_DAMAGE)
+			- unit.valOfBonuses(BonusType::ALWAYS_MINIMUM_DAMAGE);
+		facts.averageDamage = facts.baseAverageDamage;
+		if(blessed != cursed)
+			facts.averageDamage = std::max(1.0,
+				static_cast<double>(blessed ? unit.getMaxDamage(ranged) : unit.getMinDamage(ranged)) + shift);
+		facts.siegeOrSummoned = unit.hasBonusOfType(BonusType::SIEGE_WEAPON) || unit.isSummoned();
+		facts.totalHitPoints = unit.isClone() ? 1 : unit.getAvailableHealth();
+		facts.ordinarySideHitPoints = ordinarySideHealth;
+		return Ports::HoMM3::unitCombatValue(facts);
+	}
+
+	static int64_t projectedDamage(const DamageEstimation & damage, int64_t available)
+	{
+		return std::clamp<int64_t>(damage.damage.min
+			+ (damage.damage.max - damage.damage.min) / 2, 0, available);
+	}
+
+	static double projectedSourceLoss(CPlayerBattleCallback & battle, const CStack & unit,
+		bool ranged, int64_t damage)
+	{
+		// Native zero-damage hits do not destroy clones. The pure source leaf
+		// deliberately retains its unconditional Clone branch, including zero.
+		if(damage <= 0 || !unit.alive())
+			return 0;
+		return Ports::HoMM3::lossCombatValue(projectedUnitCombatValue(battle, unit, ranged),
+			unit.getCount(), unit.getMaxHealth(), unit.getMaxHealth() - unit.getFirstHPleft(),
+			unit.isClone(), std::min(damage, unit.getAvailableHealth()), false);
 	}
 
 	static double exchangeValue(CPlayerBattleCallback & battle, const CStack & attacker,
@@ -263,6 +358,9 @@ private:
 			}
 		}
 		double score = lossValue(target, damage) - retaliationLoss;
+		int64_t totalTargetDamage = projectedDamage(damage, oldTargetHealth);
+		int64_t totalAttackerDamage = preemptiveCounter ? projectedDamage(preemptiveDamage, oldAttackerHealth)
+			: (certainFirstHitKill ? 0 : projectedDamage(shooting ? nativeRangedCounter : retaliation, oldAttackerHealth));
 
 		// Pinned simulateAttack performs first hit, retaliation, then a second
 		// hit if both survive. The host also supports extra creature/hero melee
@@ -305,13 +403,10 @@ private:
 				followup.defenderPos = aimedHex;
 				const auto estimate = battle.battleEstimateDamage(followup);
 				int64_t additional = expectedDamage(estimate, afterTarget->getAvailableHealth());
-				// All losses are priced against ORIGINAL combat value and health;
-				// never recount the first strike or repeat the retaliation.
-				if(oldTargetHealth > 0)
-					score += static_cast<double>(target.estimateCombatValue())
-						* static_cast<double>(additional) / static_cast<double>(oldTargetHealth);
 				afterTarget->damage(additional);
 			}
+			totalTargetDamage = oldTargetHealth - afterTarget->getAvailableHealth();
+			totalAttackerDamage = oldAttackerHealth - afterAttacker->getAvailableHealth();
 		}
 
 		// Retail HoMM3 simulateAttack is single-shot for ranged attacks.
@@ -358,13 +453,18 @@ private:
 					followup.attackerPos = from;
 					const auto estimate = battle.battleEstimateDamage(followup);
 					int64_t extraHit = expectedDamage(estimate, remainingTarget->getAvailableHealth());
-					if(oldTargetHealth > 0)
-						score += static_cast<double>(target.estimateCombatValue())
-							* static_cast<double>(extraHit) / static_cast<double>(oldTargetHealth);
 					remainingTarget->damage(extraHit);
 				}
+				totalTargetDamage = oldTargetHealth - remainingTarget->getAvailableHealth();
+				totalAttackerDamage = oldAttackerHealth - remainingAttacker->getAvailableHealth();
 			}
 		}
+		// Wound credit is nonlinear. Apply it once to each complete exchange,
+		// against the original top wound, after all surviving native strikes.
+		// No killsOnly gate is inferred from the incomplete tactical forecast.
+		if(projectSecondMeleeStrike || projectNativeRangedRetaliation)
+			score = projectedSourceLoss(battle, target, shooting, totalTargetDamage)
+				- projectedSourceLoss(battle, attacker, shooting, totalAttackerDamage);
 		if(oldAttackerHealth != attacker.getAvailableHealth() || oldTargetHealth != target.getAvailableHealth()
 			|| oldAttackerPosition != attacker.getPosition() || oldTargetPosition != target.getPosition())
 			throw std::logic_error("HoMM3 tactical preview changed a live battle stack");
@@ -464,14 +564,9 @@ private:
 			const auto original = attacker.getHexes();
 			if(engagesFootprints(original, occupied))
 				continue; // The shooter is already blocked by our stack.
-			const BattleAttackInfo ranged(enemy, &attacker, 0, true);
-			const BattleAttackInfo melee(enemy, &attacker, 0, false);
-			const double rangedValue = lossValue(attacker, battle.battleEstimateDamage(ranged));
-			const double meleeValue = lossValue(attacker, battle.battleEstimateDamage(melee));
-			// These damage-derived values cover the surviving stack as a whole,
-			// unlike HoMM3's per-unit value. One effective native stack unit.
 			pins.push_back({occupied, Ports::HoMM3::pinnedShooterValue(
-				rangedValue, meleeValue, 1, 1)});
+				projectedUnitCombatValue(battle, *enemy, true), projectedUnitCombatValue(battle, *enemy, false),
+				enemy->isClone() ? 1 : enemy->getAvailableHealth(), enemy->getMaxHealth())});
 		}
 		return pins;
 	}
@@ -536,7 +631,7 @@ private:
 
 		// getAttackedCreatures uses the *real* legal attack-from/aim geometry
 		// and de-duplicates a wide stack. Keep each original unit for its
-		// combat-value denominator, but use a different detached state for
+		// original top wound, but use a different detached state for
 		// successive hits and cap every victim's cumulative lost health.
 		std::vector<std::pair<const CStack *, decltype(target.acquireState())>> secondaryStates;
 		for(const auto * affected : battle.getAttackedCreatures(&attacker, attackTo, false, from).first)
@@ -555,7 +650,6 @@ private:
 			const int attackDistance = attackIndex == 0 ? pathCost : 0;
 			for(auto & entry : secondaryStates)
 			{
-				const auto * original = entry.first;
 				auto & remaining = entry.second;
 				if(!remaining->alive())
 					continue;
@@ -563,10 +657,6 @@ private:
 				info.attackerPos = from;
 				const auto estimate = battle.battleEstimateDamage(info);
 				int64_t lostHealth = expectedDamage(estimate, remaining->getAvailableHealth());
-				const double loss = static_cast<double>(original->estimateCombatValue())
-					* static_cast<double>(lostHealth) / static_cast<double>(original->getAvailableHealth());
-				value += Ports::HoMM3::collateralStrikeValue(
-					battle.battleGetOwner(original) != battle.battleGetOwner(&attacker), loss);
 				remaining->damage(lostHealth);
 			}
 
@@ -593,6 +683,15 @@ private:
 				int64_t counterHit = expectedDamage(counterEstimate, remainingAttacker->getAvailableHealth());
 				remainingAttacker->damage(counterHit);
 			}
+		}
+		// Aggregate each victim's loss before restoring its original top wound.
+		for(const auto & entry : secondaryStates)
+		{
+			const auto * original = entry.first;
+			const auto damage = original->getAvailableHealth() - entry.second->getAvailableHealth();
+			value += Ports::HoMM3::collateralStrikeValue(
+				battle.battleGetOwner(original) != battle.battleGetOwner(&attacker),
+				projectedSourceLoss(battle, *original, false, damage));
 		}
 		if(!std::isfinite(value))
 			throw std::logic_error("Nonfinite HoMM3 sequential collateral projection");
@@ -670,7 +769,8 @@ private:
 				continue;
 			BattleAttackInfo counter(afterHit.get(), secondary, 0, false);
 			counter.attackerPos = target.getPosition();
-			const double loss = lossValue(*secondary, battle.battleEstimateDamage(counter));
+			const double loss = projectedSourceLoss(battle, *secondary, false,
+				projectedDamage(battle.battleEstimateDamage(counter), secondary->getAvailableHealth()));
 			// A collateral ally of OUR attacker is bad; a stack still loyal
 			// to the enemy (including under Hypnotize) benefits our exchange.
 			score += Ports::HoMM3::collateralStrikeValue(
@@ -807,7 +907,9 @@ private:
 		// one attack per enemy, yet do not discard other enemies entirely.
 		// Saturating at the full stack's value avoids fictitious overkill.
 		double accumulatedLoss = 0;
-		const double stackValue = std::max(0.0, static_cast<double>(attacker.estimateCombatValue()));
+		const double stackValue = std::max(
+			projectedSourceLoss(battle, attacker, false, attacker.getAvailableHealth()),
+			projectedSourceLoss(battle, attacker, true, attacker.getAvailableHealth()));
 		for(const auto & threat : threats)
 		{
 			const auto * enemy = threat.stack;
@@ -849,7 +951,8 @@ private:
 				info.attackerPos = enemy->getPosition();
 				info.defenderPos = cell;
 				worstEnemyLoss = std::max(worstEnemyLoss,
-					lossValue(attacker, battle.battleEstimateDamage(info)));
+					projectedSourceLoss(battle, attacker, true,
+						projectedDamage(battle.battleEstimateDamage(info), attacker.getAvailableHealth())));
 				// Pinned simulateAttack returns after a single ranged hit,
 				// whereas the VCMI host fires ordinary extra volleys.
 				// Re-evaluate each against a detached surviving victim; the
@@ -878,9 +981,8 @@ private:
 						remainingVictim->damage(hit);
 					}
 					const auto lost = attacker.getAvailableHealth() - remainingVictim->getAvailableHealth();
-					if(attacker.getAvailableHealth() > 0)
-						worstEnemyLoss = std::max(worstEnemyLoss,
-							stackValue * static_cast<double>(lost) / attacker.getAvailableHealth());
+					worstEnemyLoss = std::max(worstEnemyLoss,
+						projectedSourceLoss(battle, attacker, true, lost));
 				}
 			}
 			for(const auto & origin : threat.reachableOrigins)
@@ -891,7 +993,8 @@ private:
 				info.attackerPos = origin.hex;
 				info.defenderPos = cell;
 				worstEnemyLoss = std::max(worstEnemyLoss,
-					lossValue(attacker, battle.battleEstimateDamage(info)));
+					projectedSourceLoss(battle, attacker, false,
+						projectedDamage(battle.battleEstimateDamage(info), attacker.getAvailableHealth())));
 			}
 			accumulatedLoss = Ports::HoMM3::addIndependentEnemyThreat(
 				accumulatedLoss, worstEnemyLoss, stackValue);
@@ -944,7 +1047,7 @@ private:
 		};
 		auto remainingAttacker = attacker.acquireState();
 		auto remainingPrimary = primaryTarget.acquireState();
-		// Retain each original victim for its combat-value denominator, but
+		// Retain each original victim for its initial wound and unit value, but
 		// estimate later volleys against independent post-hit unit states.
 		// Never mutate live battle units while choosing the opening shot.
 		std::vector<std::pair<const CStack *, decltype(primaryTarget.acquireState())>> secondaryStates;
@@ -978,7 +1081,6 @@ private:
 		{
 			for(auto & entry : secondaryStates)
 			{
-				const auto * original = entry.first;
 				auto & remaining = entry.second;
 				if(!remaining->alive())
 					continue;
@@ -986,10 +1088,6 @@ private:
 				info.attackerPos = attacker.getPosition();
 				const auto estimate = battle.battleEstimateDamage(info);
 				int64_t lostHealth = expectedDamage(estimate, remaining->getAvailableHealth());
-				const double loss = static_cast<double>(original->estimateCombatValue())
-					* static_cast<double>(lostHealth) / static_cast<double>(original->getAvailableHealth());
-				value += Ports::HoMM3::collateralStrikeValue(
-					battle.battleGetOwner(original) != battle.battleGetOwner(&attacker), loss);
 				remaining->damage(lostHealth);
 			}
 			BattleAttackInfo primary(remainingAttacker.get(), remainingPrimary.get(), 0, true);
@@ -1009,6 +1107,15 @@ private:
 				int64_t counterLoss = expectedDamage(counterEstimate, remainingAttacker->getAvailableHealth());
 				remainingAttacker->damage(counterLoss);
 			}
+		}
+		// Aggregate each victim's loss before restoring its original top wound.
+		for(const auto & entry : secondaryStates)
+		{
+			const auto * original = entry.first;
+			const auto damage = original->getAvailableHealth() - entry.second->getAvailableHealth();
+			value += Ports::HoMM3::collateralStrikeValue(
+				battle.battleGetOwner(original) != battle.battleGetOwner(&attacker),
+				projectedSourceLoss(battle, *original, true, damage));
 		}
 		if(!std::isfinite(value))
 			throw std::logic_error("Nonfinite HoMM3 ranged collateral projection");

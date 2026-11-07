@@ -14,6 +14,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  fheroes2-reference:
+    name: Original FHeroes2 reference (32 cases)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test reference evidence failure paths
+        run: python3 -m unittest discover -s CI/fheroes2_reference -p 'test_*.py' -v
+      - name: Install official reference build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc g++ pkg-config libsdl2-dev libsdl2-mixer-dev zlib1g-dev
+      - name: Compile pinned unchanged engine and compare baseline with observer
+        run: >-
+          python3 CI/fheroes2_reference/reference.py source
+          --repository . --work-dir out/fheroes2-reference --jobs 2
+      - name: Preserve original-engine evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fheroes2-source-reference
+          path: out/fheroes2-reference/evidence/
+          if-no-files-found: warn
+          retention-days: 7
+
   ai-adapter-contracts:
     name: AI adapter contracts (ASan and UBSan)
     runs-on: ubuntu-24.04
@@ -165,6 +191,22 @@ jobs:
               output.write('diagnostics=' + json.dumps(report, separators=(',', ':')) + '\n')
           PY
           exit "$status"
+
+      - name: Run four native FHeroes2 reference properties
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
+        run: >-
+          python3 CI/fheroes2_reference/reference.py native
+          --repository . --test-binary out/build/linux-gcc-test/bin/vcmitest
+          --work-dir out/fheroes2-native-reference
+
+      - name: Preserve native FHeroes2 reference evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fheroes2-native-reference
+          path: out/fheroes2-native-reference/
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Check seeded three-policy battle comparison evidence
         if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
@@ -442,6 +484,42 @@ jobs:
         with:
           path: .ccache
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
+
+  fheroes2-property-pairing:
+    name: FHeroes2 four-property evidence pairing
+    needs: [ai-linux, fheroes2-reference]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download original-engine evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: fheroes2-source-reference
+          path: out/fheroes2-source-evidence
+      - name: Download native-engine evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: fheroes2-native-reference
+          path: out/fheroes2-native-evidence
+      - name: Compare only reviewed selection and effect properties
+        if: always()
+        run: >-
+          python3 CI/fheroes2_reference/reference.py compare
+          --repository . --source-evidence out/fheroes2-source-evidence
+          --native-evidence out/fheroes2-native-evidence
+          --output out/fheroes2-property-comparison.json
+      - name: Preserve pairing result, including missing evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fheroes2-property-comparison
+          path: out/fheroes2-property-comparison.json
+          if-no-files-found: warn
+          retention-days: 7
 
   native-battle-summary:
     name: Native battle evidence

@@ -4,6 +4,7 @@
  */
 #include "StdInc.h"
 #include <cstdlib>
+#include <chrono>
 
 #include "server/battles/BattleTestFixture.h"
 #include "../../AI/Integration/Ports/HoMM3TacticsBattleAI.h"
@@ -321,6 +322,77 @@ protected:
 		hero->setPrimarySkill(PrimarySkill::SPELL_POWER, power, ChangeValueMode::ABSOLUTE);
 		hero->setPrimarySkill(PrimarySkill::KNOWLEDGE, 10, ChangeValueMode::ABSOLUTE);
 		hero->mana = 100;
+	}
+
+	void prepareCombatValueShots(CreatureID shooterType, CStack *& shooter, std::vector<CStack *> & targets)
+	{
+		startRecordedGame();
+		ASSERT_FALSE(HasFatalFailure());
+		setArmy(attackerSideHero, shooterType, 1);
+		setArmy(defenderSideHero, CreatureID(2), 30);
+		ASSERT_TRUE(gameHandler->insertNewStack(
+			StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 30));
+		gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+		battle()->obstacles.clear();
+		for(const auto & unit : battle()->stacks)
+		{
+			if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == shooterType)
+				shooter = unit.get();
+			if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+				targets.push_back(unit.get());
+		}
+		ASSERT_NE(shooter, nullptr);
+		ASSERT_EQ(targets.size(), 2u);
+		ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+		BattleHex first, second;
+		for(int i = 0; i < GameConstants::BFIELD_SIZE && !first.isValid(); ++i)
+		{
+			const BattleHex a(i);
+			if(!a.isAvailable() || battle()->battleGetUnitByPos(a))
+				continue;
+			const auto radius = BattleHex::getDistance(a, shooter->getPosition());
+			if(radius < 5 || radius > 10)
+				continue;
+			for(int j = i + 1; j < GameConstants::BFIELD_SIZE; ++j)
+			{
+				const BattleHex b(j);
+				if(b.isAvailable() && !battle()->battleGetUnitByPos(b)
+					&& BattleHex::getDistance(b, shooter->getPosition()) == radius
+					&& BattleHex::getDistance(a, b) >= 3)
+				{
+					first = a;
+					second = b;
+					break;
+				}
+			}
+		}
+		ASSERT_TRUE(first.isAvailable());
+		ASSERT_TRUE(second.isAvailable());
+		targets[0]->setPosition(first);
+		targets[1]->setPosition(second);
+	}
+
+	void chooseCombatValueAction(const CStack * shooter, const std::shared_ptr<DecisionCallback> & callback)
+	{
+		ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+		callback->action.reset();
+		auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+		ASSERT_NE(policy, nullptr);
+		policy->playerID = battle()->battleGetOwner(shooter);
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(policy->playerID), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		const auto battleID = battle()->getBattleID();
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER), battle()->getSideHero(BattleSide::DEFENDER),
+			shooter->unitSide(), false);
+		policy->activeStack(battleID, shooter);
+		ASSERT_TRUE(callback->action.has_value());
+		ASSERT_EQ(callback->action->actionType, EActionType::SHOOT);
+		ASSERT_FALSE(callback->action->target.empty());
 	}
 
 	void prepareSiege(bool includeDefenderShooter = false, CreatureID defenderType = CreatureID(0),
@@ -14802,11 +14874,10 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelArrowTowerSendsNativeShotBeforeCompl
 	EXPECT_GT(recorder.damage, 0);
 }
 
-// The closed TUM plugin does not publish its arrow-tower formula. Prove that
-// our *explicitly partial* native casualty-value projection can choose a
-// different real siege target from the original partial HoMM3 attack score.
-// HoMM3 discounts an incapacitated ranged target; this TUM tower projection
-// instead estimates the combat value actually removed by its next legal shot.
+// TUM's public AI.erm publishes the FU15051 tower selector. This manual
+// tower policy still uses a partial native casualty-value projection, not
+// that ERM selector. Compare it with HoMM3's source-style role/status score
+// in a real siege with a naturally controlled tower activation.
 // This fixture injects Blind as test status, not as an observed creature proc.
 TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighValueStack)
 {
@@ -14814,7 +14885,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	ASSERT_FALSE(HasFatalFailure());
 	setArmy(attackerSideHero, CreatureID(0), 300);
 	ASSERT_TRUE(gameHandler->insertNewStack(
-		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 1));
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 1));
 	const auto * town = findFirst<CGTownInstance>();
 	ASSERT_NE(town, nullptr);
 	if(town->fortificationsLevel().wallsHealth <= 0)
@@ -14827,9 +14898,14 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	}
 	ASSERT_TRUE(gameHandler->insertNewStack(
 		StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 60));
+	// Artillery prevents the server's automatic opening shot from killing
+	// the single Archer before either policy can evaluate the position.
+	ASSERT_EQ(town->getOwner(), defenderSideHero->getOwner());
+	defenderSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::ARTILLERY),
+		MasteryLevel::BASIC, ChangeValueMode::ABSOLUTE);
 	const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
 	gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(),
-		attackerSideHero, nullptr, layout, town);
+		attackerSideHero, defenderSideHero, layout, town);
 	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 
 	const CStack * tower = nullptr;
@@ -14839,7 +14915,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	{
 		if(unit->alive() && unit->unitSide() == BattleSide::DEFENDER && unit->isTurret())
 			tower = unit.get();
-		else if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+		else if(unit->unitSide() == BattleSide::ATTACKER)
 		{
 			if(unit->unitSlot() == SlotID(0))
 				largeTarget = unit.get();
@@ -14850,11 +14926,19 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	ASSERT_NE(tower, nullptr);
 	ASSERT_NE(largeTarget, nullptr);
 	ASSERT_NE(smallTarget, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), tower);
+	ASSERT_EQ(recorder.shots, 0);
+	ASSERT_TRUE(largeTarget->alive());
+	ASSERT_TRUE(smallTarget->alive());
+	ASSERT_EQ(largeTarget->getCount(), 300);
+	ASSERT_EQ(smallTarget->getCount(), 1);
 	ASSERT_GT(largeTarget->getCount(), smallTarget->getCount())
 		<< "Native siege deployment must preserve the intended value gap";
-	// The one-creature alternative is a meaningful low-casualty shot: TUM's
-	// actual projected-loss calculation must still prefer the larger disabled
-	// stack while HoMM3's documented incapacitation discount favors this one.
+	ASSERT_EQ(largeTarget->creatureId(), CreatureID(0));
+	ASSERT_EQ(smallTarget->creatureId(), CreatureID(2));
+	// One active Archer threatens the defenders immediately. Its source role
+	// and casualty value must beat the disabled Pikemen's discounted loss,
+	// while TUM's independent native casualty value still favors the Pikemen.
 	largeTarget->addNewBonus(std::make_shared<Bonus>(
 		BonusDuration::PERMANENT, BonusType::NOT_ACTIVE, BonusSource::SPELL_EFFECT,
 		1, BonusSourceID(SpellID(SpellID::BLIND)), BonusSubtypeID(SpellID(SpellID::BLIND))));
@@ -14868,6 +14952,96 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 	ASSERT_NE(view, nullptr);
 	ASSERT_TRUE(view->battleCanShoot(tower, largeTarget->getPosition()));
 	ASSERT_TRUE(view->battleCanShoot(tower, smallTarget->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(smallTarget));
+	ASSERT_FALSE(smallTarget->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_EQ(tower->getTotalAttacks(true), 1);
+	ASSERT_GE(tower->shots.available(), 1);
+	const auto * towerHero = view->battleGetFightingHero(BattleSide::DEFENDER);
+	ASSERT_EQ(towerHero, defenderSideHero);
+	ASSERT_EQ(towerHero->getOwner(), player);
+	ASSERT_EQ(town->getOwner(), player);
+	ASSERT_EQ(view->battleGetOwner(tower), player);
+	ASSERT_EQ(towerHero->valOfBonuses(BonusType::MANUAL_CONTROL,
+		BonusSubtypeID(tower->creatureId())), 100);
+	ASSERT_EQ(towerHero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+		BonusSubtypeID(tower->creatureId())), 0);
+
+	int64_t lowestAttack = INT64_MAX;
+	int64_t lowestDefense = INT64_MAX;
+	for(const auto * unit : view->battleGetAllStacks())
+	{
+		if(!unit->alive() || unit->isTurret())
+			continue;
+		const bool ranged = view->battleCanShoot(unit);
+		lowestAttack = std::min(lowestAttack,
+			static_cast<int64_t>(unit->getAttack(ranged)) - unit->unitType()->getAttack(ranged));
+		lowestDefense = std::min(lowestDefense,
+			static_cast<int64_t>(unit->getDefense(false)) - unit->unitType()->getDefense(false));
+	}
+	std::array<int32_t, 2> sourceEffects{}, sourceScores{};
+	std::array<double, 2> nativeScores{};
+	const std::array<const CStack *, 2> targets{largeTarget, smallTarget};
+	for(size_t index = 0; index < targets.size(); ++index)
+	{
+		const auto * target = targets[index];
+		ASSERT_FALSE(target->isClone());
+		ASSERT_FALSE(target->isSummoned());
+		ASSERT_FALSE(target->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION));
+		ASSERT_FALSE(target->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE));
+		ASSERT_FALSE(target->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
+		ASSERT_FALSE(target->hasBonusOfType(BonusType::RANGED_RETALIATION));
+		ASSERT_EQ(target->getTotalAttacks(true), 1);
+		for(const auto * victim : view->getAttackedBattleUnits(tower, target, target->getPosition(), true))
+		{
+			ASSERT_EQ(victim, target) << "The bracket requires a single-victim tower shot";
+		}
+		const auto damage = view->battleEstimateDamage(BattleAttackInfo(tower, target, 0, true));
+		const int64_t midpoint = damage.damage.min + (damage.damage.max - damage.damage.min) / 2;
+		AIIntegration::Ports::HoMM3::UnitCombatValueFacts facts;
+		facts.attackDifference = target->getAttack(true) - target->unitType()->getAttack(true) - lowestAttack;
+		facts.defenseDifference = target->getDefense(false) - target->unitType()->getDefense(false) - lowestDefense;
+		facts.baseFightValue = target->unitType()->getFightValue();
+		facts.ranged = true;
+		facts.shooter = target->isShooter();
+		facts.canShoot = view->battleCanShoot(target);
+		const double unitValue = AIIntegration::Ports::HoMM3::unitCombatValue(facts);
+		sourceEffects[index] = AIIntegration::Ports::HoMM3::lossCombatValue(unitValue,
+			target->getCount(), target->getMaxHealth(), target->getMaxHealth() - target->getFirstHPleft(),
+			false, std::min(midpoint, target->getAvailableHealth()), false);
+		bool hasShot = view->battleCanShoot(target, tower->getPosition());
+		for(const auto * friendly : view->battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
+		{
+			if(friendly->alive() && view->battleCanShoot(target, friendly->getPosition()))
+				hasShot = true;
+		}
+		if(target == smallTarget)
+		{
+			ASSERT_TRUE(hasShot) << "The active Archer needs a legal shot against a defender";
+		}
+		const auto reach = view->getReachability(target);
+		const auto steps = reach.distToNearestNeighbour(target, tower);
+		const auto path = steps >= ReachabilityInfo::INFINITE_DIST
+			? ReachabilityInfo::INFINITE_DIST : static_cast<int>(steps) + 1;
+		const int time = AIIntegration::Ports::HoMM3::projectedRangedTargetTime(
+			path, target->getMovementRange(), hasShot);
+		const bool canAttack = view->battleCanAttackUnit(target, tower) || hasShot;
+		sourceScores[index] = AIIntegration::Ports::HoMM3::rangedAttackValue(
+			{sourceEffects[index], target == largeTarget, !canAttack, canAttack, time}, false);
+		nativeScores[index] = target->estimateCombatValue()
+			* std::min(static_cast<double>(target->getAvailableHealth()),
+				(static_cast<double>(damage.damage.min) + damage.damage.max) / 2.0)
+			/ target->getAvailableHealth();
+		std::cout << "AI_TOWER_SOURCE_BRACKET id=" << target->unitId() << " count=" << target->getCount()
+			<< " fight=" << facts.baseFightValue << " unitValue=" << unitValue
+			<< " damage=" << damage.damage.min << ':' << damage.damage.max
+			<< " sourceEffect=" << sourceEffects[index] << " targetTime=" << time
+			<< " sourceScore=" << sourceScores[index] << " nativeTUM=" << nativeScores[index] << '\n';
+	}
+	ASSERT_EQ(sourceScores[0], sourceEffects[0] / 10);
+	ASSERT_EQ(sourceScores[1], sourceEffects[1]);
+	ASSERT_GT(sourceEffects[0], sourceScores[1]);
+	ASSERT_GT(sourceScores[1], sourceScores[0]);
+	ASSERT_GT(nativeScores[0], nativeScores[1]);
 	const auto baseline = AIIntegration::HoMM3TacticsBattleAI::chooseAction(*view, *tower);
 	ASSERT_EQ(baseline.actionType, EActionType::SHOOT);
 	ASSERT_FALSE(baseline.target.empty());
@@ -14897,7 +15071,7 @@ TEST_F(AIIntegrationNativeBattle, tumCitadelTowerDiffersFromHoMM3OnDisabledHighV
 
 	// Require the specific proposed TUM tower shot to be accepted and applied
 	// by the authoritative battle processor, not just a test callback.
-	battle()->activeStack = tower->unitId();
+	ASSERT_EQ(battle()->battleActiveUnit(), tower);
 	const int shotsBefore = recorder.shots;
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
 	EXPECT_GT(recorder.shots, shotsBefore);
@@ -20199,4 +20373,348 @@ TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveAreaSkipsWithoutDefendedTarge
 TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveAreaFollowsHypnotizedControllerSide)
 {
 	checkDefensiveAreaPosition(CreatureID(0), 40, DefensiveAreaCase::CONTROLLED_FUTURE);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3SourceLossRestoresWoundOnlyAtCasualtyThreshold)
+{
+	CStack * shooter = nullptr;
+	std::vector<CStack *> targets;
+	prepareCombatValueShots(CreatureID(18), shooter, targets); // Single-shot Elf.
+	ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(shooter->getTotalAttacks(true), 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->battleGetOwner(shooter);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	for(const auto * target : targets)
+	{
+		ASSERT_TRUE(view->battleCanShoot(shooter, target->getPosition()));
+		ASSERT_TRUE(view->battleCanShoot(target, shooter->getPosition()));
+	}
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto initialTarget = callback->action->target.front().unitValue;
+	auto * wounded = targets[0]->unitId() == initialTarget ? targets[1] : targets[0];
+	const auto estimate = view->battleEstimateDamage(BattleAttackInfo(shooter, wounded, 0, true));
+	const int64_t hit = estimate.damage.min + (estimate.damage.max - estimate.damage.min) / 2;
+	const int64_t hp = wounded->getMaxHealth();
+	ASSERT_GT(hit, 0);
+	ASSERT_LT(hit, hp - 1);
+	int64_t wound = hp - hit - 1;
+	wounded->damage(wound);
+	const auto belowThresholdHealth = wounded->getAvailableHealth();
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(callback->action->target.front().unitValue, initialTarget)
+		<< "A sub-casualty wound must not increase source loss for an equal shot";
+	EXPECT_EQ(wounded->getAvailableHealth(), belowThresholdHealth);
+	int64_t one = 1;
+	wounded->damage(one);
+	const auto crossingHealth = wounded->getAvailableHealth();
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(callback->action->target.front().unitValue, wounded->unitId())
+		<< "Crossing the top creature's casualty threshold restores its old wound";
+	EXPECT_EQ(wounded->getAvailableHealth(), crossingHealth);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_LT(wounded->getAvailableHealth(), crossingHealth);
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3SourceLossPricesRangedVolleysOnce)
+{
+	CStack * shooter = nullptr;
+	std::vector<CStack *> targets;
+	prepareCombatValueShots(CreatureID(19), shooter, targets); // Grand Elf, two shots.
+	ASSERT_FALSE(HasFatalFailure());
+	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::CREATURE_DAMAGE,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(19)), BonusCustomSubtype::creatureDamageBoth));
+	ASSERT_EQ(shooter->getTotalAttacks(true), 2);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->battleGetOwner(shooter);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto initialTarget = callback->action->target.front().unitValue;
+	auto * wounded = targets[0]->unitId() == initialTarget ? targets[1] : targets[0];
+	const auto estimate = view->battleEstimateDamage(BattleAttackInfo(shooter, wounded, 0, true));
+	const int64_t hit = estimate.damage.min + (estimate.damage.max - estimate.damage.min) / 2;
+	const int64_t hp = wounded->getMaxHealth();
+	ASSERT_GT(hit % hp, (2 * hit) % hp)
+		<< "Each hit must cross the old wound, while the complete volley does not";
+	int64_t wound = hp - hit % hp;
+	wounded->damage(wound);
+	const auto before = wounded->getAvailableHealth();
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(callback->action->target.front().unitValue, initialTarget)
+		<< "Repeated original-wound credit would incorrectly prefer the wounded stack";
+	EXPECT_EQ(wounded->getAvailableHealth(), before);
+	int shots = 0;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.stackAttacking == static_cast<ui32>(shooter->unitId()) && attack.shot() && !attack.counter())
+			++shots;
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(shots, 2);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3SourceLossPricesRetaliationAgainstOriginalWound)
+{
+	CStack * shooter = nullptr;
+	std::vector<CStack *> targets;
+	prepareCombatValueShots(CreatureID(18), shooter, targets);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->battleGetOwner(shooter);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	auto * risky = targets[0]->unitId() == callback->action->target.front().unitValue ? targets[0] : targets[1];
+	auto * safe = targets[0] == risky ? targets[1] : targets[0];
+	const auto estimate = view->battleEstimateDamage(BattleAttackInfo(shooter, risky, 0, true));
+	const int64_t hit = estimate.damage.min + (estimate.damage.max - estimate.damage.min) / 2;
+	ASSERT_GT(hit, 0);
+	ASSERT_LT(hit, risky->getMaxHealth());
+	int64_t wound = risky->getMaxHealth() - hit;
+	risky->damage(wound);
+	risky->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::RANGED_RETALIATION,
+		BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(2))));
+	risky->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::GENERAL_ATTACK_REDUCTION,
+		BonusSource::CREATURE_ABILITY, 99, BonusSourceID(CreatureID(2))));
+	auto afterHit = risky->acquireState();
+	int64_t firstHit = hit;
+	afterHit->damage(firstHit);
+	const auto counter = view->battleEstimateDamage(BattleAttackInfo(afterHit.get(), shooter, 0, true));
+	ASSERT_EQ(counter.damage.min, 1);
+	ASSERT_EQ(counter.damage.max, 1);
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(callback->action->target.front().unitValue, risky->unitId())
+		<< "With a healthy Elf, its one-point counter costs less than the enemy wound credit";
+	int64_t ownWound = shooter->getMaxHealth() - 1;
+	shooter->damage(ownWound);
+	const auto before = shooter->getAvailableHealth();
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(callback->action->target.front().unitValue, safe->unitId())
+		<< "That same counter now crosses our original wound and kills the Elf";
+	EXPECT_EQ(shooter->getAvailableHealth(), before);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_EQ(shooter->getAvailableHealth(), before);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3SourceLossTargetsNativeCloneByCount)
+{
+	prepareBattle(CreatureID(18), 30, CreatureID(2), 1);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	teachBattleSpell(attackerSideHero, SpellID::CLONE, 20);
+	const auto battleID = battle()->getBattleID();
+	const auto * original = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(original, nullptr);
+	ASSERT_EQ(original->unitSide(), BattleSide::ATTACKER);
+	ASSERT_EQ(original->creatureId(), CreatureID(18));
+	const auto cloneAction = BattleAction::makeHeroSpellcast(BattleSide::ATTACKER,
+		{battle::Destination(original)}, SpellID::CLONE);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID,
+		battle()->sideToPlayer(BattleSide::ATTACKER), cloneAction));
+	CStack * clone = nullptr;
+	CStack * shooter = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->alive() && unit->isClone() && unit->unitSide() == BattleSide::ATTACKER)
+			clone = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			shooter = unit.get();
+	}
+	ASSERT_NE(clone, nullptr);
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_EQ(clone->getCount(), original->getCount());
+	for(int turns = 0; battle()->battleActiveUnit() != shooter && turns < 8; ++turns)
+	{
+		const auto * active = battle()->battleActiveUnit();
+		ASSERT_NE(active, nullptr);
+		ASSERT_TRUE(act(BattleAction::makeWait(active)));
+	}
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	const auto player = battle()->battleGetOwner(shooter);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_TRUE(view->battleCanShoot(shooter, clone->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(shooter, original->getPosition()));
+	ASSERT_GT(view->battleEstimateDamage(BattleAttackInfo(shooter, clone, 0, true)).damage.min, 0);
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(callback->action->target.front().unitValue, clone->unitId())
+		<< "A small shot removes count times one-fifth unit value from a native clone";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_FALSE(clone->alive());
+	EXPECT_TRUE(original->alive());
+	EXPECT_FALSE(recorder.castsOf(SpellID::CLONE).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3SourceLossUsesSameWoundScaleForPrimaryAndSplash)
+{
+	CStack * shooter = nullptr;
+	std::vector<CStack *> targets;
+	prepareCombatValueShots(CreatureID(18), shooter, targets);
+	ASSERT_FALSE(HasFatalFailure());
+	shooter->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::SHOOTS_ALL_ADJACENT, BonusSource::CREATURE_ABILITY, 1, BonusSourceID(CreatureID(18))));
+	std::array<std::vector<CStack *>, 2> groups{{{targets[0]}, {targets[1]}}};
+	for(size_t group = 0; group < groups.size(); ++group)
+	{
+		BattleHex nearby;
+		const auto groupPosition = groups[group][0]->getPosition();
+		for(const auto & hex : groupPosition.getNeighbouringTiles())
+		{
+			if(!hex.isAvailable() || battle()->battleGetUnitByPos(hex))
+				continue;
+			const auto range = BattleHex::getDistance(hex, shooter->getPosition());
+			if(range < 3 || range > 10)
+				continue;
+			bool separate = true;
+			for(const auto * other : groups[1 - group])
+				separate &= BattleHex::getDistance(hex, other->getPosition()) >= 3;
+			if(separate)
+			{
+				nearby = hex;
+				break;
+			}
+		}
+		ASSERT_TRUE(nearby.isAvailable());
+		auto * secondary = addStack(BattleSide::DEFENDER, CreatureID(2), nearby, 30);
+		ASSERT_NE(secondary, nullptr);
+		groups[group].push_back(secondary);
+	}
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->battleGetOwner(shooter);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	for(const auto & group : groups)
+	{
+		for(const auto * target : group)
+		{
+			ASSERT_TRUE(view->battleCanShoot(shooter, target->getPosition()));
+			ASSERT_TRUE(view->battleCanShoot(target, shooter->getPosition()));
+			const auto victims = view->getAttackedBattleUnits(shooter, target, target->getPosition(), true);
+			for(const auto * member : group)
+			{
+				EXPECT_NE(std::find(victims.begin(), victims.end(), member), victims.end());
+			}
+			for(const auto * outsider : groups[&group == &groups[0] ? 1 : 0])
+			{
+				EXPECT_EQ(std::find(victims.begin(), victims.end(), outsider), victims.end());
+			}
+		}
+	}
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto initialTarget = callback->action->target.front().unitValue;
+	const bool firstGroup = std::any_of(groups[0].begin(), groups[0].end(),
+		[&](const CStack * stack) { return stack->unitId() == initialTarget; });
+	auto * wounded = groups[firstGroup ? 1 : 0][0];
+	const auto estimate = view->battleEstimateDamage(BattleAttackInfo(shooter, wounded, 0, true));
+	const int64_t hit = estimate.damage.min + (estimate.damage.max - estimate.damage.min) / 2;
+	ASSERT_GT(hit, 0);
+	ASSERT_LT(hit, wounded->getMaxHealth() - 1);
+	int64_t wound = wounded->getMaxHealth() - hit - 1;
+	wounded->damage(wound);
+	const auto before = wounded->getAvailableHealth();
+	chooseCombatValueAction(shooter, callback);
+	ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(callback->action->target.front().unitValue, initialTarget)
+		<< "A harmless prior wound cannot favor a splash victim through a different value scale";
+	EXPECT_EQ(wounded->getAvailableHealth(), before);
+	int injured = 0;
+	recorder.onAttackBeforeApply = [&](const BattleAttack & attack)
+	{
+		if(attack.stackAttacking == static_cast<ui32>(shooter->unitId()) && attack.shot())
+			injured += static_cast<int>(attack.bsa.size());
+	};
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	recorder.onAttackBeforeApply = {};
+	EXPECT_EQ(injured, 2);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3SourceLossRepeatedMixedArmyDecisionIsStable)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	const std::array<CreatureID, 7> attacking{{CreatureID(13), CreatureID(0), CreatureID(2),
+		CreatureID(6), CreatureID(10), CreatureID(4), CreatureID(18)}};
+	const std::array<CreatureID, 7> defending{{CreatureID(110), CreatureID(2), CreatureID(6),
+		CreatureID(0), CreatureID(16), CreatureID(10), CreatureID(4)}};
+	setArmy(attackerSideHero, attacking[0], 10);
+	setArmy(defenderSideHero, defending[0], 10);
+	for(size_t slot = 1; slot < attacking.size(); ++slot)
+	{
+		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id, SlotID(slot)),
+			attacking[slot].toCreature(), 30));
+		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id, SlotID(slot)),
+			defending[slot].toCreature(), 30));
+	}
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	ASSERT_EQ(active->creatureId(), CreatureID(13));
+	ASSERT_EQ(battle()->battleGetAllStacks().size(), 14u);
+	std::vector<std::pair<int64_t, BattleHex>> before;
+	for(const auto & stack : battle()->stacks)
+		before.emplace_back(stack->getAvailableHealth(), stack->getPosition());
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->battleGetOwner(active);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("HoMM3OriginalTactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = false;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER), battle()->getSideHero(BattleSide::DEFENDER),
+		BattleSide::ATTACKER, false);
+	std::string firstAction;
+	double totalMilliseconds = 0;
+	double maximumMilliseconds = 0;
+	for(int trial = 0; trial < 3; ++trial)
+	{
+		callback->action.reset();
+		const auto start = std::chrono::steady_clock::now();
+		policy->activeStack(battleID, active);
+		const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+		totalMilliseconds += elapsed;
+		maximumMilliseconds = std::max(maximumMilliseconds, elapsed);
+		ASSERT_TRUE(callback->action.has_value());
+		if(trial == 0)
+			firstAction = callback->action->toString();
+		EXPECT_EQ(callback->action->toString(), firstAction);
+		ASSERT_EQ(battle()->stacks.size(), before.size());
+		for(size_t index = 0; index < before.size(); ++index)
+		{
+			EXPECT_EQ(battle()->stacks[index]->getAvailableHealth(), before[index].first);
+			EXPECT_EQ(battle()->stacks[index]->getPosition(), before[index].second);
+		}
+	}
+	std::cout << "AI_HOMM3_VALUE_DECISION_COST_MS units=14 trials=3 average="
+		<< totalMilliseconds / 3 << " maximum=" << maximumMilliseconds << '\n';
+	ASSERT_EQ(callback->action->actionType, EActionType::WALK_AND_ATTACK);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_GT(recorder.meleeAttacks, 0);
 }

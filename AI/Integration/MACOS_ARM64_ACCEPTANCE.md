@@ -130,9 +130,9 @@ cases, then verifies that the selected inventory and XML identities agree.
 Linux CI validates the compiled inventory against the Mac workflow counts
 before executing its suites. Require that check before scheduling a new Mac
 build to catch stale counts without repeating the longer compilation.
-Expected genuine passes are 311 native battle cases, 18 forecast/lifecycle cases,
+Expected genuine passes are 317 native battle cases, 18 forecast/lifecycle cases,
 48 `MMAINNOutputValidation` cases and 145 Nullkiller/resource-trading cases:
-**522 executed cases with zero skipped, disabled, failed or errored cases**.
+**528 executed cases with zero skipped, disabled, failed or errored cases**.
 These are required results, not a claim that this Mac run has already passed.
 A source change that alters the inventory requires an explicit reviewed update
 to the expected counts. XML counts alone cannot substitute for matching names.

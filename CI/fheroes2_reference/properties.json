@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "native_suite": "AIIntegrationNativeBattle",
+  "native_source": "test/aiIntegration/NativePortBattleTest.cpp",
+  "scope": "Four mapped selection/effect properties only. No identical-input decisions, ranking, valuation, RNG, battle-outcome equality, or complete policy parity.",
+  "properties": {
+    "damage_spell_chosen": {
+      "native_test": "choosesOffensiveMagicAndCompletesTheBattle",
+      "native_test_sha256": "444ba995c7a61ccaef6c9b7a99a5692155ee9adb56eaf20a2964650e5716a950",
+      "source_scenario": "spell_damage",
+      "scope": "H2 Lightning Bolt and H3 Magic Arrow: damage-spell selection only."
+    },
+    "hypnotize_chosen_and_control_transferred": {
+      "native_test": "fheroes2UsesNativeHypnotizeAndCompletesBattle",
+      "native_test_sha256": "4ca124f5880480e46e5f99ae03a79b89d7f3a6621a4bf11cc73c63639b222dd1",
+      "source_scenario": "spell_control",
+      "scope": "Hypnotize selected and ownership effect observed; different units, rules and boards."
+    },
+    "spell_permission_gate_respected": {
+      "native_test": "disabledMagicKeepsAutocombatPreferences",
+      "native_test_sha256": "70bca453d40f1870020933f83ff0e3f5934ce92c2ab432f1152e573fdd52449b",
+      "source_scenario": "human_auto",
+      "scope": "H2 no-interface human auto-combat and native disabled-magic preference; distinct permission gates."
+    },
+    "ranged_attack_chosen": {
+      "native_test": "completesRangedBattleThroughFactory",
+      "native_test_sha256": "c4873a950791dcf8d8a856524539f662ebca85d3d92d0d3a704f59803dabea9c",
+      "source_scenario": "archers",
+      "scope": "At least one engine-applied ranged attack; different troops and rules."
+    }
+  }
+}

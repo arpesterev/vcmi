@@ -36,7 +36,7 @@ Each backend must pass all gates:
 
 | Backend | Implemented in experimental branch | Missing before full identifier |
 | --- | --- | --- |
-| HoMM3Original (sushi-shi/homm3-decomp) | Independent partial ranged/melee/advance/jousting/siege decisions and hero damage/area, Bless/Bloodlust/Precision, Blind, Cure/limited Dispel and resurrection policies; native VCMI legality | Original combat-value and future-exchange simulation, full attack-position threat map, original path planning, remaining spellcaster policy and exact buff/debuff/Dispel valuation, creature specials, hero retreat/surrender, full reference trace parity |
+| HoMM3Original (sushi-shi/homm3-decomp) | Source-style unit/casualty valuation, partial ranged/melee/advance/jousting/siege decisions and hero damage/area, Bless/Bloodlust/Precision, Blind, Cure/limited Dispel and resurrection policies; native VCMI legality | Complete modifier mapping (including Frenzy), future-exchange simulation, full attack-position threat map, original path planning, remaining spellcaster policy and exact buff/debuff/Dispel valuation, creature specials, hero retreat/surrender, full reference trace parity |
 | FHeroes2 (ihhub/fheroes2) | Native archer/guard/offense/defense, multi-turn pursuit, area shots, Berserk creature turns, partial hero damage/restore and buffs/debuffs, summons/Clone, offensive Teleport, Earthquake, selective Cure/Dispel, legal retreat/surrender/farewell and deathless-round limit | Anti-Magic and complete spell-effect timing/Dispel valuation, exact kiting and castle positioning, Heroes III manual creature abilities without a source equivalent, complete host-rule mapping and broad independent Heroes II/native decision comparison beyond the initial executable corpus |
 | TUMEnchanted (SadnessPower/TUM-Enchanted) | Explicit HoMM3 partial baseline plus published ballista, neutral shooter protection, siege hold, decoy and Hypnotize overrides | Public AI.erm tower rules and published Battle_AI pursuit-penalty C++ are available, with reuse terms unestablished. Implement and independently validate those rules and the remaining spell/creature/siege behavior, including the automatic server-action boundary. **Source availability and static formula recovery are not runtime parity** |
 | MMAI (smanolloff/vcmi-gym and official VCMI MMAI) | Genuine ONNX V13/V15 stack inference; attacker/defender/siege roles; strict no scripted fallback | New spell-capable observation/action schema and newly compatible trained weights before claiming neural hero spells; full special-action coverage beyond existing source-native handlers; installed GUI/model-error acceptance; long symmetrical self-play termination with source-grounded behavior |
@@ -66,11 +66,11 @@ Each backend must pass all gates:
 - Commit `bbc23d095500a9a05fe5d6f33df37fd9fddfd645` passed both
   [pre-merge](https://github.com/arpesterev/vcmi/actions/runs/42384115632) and
   [post-merge](https://github.com/arpesterev/vcmi/actions/runs/42384830098) Linux CI.
-  Later commit `707183d3650ed25f45ae52a85f3b64811696bb34`
-  [passed Linux CI](https://github.com/arpesterev/vcmi/actions/runs/42387052438):
-  334 main native cases, 314 passed and 20 explicitly model-gated. Separate
+  Later commit `da37f6300bd8d92f42274f05ecc072d4ec10d4ea`
+  [passed Linux CI](https://github.com/arpesterev/vcmi/actions/runs/42390778484):
+  349 main native cases, 329 passed and 20 explicitly model-gated. Separate
   V13/V15 phases exercised official weights. These results are commit-specific.
-- This subsequent local increment adds five FHeroes2 generic defensive-area
+- That increment added five FHeroes2 generic defensive-area
   cases and ten HoMM3 event-lifecycle cases. The full 349-case local native
   run passed 329 cases with exactly 20 model-gated skips. Output contracts
   (48), Nullkiller regressions (145) and the four mapped source properties
@@ -79,19 +79,36 @@ Each backend must pass all gates:
   intended branch with real server actions, without forced activation or
   weakened command assertions. Complete multi-archer cover selection remains
   separate source coverage work.
+- The next HoMM3 unit/loss valuation increment uses pinned reconstructed
+  `getUnitCombatValue` and `ComputeAttackEffect` formulas consistently for
+  primary attacks, retaliation, collateral, blocking and opportunity costs.
+  Six new native scenarios cover wound thresholds, two-shot volleys, original
+  wounds during retaliation, clones, primary/splash scale and stable repeated
+  decisions. Full local native execution passed 335 of 355 cases with the
+  same 20 model-gated skips. The tower comparison now uses native Basic
+  Artillery control and an actual pending activation, not a forced active-unit
+  assignment; its source and independent casualty-value brackets both pass.
+  Public native modifiers and unknown enemy Artillery remain explicit host
+  projections. Frenzy conversion is still a separate gap. Scalar comparisons
+  against the pinned reconstructed bodies are not retail runtime proof.
 - HoMM3 order/prefix and event-lifecycle kernels remain test-only. The latter
   tracks actual pre-action WAIT evidence and post-apply round changes, keeps
   initial ownership slots, and invalidates planning during hero actions.
   Unknown late-registration phase and created-unit identity are still explicit
   unsupported mappings. No complete production combat forecast, winner
-  estimate or retreat policy is claimed. Exact-commit CI is required after
-  publication of this locally tested increment.
+  estimate or retreat policy is claimed. These supporting kernels do not
+  activate a production forecast.
 - Local execution of [pinned fheroes2](https://github.com/ihhub/fheroes2/tree/0dbfe9f386f33c2500842f4a59cd284d7f03d541) now supplies an independent no-UI source corpus:
   32 initial and 40 additional cases, each run uninstrumented and twice with
   observation. Source outcomes and RNG match across observation modes, and
   traces repeat. This does not equate Heroes II and Heroes III inputs or prove
   adapter parity. Four mapped native properties agree; complete ordered
-  decision comparison remains unfinished. This reference corpus is not yet a CI gate.
+  decision comparison remains unfinished. The initial 32-case corpus now has
+  a separate reproducible CI source job, native four-property capture and
+  fail-closed same-checkout pairing. Fresh local compilation of all 249 source
+  objects and 96 processes passed with the pinned 965-file archive. Its first
+  remote execution remains required; it covers only the four declared coarse
+  properties, not identical inputs or complete ordered decisions.
 - ARM64 commit `ecd48d9296d3647685168ac8c03373e5d5479cbc`
   [passed packaging](https://github.com/arpesterev/vcmi/actions/runs/42382614048):
   the mounted DMG, 35 thin ARM64 images, dependency closure and deep strict
@@ -106,8 +123,10 @@ Each backend must pass all gates:
   from that run is a deliverable. Source inspection and a Linux server probe
   reproduce an ANSI reset before the version line. The revised smoke parser
   strips only SGR colors, retains the exact full-SHA and isolated-HOME checks,
-  and logs escaped raw output before validation. Its new Mac run is pending.
-  The current required native ARM64 gate is 522 genuine passes, not a report
+  and logs escaped raw output before validation. Exact DA37
+  [Mac run 42391258270](https://github.com/arpesterev/vcmi/actions/runs/42391258270)
+  is running with its 522-case gate; no result or new deliverable is claimed yet.
+  The current required native ARM64 gate is 528 genuine passes, not a report
   of completed Mac tests. See [the acceptance procedure](MACOS_ARM64_ACCEPTANCE.md).
 
 ## Evidence and controls

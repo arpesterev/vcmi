@@ -1,0 +1,22 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/army.cpp",
+  "bodies": {
+    "double army::getAverageDamage() const": {
+      "sha256": "42431f6ab55d6d30803e656c32265aa9e0428af9c5e04126b478aa0e44173b6d",
+      "line": 2188
+    },
+    "double army::getUnitCombatValue(": {
+      "sha256": "5ae58414ca7b710a3a306548182a95b95d823ddf65e9dc34be38a77d61a1975e",
+      "line": 2285
+    },
+    "long army::getLossCombatValue(": {
+      "sha256": "a2a542eef7b0475c38bdfa7d84744035116eb5eba9be18484e7a6c2b4c672040",
+      "line": 2364
+    },
+    "long army::getTotalHitPoints(": {
+      "sha256": "db3eaaae53822fc1ce1a10374f749041be411e3ae4b71edb7615ebddd4467de2",
+      "line": 2384
+    }
+  }
+}
