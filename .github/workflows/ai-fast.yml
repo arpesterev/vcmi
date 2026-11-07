@@ -105,6 +105,7 @@ jobs:
           cmake --build --preset linux-gcc-test --target vcmiMain vcmiservercommon --parallel 3
 
       - name: Build native tests, headless server and settings launcher
+        id: build_targets
         run: >-
           /usr/bin/time -f 'AI and launcher stage elapsed: %e seconds'
           cmake --build --preset linux-gcc-test --target vcmitest vcmiserver vcmilauncher --parallel 3
@@ -126,6 +127,7 @@ jobs:
           key: vcmi-ai-ubuntu2404-gcc14-v1-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run source-port battles through the real engine
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
         id: native_battles
         run: |
           cd out/build/linux-gcc-test/bin
@@ -145,8 +147,8 @@ jobs:
               root = ET.parse(xml).getroot()
               report['totals'] = root.attrib
               report['failures'] = [dict(test=case.get('classname', '') + '.' + case.get('name', ''),
-                  errors=[(failure.text or '')[:14000] for failure in case.findall('failure')])
-                  for case in root.iter('testcase') if case.findall('failure')][:3]
+                  errors=[(failure.text or '')[:4000] for failure in case.findall('failure')])
+                  for case in root.iter('testcase') if case.findall('failure')][:32]
           else:
               report['error'] = 'No native battle XML report was produced'
               report['tail'] = (Path(os.environ['RUNNER_TEMP']) / 'native-battles.log').read_text(errors='replace').splitlines()[-30:]
@@ -160,6 +162,7 @@ jobs:
           exit "$status"
 
       - name: Check seeded three-policy battle comparison evidence
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
         run: |
           python3 - <<'PY'
           import itertools
@@ -214,6 +217,7 @@ jobs:
           PY
 
       - name: Run all Nullkiller2 regressions in one process
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
         run: |
           cd out/build/linux-gcc-test/bin
           ./vcmitest --gtest_filter='Nullkiller2_*:ResourceTradingTurnTest.*' --gtest_list_tests > ai-test-names.txt
@@ -222,6 +226,7 @@ jobs:
             --gtest_output=xml:fast-ai-tests.xml
 
       - name: Check headless server startup
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
         run: |
           cd out/build/linux-gcc-test/bin
           ./vcmiserver --dummy-run 2>server-errors.log
@@ -234,6 +239,7 @@ jobs:
       # These contracts run without neural weights, independently of the
       # official-model native battle gate below.
       - name: Check V13/V15 MMAI ONNX output safety contracts
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
         run: |
           set -euo pipefail
           cd out/build/linux-gcc-test/bin
@@ -301,6 +307,8 @@ jobs:
       # All Fast AI runs verify checksum-pinned 1.8 ONNX weights; no
       # binary weights enter this repository, Actions artifacts or release jobs.
       - name: Install verified public MMAI neural pack into isolated CI preset
+        id: mmai_v15_models
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 --silent --show-error \
@@ -363,6 +371,7 @@ jobs:
           PY
 
       - name: Run real MMAI neural actions through VCMI battle engine
+        if: ${{ !cancelled() && steps.mmai_v15_models.outcome == 'success' }}
         run: |
           set -euo pipefail
           cd out/build/linux-gcc-test/bin
@@ -410,6 +419,18 @@ jobs:
           print('Verified: thirteen model-gated MMAI battle cases (including engine-owned first aid) plus one negative ONNX side check; war machines are not neural commands')
           PY
 
+      - name: Verify published V13 ABI and independent compatibility battles
+        if: ${{ !cancelled() && steps.build_targets.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          python3 -m unittest discover -s CI -p 'test_mmai_v13_compatibility.py' -v
+          python3 -m venv "$RUNNER_TEMP/mmai-v13-venv"
+          "$RUNNER_TEMP/mmai-v13-venv/bin/python" -m pip install --disable-pip-version-check 'onnx==1.18.0'
+          "$RUNNER_TEMP/mmai-v13-venv/bin/python" CI/check_mmai_v13_compatibility.py \
+            --work-dir "$RUNNER_TEMP/mmai-v13-verification" \
+            --test-binary out/build/linux-gcc-test/bin/vcmitest
+
       - name: Save compiled C++ objects for later develop builds
         if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
         uses: actions/cache/save@v6
@@ -455,6 +476,8 @@ jobs:
           python3 CI/validate_json.py
       - name: Validate relative local includes
         run: python3 CI/normalize_relative_includes.py --repo .
+      - name: Validate launcher combat AI selections
+        run: python3 CI/test_launcher_ai_selection.py
       - name: Validate Markdown
         uses: DavidAnson/markdownlint-cli2-action@v24.2.0
         with:

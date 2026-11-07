@@ -1,4 +1,6 @@
 {
+	"vcmi.battle.mmaiModelLoadFailed": "MMAI neural model could not be loaded.",
+	"vcmi.battle.mmaiManualCombatRequired": "Automatic combat was not started. Please fight this battle manually.",
 	"vcmi.controllerPrompt.move": "Move",
 	"vcmi.controllerPrompt.attack": "Attack",
 	"vcmi.controllerPrompt.shoot": "Shoot",

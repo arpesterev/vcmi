@@ -248,14 +248,6 @@ jobs:
         chmod +x CI/create_appimage.sh
         CI/create_appimage.sh --use-conan
 
-    - name: Kill XProtect to work around CPack issue on macOS
-      if: ${{ startsWith(matrix.platform, 'mac') && matrix.pack == 1 }}
-      run: |
-        # Cf. https://github.com/actions/runner-images/issues/7522#issuecomment-1556766641
-        echo Killing...; sudo pkill -9 XProtect >/dev/null || true;
-        echo "Waiting..."; counter=0; while pgrep XProtect && ((counter < 20)); do sleep 3; ((counter++)); done
-        pgrep XProtect || true
-
     - name: Pack
       id: cpack
       if: ${{ matrix.pack == 1 }}
@@ -529,4 +521,3 @@ jobs:
           with:
             config: 'CI/example.markdownlint-cli2.jsonc'
             globs: '**/*.md'
-

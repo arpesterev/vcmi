@@ -679,8 +679,9 @@ void CPlayerInterface::battleStart(const BattleID & battleID, const CCreatureSet
 				// exists when a human battle interface can be constructed.
 				if(settings["session"]["headless"].Bool())
 					throw;
-				showInfoDialog("MMAI neural model could not be loaded: " + std::string(e.what())
-					+ "\nAutomatic combat was not started. Please fight this battle manually.");
+				showInfoDialog(LIBRARY->generaltexth->translate("vcmi.battle.mmaiModelLoadFailed")
+					+ "\n" + e.what() + "\n"
+					+ LIBRARY->generaltexth->translate("vcmi.battle.mmaiManualCombatRequired"));
 			}
 		}
 		else

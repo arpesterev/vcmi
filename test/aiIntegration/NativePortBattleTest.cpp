@@ -267,6 +267,21 @@ protected:
 		ASSERT_TRUE(CResourceHandler::get()->existsResource(ResourcePath(path, EResType::AI_MODEL)))
 			<< "MMAI neural model is not mounted: " << path;
 	}
+
+	void requirePublishedV13Role(const std::string & role) const
+	{
+		requireInstalledNeuralRole(role);
+		ASSERT_FALSE(HasFatalFailure());
+		const auto config = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+		auto model = MMAI::BAI::CreateNNModel("MMAI/models/" + config["models"][role].String());
+		ASSERT_NE(model, nullptr);
+		ASSERT_EQ(model->getType(), MMAI::Schema::ModelType::NN);
+		ASSERT_EQ(model->getVersion(), 13);
+		ASSERT_EQ(model->getSide(), role == "attacker" ? MMAI::Schema::Side::LEFT : MMAI::Schema::Side::RIGHT);
+		EXPECT_THROW(model->getAction(nullptr), std::runtime_error);
+		std::cout << "AI_MMAI_V13_MODEL role=" << role << " version=" << model->getVersion()
+			<< " side=" << static_cast<int>(model->getSide()) << '\n';
+	}
 #endif
 
 	void startRecordedGame()
@@ -15254,6 +15269,123 @@ TEST_F(AIIntegrationNativeBattle, tumDoesNotMistakeForgottenNeutralArcherForMele
 }
 
 #ifdef ENABLE_MMAI
+TEST_F(AIIntegrationNativeBattle, mmaiV13StrictRejectsInvalidPack)
+{
+	const auto * scenario = std::getenv("VCMI_AI_MMAI_V13_INVALID_PACK");
+	if(!scenario)
+		GTEST_SKIP() << "Requires an isolated invalid V13 CI pack";
+	const std::string kind(scenario);
+	ASSERT_TRUE(kind == "absent" || kind == "wrong-side" || kind == "load-error");
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 20);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto policy = AIFactory::createBattleAI("MMAI");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	try
+	{
+		policy->initBattleInterface(environment, callback, AutocombatPreferences{});
+		FAIL() << "Strict MMAI accepted invalid V13 pack: " << kind;
+	}
+	catch(const std::runtime_error & error)
+	{
+		const std::string diagnostic(error.what());
+		EXPECT_NE(diagnostic.find("MMAI"), std::string::npos);
+		if(kind == "absent")
+			EXPECT_NE(diagnostic.find("refusing scripted fallback"), std::string::npos);
+		else if(kind == "load-error")
+		{
+			EXPECT_NE(diagnostic.find("failed to load"), std::string::npos);
+			EXPECT_NE(diagnostic.find("refusing substitute neural policy"), std::string::npos);
+		}
+		else
+			EXPECT_NE(diagnostic.find("side"), std::string::npos);
+		std::cout << "AI_MMAI_V13_PACK_REJECTED kind=" << kind << " diagnostic=" << diagnostic << '\n';
+	}
+	EXPECT_FALSE(callback->action.has_value());
+	EXPECT_EQ(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiV13AttackerCompletesBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_V13_TEST"))
+		GTEST_SKIP() << "Requires checksum-verified published V13 models";
+	requirePublishedV13Role("attacker");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "FHeroes2Tactics", true);
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiV13DefenderCompletesBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_V13_TEST"))
+		GTEST_SKIP() << "Requires checksum-verified published V13 models";
+	requirePublishedV13Role("defender");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "MMAI", true);
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiV13BothNeuralSidesCompleteBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_V13_TEST"))
+		GTEST_SKIP() << "Requires checksum-verified published V13 models";
+	requirePublishedV13Role("attacker");
+	requirePublishedV13Role("defender");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	runToCompletion(std::nullopt, false, "MMAI", "MMAI", true);
+	EXPECT_GE(mmaiUnitDecisions, 2);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiV13SiegeDefenderCompletesBattle)
+{
+	if(!std::getenv("VCMI_AI_MMAI_V13_TEST"))
+		GTEST_SKIP() << "Requires checksum-verified published V13 models";
+	requirePublishedV13Role("defender");
+	ASSERT_FALSE(HasFatalFailure());
+	const auto config = JsonUtils::assembleFromFiles("MMAI/CONFIG/mmai-settings.json");
+	ASSERT_TRUE(config["models"]["defender.siege"].isNull());
+	prepareSiege();
+	ASSERT_FALSE(HasFatalFailure());
+	// V13 publishes no separate siege weight; exercise parent-role routing.
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "MMAI", true);
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+	EXPECT_FALSE(recorder.catapultAttacks.empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, mmaiV13StrictNeuralDoesNotCastHeroSpell)
+{
+	if(!std::getenv("VCMI_AI_MMAI_V13_TEST"))
+		GTEST_SKIP() << "Requires checksum-verified published V13 models";
+	requirePublishedV13Role("attacker");
+	ASSERT_FALSE(HasFatalFailure());
+	prepareBattle(CreatureID(2), 20, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 20);
+	const auto observer = std::make_shared<DecisionCallback>(battle()->sideToPlayer(BattleSide::ATTACKER));
+	observer->onBattleStarted(battle());
+	ASSERT_EQ(observer->getBattle(battle()->getBattleID())->battleCanCastSpell(
+		attackerSideHero, spells::Mode::HERO), ESpellCastProblem::OK);
+	runToCompletion(std::nullopt, true, "MMAI", "HoMM3OriginalTactics", true);
+	EXPECT_EQ(heroSpellDecisions, 0);
+	EXPECT_TRUE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_GT(mmaiUnitDecisions, 0);
+	EXPECT_GT(mmaiNonpassiveDecisions, 0);
+}
+
 TEST_F(AIIntegrationNativeBattle, mmaiSelectedNeuralPolicyCannotFallBackToScriptedAI)
 {
 	// This CI fixture deliberately installs only public Heroes III battle

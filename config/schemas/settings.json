@@ -644,17 +644,17 @@
 				},
 				"combatEnemyAI" : {
 					"type" : "string",
-					"enum" : [ "EmptyAI", "StupidAI", "BattleAI", "MMAI" ],
+					"enum" : [ "EmptyAI", "StupidAI", "BattleAI", "HoMM3OriginalTactics", "FHeroes2Tactics", "TUMEnchantedTactics", "MMAI" ],
 					"default" : "BattleAI"
 				},
 				"combatAlliedAI" : {
 					"type" : "string",
-					"enum" : [ "EmptyAI", "StupidAI", "BattleAI", "MMAI" ],
+					"enum" : [ "EmptyAI", "StupidAI", "BattleAI", "HoMM3OriginalTactics", "FHeroes2Tactics", "TUMEnchantedTactics", "MMAI" ],
 					"default" : "BattleAI"
 				},
 				"combatNeutralAI" : {
 					"type" : "string",
-					"enum" : [ "EmptyAI", "StupidAI", "BattleAI", "MMAI" ],
+					"enum" : [ "EmptyAI", "StupidAI", "BattleAI", "HoMM3OriginalTactics", "FHeroes2Tactics", "TUMEnchantedTactics", "MMAI" ],
 					"default" : "BattleAI"
 				}
 			}
@@ -932,3 +932,4 @@
 		}
 	}
 }
+

@@ -61,6 +61,22 @@ public:
 private:
 	std::shared_ptr<CBattleCallback> cb;
 
+	static int visibleHeroGrantedAttacks(CPlayerBattleCallback & battle, const CStack & attacker)
+	{
+		// Hypnotize changes control, not unitSide(). The native server grants
+		// attacks from the ORIGINAL side's hero, which a player-scoped
+		// callback may not inspect. Do not substitute the controller's hero
+		// or call battleGetFightingHero on a hidden side (it throws).
+		// Keep intrinsic stack attacks when that extra information is hidden.
+		const auto perspective = battle.battleGetMySide();
+		if(perspective != BattleSide::ALL_KNOWING && perspective != attacker.unitSide())
+			return 0;
+		if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
+			return hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
+				BonusSubtypeID(attacker.creatureId()));
+		return 0;
+	}
+
 	static double lossValue(const CStack & target, const DamageEstimation & estimate)
 	{
 		const double health = static_cast<double>(target.getAvailableHealth());
@@ -104,9 +120,7 @@ private:
 		int totalMeleeAttacks = attacker.getTotalAttacks(false);
 		if(projectSecondMeleeStrike && !shooting)
 		{
-			if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
-				totalMeleeAttacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
-					BonusSubtypeID(attacker.creatureId()));
+			totalMeleeAttacks += visibleHeroGrantedAttacks(battle, attacker);
 		}
 		// Retail HoMM3 simulateAttack does not model FIRST_STRIKE. VCMI
 		// resolves a preemptive melee retaliation before the first hit, and
@@ -291,9 +305,7 @@ private:
 		if(projectNativeRangedRetaliation && shooting)
 		{
 			int totalRangedAttacks = attacker.getTotalAttacks(true);
-			if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
-				totalRangedAttacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
-					BonusSubtypeID(attacker.creatureId()));
+			totalRangedAttacks += visibleHeroGrantedAttacks(battle, attacker);
 			totalRangedAttacks = std::min(totalRangedAttacks, attacker.shots.available());
 			if(totalRangedAttacks > 1)
 			{
@@ -477,9 +489,7 @@ private:
 			return std::clamp<int64_t>(midpoint, 0, available);
 		};
 		int totalMeleeAttacks = attacker.getTotalAttacks(false);
-		if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
-			totalMeleeAttacks += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
-				BonusSubtypeID(attacker.creatureId()));
+		totalMeleeAttacks += visibleHeroGrantedAttacks(battle, attacker);
 		if(totalMeleeAttacks <= 0)
 			return 0.0;
 
@@ -904,9 +914,7 @@ private:
 		// and survival gates as the HoMM3-only primary exchange projection.
 		// This remains a host-specific approximation, not source equivalence.
 		int totalShots = attacker.getTotalAttacks(true);
-		if(const auto * hero = battle.battleGetFightingHero(attacker.unitSide()))
-			totalShots += hero->valOfBonuses(BonusType::HERO_GRANTS_ATTACKS,
-				BonusSubtypeID(attacker.creatureId()));
+		totalShots += visibleHeroGrantedAttacks(battle, attacker);
 		totalShots = std::min(totalShots, attacker.shots.available());
 		if(totalShots <= 0)
 			return 0.0;

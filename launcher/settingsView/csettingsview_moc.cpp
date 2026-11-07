@@ -131,7 +131,7 @@ void CSettingsView::updateCheckbuttonText(QToolButton * button)
 
 void CSettingsView::fillValidCombatAILibraries(QComboBox * comboBox, QString activeAI)
 {
-	comboBox->blockSignals(true);
+	QSignalBlocker guard(comboBox);
 	comboBox->clear();
 
 #ifdef ENABLE_STUPID_AI
@@ -155,17 +155,16 @@ void CSettingsView::fillValidCombatAILibraries(QComboBox * comboBox, QString act
 #ifdef ENABLE_MMAI
 	comboBox->addItem(tr("MMAI (neural model required, experimental)"), "MMAI");
 	comboBox->setItemData(comboBox->count() - 1,
-		tr("Requires an installed, loadable MMAI neural model for the battle side. If unavailable, refuses the battle rather than silently executing BattleAI or StupidAI."),
+		tr("Install and enable the MMAI mod with compatible neural models before playing. Models must support the selected battle side. Missing or incompatible models stop AI-controlled combat; human quick combat reports the error and returns to manual combat. BattleAI or StupidAI is never substituted."),
 		Qt::ToolTipRole);
 #endif
 
 	fillValidAnyAILibraries(comboBox, activeAI);
-	comboBox->blockSignals(false);
 }
 
 void CSettingsView::fillValidAdventureAILibraries(QComboBox * comboBox, QString activeAI)
 {
-	comboBox->blockSignals(true);
+	QSignalBlocker guard(comboBox);
 	comboBox->clear();
 
 #ifdef ENABLE_NULLKILLER2_AI
@@ -173,7 +172,6 @@ void CSettingsView::fillValidAdventureAILibraries(QComboBox * comboBox, QString 
 #endif
 
 	fillValidAnyAILibraries(comboBox, activeAI);
-	comboBox->blockSignals(false);
 }
 
 void CSettingsView::fillValidAnyAILibraries(QComboBox * comboBox, QString activeAI)
@@ -183,10 +181,23 @@ void CSettingsView::fillValidAnyAILibraries(QComboBox * comboBox, QString active
 
 	int indexToSelect = comboBox->findData(activeAI);
 
-	if (indexToSelect == -1)
-		comboBox->setCurrentIndex(0);
-	else
-		comboBox->setCurrentIndex(indexToSelect);
+	if(indexToSelect == -1)
+	{
+		if(activeAI == "EmptyAI")
+			comboBox->addItem(tr("EmptyAI (no AI)"), activeAI);
+		else
+		{
+			comboBox->addItem(activeAI.isEmpty()
+				? tr("No AI selected (select an available AI)")
+				: tr("%1 (unavailable in this build)").arg(activeAI), activeAI);
+			comboBox->setItemData(comboBox->count() - 1,
+				tr("The saved AI selection is not available in this build. Select an available AI before starting a game. The saved selection has not been changed and no other AI will be substituted."),
+				Qt::ToolTipRole);
+		}
+		indexToSelect = comboBox->count() - 1;
+	}
+	comboBox->setCurrentIndex(indexToSelect);
+	comboBox->setToolTip(comboBox->currentData(Qt::ToolTipRole).toString());
 }
 
 void CSettingsView::fillValidAILibraries()
@@ -642,6 +653,7 @@ void CSettingsView::on_comboBoxDisplayIndex_currentIndexChanged(int index)
 
 void CSettingsView::on_comboBoxFriendlyAI_currentIndexChanged(int index)
 {
+	ui->comboBoxFriendlyAI->setToolTip(ui->comboBoxFriendlyAI->itemData(index, Qt::ToolTipRole).toString());
 	QString aiName = ui->comboBoxFriendlyAI->itemData(index).toString();
 	Settings node = settings.write["ai"]["combatAlliedAI"];
 	node->String() = aiName.toUtf8().data();
@@ -652,6 +664,7 @@ void CSettingsView::on_comboBoxFriendlyAI_currentIndexChanged(int index)
 
 void CSettingsView::on_comboBoxNeutralAI_currentIndexChanged(int index)
 {
+	ui->comboBoxNeutralAI->setToolTip(ui->comboBoxNeutralAI->itemData(index, Qt::ToolTipRole).toString());
 	QString aiName = ui->comboBoxNeutralAI->itemData(index).toString();
 	Settings node = settings.write["ai"]["combatNeutralAI"];
 	node->String() = aiName.toUtf8().data();
@@ -662,6 +675,7 @@ void CSettingsView::on_comboBoxNeutralAI_currentIndexChanged(int index)
 
 void CSettingsView::on_comboBoxEnemyAI_currentIndexChanged(int index)
 {
+	ui->comboBoxEnemyAI->setToolTip(ui->comboBoxEnemyAI->itemData(index, Qt::ToolTipRole).toString());
 	QString aiName = ui->comboBoxEnemyAI->itemData(index).toString();
 	Settings node = settings.write["ai"]["combatEnemyAI"];
 	node->String() = aiName.toUtf8().data();
@@ -672,6 +686,7 @@ void CSettingsView::on_comboBoxEnemyAI_currentIndexChanged(int index)
 
 void CSettingsView::on_comboBoxEnemyPlayerAI_currentIndexChanged(int index)
 {
+	ui->comboBoxEnemyPlayerAI->setToolTip(ui->comboBoxEnemyPlayerAI->itemData(index, Qt::ToolTipRole).toString());
 	QString aiName = ui->comboBoxEnemyPlayerAI->itemData(index).toString();
 	Settings node = settings.write["ai"]["adventureEnemyAI"];
 	node->String() = aiName.toUtf8().data();
@@ -679,6 +694,7 @@ void CSettingsView::on_comboBoxEnemyPlayerAI_currentIndexChanged(int index)
 
 void CSettingsView::on_comboBoxAlliedPlayerAI_currentIndexChanged(int index)
 {
+	ui->comboBoxAlliedPlayerAI->setToolTip(ui->comboBoxAlliedPlayerAI->itemData(index, Qt::ToolTipRole).toString());
 	QString aiName = ui->comboBoxAlliedPlayerAI->itemData(index).toString();
 	Settings node = settings.write["ai"]["adventureAlliedAI"];
 	node->String() = aiName.toUtf8().data();
@@ -1095,3 +1111,4 @@ void CSettingsView::on_buttonEnableDiscordRichPresence_toggled(bool checked)
 	node->Bool() = checked;
 	updateCheckbuttonText(ui->buttonEnableDiscordRichPresence);
 }
+
