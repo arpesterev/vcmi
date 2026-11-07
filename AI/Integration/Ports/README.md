@@ -212,6 +212,66 @@ pin both directions; a completed engine battle checks a Cavalier's
 first real charge against a nearby one-hit target. This is not the full
 HoMM3 attack-position evaluator or its global enemy-threat map.
 
+The pinned `type_AI_attack_hex_chooser::getHexAttackValue` also rewards
+attack hexes adjacent to an opposing shooter that was not already engaged.
+The source helper's survivor-health scaling and minimum-one contribution are
+covered by contract tests. A narrow native projection now uses VCMI damage
+estimates (incoming ranged vs melee) as the engagement value. Both
+occupied hexes of wide attackers and wide shooters are now evaluated; each
+newly engaged shooter contributes at most once, as in the source's shared
+checked mask. Shooters already blocked by the moving stack at its current
+position are excluded. Pure tests cover tail-only and invalid contacts; real
+server battles cover ordinary melee-versus-shooter and a wide Cavalier
+issuing a legal attack against a shooter. This is NOT the original HoMM3
+per-creature combat-value pricing, and does not reconstruct the complete
+multi-head or breath attacks, path-wide threat map, or original threat-array
+scoring. Engine acceptance alone does not prove source decision parity.
+
+The next independent HoMM3-only slice projects the signed landing-risk term
+of the source `checkAdjacentHexes`: for a legal melee destination, native
+damage previews approximate the strongest next attack from another enemy.
+Reach uses a hex-distance upper bound, not a real enemy path; shooter status
+uses currently legal native shooting. Primary-target direct retaliation is
+already accounted for separately. For a wide stack, the more exposed cell
+dominates via the source's `min(enemy_attacks[head], enemy_attacks[tail])`.
+This is NOT an accurate reconstruction of HoMM3's precomputed threat field,
+all possible special attacks or obstacle-aware reachable positions.
+The TUM composition remains unchanged. A two-enemy VCMI battle regression
+exercises this projection and a terminal server battle result.
+
+The bounded HoMM3-only VCMI landing-threat approximation now preserves
+unrestricted `FREE_SHOOTING` threats even when a future attack footprint
+engages the shooter, while respecting native `LIMITED_SHOOTING_RANGE`.
+A real server regression checks ordinary and unrestricted adjacent shot
+legality, an independently selected and accepted HoMM3 melee command,
+observed ranged attacks, damage and a terminal result. Pure tests cover
+restricted/free shooting and shooting-range boundaries. This does not
+reconstruct the original `enemy_attacks` field or prove that the original
+HoMM3 would choose the same attack hex. The TUM-composed baseline is not
+changed by this HoMM3-only projection.
+
+The pinned `type_AI_combat_parameters::simulateAttack` applies its first
+melee blow, the surviving defender's retaliation, and then a possible
+`creatureTwoAttacks` second blow. For the HoMM3-only two-strike case, the
+VCMI estimator now previews the retaliation from a detached defender after
+representative first-hit casualties, instead of charging the untouched stack's
+full counterdamage. The Crusader/Swordsmen server regression verifies reduced
+counterdamage estimates without mutating a live stack, one actual intervening
+retaliation, two Crusader hits and a terminal battle. This is an approximate
+expected-damage projection, not the retail HoMM3 combat simulator; independent
+change of tactical target choice is not established. TUM's partial baseline
+is not changed.
+
+Native VCMI `FIRST_STRIKE` is not part of the pinned HoMM3 combat
+sequence. A preemptive hit can reduce, but not kill, a multi-target attacker.
+For HoMM3-only collateral previews, `projectedCollateral` now applies the
+representative counterdamage to a detached attacker before valuing splash
+against secondary stacks. A separate server regression exercises partial
+preemptive casualties, independent `WALK_AND_ATTACK` selection, real
+attack packets and battle completion. This remains approximate damage
+valuation, not retail HoMM3 behavior or proof of identical target choice.
+The TUM-composed partial baseline remains independent.
+
 The first implemented actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign
@@ -233,15 +293,45 @@ five independently implemented overrides derived from the documentation:
 - **Ballista:** excludes targets affected by Blind, Paralyze or Stone Gaze;
   with no remaining legal target, it defends instead of waking a disabled
   stack. We check actual VCMI spell-effect bonuses, not `isFrozen()` alone,
-  because the latter only detects Stone Gaze.
+  because the latter only detects Stone Gaze. VCMI Artillery may grant
+  additional ranged attacks; the partial native targeting score now ranks
+  **cumulative projected loss over the legal volley**, capped by both live
+  target HP and remaining machine ammunition. A native battle checks an
+  expert-Artillery ballista proposal, server-accepted attack sequence and
+  actual result, without claiming the closed TUM numerical formula.
+  **Manual-control boundary:** this TUM decision requires a server-delivered
+  unit activation, e.g. from Artillery. Without a native `MANUAL_CONTROL`
+  bonus, `BattleFlowProcessor` resolves `CPU_CONTROLLED` ballista turns
+  before `TUMEnchantedTactics::activeStack` is called. A separate native
+  server regression distinguishes automatic ballista shots from TUM decisions.
+  The published rule against waking disabled enemies is therefore **not yet
+  enforced on automatic ballista turns**. Changing that requires an explicitly
+  authorized integration at the automatic-action boundary, not an invented
+  tactical activation.
+- **Arrow towers (blocked at the policy boundary):** VCMI
+  `BattleFlowProcessor::tryMakeAutomaticActionOfRangedUnit` handles
+  CPU-controlled citadel towers before `CBattleGameInterface::activeStack`.
+  A live citadel regression confirmed that a proposed tower action in the
+  experimental adapter is never received as an engine-accepted unit action.
+  The attempted override was reverted. The documented but unpublished TUM
+  tower targeting cannot honestly be claimed as a functioning port without
+  a separate, explicitly scoped engine extension, which this branch forbids.
 - **Shooter protection:** when facing neutral melee-only stacks, allied
   ranged troops still have usable shots, and no neutral stack can reach the
-  friendly army in its next movement, the active friendly melee stack defends
-  instead of rushing forward. Presence of enemy shooters is checked using
+  friendly army in its next movement, the active friendly melee stack first
+  **waits** (if it has not already waited), then defends on a second safe
+  activation instead of rushing forward. This preserves a legal later-turn
+  response; the native neutral battle asserts an engine-accepted WAIT and a
+  completed result. Presence of enemy shooters is checked using
   the native ranged-unit classification, not immediate `battleCanShoot()`:
   an archer under Forgetfulness is still an enemy shooter for this conservative
-  interpretation of the published TUM rule. Friendly shooters need remaining
-  usable shots, even if their current firing line is blocked. Movement reach
+  interpretation of the published TUM rule. Friendly shooters must be able to
+  act and have at least one legal VCMI shot against a live enemy; otherwise a
+  melee guard does not wait for a firing line that cannot shoot. An out-of-ammo
+  archer remains a ranged creature, never a melee screen merely because
+  `battleCanShoot()` is false. A native exhausted-archer encounter now checks
+  the first TUM decision against the partial HoMM3 baseline and records
+  actions actually accepted by the VCMI server. Movement reach
   is evaluated with VCMI pathfinding. The documented exception for
   neutral-controlled armies outside siege applies.
 - **Fast-stack decoys:** when no immediate melee attack or ranged shot is
@@ -263,6 +353,10 @@ five independently implemented overrides derived from the documentation:
   not TUM's unpublished damage simulator. A live Hypnotize regression with
   legal ranged and melee alternatives checks that the higher-scoring action
   is accepted by the game server and the battle reaches an actual result.
+  If the minimum projected first-strike damage kills the target, the scorer
+  assigns zero retaliation rather than valuing a counterstrike that the
+  real server cannot execute. A native Hypnotize battle checks this guaranteed
+  lethal bound and an engine-accepted subsequent attack.
 - **Fortified siege defense:** melee defenders entirely inside castle walls
   hold while the gate remains closed or blocked and no enemy has breached
   the walls or reached melee. They resume normal actions after a breach

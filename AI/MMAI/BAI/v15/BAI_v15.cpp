@@ -20,6 +20,7 @@
 #include "callback/CBattleCallback.h"
 
 #include "AI/MMAI/common.h"
+#include "BAI/nn_model_resolution.h"
 #include "BAI/v15/render_v15.h"
 #include "BAI/v15/verify_v15.h"
 #include "schema/base.h"
@@ -54,8 +55,10 @@ Schema::Action BAI::getNonRenderAction()
 
 	const auto * s = state.get();
 	auto action = model->getAction(s);
+	unsigned renderRequests = 0;
 	while(action == Schema::ACTION_RENDER_ANSI)
 	{
+		requireStrictNNRenderProgress(strictNeural, ++renderRequests);
 		logger.debug("Got a RENDER action");
 		if(state->supdata->ansiRender.empty())
 		{
@@ -126,7 +129,7 @@ void BAI::battleEnd(const BattleID & bid, const BattleResult * br, QuestionID qu
 	{
 		logger.debug("Battle ended normally: reporting terminal state, expecting ACTION_RESET");
 		auto a = getNonRenderAction();
-		ASSERT(a == Schema::ACTION_RESET, "expected ACTION_RESET, got: " + std::to_string(EI(a)));
+		requireNNModelTerminalReset(a);
 	}
 
 	if(getActionTotalCalls > 0)
@@ -190,21 +193,13 @@ std::shared_ptr<BattleAction> BAI::maybeBuildAutoAction(const CStack * astack, c
 {
 	if(astack->creatureId() == CreatureID::FIRST_AID_TENT)
 	{
-		const CStack * target = nullptr;
-		auto maxdmg = 0;
-		for(const auto * stack : battle->battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
-		{
-			auto dmg = stack->getMaxHealth() - stack->getFirstHPleft();
-			if(dmg <= maxdmg)
-				continue;
-			maxdmg = static_cast<int>(dmg);
-			target = stack;
-		}
-
-		if(target)
-		{
-			return std::make_shared<BattleAction>(BattleAction::makeHeal(astack, target));
-		}
+		// Keep military-machine turns outside neural inference even when every
+		// allied stack has full health. VCMI HealAction::findMostWounded
+		// selects only an actually healable target, taking spell immunity into
+		// account. The old max-missing-HP shortcut could select an immune
+		// target or return no action and incorrectly enter the ONNX policy.
+		// This is an engine-owned automatic action, not a neural decision.
+		return std::make_shared<BattleAction>(BattleAction::makeHeal(astack));
 	}
 	else if(astack->creatureId() == CreatureID::CATAPULT)
 	{
@@ -246,17 +241,19 @@ std::shared_ptr<BattleAction> BAI::maybeBuildAutoAction(const CStack * astack, c
 			// out of ammo (arrow towers have 99 shots)
 			return std::make_shared<BattleAction>(BattleAction::makeDefend(astack));
 
-		auto allstacks = battle->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
-		auto target = std::ranges::max_element(
-			allstacks,
-			[](const CStack * a, const CStack * b)
+		const auto allstacks = battle->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		const auto * target = selectLegalNNWarMachineTarget(allstacks,
+			[this, astack](const CStack * candidate)
 			{
-				return N::Unit::GetValue(a->unitType()) < N::Unit::GetValue(b->unitType());
-			}
-		);
-
-		ASSERT(target != allstacks.end(), "Could not find an enemy stack to attack. Falling back to a defend.");
-		return std::make_shared<BattleAction>(BattleAction::makeShotAttack(astack, *target));
+				return battle->battleCanShoot(astack, candidate->getPosition());
+			},
+			[](const CStack * candidate)
+			{
+				return N::Unit::GetValue(candidate->unitType());
+			});
+		if(!target)
+			return std::make_shared<BattleAction>(BattleAction::makeDefend(astack));
+		return std::make_shared<BattleAction>(BattleAction::makeShotAttack(astack, target));
 	}
 
 	return nullptr;
@@ -264,6 +261,12 @@ std::shared_ptr<BattleAction> BAI::maybeBuildAutoAction(const CStack * astack, c
 
 std::optional<BattleAction> BAI::maybeFleeOrSurrender(const BattleID & bid)
 {
+	// Published V13/V15 ONNX schemas do not choose surrender or retreat.
+	// Preserve the legacy adventure-layer decision only in hybrid mode;
+	// strict neural combat must not silently delegate this policy to a callback.
+	if(strictNeural)
+		return std::nullopt;
+
 	BattleStateInfoForRetreat bs;
 
 	bs.canFlee = battle->battleCanFlee();
@@ -302,28 +305,57 @@ namespace
 {
 	BattleAction ToBattleAction(const CPlayerBattleCallback & battle, const ActionPtr & a, const CStack * acstack)
 	{
+		// The ONNX head chooses an action node, but an event/state adapter
+		// mismatch can invalidate its actor or target before conversion.
+		// assert() disappears in release builds: reject such actions instead
+		// of dereferencing null or sending a different command to the server.
+		requireNNV15ActionActor(a, acstack);
+
 		switch(a->actionType)
 		{
 			case AT::WAIT:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(!acstack->waitedThisRound());
+				if(acstack->waitedThisRound())
+					throw std::runtime_error("MMAI V15: model selected WAIT for a creature that already waited");
 				return BattleAction::makeWait(acstack);
 			case AT::DEFEND:
-				assert(a->by && &a->by->cstack == acstack);
 				return BattleAction::makeDefend(acstack);
 			case AT::MOVE:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(a->endsAt.size() > 0);
-				return BattleAction::makeMove(acstack, a->endsAt.at(0)->bhex);
+			{
+				if(a->endsAt.empty() || !a->endsAt.front())
+					throw std::runtime_error("MMAI V15: model MOVE action has no destination");
+				const auto & destination = a->endsAt.front()->bhex;
+				const auto reachability = battle.getReachability(acstack);
+				requireNNV15LegalMove(destination, reachability, acstack->getMovementRange());
+				return BattleAction::makeMove(acstack, destination);
+			}
 			case AT::AMOVE:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(a->endsAt.size() > 0);
-				assert(a->target && battle.isMeleeAttackPossible(acstack, &a->target->cstack, a->endsAt.front()->bhex));
-				return BattleAction::makeMeleeAttack(acstack, &a->target->cstack, a->endsAt.front()->bhex);
+			{
+				if(a->endsAt.empty() || !a->endsAt.front())
+					throw std::runtime_error("MMAI V15: model AMOVE action has no destination");
+				// The model-selected approach must still be reachable at dispatch.
+				const auto & destination = a->endsAt.front()->bhex;
+				const auto reachability = battle.getReachability(acstack);
+				requireNNV15LegalMeleeApproach(destination, reachability, acstack->getMovementRange());
+				const auto * target = a->target ? &a->target->cstack : nullptr;
+				requireNNV15ObservedTargetAtHex(target, a->targetPositionAtObservation,
+					[&battle](const BattleHex & hex) { return battle.battleGetStackByPos(hex); }, "AMOVE");
+				requireNNV15LegalTarget(target, [&](const CStack * candidate)
+				{
+					return battle.isMeleeAttackPossible(acstack, candidate, a->endsAt.front()->bhex);
+				}, "AMOVE");
+				return BattleAction::makeMeleeAttack(acstack, target, a->endsAt.front()->bhex);
+			}
 			case AT::SHOOT:
-				assert(a->by && &a->by->cstack == acstack);
-				assert(a->target && battle.battleCanShoot(acstack, a->target->cstack.getPosition()));
-				return BattleAction::makeShotAttack(acstack, &a->target->cstack);
+			{
+				const auto * target = a->target ? &a->target->cstack : nullptr;
+				requireNNV15ObservedTargetAtHex(target, a->targetPositionAtObservation,
+					[&battle](const BattleHex & hex) { return battle.battleGetStackByPos(hex); }, "SHOOT");
+				requireNNV15LegalTarget(target, [&](const CStack * candidate)
+				{
+					return battle.battleCanShoot(acstack, candidate->getPosition());
+				}, "SHOOT");
+				return BattleAction::makeShotAttack(acstack, target);
+			}
 			default:
 				throwf("Unexpected action type: %1%", EI(a->actionType));
 		}
@@ -338,7 +370,7 @@ void BAI::activeStack(const BattleID & bid, const CStack * astack)
 	}
 	catch(const std::exception & e) // NOSONAR
 	{
-		if(strictNeural)
+		if(!canNNUseLegacyBattleFallback(strictNeural, astack))
 			throw;
 		logger.error("Falling back to BattleAI due to MMAI error: " + std::string(e.what()));
 		auto evaluator = BattleEvaluator(env, cb, astack, cb->getPlayerID().value(), bid, battle->battleGetMySide(), 1.0f, 2);
@@ -349,6 +381,9 @@ void BAI::activeStack(const BattleID & bid, const CStack * astack)
 
 void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 {
+	// A stale activeStack callback must not drive either ONNX inference or an
+	// engine-owned war-machine action for a creature that has already died.
+	requireNNV15LivingActiveStack(astack);
 	if(const auto ba = maybeBuildAutoAction(astack, bid))
 	{
 		logger.info("Making automatic action with %s", astack->getDescription());
@@ -374,6 +409,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	}
 
 	state->onActiveStack(astack, roundcounter);
+	const auto actorHexAtObservation = astack->getPosition();
 
 	if(maybeCastSpell(astack, bid))
 		return;
@@ -390,11 +426,14 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 	auto t0 = std::chrono::steady_clock::now();
 	int a = getNonRenderAction();
+	requireNNObservedActorAtHex(astack, actorHexAtObservation,
+		[this](const BattleHex & hex) { return battle->battleGetStackByPos(hex); }, "V15");
 	auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 	getActionTotalMs += static_cast<int>(dt);
 	getActionTotalCalls += 1;
 
 	allactions.push_back(a);
+	enforceStrictNNLiveBattleAction(strictNeural, a);
 
 	// battle should have ended instead
 	ASSERT(!resetting, "got activeStack(), but resetting was already true");
@@ -410,7 +449,7 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 
 	logger.debug("Received action: " + std::to_string(a));
 	auto action = state->G->getById<N::Action>(a);
-	ASSERT(action->isActive || resetting, "expected active action");
+	requireNNV15ActiveAction(action);
 
 	lastAction = action;
 
@@ -423,6 +462,8 @@ void BAI::_activeStack(const BattleID & bid, const CStack * astack)
 	if(isMMAIAutoVerify())
 		Verify(state.get());
 
+	requireNNObservedActorAtHex(astack, actorHexAtObservation,
+		[this](const BattleHex & hex) { return battle->battleGetStackByPos(hex); }, "V15");
 	cb->battleMakeUnitAction(bid, ba);
 }
 

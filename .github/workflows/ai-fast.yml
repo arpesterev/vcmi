@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [develop, 'feature/ai-event-adapters-20261031', 'feature/fheroes2-native-summon-20261104']
   push:
-    branches: [develop]
+    branches: [develop, 'feature/ai-four-policy-integration-*']
 
 permissions:
   contents: read
@@ -109,12 +109,17 @@ jobs:
           /usr/bin/time -f 'AI and launcher stage elapsed: %e seconds'
           cmake --build --preset linux-gcc-test --target vcmitest vcmiserver vcmilauncher --parallel 3
 
+      # The MMAI GUI preload recovery lives in CPlayerInterface, which is
+      # not built by the server/test/launcher-only targets above.
+      - name: Compile MMAI GUI preloading and error presentation
+        run: cmake --build --preset linux-gcc-test --target vcmiclientcommon --parallel 3
+
       - name: Report compiler cache efficiency
         if: always()
         run: ccache --show-stats || true
 
       - name: Preserve compiler progress for trusted PR reruns
-        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.build_core.outcome != 'skipped' }}
+        if: ${{ !cancelled() && steps.build_core.outcome != 'skipped' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/feature/ai-four-policy-integration-'))) }}
         uses: actions/cache/save@v6
         with:
           path: .ccache
@@ -225,10 +230,77 @@ jobs:
             exit 1
           fi
 
-      # Only MMAI or four-policy integration PRs download checksum-pinned 1.8 ONNX weights; no
+      # A malformed ONNX head must not become a seemingly legal model action.
+      # These contracts run without neural weights, independently of the
+      # official-model native battle gate below.
+      - name: Check V13/V15 MMAI ONNX output safety contracts
+        run: |
+          set -euo pipefail
+          cd out/build/linux-gcc-test/bin
+          timeout 60 ./vcmitest \
+            --gtest_filter='MMAINNOutputValidation.*' \
+            --gtest_output=xml:mmai-onnx-output-contracts.xml
+          python3 - <<'PY'
+          from xml.etree import ElementTree as ET
+          cases = list(ET.parse('mmai-onnx-output-contracts.xml').getroot().iter('testcase'))
+          expected = {'V13V15RejectAbsentOrWrongVersionStateAndV13MaskBeforeOnnx',
+                      'RejectsInvalidOnnxOutputBeforeGreedyOrSampling',
+                      'V13V15RejectInvalidSamplingTemperatureAtModelConstruction',
+                      'V15AcceptsOnlyScalarOrSingletonOnnxOutputs',
+                      'V15RejectsInvalidValueHead',
+                      'V15RejectsUnrepresentableNeuralActionIdBeforeDispatch',
+                      'V15RejectsMissingSampledOrGreedyGraphActionNode',
+                      'V13V15WarMachineTargetsOnlyLivingShootableEnemies',
+                      'V13V15RejectNonFiniteObservationBeforeInference',
+                      'V13V15RejectInvalidTensorElementCountsBeforeOnnxAllocation',
+                      'V15RejectsOverflowDuringGraphFlatteningBeforeAllocation',
+                      'V13RejectsOversizedLinkCountsBeforeFlattening',
+                      'V13RejectsMissingLinkAndWrongSizedBattlefieldBeforeOnnx',
+                      'V13V15RejectMovedOrReplacedObservedActorBeforeDispatch',
+                      'RejectsScriptedFallbackForStrictOrInvalidActiveActor',
+                      'V13RejectsDeadOrMissingEngineOwnedMachineActor',
+                      'V13RejectsStaleOrDeadActiveCreatureBeforeModelDispatch',
+                      'V13RejectsIllegalTargetBeforeEngineDispatch',
+                      'V13RejectsReplacedShootHexTargetBeforeDispatch',
+                      'V13RejectsReplacedMeleeHexTargetBeforeDispatch',
+                      'V13StrictNeuralRetreatUsesLiveEnginePermission',
+                      'V13StrictRejectsInvalidModelActionWithoutResampling',
+                      'V13RejectsMoveOutsideLiveEngineReachability',
+                      'V13RejectsMeleeApproachOutsideLiveEngineReachability',
+                      'V15RejectsStaleActiveCreatureBeforeActionConversion',
+                      'V15RejectsEmptyActionGraphBeforeOnnxInference',
+                      'V15RejectsInvalidGraphElementsAndEndpointsBeforeOnnx',
+                      'V15RejectsInactiveGraphActionBeforeServerDispatch',
+                      'V15RejectsMoveOutsideLiveEngineReachability',
+                      'V15RejectsMeleeApproachOutsideLiveEngineReachability',
+                      'V15RejectsDeadOrMissingModelAttackTarget',
+                      'V15RejectsMovedOrReplacedObservedTargetBeforeDispatch',
+                      'RejectsUnexpectedTerminalOnnxAction',
+                      'StrictNeuralRejectsRepeatedAnsiRenderRequests',
+                      'PreservesFiniteOnnxActionDistribution',
+                      'V13SamplesOnlyRequiredHierarchicalHeads',
+                      'V13RejectsInvalidRequiredHead',
+                      'V13RejectsJaggedActionTableMetadata',
+                      'V13RejectsIncorrectOnnxInputAndOutputNamesAtLoad',
+                      'V13V15RejectMalformedOnnxTensorSignaturesAtLoad',
+                      'V13RejectsOutOfRangeActionTableEntries',
+                      'V13RejectsDecodedActionOutsideLiveSchema',
+                      'V15RejectsDuplicateNodeAndEdgeMetadataTypes',
+                      'RejectsInvalidModelSideMetadata',
+                      'RejectsInvalidModelVersionMetadata',
+                      'StrictRejectsConfiguredNeuralLoadError',
+                      'StrictLiveBattleRejectsGymResetButAllowsGraphActionZero',
+                      'LegacyFallbackCannotPoisonStrictModelCache'}
+          if {c.get('name') for c in cases} != expected or len(cases) != len(expected):
+              raise RuntimeError('MMAI ONNX output contract tests missing: ' + str(cases))
+          if any(c.find(t) is not None for c in cases for t in ('failure', 'error', 'skipped')):
+              raise RuntimeError('MMAI ONNX output contract test failed or skipped')
+          print('Verified: V13/V15 shared neural output guards reject invalid weights and preserve finite heads')
+          PY
+
+      # All Fast AI runs verify checksum-pinned 1.8 ONNX weights; no
       # binary weights enter this repository, Actions artifacts or release jobs.
       - name: Install verified public MMAI neural pack into isolated CI preset
-        if: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'feature/mmai-') || startsWith(github.head_ref, 'feature/ai-four-policy-integration-')) }}
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 --silent --show-error \
@@ -291,7 +363,6 @@ jobs:
           PY
 
       - name: Run real MMAI neural actions through VCMI battle engine
-        if: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'feature/mmai-') || startsWith(github.head_ref, 'feature/ai-four-policy-integration-')) }}
         run: |
           set -euo pipefail
           cd out/build/linux-gcc-test/bin
@@ -317,7 +388,8 @@ jobs:
           from xml.etree import ElementTree as ET
           root = ET.parse('mmai-real-neural-battle.xml').getroot()
           cases = list(root.iter('testcase'))
-          expected = {'mmaiWithRealNeuralModelCompletesRealBattle',
+          expected = {'mmaiFirstAidWithoutWoundsUsesEngineAutoHealRealBattle',
+                      'mmaiWithRealNeuralModelCompletesRealBattle',
                       'mmaiDefenderNeuralModelCompletesRealBattle',
                       'mmaiSiegeDefenderNeuralModelCompletesRealBattle',
                       'mmaiBothNeuralSidesFightRealBattle',
@@ -331,11 +403,11 @@ jobs:
                       'mmaiRangedAttackerAgainstFHeroes2InfantryRealBattle',
                       'mmaiDefenderAgainstFHeroes2RangedAttackerRealBattle'}
           names = {case.get('name') for case in cases}
-          if len(cases) != 13 or names != expected:
+          if len(cases) != 14 or names != expected:
               raise RuntimeError('MMAI attacker, defender and siege neural battles did not all execute: ' + str(names))
           if any(case.find(tag) is not None for case in cases for tag in ('failure', 'error', 'skipped')):
               raise RuntimeError('An MMAI neural integration test failed or was skipped')
-          print('Verified: twelve model-gated MMAI battle cases plus one negative real-ONNX training-side check; engine siege packets are not necessarily MMAI decisions')
+          print('Verified: thirteen model-gated MMAI battle cases (including engine-owned first aid) plus one negative ONNX side check; war machines are not neural commands')
           PY
 
       - name: Save compiled C++ objects for later develop builds

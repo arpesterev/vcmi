@@ -1,4 +1,5 @@
 #include "../AI/Integration/Ports/SourceTactics.h"
+#include "../AI/Integration/Ports/FHeroes2ThreatProjection.h"
 #include "../AI/Integration/Ports/FHeroes2EarthquakePolicy.h"
 #include "../AI/Integration/Ports/FHeroes2TeleportPolicy.h"
 #include "../AI/Integration/Ports/FHeroes2BerserkOrder.h"
@@ -29,6 +30,67 @@ int main()
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;
 	using FHeroes2::selectTactics;
+	// fheroes2 Unit::evaluateThreatForUnit: damage to a particular
+	// defender, distance/speed discount, second strike, clone priority,
+	// moved/disabled status and mind-control penalty.
+	FHeroes2::ThreatProjection threat;
+	threat.damage = 100;
+	threat.attackerHealth = 100;
+	threat.distance = 3;
+	threat.movement = 4;
+	require(FHeroes2::projectRelativeThreat(threat) == 100,
+		"Nearby ground attacker keeps full potential damage");
+	threat.distance = 9;
+	require(FHeroes2::projectRelativeThreat(threat) == 100.0 / (1.5 * 9 / 4),
+		"Distant ground attacker loses threat by source distance factor");
+	threat.ranged = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 100,
+		"Ranged attack bypasses ground movement-distance penalty");
+	threat.ranged = false;
+	threat.flying = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 100,
+		"Flying attack bypasses ground movement-distance penalty");
+	threat.flying = false;
+	threat.distance = 3;
+	threat.attacks = 2;
+	require(FHeroes2::projectRelativeThreat(threat) == 200,
+		"Second attack doubles threat when no retaliation occurs");
+	threat.retaliationDamage = 50;
+	require(FHeroes2::projectRelativeThreat(threat) == 150,
+		"Source second attack discounts expected retaliatory losses");
+	threat.attacks = 1;
+	threat.retaliationDamage = 0;
+	threat.clone = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 1000,
+		"Destroyable clone gets original source tenfold priority");
+	threat.clone = false;
+	threat.disabled = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 0,
+		"Disabled unit cannot threaten a defender");
+	threat.disabled = false;
+	threat.alreadyActed = true;
+	require(FHeroes2::projectRelativeThreat(threat) == 80,
+		"Unit that already acted receives source 1.25 divisor");
+	threat.alreadyActed = false;
+	threat.originallyFriendly = true;
+	require(FHeroes2::projectRelativeThreat(threat) == -200,
+		"Friendly target has a source negative threat");
+	threat.originallyFriendly = false;
+	threat.mindControlled = true;
+	require(FHeroes2::projectRelativeThreat(threat) == -100,
+		"Mind controlled target receives source negative priority");
+	threat.mindControlled = false;
+	threat.movement = 0;
+	require(FHeroes2::projectRelativeThreat(threat) == 0,
+		"Immobile ground unit cannot approach another stack");
+	threat.movement = 4;
+	threat.damage = std::numeric_limits<double>::quiet_NaN();
+	try { FHeroes2::projectRelativeThreat(threat); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	threat.damage = 100;
+	threat.distance = -1;
+	try { FHeroes2::projectRelativeThreat(threat); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
 	// Pinned Earthquake formula requires fortress, ground melee, standing
 	// walls and enemy ranged strength. No spell is spent when any is absent.
 	const double expectedEarthquake = FHeroes2::earthquakeValue(true, 2, 50, 100,
@@ -232,6 +294,67 @@ int main()
 						require(rangedAttackValue(target, difficulty) == 1001 / divisor, "HoMM3 target weighting changed");
 					}
 
+	// The pinned getSimpleAttackEffect subtracts our losses and may be
+	// negative. The source's getRangedAttackValue retains the signed long
+	// before applying its time/disable divisor. VCMI's return-fire is a
+	// host-only way to create that negative result; zero-clamping ranked
+	// distinct dangerous shots equally in HoMM3OriginalTactics.
+	require(HoMM3::signedProjectedAttackEffect(-175.9) == -175,
+		"HoMM3 must retain a harmful net ranged exchange");
+	require(HoMM3::signedProjectedAttackEffect(-19.0) == -19,
+		"HoMM3 must distinguish differently harmful shots");
+	require(HoMM3::signedProjectedAttackEffect(0) == 0,
+		"HoMM3 net-zero attacks remain neutral");
+	require(HoMM3::signedProjectedAttackEffect(42.9) == 42,
+		"HoMM3 signed effect truncates toward zero");
+	require(HoMM3::signedProjectedAttackEffect(-1e20) == std::numeric_limits<int32_t>::min(),
+		"HoMM3 negative attack effect must saturate without overflow");
+	require(HoMM3::signedProjectedAttackEffect(1e20) == std::numeric_limits<int32_t>::max(),
+		"HoMM3 positive attack effect must saturate without overflow");
+	require(rangedAttackValue({-175, false, false, true, 2}, false) == -87,
+		"HoMM3 ranged target ranking must preserve signed source division");
+	require(rangedAttackValue({-175, true, false, true, 2}, false) == -17,
+		"HoMM3 incapacitation weighting preserves negative source values");
+	try { HoMM3::signedProjectedAttackEffect(std::numeric_limits<double>::quiet_NaN()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::signedProjectedAttackEffect(std::numeric_limits<double>::infinity()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// Pinned getRangedAttackValue checks cannotAttack, not just whether
+	// the enemy can melee. A shooting-only VCMI Ballista remains a live
+	// threat even with zero movement and no melee attack capability.
+	require(HoMM3::nativeTargetCanAttack(false, true),
+		"HoMM3 ranged-only native enemy must count as able to attack");
+	require(HoMM3::nativeTargetCanAttack(true, false),
+		"HoMM3 melee-capable enemy must remain an active threat");
+	require(!HoMM3::nativeTargetCanAttack(false, false),
+		"HoMM3 incapable enemy must not receive an imaginary attack");
+	require(HoMM3::rangedAttackValue({100, false,
+		!HoMM3::nativeTargetCanAttack(false, true),
+		HoMM3::nativeTargetCanAttack(false, true),
+		HoMM3::projectedRangedTargetTime(6, 0, true)}, false) == 100,
+		"A stationary ranged-only threat with a legal shot must receive one-turn weight");
+	require(HoMM3::rangedAttackValue({100, false, true, false,
+		HoMM3::projectedRangedTargetTime(6, 0, false)}, false) == 20,
+		"A stationary nonattacker still receives the source distant-threat discount");
+
+	// Pinned checkAdjacentHexes keeps signed long hex values. A host
+	// preview may differ by less than one combat point: the original path
+	// tie-break then decides, rather than an accidental double comparison.
+	require(HoMM3::discreteMeleeHexValue(11.9) == 11,
+		"HoMM3 melee hex value truncates positive estimates");
+	require(HoMM3::discreteMeleeHexValue(-11.9) == -11,
+		"HoMM3 melee hex value truncates negative estimates toward zero");
+	require(HoMM3::discreteMeleeHexValue(14.1) == HoMM3::discreteMeleeHexValue(14.9)
+		&& preferEqualValueMeleeHex(6, 4, true),
+		"HoMM3 Cavalier resolves sub-point equality by longer source path");
+	require(HoMM3::discreteMeleeHexValue(-1e20) == std::numeric_limits<int32_t>::min(),
+		"HoMM3 source long score clamps negative overflow");
+	require(HoMM3::discreteMeleeHexValue(1e20) == std::numeric_limits<int32_t>::max(),
+		"HoMM3 source long score clamps positive overflow");
+	try { HoMM3::discreteMeleeHexValue(std::numeric_limits<double>::quiet_NaN()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
 	// HoMM3 check_adjacent_hexes: on equal melee value and one-turn
 	// reachability, Cavalier/Champion prefer the greater path cost.
 	require(preferEqualValueMeleeHex(6, 4, true), "Jouster prefers a longer equal-value charge");
@@ -243,6 +366,173 @@ int main()
 	try { preferEqualValueMeleeHex(-1, 4, true); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 	try { preferEqualValueMeleeHex(4, -1, false); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// Source getHexAttackValue scales the ranged-versus-melee combat-value
+	// difference by surviving unit-equivalents and never gives less than 1
+	// for a live eligible shooter. Native damage projection is separate.
+	require(HoMM3::pinnedShooterValue(10, 4, 35, 10) == 21,
+		"HoMM3 pinned shooter value must scale by surviving health");
+	require(HoMM3::pinnedShooterValue(10, 4, 37, 10) == 22,
+		"HoMM3 pinned shooter value truncates toward zero like source long cast");
+	require(HoMM3::pinnedShooterValue(4, 10, 35, 10) == 1,
+		"HoMM3 scorer floors nonpositive live shooter contribution at one");
+	require(HoMM3::pinnedShooterValue(10, 4, 0, 10) == 0,
+		"Dead shooter cannot receive suppression credit");
+	require(HoMM3::pinnedShooterValue(1e20, 0, 10, 1) == std::numeric_limits<int32_t>::max(),
+		"Native source projection must not overflow its signed score");
+	try { HoMM3::pinnedShooterValue(10, 4, 10, 0); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::pinnedShooterValue(std::numeric_limits<double>::infinity(), 4, 10, 1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// Original getMultiHeadBonus counts additional enemies; getBreathBonus
+	// also subtracts damage to allies. The host engine resolves which
+	// stacks are actually struck from a given native attack hex.
+	require(HoMM3::collateralStrikeValue(true, 21.5) == 21.5,
+		"HoMM3 multi-head collateral must reward enemy damage");
+	require(HoMM3::collateralStrikeValue(false, 21.5) == -21.5,
+		"HoMM3 breath collateral must penalize friendly fire");
+	require(HoMM3::collateralStrikeValue(true, 0) == 0,
+		"Zero secondary damage must not create bonus");
+	try { HoMM3::collateralStrikeValue(true, -1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::collateralStrikeValue(false, std::numeric_limits<double>::infinity()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// VCMI free shooting (e.g. Sharpshooter's Bow) can survive
+	// adjacent contact. The original source valuation is not reused when
+	// native rules prove the intended suppression does not occur.
+	require(HoMM3::nativeShooterSuppressionPossible(true, false, true),
+		"Ordinary shooter loses its shot when contacted");
+	require(!HoMM3::nativeShooterSuppressionPossible(true, true, true),
+		"Unrestricted free shooter does not lose its shot to a pin");
+	require(HoMM3::nativeShooterSuppressionPossible(true, true, false),
+		"Restricted free shooter cannot shoot adjacent targets");
+	require(!HoMM3::nativeShooterSuppressionPossible(false, false, false),
+		"Unavailable shot cannot receive a fictional pin bonus");
+
+	// HoMM3 checkAdjacentHexes evaluates BOTH attacker's occupied hexes and
+	// shares its visited-shooter mask. Physical contact on a wide tail must
+	// count, while a nonadjacent head alone does not. A wide shooter may also
+	// be engaged at its tail; its two cells never imply two separate shooters.
+	const auto linearDistance = [](int lhs, int rhs) { return std::abs(lhs - rhs); };
+	require(HoMM3::attackFootprintEngagesShooter(std::array<int, 2>{2, 5},
+		std::array<int, 1>{6}, linearDistance),
+		"HoMM3 wide attacker must count shooter blocked by its trailing hex");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 1>{2},
+		std::array<int, 1>{6}, linearDistance),
+		"HoMM3 head-only contact cannot invent shooter engagement");
+	require(HoMM3::attackFootprintEngagesShooter(std::array<int, 1>{5},
+		std::array<int, 2>{6, 7}, linearDistance),
+		"HoMM3 shooter tail contact must count");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 2>{2, 3},
+		std::array<int, 2>{6, 7}, linearDistance),
+		"HoMM3 distant footprints do not pin shooters");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 0>{},
+		std::array<int, 1>{6}, linearDistance),
+		"HoMM3 empty attack footprint cannot pin a shooter");
+	require(!HoMM3::attackFootprintEngagesShooter(std::array<int, 2>{2, 5},
+		std::array<int, 0>{}, linearDistance),
+		"HoMM3 empty enemy footprint cannot generate score");
+
+	// Pinned checkAdjacentHexes uses precomputed enemy_attacks[hex]; the
+	// VCMI approximation must not invent a shot at an empty future cell.
+	require(!HoMM3::projectedNativeRangedThreat(true, true, false, true, false, 0, 1),
+		"Ordinary shooter cannot fire through new melee contact");
+	require(HoMM3::projectedNativeRangedThreat(true, true, true, true, false, 0, 1),
+		"Unrestricted free shooting remains dangerous when engaged");
+	require(!HoMM3::projectedNativeRangedThreat(true, true, true, false, false, 0, 1),
+		"Restricted free shooter cannot shoot an adjacent target");
+	require(!HoMM3::projectedNativeRangedThreat(false, false, true, true, false, 0, 2),
+		"A currently disabled shooter must not invent a shot");
+	require(HoMM3::projectedNativeRangedThreat(true, false, false, false, true, 3, 3),
+		"Native limited shooting range includes its exact boundary");
+	require(!HoMM3::projectedNativeRangedThreat(true, false, false, false, true, 3, 4),
+		"Native limited-range shooter cannot threaten beyond its range");
+	require(HoMM3::projectedNativeRangedThreat(true, false, false, false, false, 0, 4),
+		"Unlimited normal shooting may threaten a distant cell");
+	try { HoMM3::projectedNativeRangedThreat(true, false, false, false, true, -1, 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::projectedNativeRangedThreat(true, false, false, false, false, 0, -1); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// VCMI battleCanShoot queries the OLD board. When our mobile blocker
+	// leaves a normal archer, the future threat must reappear only if no
+	// independent hostile stack still pins it. A new landing next to the
+	// same archer or an out-of-range target remains safe from that shot.
+	require(HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, false),
+		"Moving the sole melee blocker away reopens the archer's shot");
+	require(!HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, true),
+		"A second blocker keeps the archer pinned after the mover leaves");
+	require(!HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, false, false),
+		"A shot cannot appear if the moving unit was not the blocker");
+	require(!HoMM3::projectedShooterReadyAfterMoverLeaves(false, false, true, false),
+		"No ammunition or disabled shooting cannot be revived by movement");
+	require(HoMM3::projectedShooterReadyAfterMoverLeaves(true, true, false, false),
+		"An already legal shot remains legal before hypothetical contact checks");
+	require(!HoMM3::projectedNativeRangedThreat(
+		HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, false),
+		true, false, false, false, 0, 1),
+		"Unpinning does not allow a normal archer to shoot a newly adjacent target");
+	require(!HoMM3::projectedNativeRangedThreat(
+		HoMM3::projectedShooterReadyAfterMoverLeaves(false, true, true, false),
+		false, false, false, true, 2, 3),
+		"A recovered archer still obeys its native limited shooting range");
+
+	// A target's global getAITargetTime from retail HoMM3 is not yet
+	// reconstructed. Our native ranged-target proxy must not grant a
+	// zero-speed enemy imaginary travel, and reaches melee at distance one.
+	require(HoMM3::projectedRangedTargetTime(1, 0, false) == 1,
+		"Already-adjacent immobile target can attack without moving");
+	require(HoMM3::projectedRangedTargetTime(2, 0, false) == 100,
+		"Nonadjacent immobile target cannot reach the archer");
+	require(HoMM3::projectedRangedTargetTime(5, 2, false) == 2,
+		"Native approach counts steps to contact rather than the target hex");
+	require(HoMM3::projectedRangedTargetTime(2, 1, false) == 1,
+		"A one-step approach reaches melee on the next activation");
+	require(HoMM3::projectedRangedTargetTime(0, 0, false) == 1,
+		"Overlapping synthetic footprints cannot cause division by zero");
+	require(HoMM3::projectedRangedTargetTime(100, 0, false) == 100,
+		"Stationary 100-turn sentinel is source-derived");
+	require(HoMM3::projectedRangedTargetTime(100, 0, true) == 1,
+		"A stationary enemy archer with a legal shot threatens immediately");
+	require(HoMM3::projectedRangedTargetTime(6, 2, true) == 1,
+		"A ready shooter does not chase a melee path to use its ranged attack");
+	try { HoMM3::projectedRangedTargetTime(-1, 1, false); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::projectedRangedTargetTime(2, -1, false); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// The original checkAdjacentHexes reads a per-hex enemy_attacks field.
+	// The still-partial VCMI projection must account for distinct attackers:
+	// select one strongest action per enemy, sum the independent losses and
+	// bound casualties by the landing army's original combat value. Do not
+	// add a single enemy's shot and melee threat twice.
+	require(HoMM3::addIndependentEnemyThreat(0, 25, 100) == 25,
+		"First hostile stack contributes its actual projected attack");
+	require(HoMM3::addIndependentEnemyThreat(25, 30, 100) == 55,
+		"Distinct enemy threats must accumulate rather than keep only maximum");
+	require(HoMM3::addIndependentEnemyThreat(85, 30, 100) == 100,
+		"Independent threats cannot kill more than the whole active stack");
+	require(HoMM3::addIndependentEnemyThreat(25, 0, 100) == 25,
+		"Inactive or unreachable opponents add no imagined threat");
+	require(HoMM3::addIndependentEnemyThreat(1e308, 1e308, 100) == 100,
+		"Finite extreme projections saturate without yielding infinity");
+	try { HoMM3::addIndependentEnemyThreat(1, -1, 100); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { HoMM3::addIndependentEnemyThreat(0, 1, std::numeric_limits<double>::quiet_NaN()); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	// Source checkAdjacentHexes combines a wide stack's per-cell threats
+	// using min, so the more exposed cell dominates, not their average.
+	require(HoMM3::moreExposedFootprintThreat(-50, -10) == -50,
+		"HoMM3 wide attacker must retain head-cell risk");
+	require(HoMM3::moreExposedFootprintThreat(-5, -70) == -70,
+		"HoMM3 wide attacker must retain tail-cell risk");
+	require(HoMM3::moreExposedFootprintThreat(0, 0) == 0,
+		"HoMM3 empty threat must be neutral");
+	try { HoMM3::moreExposedFootprintThreat(std::numeric_limits<double>::quiet_NaN(), -1); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
 	FHeroes2::TacticsInput input{100, 100, 30, 0, true, false, false};
@@ -471,8 +761,56 @@ int main()
 	cover.opponentHasShooters = false;
 	cover.opponentIsNeutral = false;
 	require(!TUM::holdMeleeForShooters(cover), "Do not apply neutral-only rule to an enemy hero");
+	// The real TUM adapter consumes the native reachability-map distance.
+	// In particular, an unreachable melee-contact hex is encoded as -1,
+	// which previously compared as <= every positive movement allowance.
+	require(!TUM::canReachNextTurn(-1, 4), "Unreachable contact must not break the neutral shooter screen");
+	require(!TUM::canReachNextTurn(-10, 4), "Any negative native distance must be rejected");
+	require(TUM::canReachNextTurn(0, 0), "A reachable occupied hex needs no movement");
+	require(TUM::canReachNextTurn(4, 4), "A contact at the exact speed boundary is a real threat");
+	require(!TUM::canReachNextTurn(5, 4), "Out-of-range reachable contact cannot break the screen");
+	require(!TUM::canReachNextTurn(0, -1), "Negative movement is not a legal threat");
 	for(int effects = 0; effects < 8; ++effects)
 		require(TUM::ballistaMayTarget(effects & 1, effects & 2, effects & 4) == (effects == 0), "Do not wake disabled targets with a ballista");
+	// The engine's Artillery grant can make a ballista fire twice. A
+	// single-shot ranking can prefer the small stack while the same native
+	// damage estimate over a full volley prefers a durable alternative.
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 1) == 100,
+		"One shot values a kill but cannot exceed the stack value");
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 2) == 100,
+		"Extra shots cannot double count a stack already killed");
+	require(TUM::projectedSiegeVolleyLoss(200, 100, 40, 1) == 80,
+		"One shot values only lost health, not entire surviving stack");
+	require(TUM::projectedSiegeVolleyLoss(200, 100, 40, 2) == 160,
+		"Two shots value cumulative projected loss on a durable target");
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 1)
+		> TUM::projectedSiegeVolleyLoss(200, 100, 40, 1),
+		"A single shot favors the killable small stack");
+	require(TUM::projectedSiegeVolleyLoss(100, 20, 20, 2)
+		< TUM::projectedSiegeVolleyLoss(200, 100, 40, 2),
+		"A second shot can reverse the selection");
+	try { TUM::projectedSiegeVolleyLoss(100, 0, 5, 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { TUM::projectedSiegeVolleyLoss(100, 20, 5, 0); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { TUM::projectedSiegeVolleyLoss(100, 20,
+		std::numeric_limits<double>::infinity(), 2); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	// A neutral's wide occupied footprint can have a legal tail shot but no
+	// legal head shot. Guarding only its head abandons active allied archers.
+	const std::array<int, 2> wideShotCells{20, 19};
+	require(TUM::shooterCanHitAnyOccupiedCell(wideShotCells,
+		[](int cell) { return cell == 19; }),
+		"Native shooter screen must recognize a legal wide-target tail shot");
+	require(TUM::shooterCanHitAnyOccupiedCell(wideShotCells,
+		[](int cell) { return cell == 20; }),
+		"Native shooter screen must retain a legal wide-target head shot");
+	require(!TUM::shooterCanHitAnyOccupiedCell(wideShotCells,
+		[](int) { return false; }),
+		"No legal shot into either occupied cell means no firing line");
+	require(!TUM::shooterCanHitAnyOccupiedCell(std::array<int, 0>{},
+		[](int) { return true; }),
+		"An empty enemy footprint never creates a legal shot");
 	require(!TUM::creatureMayApplyEffect(true), "Do not recast existing effect");
 	require(TUM::creatureMayApplyEffect(false), "Allow a new effect");
 	// Siege hold is invalidated by a breach in either occupied cell of a
@@ -519,19 +857,19 @@ int main()
 
 	// In the live VCMI projection, a fast double-wide decoy may be near
 	// by its tail, even if its head is just outside the two-turn radius.
-	const auto linearDistance = [](int first, int second) { return std::abs(first - second); };
+	const auto decoyFootprintDistance = [](int first, int second) { return std::abs(first - second); };
 	const int wideDistance = TUM::nearestFootprintDistance(
-		std::array<int, 1>{0}, std::array<int, 2>{10, 9}, linearDistance);
+		std::array<int, 1>{0}, std::array<int, 2>{10, 9}, decoyFootprintDistance);
 	require(wideDistance == 9, "Decoy distance must use the nearest occupied cell");
 	require(!TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, 10),
 		"Wide enemy head alone would miss the guarded radius");
 	require(TUM::ignoreNearbyFastDecoyForMovement(4, 7, 3, wideDistance),
 		"Wide enemy tail inside the radius must count as nearby");
 	require(TUM::nearestFootprintDistance(std::array<int, 2>{0, 1},
-		std::array<int, 2>{10, 11}, linearDistance) == 9,
+		std::array<int, 2>{10, 11}, decoyFootprintDistance) == 9,
 		"Wide acting stack must also use both occupied cells");
 	require(TUM::nearestFootprintDistance(std::array<int, 0>{},
-		std::array<int, 1>{5}, linearDistance) == std::numeric_limits<int>::max(),
+		std::array<int, 1>{5}, decoyFootprintDistance) == std::numeric_limits<int>::max(),
 		"Invalid empty footprint must not create a nearby target");
 
 	// The published fast-decoy fix has no recoverable scoring code.

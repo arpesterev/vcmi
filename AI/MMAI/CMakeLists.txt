@@ -7,6 +7,8 @@ endif()
 
 set(MMAI_FILES
   BAI/logger.h
+  BAI/nn_output_validation.h
+  BAI/nn_v13_action_routing.h
   BAI/factory.h
   BAI/factory.cpp
   BAI/router.cpp

@@ -660,7 +660,33 @@ void CPlayerInterface::battleStart(const BattleID & battleID, const CCreatureSet
 
 	if ((replayAllowed && useQuickCombat) || forceQuickCombat)
 	{
-		prepareAutoFightingAI(battleID, army1, army2, tile, hero1, hero2, side);
+		// Only the explicitly selected strict MMAI receives this recovery path.
+		// A missing or incompatible ONNX model must not crash the GUI or cause
+		// another scripted battle AI to be silently substituted. Instead, make
+		// the failed preload visible and let CClient construct manual combat.
+		if(settings["ai"]["combatAlliedAI"].String() == "MMAI")
+		{
+			try
+			{
+				prepareAutoFightingAI(battleID, army1, army2, tile, hero1, hero2, side);
+			}
+			catch(const std::exception & e)
+			{
+				isAutoFightOn = false;
+				autofightingAI.reset();
+				logGlobal->error("MMAI: ONNX quick-combat preload failed; manual battle required: %s", e.what());
+				// In non-GUI runs keep the failure explicit. Manual combat only
+				// exists when a human battle interface can be constructed.
+				if(settings["session"]["headless"].Bool())
+					throw;
+				showInfoDialog("MMAI neural model could not be loaded: " + std::string(e.what())
+					+ "\nAutomatic combat was not started. Please fight this battle manually.");
+			}
+		}
+		else
+		{
+			prepareAutoFightingAI(battleID, army1, army2, tile, hero1, hero2, side);
+		}
 	}
 
 	waitForAllDialogs();

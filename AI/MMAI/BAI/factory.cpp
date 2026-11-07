@@ -14,6 +14,8 @@
 #include "filesystem/Filesystem.h"
 #include <onnxruntime_c_api.h>
 
+#include "BAI/nn_model_metadata.h"
+#include "BAI/nn_output_validation.h"
 #include "BAI/v13/BAI_v13.h"
 #include "BAI/v13/nn_model_v13.h"
 #include "BAI/v15/BAI_v15.h"
@@ -64,23 +66,13 @@ namespace
 		 * If needed, NNModel may be extended to support other versions as well.
 		 *
 		 */
-		int res = -1;
-
 		Ort::AllocatedStringPtr v = md.LookupCustomMetadataMapAllocated("version", allocator);
 		if(!v)
 			throw std::runtime_error("NNBase: readVersion: no such key");
 
-		std::string vs(v.get());
-		try
-		{
-			res = std::stoi(vs);
-		}
-		catch(...)
-		{
-			throw std::runtime_error("NNBase: readVersion: not an int: " + vs);
-		}
-
-		return res;
+		// Match the exact schema metadata emitted by the V13/V15 exporters.
+		// A malformed version must fail before selecting a neural backend.
+		return parseNNModelVersion(v.get());
 	}
 
 	std::shared_ptr<NNContainer> CreateNNContainer(const std::string & path)
@@ -98,6 +90,9 @@ namespace
 // Factory method for versioned derived NNModel (e.g. NNModel::V1)
 std::shared_ptr<MMAI::Schema::IModel> CreateNNModel(const std::string & path, float temperature, uint64_t seed)
 {
+	// Report an invalid configured temperature before opening ONNX weights.
+	// No neural model or scripted substitute is constructed on this path.
+	validateNNModelSamplingTemperature(temperature);
 	auto container = CreateNNContainer(path);
 
 	if(container->version == 13)

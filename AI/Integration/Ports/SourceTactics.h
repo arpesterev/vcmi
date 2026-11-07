@@ -22,6 +22,20 @@ namespace AIIntegration::Ports
 {
 namespace HoMM3
 {
+// Source: ai_tactical.cpp, type_AI_attack_hex_chooser::checkAdjacentHexes.
+// Its local attack-hex value and best_value are signed 32-bit retail longs.
+// Our VCMI damage/threat previews are fractional; compare their truncated
+// signed integer equivalents before the source's path-cost tie break.
+// This is a discrete host projection, not exact HoMM3 damage mathematics.
+inline int32_t discreteMeleeHexValue(double value)
+{
+	if(!std::isfinite(value))
+		throw std::invalid_argument("HoMM3 melee hex score must be finite");
+	return static_cast<int32_t>(std::clamp(std::trunc(value),
+		static_cast<double>(std::numeric_limits<int32_t>::min()),
+		static_cast<double>(std::numeric_limits<int32_t>::max())));
+}
+
 // Source: ai_tactical.cpp, type_AI_attack_hex_chooser::check_adjacent_hexes.
 // Once the attack value and turn count tie, Cavalier/Champion choose the
 // costlier approach to preserve jousting; other troops prefer a cheaper route.
@@ -31,6 +45,166 @@ inline bool preferEqualValueMeleeHex(int candidatePathCost, int currentPathCost,
 	if(candidatePathCost < 0 || currentPathCost < 0)
 		throw std::invalid_argument("HoMM3 melee tie break requires nonnegative path costs");
 	return jouster ? candidatePathCost > currentPathCost : candidatePathCost < currentPathCost;
+}
+
+// Source: checkAdjacentHexes combines getHexAttackValue for both occupied
+// cells of a double-wide attacker, with a single shared checked-shooter mask.
+// Evaluate physical footprint contact once per *shooter*, not once per hex.
+// VCMI supplies the prospective head/tail cells and actual legal attacks.
+template<typename AttackerFootprint, typename ShooterFootprint, typename Distance>
+inline bool attackFootprintEngagesShooter(const AttackerFootprint & attacker,
+	const ShooterFootprint & shooter, Distance distance)
+{
+	for(const auto & attackerHex : attacker)
+		for(const auto & shooterHex : shooter)
+			if(distance(attackerHex, shooterHex) == 1)
+				return true;
+	return false;
+}
+
+// Source: ai_tactical.cpp, type_AI_attack_hex_chooser::getHexAttackValue.
+// An adjacent enemy shooter that loses its ability to shoot contributes the
+// difference between its ranged and melee combat values, scaled by surviving
+// hit points / hit points per creature. The recovered implementation floors
+// even a nonpositive contribution to one. Native VCMI attack estimates are
+// an explicit projection of those HoMM3 combat values, not a direct port.
+inline int32_t pinnedShooterValue(double rangedUnitValue, double meleeUnitValue,
+	int64_t remainingHitPoints, int64_t hitPointsPerCreature)
+{
+	if(!std::isfinite(rangedUnitValue) || !std::isfinite(meleeUnitValue)
+		|| rangedUnitValue < 0 || meleeUnitValue < 0 || remainingHitPoints < 0
+		|| hitPointsPerCreature <= 0)
+		throw std::invalid_argument("HoMM3 shooter pin needs nonnegative values and positive unit health");
+	if(remainingHitPoints == 0)
+		return 0;
+	const double scaled = (rangedUnitValue - meleeUnitValue)
+		* static_cast<double>(remainingHitPoints) / static_cast<double>(hitPointsPerCreature);
+	if(!std::isfinite(scaled))
+		throw std::invalid_argument("HoMM3 shooter pin overflowed");
+	return static_cast<int32_t>(std::clamp(std::trunc(scaled), 1.0,
+		static_cast<double>(std::numeric_limits<int32_t>::max())));
+}
+
+// Pinned getHexAttackValue compares a neighboring shooter's ranged and
+// melee combat values. VCMI's native FREE_SHOOTING may preserve a legal shot
+// even after melee contact. Do not pretend contact suppresses that shooter.
+// Restricted free shooting can still lose adjacent shots; this is a VCMI
+// legality correction to a partial port, not an exact HoMM3 valuation.
+inline bool nativeShooterSuppressionPossible(bool canShootNow,
+	bool canShootWhileBlocked, bool canShootAdjacent)
+{
+	return canShootNow && !(canShootWhileBlocked && canShootAdjacent);
+}
+
+// The pinned checkAdjacentHexes consumes a precomputed enemy_attacks[hex]
+// landing-risk field. In the VCMI approximation, the prospective landing
+// cell is still empty, so battleCanShoot(enemy, thatCell) would incorrectly
+// return false. Reproduce the host's blocked-shot / range checks using
+// authoritative unit bonuses and hypothetical cell distance instead.
+// This is VCMI shot legality, not a recovered Heroes III valuation.
+inline bool projectedNativeRangedThreat(bool canShootNow, bool newContact,
+	bool canShootBlocked, bool canShootAdjacent, bool hasRangeLimit,
+	int shootingRange, int distance)
+{
+	if(shootingRange < 0 || distance < 0)
+		throw std::invalid_argument("HoMM3 ranged threat needs nonnegative range and distance");
+	return canShootNow
+		&& (!newContact || (canShootBlocked && canShootAdjacent))
+		&& (!hasRangeLimit || distance <= shootingRange);
+}
+
+// An archer pinned by the moving stack may regain its legal shot after
+// that stack leaves. battleCanShoot(enemy) describes the OLD board state,
+// not the hypothetical landing. Recover shooting only if the moving stack
+// is the actual blocker and no other hostile stack still pins the archer.
+// This is a native VCMI future-state projection, not a retail HoMM3 rule.
+inline bool projectedShooterReadyAfterMoverLeaves(bool canShootNow, bool intrinsicallyCanShoot,
+	bool moverPinsNow, bool anotherBlockerRemains)
+{
+	return canShootNow || (intrinsicallyCanShoot && moverPinsNow && !anotherBlockerRemains);
+}
+
+// Pinned ai_tactical.cpp::getAttackTime gives a stationary attacker a
+// 100-turn path when it cannot reach its goal. getRangedAttackValue instead
+// obtains target time from the full AI goal map, which is not ported here.
+// For the VCMI ranged-target approximation, count steps to the first
+// adjacent attack hex (not the victim's occupied hex), and never invent
+// movement for a speed-zero unit. This is not original getAITargetTime parity.
+inline int projectedRangedTargetTime(int nearestFootprintDistance, int movement, bool hasLegalShotNow)
+{
+	if(nearestFootprintDistance < 0 || movement < 0)
+		throw std::invalid_argument("HoMM3 projected ranged target time needs nonnegative distance and speed");
+	// getAITargetTime accounts for shooters as well as melee pursuers. An
+	// archer with a legal native shot can threaten THIS active stack now,
+	// even at speed zero. Never treat its only useful action as pursuit.
+	if(hasLegalShotNow)
+		return 1;
+	const int stepsToMelee = std::max(0, nearestFootprintDistance - 1);
+	if(stepsToMelee == 0)
+		return 1;
+	if(movement == 0)
+		return 100;
+	// Overflow-safe ceil(stepsToMelee / movement), at least one turn.
+	return 1 + (stepsToMelee - 1) / movement;
+}
+
+// Pinned getRangedAttackValue tests enemy.cannotAttack() before using the
+// target's global attack time. VCMI battleCanAttackUnit only answers whether
+// the unit can MELEE (without spatial reasoning). A ranged-only war machine
+// can still fire right now, so it must not be treated as incapable of attack.
+// This is a native capability adaptation, not recovery of the source AI goal.
+inline bool nativeTargetCanAttack(bool canMelee, bool canShootNow)
+{
+	return canMelee || canShootNow;
+}
+
+// The pinned checkAdjacentHexes consults a precomputed enemy_attacks[cell]
+// field. Its generator is not yet reproduced. In the native approximation,
+// each distinct hostile stack can take at most one ordinary next action:
+// combine the strongest shot or melee approach PER enemy, but never value
+// casualties above the total combat value of our landing stack. Taking the
+// global maximum misses independent threats from other living enemies.
+// This is a bounded VCMI threat proxy, not a recovery of the retail field.
+inline double addIndependentEnemyThreat(double accumulatedLoss, double nextEnemyLoss, double stackValue)
+{
+	if(!std::isfinite(accumulatedLoss) || !std::isfinite(nextEnemyLoss) || !std::isfinite(stackValue)
+		|| accumulatedLoss < 0 || nextEnemyLoss < 0 || stackValue < 0)
+		throw std::invalid_argument("HoMM3 threat projection needs finite nonnegative combat values");
+	return std::min(stackValue, accumulatedLoss + nextEnemyLoss);
+}
+
+// checkAdjacentHexes uses the lower enemy_attacks score for two occupied
+// hexes. Native projected incoming-damage scores are negative (danger).
+inline double moreExposedFootprintThreat(double head, double tail)
+{
+	if(!std::isfinite(head) || !std::isfinite(tail))
+		throw std::invalid_argument("HoMM3 landing threat must be finite");
+	return std::min(head, tail);
+}
+
+// HoMM3 getMultiHeadBonus credits additional enemies, while getBreathBonus
+// debits friendly stacks hit beyond the primary target. VCMI enumerates
+// only targets actually affected by the attack from the chosen native hex.
+// This is signed projected combat value, NOT identical HoMM3 damage math.
+inline double collateralStrikeValue(bool enemy, double projectedLoss)
+{
+	if(!std::isfinite(projectedLoss) || projectedLoss < 0)
+		throw std::invalid_argument("HoMM3 secondary strike needs finite nonnegative loss");
+	return enemy ? projectedLoss : -projectedLoss;
+}
+
+// Pinned getSimpleAttackEffect subtracts friendly casualties from inflicted
+// losses and returns a signed long. Native ranged retaliation can therefore
+// make a VCMI-hosted shot net-negative. Preserve that sign for the HoMM3-only
+// scorer; the existing TUM composition intentionally retains its unsigned
+// partial-baseline projection. This is not retail damage-formula parity.
+inline int32_t signedProjectedAttackEffect(double value)
+{
+	if(!std::isfinite(value))
+		throw std::invalid_argument("HoMM3 net attack effect must be finite");
+	return static_cast<int32_t>(std::clamp(value,
+		static_cast<double>(std::numeric_limits<int32_t>::min()),
+		static_cast<double>(std::numeric_limits<int32_t>::max())));
 }
 
 struct RangedTarget
@@ -397,6 +571,24 @@ inline bool holdMeleeForShooters(const ShooterProtection & state)
 		&& !state.opponentHasShooters && !state.opponentCanReachAnyFriendlyStack;
 }
 
+// A shooter can have a legal native shot through the exposed TAIL of a
+// double-wide enemy even if its head is blocked by obstacles or siege geometry.
+// Keep the neutral archer screen if ANY occupied enemy cell can be shot.
+template<typename Footprint, typename CanShoot>
+inline bool shooterCanHitAnyOccupiedCell(const Footprint & occupied, CanShoot canShoot)
+{
+	return std::any_of(occupied.begin(), occupied.end(), canShoot);
+}
+
+// Native reachability uses a negative distance for an unreachable hex. The
+// published TUM neutral-melee screen must react only to an enemy that can
+// ACTUALLY reach a friendly unit next movement turn. -1 <= speed is not a
+// legitimate path, even when VCMI allows a hypothetical melee contact hex.
+inline bool canReachNextTurn(int pathDistance, int movementRange)
+{
+	return pathDistance >= 0 && movementRange >= 0 && pathDistance <= movementRange;
+}
+
 /// AI Improvements.txt: a ballista must not break Blind, Paralyze or Petrification.
 inline bool ballistaMayTarget(bool blind, bool paralyzed, bool petrified)
 {
@@ -428,6 +620,21 @@ inline bool ignoreNearbyFastDecoyForMovement(int ownSpeed, int enemySpeed, int s
 		&& slowerEnemySpeed <= ownSpeed
 		&& slowerEnemySpeed < enemySpeed
 		&& static_cast<int64_t>(hexDistance) <= static_cast<int64_t>(ownSpeed) * 2 + 1;
+}
+
+// The TUM document does not publish a numerical ballista targeting formula.
+// For VCMI-only projected-loss ranking, price the WHOLE legal volley, bounded
+// by remaining target health. The engine owns the actual attack count, ammo
+// and every hit; this is not a TUM ERA/DLL damage simulation.
+inline double projectedSiegeVolleyLoss(double combatValue, double health,
+    double damagePerHit, int legalShots)
+{
+    if(!std::isfinite(combatValue) || !std::isfinite(health)
+        || !std::isfinite(damagePerHit) || combatValue < 0 || health <= 0
+        || damagePerHit < 0 || legalShots <= 0)
+        throw std::invalid_argument("TUM siege volley requires finite nonnegative damage/value, positive health and attacks");
+    const double projectedDamage = std::min(health, damagePerHit * legalShots);
+    return combatValue * projectedDamage / health;
 }
 
 /// AI Improvements.txt: Hypnotized troops under AI control prefer attacks

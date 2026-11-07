@@ -9,6 +9,9 @@
  */
 
 #include "nn_model_v15.h"
+#include "BAI/nn_model_metadata.h"
+#include "BAI/nn_output_validation.h"
+#include "BAI/nn_model_resolution.h"
 
 #include "schema/base.h"
 #include "schema/v15/constants.h"
@@ -95,12 +98,7 @@ namespace
 			throwf("toScalar: %s: unsupported scalar type", name);
 		}
 
-		int64_t numel = 1;
-		for(auto d : shape)
-			numel *= d;
-
-		if(numel != 1)
-			throwf("toScalar: %s: bad numel: want: 1, have: %d", name, numel);
+		requireNNV15ScalarOutputShape(shape, name);
 
 		return tensor.GetTensorData<T>()[0];
 	}
@@ -159,8 +157,9 @@ namespace
 		auto sample = Sample{};
 		auto greedy = Sample{};
 
-		if(temperature < 0.0f)
-			throwf("sample: negative temperature");
+		// Validate the actual ONNX head in both greedy and stochastic modes.
+		// Neither NaN/Inf nor negative weights may be interpreted as actions.
+		validateNNActionDistribution(probs, temperature);
 
 		bool isGreedy = temperature < 1e-5;
 
@@ -315,18 +314,7 @@ Schema::Side NNModel::readSide() const
 	 *
 	 * Battlefield side the model was trained on (see Schema::Side enum).
 	 */
-	Schema::Side res;
-	const auto vs = readMetadata(container, "side");
-	try
-	{
-		res = static_cast<Schema::Side>(std::stoi(vs));
-	}
-	catch(...)
-	{
-		throw std::runtime_error("metadata error: side: not an int");
-	}
-
-	return res;
+	return parseNNModelSide(readMetadata(container, "side"));
 }
 
 std::vector<NNModel::NodeInputSpec> NNModel::readNodeOrder() const
@@ -336,6 +324,7 @@ std::vector<NNModel::NodeInputSpec> NNModel::readNodeOrder() const
 	 *   ["Global", "Player", "Unit", "Hex", "Action"]
 	 */
 	auto res = std::vector<NodeInputSpec>{};
+	std::set<int> seenTypes;
 	const auto jsonstr = readMetadata(container, "node_order");
 
 	try
@@ -346,6 +335,7 @@ std::vector<NNModel::NodeInputSpec> NNModel::readNodeOrder() const
 		{
 			const auto & name = jv.String();
 			const auto type = nodeTypeByName(name);
+			requireUniqueNNMetadataType(seenTypes, static_cast<int>(type), "node_order");
 			res.push_back(NodeInputSpec{type, name, nodeAttrSize(type)});
 		}
 	}
@@ -370,6 +360,7 @@ std::vector<NNModel::EdgeInputSpec> NNModel::readEdgeOrder() const
 	 * the flattened edge input order.
 	 */
 	auto res = std::vector<EdgeInputSpec>{};
+	std::set<int> seenTypes;
 	const auto jsonstr = readMetadata(container, "edge_order");
 
 	try
@@ -386,6 +377,7 @@ std::vector<NNModel::EdgeInputSpec> NNModel::readEdgeOrder() const
 			const auto relName = parts[1].String();
 			const auto dstName = parts[2].String();
 			const auto type = edgeTypeByNames(srcName, relName, dstName);
+			requireUniqueNNMetadataType(seenTypes, static_cast<int>(type), "edge_order");
 			res.push_back(EdgeInputSpec{type, srcName, relName, dstName, edgeAttrSize(type)});
 		}
 	}
@@ -444,6 +436,21 @@ std::vector<const char *> NNModel::readInputNames()
 			throwf("wrong input name at %d: want: %s, have: %s", ind, tailNames[i], res[ind]);
 	}
 
+	// Preflight the type/rank and known fixed axes of every model input.
+	// The exporter marks graph cardinalities as dynamic (symbolic -1).
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto typeInfo = container->session->GetInputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	for(size_t i = 0; i < nodeOrder.size(); ++i)
+		check(i, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1, nodeOrder[i].attrSize});
+	check(nodeOrder.size(), ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {2, -1});
+	check(nodeOrder.size() + 1, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1, edgeAttrFlatSize});
+	check(nodeOrder.size() + 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {static_cast<int64_t>(edgeOrder.size())});
+	check(nodeOrder.size() + 3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {-1});
+
 	return res;
 }
 
@@ -478,6 +485,30 @@ std::vector<const char *> NNModel::readOutputNames()
 	for(size_t i = 0; i < expectedNames.size(); ++i)
 		if(expectedNames[i] != res[i])
 			throwf("wrong output name at %d: want: %s, have: %s", i, expectedNames[i], res[i]);
+
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto typeInfo = container->session->GetOutputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	// The exporter allows a scalar [] or singleton [1] action/value head.
+	// Keep the owning Ort::TypeInfo alive while reading each borrowed
+	// TensorTypeAndShapeInfo. Chaining temporaries is a use-after-free.
+	const auto actionType = container->session->GetOutputTypeInfo(0);
+	const auto valueType = container->session->GetOutputTypeInfo(2);
+	const auto actionShape = actionType.GetTensorTypeAndShapeInfo().GetShape();
+	const auto valueShape = valueType.GetTensorTypeAndShapeInfo().GetShape();
+	if(actionShape.empty())
+		check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {});
+	else
+		check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {1});
+	check(1, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1});
+	if(valueShape.empty())
+		check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {});
+	else
+		check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {1});
+	check(3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {-1});
 
 	return res;
 }
@@ -525,12 +556,13 @@ Schema::Side NNModel::getSide()
 
 int NNModel::getAction(const MMAI::Schema::IState * s)
 {
+	// A role model is cached and reused across battles. Protect the shared RNG
+	// and ONNX session from overlapping inferences on different battle threads.
+	const std::lock_guard<std::mutex> inferenceLock(inferenceMutex);
 	NestedLogTag _("getAction");
 	auto timer = ScopedTimer("call");
+	requireNNModelState(s, version, "V15");
 	auto any = s->getSupplementaryData();
-
-	if(s->version() != version)
-		throwf("getAction: unsupported IState version: want: %d, have: %d", version, s->version());
 
 	if(!any.has_value())
 		throw std::runtime_error("extractSupplementaryData: supdata is empty");
@@ -549,7 +581,10 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	if(!graph)
 		throwf("getAction: null graph");
 
-	const auto * gnode = graph->getNodes(ET::NODE_GLOBAL).at(0);
+	const auto & globalNodes = graph->getNodes(ET::NODE_GLOBAL);
+	if(globalNodes.empty() || !globalNodes.front())
+		throwf("getAction: graph has no global node before ONNX inference");
+	const auto * gnode = globalNodes.front();
 	using GA = S15::Graph::NodeAttributes::Global;
 
 	if(gnode->rawAttributes().at(EU(GA::BATTLE_WINNER)) != EU(S15::CombatResult::NONE))
@@ -558,16 +593,19 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 		return MMAI::Schema::ACTION_RESET;
 	}
 
+	const auto activeActionIds = graph->getActiveActionIds();
+	requireNNV15ActionCandidates(activeActionIds.size());
+
 	auto inputs = prepareInputs(graph);
 	auto outputs = container->session->Run(Ort::RunOptions(), inputNames.data(), inputs.data(), inputs.size(), outputNames.data(), outputNames.size());
 
 	if(outputs.size() != 4)
 		throwf("getAction: bad output size: want: 4, have: %d", outputs.size());
 
-	const auto activeActionIds = graph->getActiveActionIds();
 	const auto modelGreedyAction = toScalar<int64_t>("action", outputs[0]);
 	const auto activeProbs = toVec1D<float>("active_probs", outputs[1], static_cast<int64_t>(activeActionIds.size()));
 	const auto value = toScalar<float>("value", outputs[2]);
+	validateNNValueEstimate(value);
 	const auto activeActionIdsOut = toVec1D<int64_t>("active_action_ids_out", outputs[3], static_cast<int64_t>(activeActionIds.size()));
 
 	if(activeActionIds.empty())
@@ -587,8 +625,17 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	if(modelGreedyAction != gaction)
 		throwf("getAction: model greedy action mismatch: output: %d, probabilities: %d", modelGreedyAction, gaction);
 
-	const auto sname = graph->getNode(ET::NODE_ACTION, saction)->name();
-	const auto gname = graph->getNode(ET::NODE_ACTION, gaction)->name();
+	// The ONNX graph uses int64 IDs, but the battle interface accepts int.
+	// Never silently truncate a model-selected node to another action.
+	const int dispatchAction = checkedNNV15ActionId(saction);
+	(void)checkedNNV15ActionId(gaction);
+
+	// A valid ONNX action ID is not enough if the event graph has lost its
+	// corresponding node. Report the original selection, never remap it.
+	const auto * sampleNode = requireNNV15SelectedGraphActionNode(graph->getNode(ET::NODE_ACTION, saction), saction);
+	const auto * greedyNode = requireNNV15SelectedGraphActionNode(graph->getNode(ET::NODE_ACTION, gaction), gaction);
+	const auto sname = sampleNode->name();
+	const auto gname = greedyNode->name();
 
 	logAi->debug(
 		"greedy: %d (prob=%.2f conf=%.2f value=%.4f). Detail: active_index=%d %s", gaction, greedy.prob, greedy.confidence, value, greedy.index, gname
@@ -599,7 +646,7 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	);
 
 	timer.name = boost::str(boost::format("MMAI action: %d (confidence=%.2f): %s") % saction % sample.confidence % sname);
-	return static_cast<int>(saction);
+	return dispatchAction;
 };
 
 double NNModel::getValue(const MMAI::Schema::IState * s)
@@ -622,17 +669,21 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 	{
 		const auto nodes = graph->getNodes(nodeSpec.type);
 		auto flat = std::vector<float>{};
-		flat.resize(nodes.size() * static_cast<size_t>(nodeSpec.attrSize), 0.0f);
+		if(nodeSpec.attrSize < 0)
+			throwf("negative node attribute size for %s", nodeSpec.name);
+		const auto attrSize = static_cast<size_t>(nodeSpec.attrSize);
+		flat.resize(checkedNNObservationProduct("x_" + nodeSpec.name, nodes.size(), attrSize), 0.0f);
 
 		for(size_t i = 0; i < nodes.size(); ++i)
 		{
-			auto out = std::span<float>(flat.data() + (i * static_cast<size_t>(nodeSpec.attrSize)), static_cast<size_t>(nodeSpec.attrSize));
+			requireNNV15GraphElementType(nodes[i], nodeSpec.type, "node " + nodeSpec.name);
+			auto out = std::span<float>(flat.data() + (i * attrSize), attrSize);
 			const auto encoded = nodes[i]->encode(out);
 			if(encoded != nodeSpec.attrSize)
 				throwf("unexpected encoded node size for %s: want: %d, have: %d", nodeSpec.name, nodeSpec.attrSize, encoded);
 		}
 
-		tensors.push_back(toTensor("x_" + nodeSpec.name, flat, {static_cast<int64_t>(nodes.size()), static_cast<int64_t>(nodeSpec.attrSize)}));
+		tensors.push_back(toTensor("x_" + nodeSpec.name, flat, {checkedNNObservationAxis("x_" + nodeSpec.name, nodes.size()), static_cast<int64_t>(nodeSpec.attrSize)}));
 
 		nodeShapeLog << nodeSpec.name << "={" << nodes.size() << ", " << nodeSpec.attrSize << "} ";
 	}
@@ -649,17 +700,21 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 	for(const auto & edgeSpec : edgeOrder)
 	{
 		const auto edges = graph->getEdges(edgeSpec.type);
-		lengths.push_back(static_cast<int>(edges.size()));
+		lengths.push_back(checkedNNObservationIntSize("edge_lengths", edges.size()));
 		edgeLengthLog << edgeSpec.srcName << "_" << edgeSpec.relName << "_" << edgeSpec.dstName << "=" << edges.size() << " ";
 
+		const auto expectedSourceType = nodeTypeByName(edgeSpec.srcName);
+		const auto expectedTargetType = nodeTypeByName(edgeSpec.dstName);
 		for(const auto * edge : edges)
 		{
+			requireNNV15GraphElementType(edge, edgeSpec.type, "edge " + edgeSpec.relName);
 			const auto [src, dst] = edge->endpoints();
+			requireNNV15GraphEdgeEndpoints(src, dst, expectedSourceType, expectedTargetType, edgeSpec.relName);
 			ei_flat_src.push_back(graph->getNodeIndex(src));
 			ei_flat_dst.push_back(graph->getNodeIndex(dst));
 
 			const auto oldSize = ea_flat.size();
-			ea_flat.resize(oldSize + static_cast<size_t>(edgeAttrFlatSize), 0.0f);
+			ea_flat.resize(checkedNNObservationSum("edge_attr_flat", oldSize, static_cast<size_t>(edgeAttrFlatSize)), 0.0f);
 
 			if(edgeSpec.attrSize > 0)
 			{
@@ -680,23 +735,23 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 
 	const auto sumE = ei_flat_src.size();
 	auto ei_flat = std::vector<int64_t>{};
-	ei_flat.reserve(2 * sumE);
+	ei_flat.reserve(checkedNNObservationProduct("edge_index_flat", sumE, 2));
 	ei_flat.insert(ei_flat.end(), ei_flat_src.begin(), ei_flat_src.end());
 	ei_flat.insert(ei_flat.end(), ei_flat_dst.begin(), ei_flat_dst.end());
 
 	if(ei_flat_dst.size() != sumE)
 		throwf("unexpected ei_flat_dst.size(): want: %d, have: %d", sumE, ei_flat_dst.size());
-	if(ea_flat.size() != sumE * static_cast<size_t>(edgeAttrFlatSize))
-		throwf("unexpected ea_flat.size(): want: %d, have: %d", sumE * static_cast<size_t>(edgeAttrFlatSize), ea_flat.size());
+	if(ea_flat.size() != checkedNNObservationProduct("edge_attr_flat", sumE, static_cast<size_t>(edgeAttrFlatSize)))
+		throwf("unexpected ea_flat.size(): want: %d, have: %d", checkedNNObservationProduct("edge_attr_flat", sumE, static_cast<size_t>(edgeAttrFlatSize)), ea_flat.size());
 
 	auto activeActionIds = graph->getActiveActionIds();
 	if(activeActionIds.empty())
 		throwf("prepareInputs: no active actions");
 
-	tensors.push_back(toTensor("edge_index_flat", ei_flat, {2, static_cast<int64_t>(sumE)}));
-	tensors.push_back(toTensor("edge_attr_flat", ea_flat, {static_cast<int64_t>(sumE), static_cast<int64_t>(edgeAttrFlatSize)}));
-	tensors.push_back(toTensor("edge_lengths", lengths, {static_cast<int64_t>(edgeOrder.size())}));
-	tensors.push_back(toTensor("active_action_ids", activeActionIds, {static_cast<int64_t>(activeActionIds.size())}));
+	tensors.push_back(toTensor("edge_index_flat", ei_flat, {2, checkedNNObservationAxis("edge_index_flat", sumE)}));
+	tensors.push_back(toTensor("edge_attr_flat", ea_flat, {checkedNNObservationAxis("edge_attr_flat", sumE), static_cast<int64_t>(edgeAttrFlatSize)}));
+	tensors.push_back(toTensor("edge_lengths", lengths, {checkedNNObservationAxis("edge_lengths", edgeOrder.size())}));
+	tensors.push_back(toTensor("active_action_ids", activeActionIds, {checkedNNObservationAxis("active_action_ids", activeActionIds.size())}));
 
 	logAi->debug("Node shapes: " + nodeShapeLog.str());
 	logAi->debug("Edge lengths: " + edgeLengthLog.str());
@@ -714,13 +769,12 @@ std::vector<Ort::Value> NNModel::prepareInputs(const S15::Graph::IGraph * graph)
 template<typename T>
 Ort::Value NNModel::toTensor(const std::string & name, std::vector<T> & vec, const std::vector<int64_t> & shape)
 {
-	// Sanity check
-	int64_t numel = 1;
-	for(int64_t d : shape)
-		numel *= d;
-
-	if(numel != vec.size())
-		throwf("toTensor: %s: numel check failed: want: %d, have: %d", name, numel, vec.size());
+	// Reject invalid/overflowing graph shape before constructing an ONNX
+	// tensor, without changing valid V13/V15 observation contents.
+	requireNNTensorElementCount(name, shape, vec.size());
+	// Graph encoder failures must not turn into undefined neural decisions.
+	if constexpr(std::is_same_v<T, float>)
+		validateNNObservationValues(vec, name);
 
 	// Create a memory-owning tensor then copy data
 	auto res = Ort::Value::CreateTensor<T>(container->allocator, shape.data(), shape.size());

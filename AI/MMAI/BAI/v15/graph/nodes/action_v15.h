@@ -15,6 +15,7 @@
 #include "BAI/v15/graph/nodes/base_v15.h"
 #include "BAI/v15/graph/nodes/hex_v15.h"
 #include "BAI/v15/graph/nodes/unit_v15.h"
+#include "battle/BattleHex.h"
 #include "battle/BattleSide.h"
 #include "schema/v15/constants.h"
 #include "schema/v15/graph.h"
@@ -59,6 +60,7 @@ public:
 		: actionType(args.actionType)
 		, by(args.by)
 		, target(args.target)
+		, targetPositionAtObservation(args.target ? args.target->cstack.getPosition() : BattleHex{})
 		, endsAt(args.endsAt)
 		, flags(args.flags)
 		, isActive(args.by == nullptr || args.by->isActive) // RETREAT has no `by`, but is still active
@@ -137,6 +139,8 @@ public:
 	const S15::ActionType actionType;
 	const std::shared_ptr<const Nodes::Unit> by;
 	const std::shared_ptr<const Nodes::Unit> target;
+	// Immutable target head hex captured while building this observation.
+	const BattleHex targetPositionAtObservation;
 	const std::vector<std::shared_ptr<const Nodes::Hex>> endsAt; // primary hex is always first
 	const Flags flags;
 	bool isActive;

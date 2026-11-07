@@ -13,11 +13,17 @@
 #include "common.h"
 #include "filesystem/Filesystem.h"
 #include "nn_model_v13.h"
+#include "BAI/nn_model_metadata.h"
+#include "BAI/nn_output_validation.h"
+#include "BAI/nn_model_resolution.h"
+#include "BAI/nn_v13_action_routing.h"
 #include "schema/base.h"
+#include "schema/v13/constants.h"
 #include "vstd/CLoggerBase.h"
 #include "json/JsonNode.h"
 
 #include <onnxruntime_cxx_api.h>
+#include <array>
 
 namespace MMAI::BAI::V13
 {
@@ -145,8 +151,9 @@ namespace
 		auto sample = Sample{};
 		auto greedy = Sample{};
 
-		if(temperature < 0.0f)
-			throwf("sample: negative temperature");
+		// Validate the actual ONNX head in both greedy and stochastic modes.
+		// Neither NaN/Inf nor negative weights may be interpreted as actions.
+		validateNNActionDistribution(probs, temperature);
 
 		// Greedy sample: argmax, first tie.
 		{
@@ -226,21 +233,10 @@ Schema::Side NNModel::readSide() const
 	 * Battlefield side the model was trained on (see Schema::Side enum).
 	 *
 	 */
-	Schema::Side res;
 	Ort::AllocatedStringPtr v = container->metadata.LookupCustomMetadataMapAllocated("side", container->allocator);
 	if(!v)
 		throw std::runtime_error("metadata error: side: no such key");
-	std::string vs(v.get());
-	try
-	{
-		res = static_cast<Schema::Side>(std::stoi(vs));
-	}
-	catch(...)
-	{
-		throw std::runtime_error("metadata error: side: not an int");
-	}
-
-	return res;
+	return parseNNModelSide(v.get());
 }
 
 Vec3D<int32_t> NNModel::readActionTable() const
@@ -277,7 +273,7 @@ Vec3D<int32_t> NNModel::readActionTable() const
 					{
 						throwf("invalid data type: want: %d, got: %d", EI(JsonNode::JsonType::DATA_INTEGER), EI(jv2.getType()));
 					}
-					vec2.push_back(static_cast<int32_t>(jv2.Integer()));
+					vec2.push_back(checkedV13ActionTableEntry(jv2.Integer()));
 				}
 				vec1.emplace_back(vec2);
 			}
@@ -289,12 +285,7 @@ Vec3D<int32_t> NNModel::readActionTable() const
 		throwf(std::string("failed to parse 'action_table' JSON: ") + e.what());
 	}
 
-	if(res.size() != 4)
-		throwf("readActionTable: bad size for d1: want: 4, have: %zu", res.size());
-	if(res[0].size() != 165)
-		throwf("readActionTable: bad size for d2: want: 165, have: %zu", res[0].size());
-	if(res[0][0].size() != 165)
-		throwf("readActionTable: bad size for d3: want: 165, have: %zu", res[0][0].size());
+	validateV13ActionTableShape(res);
 
 	return res;
 }
@@ -333,6 +324,24 @@ std::vector<const char *> NNModel::readInputNames()
 		inputNamePtrs.emplace_back(container->session->GetInputNameAllocated(i, container->allocator));
 		res.push_back(inputNamePtrs.back().get());
 	}
+
+	// Match the exported positional ONNX contract before any battle inference.
+	constexpr std::array<const char *, 4> expectedNames = {"obs", "ei_flat", "ea_flat", "lengths"};
+	for(size_t i = 0; i < expectedNames.size(); ++i)
+		requireNNV13TensorName(res[i], expectedNames[i], i, "input");
+
+	// The exporter binds these positional tensors by name, dtype and rank.
+	// A foreign ONNX model must fail on load, not during the first live turn.
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto typeInfo = container->session->GetInputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1});
+	check(1, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, {2, -1});
+	check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {-1, 1});
+	check(3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {LT_COUNT});
 
 	return res;
 }
@@ -379,6 +388,24 @@ std::vector<const char *> NNModel::readOutputNames()
 		res.push_back(outputNamePtrs.back().get());
 	}
 
+	// Match the exported positional ONNX contract before any battle inference.
+	constexpr std::array<const char *, 6> expectedNames = {"act0_probs", "hex1_probs", "hex2_probs", "act0_mask", "hex1_mask", "hex2_mask"};
+	for(size_t i = 0; i < expectedNames.size(); ++i)
+		requireNNV13TensorName(res[i], expectedNames[i], i, "output");
+
+	const auto check = [this, &res](size_t i, ONNXTensorElementDataType dtype, std::initializer_list<int64_t> shape)
+	{
+		const auto typeInfo = container->session->GetOutputTypeInfo(i);
+		const auto spec = typeInfo.GetTensorTypeAndShapeInfo();
+		requireNNModelTensorSignature(res[i], spec.GetElementType(), dtype, spec.GetShape(), shape);
+	};
+	check(0, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {4});
+	check(1, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {4, 165});
+	check(2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, {165, 165});
+	check(3, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {4});
+	check(4, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {4, 165});
+	check(5, ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32, {165, 165});
+
 	return res;
 }
 
@@ -421,12 +448,13 @@ Schema::Side NNModel::getSide()
 
 int NNModel::getAction(const MMAI::Schema::IState * s)
 {
+	// A role model is cached and reused across battles. Protect the shared RNG
+	// and ONNX session from overlapping inferences on different battle threads.
+	const std::lock_guard<std::mutex> inferenceLock(inferenceMutex);
 	NestedLogTag _("getAction");
 	auto timer = ScopedTimer("call");
+	requireNNModelState(s, version, "V13");
 	auto any = s->getSupplementaryData();
-
-	if(s->version() != version)
-		throwf("getAction: unsupported IState version: want: %d, have: %d", version, s->version());
 
 	if(!any.has_value())
 		throw std::runtime_error("extractSupplementaryData: supdata is empty");
@@ -435,6 +463,8 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 		throwf("getAction: anycast failed: %s", err);
 
 	const auto * sup = std::any_cast<const MMAI::Schema::V13::ISupplementaryData *>(any);
+	if(!sup)
+		throwf("getAction: null supplementary data");
 
 	if(sup->getIsBattleEnded())
 	{
@@ -442,6 +472,8 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 		return MMAI::Schema::ACTION_RESET;
 	}
 
+	const auto * actionMask = s->getActionMask();
+	requireNNV13ActionMask(actionMask, static_cast<size_t>(Schema::V13::N_ACTIONS));
 	auto inputs = prepareInputsV13(s, sup);
 	auto outputs = container->session->Run(Ort::RunOptions(), inputNames.data(), inputs.data(), inputs.size(), outputNames.data(), outputNames.size());
 
@@ -455,9 +487,22 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 	const auto hex1_mask = toVec2D<int>("hex1_mask", outputs[4], {4, 165});
 	const auto hex2_mask = toVec2D<int>("hex2_mask", outputs[5], {165, 165});
 
-	const auto [act0_sample, act0_greedy] = categorical(act0_probs, temperature, rng);
-	const auto [hex1_sample, hex1_greedy] = categorical(hex1_probs.at(act0_sample.index), temperature, rng);
-	const auto [hex2_sample, hex2_greedy] = categorical(hex2_probs.at(hex1_sample.index), temperature, rng);
+	// V13 is hierarchical. WAIT has no hex parameters, while only AMOVE
+	// needs hex2. Do not sample unused ONNX rows: they may be all zeros.
+	// Decode the greedy path independently, not under the sampled action's
+	// conditional heads; zero-temperature sampling does not consume RNG.
+	const auto [act0_sample, hex1_sample, hex2_sample] = sampleV13ActionPath(
+		act0_probs, hex1_probs, hex2_probs,
+		[this](const std::vector<float> & probabilities) {
+			return categorical(probabilities, temperature, rng).first;
+		}
+	);
+	const auto [act0_greedy, hex1_greedy, hex2_greedy] = sampleV13ActionPath(
+		act0_probs, hex1_probs, hex2_probs,
+		[this](const std::vector<float> & probabilities) {
+			return categorical(probabilities, 0.0f, rng).first;
+		}
+	);
 
 	if(act0_sample.prob == 0)
 		throwf("getAction: act0_sample has 0 probability");
@@ -482,11 +527,14 @@ int NNModel::getAction(const MMAI::Schema::IState * s)
 			throwf("getAction: hex2_sample is masked out");
 	}
 
-	const auto & saction = actionTable.at(act0_sample.index).at(hex1_sample.index).at(hex2_sample.index);
+	// An action_table may legitimately contain masked sentinel values, but a
+	// sampled one must be in V13's actual live action space. Do not rely on
+	// an out_of_range from the mask or try a different neural prediction.
+	const auto saction = checkedV13DecodedAction(
+		actionTable.at(act0_sample.index).at(hex1_sample.index).at(hex2_sample.index), Schema::V13::N_ACTIONS);
 	const auto & gaction = actionTable.at(act0_greedy.index).at(hex1_greedy.index).at(hex2_greedy.index);
 
-	const auto & mask = s->getActionMask();
-	if(!mask->at(saction))
+	if(!actionMask->at(saction))
 		throwf("getAction: sampled action is masked"); // Incorrect mask?
 
 	auto sconf = act0_sample.confidence * hex1_sample.confidence * hex2_sample.confidence;
@@ -541,6 +589,7 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 		if(EI(type) != i)
 			throwf("unexpected link type: want: %d, have: %d", i, EI(type));
 
+		requireNNV13LinkPayload(links, EI(type));
 		const auto & srcinds = links->getSrcIndex();
 		const auto & dstinds = links->getDstIndex();
 		const auto & attrs = links->getAttributes();
@@ -553,9 +602,16 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 		if(attrs.size() != nlinks)
 			throwf("unexpected attrs.size() for LinkType(%d): want: %d, have: %d", EI(type), nlinks, attrs.size());
 
+
+		// Each exporter link length is an int32 ONNX input. The combined
+		// edge count is an int64 ONNX axis and is duplicated for edge indices.
+		// Validate all three bounds before appending to the vectors, not
+		// after an overflowing cast or reserve multiplication.
+		const int linkLength = checkedNNV13LinkLength(ei_flat_src.size(), nlinks);
+
 		oss << nlinks << " ";
 
-		lengths.push_back(static_cast<int>(nlinks));
+		lengths.push_back(linkLength);
 
 		ei_flat_src.insert(ei_flat_src.end(), srcinds.begin(), srcinds.end());
 		ei_flat_dst.insert(ei_flat_dst.end(), dstinds.begin(), dstinds.end());
@@ -569,18 +625,19 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 	auto sum_e = ei_flat_src.size();
 	auto ei_flat = std::vector<int64_t>{};
 
-	ei_flat.reserve(2 * sum_e);
+	ei_flat.reserve(checkedNNObservationProduct("V13 edge indices", sum_e, 2u));
 	ei_flat.insert(ei_flat.end(), ei_flat_src.begin(), ei_flat_src.end());
 	ei_flat.insert(ei_flat.end(), ei_flat_dst.begin(), ei_flat_dst.end());
 
 	const auto * state = s->getBattlefieldState();
+	requireNNV13BattlefieldObservation(state, static_cast<std::size_t>(Schema::V13::BATTLEFIELD_STATE_SIZE));
 	auto estate = std::vector<float>(state->size());
 	std::ranges::copy(*state, estate.begin());
 
 	auto tensors = std::vector<Ort::Value>{};
-	tensors.push_back(toTensor("obs", estate, {static_cast<int64_t>(estate.size())}));
-	tensors.push_back(toTensor("ei_flat", ei_flat, {2, static_cast<int64_t>(sum_e)}));
-	tensors.push_back(toTensor("ea_flat", ea_flat, {static_cast<int64_t>(sum_e), 1}));
+	tensors.push_back(toTensor("obs", estate, {checkedNNObservationAxis("V13 obs", estate.size())}));
+	tensors.push_back(toTensor("ei_flat", ei_flat, {2, checkedNNObservationAxis("V13 edges", sum_e)}));
+	tensors.push_back(toTensor("ea_flat", ea_flat, {checkedNNObservationAxis("V13 edges", sum_e), 1}));
 	tensors.push_back(toTensor("lengths", lengths, {LT_COUNT}));
 
 	logAi->debug("Edge lengths: [ " + oss.str() + "]");
@@ -592,18 +649,21 @@ std::vector<Ort::Value> NNModel::prepareInputsV13(const MMAI::Schema::IState * s
 template<typename T>
 Ort::Value NNModel::toTensor(const std::string & name, std::vector<T> & vec, const std::vector<int64_t> & shape) const
 {
-	// Sanity check
-	int64_t numel = 1;
-	for(int64_t d : shape)
-		numel *= d;
-
-	if(numel != vec.size())
-		throwf("toTensor: %s: numel check failed: want: %d, have: %d", name, numel, vec.size());
+	// Reject invalid/overflowing graph shape before constructing an ONNX
+	// tensor, without changing valid V13/V15 observation contents.
+	requireNNTensorElementCount(name, shape, vec.size());
+	// Reject corrupted battle attributes before they reach the V13 ONNX graph.
+	if constexpr(std::is_same_v<T, float>)
+		validateNNObservationValues(vec, name);
 
 	// Create a memory-owning tensor then copy data
 	auto res = Ort::Value::CreateTensor<T>(container->allocator, shape.data(), shape.size());
 	T * dst = res.template GetTensorMutableData<T>();
-	std::memcpy(dst, vec.data(), vec.size() * sizeof(T));
+	// V13 may have no links of a given type. C++ does not guarantee that
+	// a zero-byte memcpy with vec.data() == nullptr is valid; V15 already
+	// guards this case. Keep the ONNX tensor shape and contents unchanged.
+	if(!vec.empty())
+		std::memcpy(dst, vec.data(), vec.size() * sizeof(T));
 	return res;
 }
 

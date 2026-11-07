@@ -14,6 +14,7 @@
 #include "schema/base.h"
 #include "schema/v13/types.h"
 
+#include <mutex>
 #include <onnxruntime_cxx_api.h>
 
 namespace MMAI::BAI::V13
@@ -43,6 +44,8 @@ private:
 	float temperature;
 	Schema::Side side;
 	std::mt19937 rng;
+	// Router caches each role model; getAction may run on multiple battle threads.
+	std::mutex inferenceMutex;
 
 	const int version = 13;
 
