@@ -23,6 +23,12 @@ int main()
 	require(!nativeHeroSpellMayReflect(false, false, true, 100), "Area spells remain eligible against Magic Mirror");
 	require(!nativeHeroSpellMayReflect(true, true, true, 100), "Mass spells remain eligible against Magic Mirror");
 	require(!nativeHeroSpellMayReflect(false, true, false, 100), "Positive and neutral spells are not reflected");
+	require(hostileSpellShouldAttackNow(true, false, false, false, true), "Source kill-only branch attacks immediately");
+	require(hostileSpellShouldAttackNow(false, true, false, false, true), "Last friendly opportunity attacks immediately");
+	require(hostileSpellShouldAttackNow(false, false, true, false, true), "Active melee target permits casting before retaliation");
+	require(!hostileSpellShouldAttackNow(false, false, false, false, false), "Nonthreatening target cannot force an early cast");
+	require(!hostileSpellShouldAttackNow(false, false, false, true, true), "Earlier friendly action preserves a later casting opportunity");
+	require(hostileSpellShouldAttackNow(false, false, false, true, false), "Threat acting before every other ally permits an early cast");
 	require(spellPlanningRounds(100, 100) == 7, "Equal armies retain the seven-round source horizon");
 	require(spellPlanningRounds(260, 100) == 1, "Source first odds rung shortens the horizon");
 	require(spellPlanningRounds(190, 100) == 2, "Source second odds rung is inclusive");
@@ -41,6 +47,18 @@ int main()
 	require(spellDamageValue(100, 100, 100, true) == 100, "Lethal damage has no wake-up penalty");
 	require(spellDamageValue(100, 100, 150, false) == 100, "Overkill does not inflate spell value");
 	require(spellDamageValue(100, 100, 0, true) == 0, "Unaffected disabled stack contributes nothing");
+	require(nativeSpellSuccessPercent(true, true, 100) == 0, "Complete native resistance prevents hostile magical effects");
+	require(nativeSpellSuccessPercent(true, true, 40) == 60, "Partial native resistance preserves its landing probability");
+	require(nativeSpellSuccessPercent(true, true, 150) == 0, "Native resistance above 100 cannot create negative probability");
+	require(nativeSpellSuccessPercent(true, true, -20) == 100, "Negative native resistance cannot exceed certain success");
+	require(nativeSpellSuccessPercent(false, true, 100) == 100, "Positive and neutral spells bypass native resistance");
+	require(nativeSpellSuccessPercent(true, false, 100) == 100, "Nonmagical effects bypass native resistance");
+	require(resistanceWeightedProjectedLoss(100, 100, 40, false, 50) == 20, "Native capped loss is discounted by landing probability");
+	require(resistanceWeightedProjectedLoss(100, 100, 400, false, 50) == 50, "Host preview caps overkill before resistance, unlike original source ordering");
+	require(resistanceWeightedProjectedLoss(100, 100, 40, true, 50) == -60, "Wake-up penalty follows the discounted native loss");
+	require(resistanceWeightedProjectedLoss(100, 100, 100, true, 0) == 0, "A fully resisted spell cannot wake a disabled enemy");
+	require(resistanceWeightedProjectedLoss(100, 100, 3, false, 50) == 1, "Projected loss truncates fractional hit points");
+	require(resistanceWeightedProjectedLoss(100, 100, INT64_MAX, false, 100) == 100, "Large native damage discounts without signed overflow");
 	require(massSpellDamageValue(100, 40, 1000, 200) == 0,
 		"Area spell with positive raw exchange still fails the proportional friendly-loss gate");
 	require(massSpellDamageValue(100, 20, 1000, 200) == 0,
@@ -73,6 +91,14 @@ int main()
 	require(removedAttackSpellValue(10000, 130, 125, 5000, 1)
 		+ removedAttackSpellValue(500, 5, 6, 5000, 1) < 0,
 		"Mass Dispel must charge a large mixed-effect loss before adding a small Curse-removal gain");
+	require(resurrectionFitsCasualties(10, 20, 100), "Small resurrection may restore casualties below the three-quarter threshold");
+	require(resurrectionFitsCasualties(20, 20, 100), "Exact-capacity restoration does not waste healing");
+	require(!resurrectionFitsCasualties(21, 20, 100), "Overhealing small casualties waits without a predicted win");
+	require(resurrectionFitsCasualties(100, 75, 100), "Heavy casualties permit a partially wasted resurrection");
+	require(!resurrectionFitsCasualties(100, 74, 100), "Heavy-loss exception begins at the source integer threshold");
+	require(resurrectionFitsCasualties(5, 2, 3), "Three-quarter source threshold retains integer truncation");
+	require(!resurrectionFitsCasualties(0, 10, 100), "No full resurrected creature has no source restoration value");
+	require(!resurrectionFitsCasualties(10, 0, 100), "Healing a wound without resurrecting creatures is not resurrection value");
 	require(blindSpellValue(100, 200, 50, 0.5) == 50, "Blind on one of several awake enemies uses duration");
 	require(blindSpellValue(100, 100, 0, 1) == 50, "Expert Blind on the last awake enemy is capped at half value");
 	require(blindSpellValue(100, 100, 50, 1) < 15, "Basic Blind on the last enemy prices its retaliation");

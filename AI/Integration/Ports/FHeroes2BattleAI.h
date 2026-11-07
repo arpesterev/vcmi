@@ -18,6 +18,7 @@
 #include <map>
 #include "FHeroes2RetreatDecision.h"
 #include "../../../lib/CPlayerState.h"
+#include "../../../lib/StartInfo.h"
 #include "../../../lib/entities/artifact/ArtifactUtils.h"
 #include "../../../lib/entities/artifact/ArtSlotInfo.h"
 #include "../../../lib/entities/artifact/CArtifact.h"
@@ -196,9 +197,30 @@ public:
 				const int surrenderCost = canSurrender ? battle->battleGetSurrenderCost() : -1;
 				const bool affordable = surrenderCost >= 0
 					&& env->game()->getResource(hero->getOwner(), GameResID::GOLD) >= surrenderCost;
-				// Source NORMAL difficulty ratio. No hidden-map intelligence:
-				// only the current battle, owned hero and owned player economy.
-				const Ports::FHeroes2::WithdrawalContext context{ourStrength, enemyStrength, 100.0 / 7.5,
+				// Pinned difficulty.cpp::getArmyStrengthRatioForAIRetreat.
+				// Match difficulty is public configuration, not enemy intelligence.
+				const auto * startInfo = env->game()->getStartInfo();
+				if(!startInfo)
+					throw std::logic_error("FHeroes2 withdrawal requires match configuration");
+				const double difficultyRatio = [&]()
+				{
+					switch(startInfo->getDifficulty())
+					{
+						case EMapDifficulty::EASY:
+							return 100.0 / 6.0;
+						case EMapDifficulty::NORMAL:
+							return 100.0 / 7.5;
+						case EMapDifficulty::HARD:
+						case EMapDifficulty::EXPERT:
+							return 100.0 / 8.5;
+						case EMapDifficulty::IMPOSSIBLE:
+							return 100.0 / 10.0;
+						case EMapDifficulty::COUNT:
+							break;
+					}
+					throw std::logic_error("FHeroes2 withdrawal received an invalid match difficulty");
+				}();
+				const Ports::FHeroes2::WithdrawalContext context{ourStrength, enemyStrength, difficultyRatio,
 					false, initialFriendlySlots < 4 || fullyLostStack, canFlee, canSurrender,
 					affordable, valuableArtifacts, canRehire, primarySkillTotal};
 				const auto outcome = Ports::FHeroes2::decideWithdrawal(context);
@@ -1091,9 +1113,8 @@ private:
 	// fheroes2 ai_battle.cpp archerDecision, pinned at 0dbfe9f386f33c2500842f4a59cd284d7f03d541:
 	// only a sufficiently faster shooter attempts to escape an imminent melee
 	// threat, and only to a position safe from every visible enemy stack.
-	// Native VCMI movement hexes supply legality. Geometric enemy reach is
-	// deliberately conservative because the currently occupied archer hex
-	// could otherwise block the enemy path used to assess a future position.
+	// Project the source UnitRemover without changing the live battlefield.
+	// Native BFS retains obstacles, footprint rules and our visibility.
 	static std::optional<BattleAction> archerRetreat(CPlayerBattleCallback & battle,
 		const CStack & stack, const std::vector<const CStack *> & enemies)
 	{
@@ -1146,6 +1167,41 @@ private:
 			return false;
 		};
 
+		class DeparturePaths final : public CPlayerBattleCallback
+		{
+		public:
+			explicit DeparturePaths(const CPlayerBattleCallback & source)
+				: CPlayerBattleCallback(source) {}
+
+			ReachabilityInfo::TDistances distances(const CStack & enemy, const CStack & departing) const
+			{
+				auto access = getAccessibility(&enemy);
+				for(const auto & hex : departing.getHexes())
+					if(access[hex.toInt()] == EAccessibility::ALIVE_STACK)
+					{
+						access[hex.toInt()] = EAccessibility::ACCESSIBLE;
+						if(battleGetFortifications().wallsHealth > 0
+							&& (hex == BattleHex::GATE_INNER || hex == BattleHex::GATE_OUTER))
+						{
+							if(battleGetGateState() == EGateState::CLOSED)
+								access[hex.toInt()] = EAccessibility::GATE;
+							else if(battleGetGateState() == EGateState::BLOCKED)
+								access[hex.toInt()] = EAccessibility::UNAVAILABLE;
+						}
+					}
+				// knownAccessible contains only the enemy's original footprint:
+				// leaving a shooter hex must not disable a stopper underneath it.
+				const ReachabilityInfo::Parameters params(battleGetMySide(), &enemy,
+					enemy.getPosition(), enemy.getHexes());
+				return makeBFS(access, params).distances;
+			}
+		};
+		const DeparturePaths departure(battle);
+		std::map<uint32_t, ReachabilityInfo::TDistances> enemyPaths;
+		for(const auto * enemy : enemies)
+			if(enemy->getPosition().isValid())
+				enemyPaths.emplace(enemy->unitId(), departure.distances(*enemy, stack));
+
 		const auto isThreatened = [&](const BattleHex & position, const CStack & enemy)
 		{
 			const int distance = footprintDistance(position, enemy);
@@ -1155,9 +1211,25 @@ private:
 			// NOT_ACTIVE is the current can't-act projection: contact still
 			// blocks a shot, but the unit cannot chase next turn.
 			const bool disabled = enemy.hasBonusOfType(BonusType::NOT_ACTIVE);
-			const int reach = unengagedArcher || disabled ? 1
-				: static_cast<int>(enemy.getMovementRange()) + 1;
-			return distance <= reach;
+			if(distance == 1)
+				return true;
+			if(unengagedArcher || disabled || !enemy.getPosition().isValid())
+				return false;
+			const auto movement = enemy.getMovementRange();
+			const auto & distances = enemyPaths.at(enemy.unitId());
+			for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+			{
+				if(distances[index] >= ReachabilityInfo::INFINITE_DIST || distances[index] > movement)
+					continue;
+				int separation = GameConstants::BFIELD_SIZE;
+				for(const auto & from : enemy.getHexes(BattleHex(index)))
+					for(const auto & to : stack.getHexes(position))
+						separation = std::min(separation,
+							static_cast<int>(BattleHex::getDistance(from, to)));
+				if(separation == 1)
+					return true;
+			}
+			return false;
 		};
 
 		bool threatened = false;

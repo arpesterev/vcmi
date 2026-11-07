@@ -18,6 +18,14 @@ inline bool nativeHeroSpellMayReflect(bool massive, bool directRange, bool negat
 	return !massive && directRange && negative && mirrorChance > 0;
 }
 
+inline bool hostileSpellShouldAttackNow(bool killsOnly, bool lastAction,
+	bool activeMeleeTarget, bool enemyCanAttack, bool friendlyActsBeforeEnemy)
+{
+	if(killsOnly || lastAction || activeMeleeTarget)
+		return true;
+	return enemyCanAttack && !friendlyActsBeforeEnemy;
+}
+
 inline int spellPlanningRounds(double friendlyAwake, double enemyAwake)
 {
 	const double high = std::max(friendlyAwake, enemyAwake);
@@ -49,6 +57,26 @@ inline double spellDamageValue(double totalValue, int64_t health, int64_t damage
 	if(inactive && value < totalValue)
 		value = 2 * value - totalValue;
 	return value;
+}
+
+// Native beforeCast applies resistance only to negative magical effects.
+inline int nativeSpellSuccessPercent(bool negative, bool magical, int resistance)
+{
+	return negative && magical ? 100 - std::clamp(resistance, 0, 100) : 100;
+}
+
+// castEval exposes already-capped health loss. This host projection
+// discounts that loss; pinned getDamageValue instead discounts raw damage
+// before its casualty cap, so resisted overkill can rank differently.
+inline double resistanceWeightedProjectedLoss(double totalValue, int64_t health,
+	int64_t projectedLoss, bool inactive, int successPercent)
+{
+	if(projectedLoss <= 0 || health <= 0)
+		return 0;
+	const int chance = std::clamp(successPercent, 0, 100);
+	const int64_t loss = std::min(projectedLoss, health);
+	const int64_t expected = loss / 100 * chance + loss % 100 * chance / 100;
+	return spellDamageValue(totalValue, health, expected, inactive);
 }
 
 inline double massSpellDamageValue(double enemyDamage, double friendlyDamage,
@@ -98,6 +126,12 @@ inline double removedAttackSpellValue(double total, double before, double after,
 	if(after <= 0)
 		return -total * duration;
 	return -attackSpellValue(total, after, before, targetHealth, duration);
+}
+
+inline bool resurrectionFitsCasualties(int64_t healable, int64_t dead, int64_t original)
+{
+	return healable >= 1 && dead >= 1 && original >= 1
+		&& (healable <= dead || dead >= original * 3 / 4);
 }
 
 inline double blindSpellValue(double total, double awakeEnemy, int retaliationPercent, double duration)

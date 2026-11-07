@@ -1,6 +1,6 @@
 # Four combat AI backends: delivery and acceptance matrix
 
-Status as of 2026-11-03. This is a **requirements inventory**, not a claim that the
+Status as of 2026-11-07. This is a **requirements inventory**, not a claim that the
 four original policies are implemented or equivalent. Keep full-port factory
 identifiers unavailable until the corresponding evidence exists. The selected
 experimental versions must remain explicit and must never silently invoke
@@ -36,31 +36,62 @@ Each backend must pass all gates:
 
 | Backend | Implemented in experimental branch | Missing before full identifier |
 | --- | --- | --- |
-| HoMM3Original (sushi-shi/homm3-decomp) | Independent partial ranged/melee/advance/jousting/siege decisions; native VCMI legality | Original combat-value and future-exchange simulation, full attack-position threat map, original path planning, spellcaster policy including buffs/debuffs/dispels, creature specials, hero retreat/surrender, full reference trace parity |
-| FHeroes2 (ihhub/fheroes2) | Native archer/guard/offense/defense, multi-turn pursuit, area shots, Berserk creature turns, partial hero damage/restore and buffs/debuffs, summons/Clone, offensive Teleport, Earthquake, selective Cure/Dispel, legal retreat/surrender/farewell and deathless-round limit | Anti-Magic and complete spell-effect timing/Dispel valuation, exact kiting and castle positioning, Heroes III manual creature abilities without a source equivalent, independent Heroes II reference decisions and complete host-rule mapping |
-| TUMEnchanted (SadnessPower/TUM-Enchanted) | Explicit HoMM3 partial baseline plus published ballista, neutral shooter protection, siege hold, decoy and Hypnotize overrides | ERA/DLL implementation not available in equivalent source. Reconstruct and independently validate remaining documented tower/spell/creature/siege rules. **Exact parity cannot be asserted from the public description** |
-| MMAI (smanolloff/vcmi-gym and official VCMI MMAI) | Genuine ONNX V13/V15 stack inference; attacker/defender/siege roles; strict no scripted fallback | New spell-capable observation/action schema and newly compatible trained weights before claiming neural hero spells; declared policy for war machines and special actions; model preflight/GUI failures; long symmetrical self-play termination with source-grounded behavior |
+| HoMM3Original (sushi-shi/homm3-decomp) | Independent partial ranged/melee/advance/jousting/siege decisions and hero damage/area, Bless/Bloodlust/Precision, Blind, Cure/limited Dispel and resurrection policies; native VCMI legality | Original combat-value and future-exchange simulation, full attack-position threat map, original path planning, remaining spellcaster policy and exact buff/debuff/Dispel valuation, creature specials, hero retreat/surrender, full reference trace parity |
+| FHeroes2 (ihhub/fheroes2) | Native archer/guard/offense/defense, multi-turn pursuit, area shots, Berserk creature turns, partial hero damage/restore and buffs/debuffs, summons/Clone, offensive Teleport, Earthquake, selective Cure/Dispel, legal retreat/surrender/farewell and deathless-round limit | Anti-Magic and complete spell-effect timing/Dispel valuation, exact kiting and castle positioning, Heroes III manual creature abilities without a source equivalent, complete host-rule mapping and broad independent Heroes II/native decision comparison beyond the initial executable corpus |
+| TUMEnchanted (SadnessPower/TUM-Enchanted) | Explicit HoMM3 partial baseline plus published ballista, neutral shooter protection, siege hold, decoy and Hypnotize overrides | Public AI.erm tower rules and published Battle_AI pursuit-penalty C++ are available, with reuse terms unestablished. Implement and independently validate those rules and the remaining spell/creature/siege behavior, including the automatic server-action boundary. **Source availability and static formula recovery are not runtime parity** |
+| MMAI (smanolloff/vcmi-gym and official VCMI MMAI) | Genuine ONNX V13/V15 stack inference; attacker/defender/siege roles; strict no scripted fallback | New spell-capable observation/action schema and newly compatible trained weights before claiming neural hero spells; full special-action coverage beyond existing source-native handlers; installed GUI/model-error acceptance; long symmetrical self-play termination with source-grounded behavior |
 
-## Ordered implementation slices
+## Current implementation order
 
-| Milestone | Deliverable | Hard gate |
-| --- | --- | --- |
-| M1 (in progress) | Source-derived FHeroes2 Haste/Slow decisions using hypothetical VCMI battle and real combat | Model-free source contracts, engine-accepted buff and debuff casts, completed battles, all existing CI |
-| M2 | HoMM3 attack/retaliation and position scoring, then original hero spell policy | Independent comparison with pinned decomp code, distinct decisions in real engine battles |
-| M3 | Remaining fheroes2 buffs/debuffs and special creature abilities | Spell-by-spell coverage report and real battle demonstrations |
-| M4 | TUM documented tower/creature/siege/spell differences | Published rule to test mapping, explicit uncertainty for inaccessible DLL behavior |
-| M5 | MMAI neural action/schema + model training, neural spell actions | Successful spell-selection inference with published/proven model, no scripted substitute |
-| M6 | Real launcher and platform acceptance, batch statistical comparisons | Every acceptance gate, all PR checks, reviewed human sign-off before merge |
+1. Finish FHeroes2 and HoMM3 source-function coverage, as the requested priority.
+   Keep an explicit distinction between source decisions, native Heroes III
+   rule projections, and missing branches. Haste/Slow and the initial HoMM3
+   hero-spell subset already have native server tests; they are not the full
+   remaining scope.
+2. Qualify each subsequent spell/timing/path/forecast increment in the real
+   engine before publication, then run exact-commit CI. Do not count prepared
+   test bodies or standalone scalar checks as executed native evidence.
+3. Produce and audit an experimental ARM64 package, then test actual installed
+   launcher selection, persistence, game startup and representative battles.
+   Static bundle checks do not establish GUI or gameplay acceptance.
+4. Preserve TUM and MMAI work while the first two are completed. Resume their
+   missing rules/model work separately; do not substitute scripted hero spells
+   for trained MMAI hero-spell inference.
+5. Run broader seeded, bidirectional comparisons only after the corresponding
+   policies and reference fixtures are qualified. No current smoke corpus
+   establishes comparative playing strength or complete parity.
+
+## Established evidence boundaries
+
+- Commit `747784ed0f1984055bc70efc283e655662783d8d` passed both
+  [pre-merge](https://github.com/arpesterev/vcmi/actions/runs/42380278212) and
+  [post-merge](https://github.com/arpesterev/vcmi/actions/runs/42380715599) Linux
+  CI. The main native phase enumerated 291 tests: 271 passed and 20 were
+  explicitly model-gated. Separate V13/V15 phases exercised supplied official
+  weights. Those results apply to that commit, not automatically to later work.
+- Local execution of [pinned fheroes2](https://github.com/ihhub/fheroes2/tree/0dbfe9f386f33c2500842f4a59cd284d7f03d541) now supplies an independent no-UI source corpus:
+  32 initial and 40 additional cases, each run uninstrumented and twice with
+  observation. Source outcomes and RNG match across observation modes, and
+  traces repeat. This does not equate Heroes II and Heroes III inputs or prove
+  adapter parity. Four mapped native properties agree; complete ordered
+  decision comparison remains unfinished. This reference corpus is not yet a CI gate.
+- ARM64 commit `18eecbddc10c41eeea82f55f79f89d41420d3261` compiled and created
+  a DMG, but the mounted audit rejected a Conan-cache rpath. No artifact from
+  that run is a deliverable. A repaired build must pass the strict audit and
+  upload before it can be offered for installation.
 
 ## Evidence and controls
 
 The existing `CI/check_ai_backend_acceptance.py` intentionally fails when
 independent evidence is missing. Do not weaken it to label partial ports as
 full ones. The existing `AI/Integration/README.md` documents the JSONL trace
-schema and action identity requirements. All new work goes to draft branches;
-do not change VCMI game rules, default AI, release workflows, or publish
-binaries/models/Actions artifacts. Green build and smoke tests do **not**
-establish upstream-equivalent behavior.
+schema and action identity requirements. Review experimental changes on a
+staging branch and require exact-commit CI before the authorized non-forced
+integration into develop. The dedicated ARM64 workflow may publish requested
+experimental build artifacts after its checks pass. Do not change VCMI game
+rules, default AI, security settings or release channels, or redistribute game
+data/model weights as part of that package. Green build and smoke tests do
+**not** establish upstream-equivalent behavior.
 
 ## Experimental integration after merge
 

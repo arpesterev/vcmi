@@ -265,6 +265,63 @@ int main()
 	require(FHeroes2::decideWithdrawal(withdrawal) == FHeroes2::Withdrawal::FIGHT,
 		"Native inability to surrender always wins over a proposed surrender");
 
+	// Exact threshold equality keeps fighting at every source difficulty.
+	// The two adjacent representable strengths exercise strict comparison.
+	for(const double ratio : {100.0 / 6.0, 100.0 / 7.5, 100.0 / 8.5, 100.0 / 8.5, 100.0 / 10.0})
+	{
+		FHeroes2::WithdrawalContext threshold;
+		threshold.friendlyStrength = 12;
+		threshold.difficultyRatio = ratio;
+		threshold.enemyStrength = threshold.friendlyStrength * ratio;
+		threshold.considerRetreat = true;
+		threshold.canFlee = true;
+		threshold.canSurrender = true;
+		threshold.canAffordSurrender = true;
+		threshold.valuableArtifacts = true;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"Equal source strength threshold does not abandon the battle");
+		threshold.enemyStrength = std::nextafter(threshold.enemyStrength, 0.0);
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"Enemy strength just below threshold keeps fighting");
+		threshold.enemyStrength = std::nextafter(threshold.friendlyStrength * ratio,
+			std::numeric_limits<double>::infinity());
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::RETREAT,
+			"Enemy strength just above threshold permits preserving the hero");
+		threshold.humanController = true;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"Human control suppresses difficulty-dependent withdrawal");
+		threshold.humanController = false;
+		threshold.considerRetreat = false;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"Intact sufficient army slots suppress difficulty-dependent withdrawal");
+		threshold.considerRetreat = true;
+		threshold.canFlee = false;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::SURRENDER,
+			"Source surrender remains available when retreat is blocked");
+		threshold.canAffordSurrender = false;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"Difficulty never permits an unaffordable surrender");
+		threshold.canAffordSurrender = true;
+		threshold.canSurrender = false;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"Difficulty never overrides native withdrawal legality");
+		threshold.canFlee = true;
+		threshold.valuableArtifacts = false;
+		threshold.primarySkillTotal = 10;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"A nonvaluable irreplaceable hero must keep fighting at every difficulty");
+		threshold.canRehire = true;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::RETREAT,
+			"Rehirable experienced hero may retreat at every difficulty");
+		threshold.primarySkillTotal = 9;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::FIGHT,
+			"Rehirable inexperienced hero without artifacts keeps fighting");
+		threshold.valuableArtifacts = true;
+		threshold.canRehire = false;
+		require(FHeroes2::decideWithdrawal(threshold) == FHeroes2::Withdrawal::RETREAT,
+			"Valuable artifact overrides both skill and rehire prerequisites");
+	}
+
 	// Pinned spellDispelValue considers ALL affected sides, including
 	// losses from stripping friendly buffs or enemy debuffs.
 	require(FHeroes2::dispelledEffectValue(100, 0.8, true, true, true) == 80,
@@ -281,6 +338,22 @@ int main()
 	catch(const std::invalid_argument &) { ++checks; }
 	try { FHeroes2::dispelledEffectValue(1,
 		std::numeric_limits<double>::infinity(), true, true, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+
+	for(bool before : {false, true})
+		for(bool after : {false, true})
+			require(FHeroes2::dispelledHypnotizeValue(100, before, after)
+				== (before == after ? 0 : after ? 150 : -150),
+				"Hypnotize removal must follow the actual ownership transition");
+	require(FHeroes2::dispelledHypnotizeValue(100, true, false)
+		+ FHeroes2::dispelledEffectValue(100, 0.15, false, true, true) < 0,
+		"Removing Curse cannot hide giving a controlled enemy back");
+	require(FHeroes2::dispelledHypnotizeValue(100, false, true)
+		+ FHeroes2::dispelledEffectValue(100, 0.1, true, false, true) > 0,
+		"Recovering an allied stack may justify losing its Stone Skin");
+	try { FHeroes2::dispelledHypnotizeValue(-1, false, true); return 1; }
+	catch(const std::invalid_argument &) { ++checks; }
+	try { FHeroes2::dispelledHypnotizeValue(std::numeric_limits<double>::infinity(), false, true); return 1; }
 	catch(const std::invalid_argument &) { ++checks; }
 
 	for(int difficulty = 0; difficulty < 2; ++difficulty)

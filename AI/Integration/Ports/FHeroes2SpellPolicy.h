@@ -25,7 +25,7 @@
 namespace AIIntegration
 {
 /// Source-derived spell priorities with VCMI legality and spell-effect simulation.
-/// Covers damage, restoration, native elemental summoning, limited Cure dispelling (Curse/Blind/Slow), enemy Haste/Bless dispelling, Haste/Slow, Bless/Curse, Stone Skin, Bloodlust, ranged Shield, Clone/Mirror Image, Hypnotize, Blind, Berserk and Disrupting Ray using native effects; other buffs, dispels and retreat are not yet ported.
+/// Native effects preserve host legality; the remaining source gaps are tracked in the acceptance matrix.
 class FHeroes2SpellPolicy
 {
 	struct Army
@@ -45,6 +45,19 @@ class FHeroes2SpellPolicy
 		BattleHex position;
 		PlayerColor owner;
 	};
+
+	static bool completedTurn(const battle::Unit & unit)
+	{
+		return unit.moved() || unit.defended();
+	}
+
+	static bool canValueNewEffect(const battle::Unit & unit, int duration)
+	{
+		// Source isSpellcastUselessForUnit and spellDurationMultiplier.
+		// Native DEFEND spends the turn without setting moved(); WAIT does not.
+		return !unit.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& (duration >= 2 || !completedTurn(unit));
+	}
 
 	static int actingSpeed(const battle::Unit & unit)
 	{
@@ -251,6 +264,9 @@ public:
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
+			const bool unitEffectSpell = speedSpell || defenseSpell || dragonSlayerSpell
+				|| damageRangeSpell || defenseBuff || attackBuff || rangedShield
+				|| hypnotizeSpell || disablingSpell || berserkSpell;
 			if(!spell->isCombat() || spell->isCreatureAbility()
 				|| (!spell->isDamage() && !resurrection && !summonSpell && !teleportSpell && !earthquakeSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
@@ -262,10 +278,26 @@ public:
 				continue;
 			spells::BattleCast legality(real.get(), hero, spells::Mode::HERO, spell);
 			const auto mechanics = spell->battleMechanics(&legality);
+			const int duration = mechanics->getEffectDuration();
+			if(rangedShield && duration == 1
+				&& std::none_of(before.begin(), before.end(), [&](const UnitSnapshot & old)
+				{
+					return old.owner != player && old.health > 0 && old.unit->isShooter()
+						&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+						&& !completedTurn(*old.unit);
+				}))
+				continue;
 			const auto legalTargets = teleportSpell
 				? teleportTargets(*mechanics, activeStack) : targets(*mechanics);
 			for(const auto & target : legalTargets)
 			{
+				if(mirrorImageSpell)
+				{
+					const auto * source = target.empty() ? nullptr
+						: real->battleGetUnitByPos(target.front().hexValue, true);
+					if(!source || !canValueNewEffect(*source, duration))
+						continue;
+				}
 				auto projected = std::make_shared<HypotheticBattle>(environment, real);
 				// Earthquake is randomized; rank expected wall damage.
 				if(!earthquakeSpell)
@@ -330,7 +362,9 @@ public:
 					const auto * after = projected->battleGetUnitByID(old.unit->unitId());
 					const int64_t health = after && after->alive() ? after->getAvailableHealth() : 0;
 					const bool friendly = old.owner == player;
-					if(friendly)
+					const bool friendlyAfter = after && after->alive()
+						&& projected->battleGetOwner(after) == player;
+					if(friendlyAfter)
 						friendlyHealth += health;
 					if(health < old.health)
 						value += (friendly ? -1 : 1) * damageValue(*old.unit, old.health - health, friendly ? ours : theirs);
@@ -338,7 +372,32 @@ public:
 					{
 						const double restored = static_cast<double>(after->estimateCombatValue())
 							* static_cast<double>(health - old.health) / static_cast<double>(health);
-						value += friendly ? restored : -restored;
+						value += friendlyAfter ? restored : -restored;
+					}
+					int valuationDuration = duration;
+					if(unitEffectSpell && after)
+					{
+						const auto effects = after->getAllBonuses(Selector::source(
+							BonusSource::SPELL_EFFECT, BonusSourceID(spell->id)));
+						// Native permanent effects, notably Disrupting Ray, cannot
+						// expire at the round boundary even at spell power one.
+						if(std::any_of(effects->begin(), effects->end(), [](const auto & bonus)
+						{
+							return Bonus::Permanent(bonus.get()) && !Bonus::NTurns(bonus.get());
+						}))
+							valuationDuration = std::max(valuationDuration, 2);
+					}
+					// Dispel/Cure remove existing effects even from disabled units.
+					if(unitEffectSpell && !canValueNewEffect(*old.unit, valuationDuration))
+						continue;
+					if((dispelSpell || spell->id == SpellID::CURE) && after && after->alive())
+					{
+						const auto hypnotize = Selector::source(BonusSource::SPELL_EFFECT,
+							BonusSourceID(SpellID(SpellID::HYPNOTIZE)));
+						if(old.unit->hasBonus(hypnotize) && !after->hasBonus(hypnotize)
+							&& old.unit->isHypnotized() && !after->isHypnotized())
+							value += Ports::FHeroes2::dispelledHypnotizeValue(
+								static_cast<double>(old.unit->estimateCombatValue()), friendly, friendlyAfter);
 					}
 					// Pinned spellDragonSlayerValue only values this buff when
 					// enemy dragons exist. VCMI's SLAYER is a target-dependent
@@ -393,7 +452,7 @@ public:
 					// pre/post-cast movement. This is deliberately not a
 					// blanket dispel heuristic: other effect combinations
 					// are not yet valued, and no-op casts earn zero.
-					if(dispelSpell && !friendly && after && after->alive() && health == old.health)
+					if(dispelSpell && !friendlyAfter && after && after->alive() && health == old.health)
 					{
 						const auto haste = Selector::source(BonusSource::SPELL_EFFECT,
 							BonusSourceID(SpellID(SpellID::HASTE)));
@@ -465,7 +524,7 @@ public:
 					// of hostile magic, not only recovered hit points. Evaluate only
 					// negative effects that the *native* projected Cure really
 					// removes. Heroes II ratios are projections onto VCMI statuses.
-					if((spell->id == SpellID::CURE || dispelSpell) && friendly && after && after->alive())
+					if((spell->id == SpellID::CURE || dispelSpell) && friendlyAfter && after && after->alive())
 					{
 						const auto sourceEffect = [](SpellID id)
 						{
@@ -537,7 +596,7 @@ public:
 							return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
 						};
 						const double strength = static_cast<double>(old.unit->estimateCombatValue());
-						if(friendly)
+						if(friendlyAfter)
 						{
 							if(old.unit->hasBonus(effect(SpellID(SpellID::HASTE)))
 								&& !after->hasBonus(effect(SpellID(SpellID::HASTE)))

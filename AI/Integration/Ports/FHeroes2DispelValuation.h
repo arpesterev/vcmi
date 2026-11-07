@@ -26,4 +26,16 @@ inline double dispelledEffectValue(double projectedStrength, double effectRatio,
 	const bool helpful = friendlyStack == harmfulEffect;
 	return (helpful ? 1.0 : -1.0) * projectedStrength * effectRatio;
 }
+// Hypnotize changes effective ownership. Charge the source 1.5 control ratio
+// only when removing the native effect actually transfers the stack.
+inline double dispelledHypnotizeValue(double projectedStrength,
+	bool friendlyBefore, bool friendlyAfter)
+{
+	if(!std::isfinite(projectedStrength) || projectedStrength < 0)
+		throw std::invalid_argument("FHeroes2 Hypnotize requires finite nonnegative strength");
+	if(friendlyBefore == friendlyAfter)
+		return 0;
+	return (friendlyAfter ? 1.5 : -1.5) * projectedStrength;
+}
+
 }

@@ -106,7 +106,8 @@ class HoMM3SpellPolicy
 					continue;
 				for(const auto aim : target->getHexes())
 				{
-					if(!shooting && !battle.battleCanAttackFromHex(available, &unit, aim, from))
+					if(!shooting && (!battle.meleeAttackHexes(&unit, target, from).contains(aim)
+						|| !battle.battleCanAttackFromHex(available, &unit, aim, from)))
 						continue;
 					Attack candidate{target, from, aim, shooting, 0};
 					candidate.damage = estimateAttack(battle, unit, candidate);
@@ -122,6 +123,44 @@ class HoMM3SpellPolicy
 			}
 		}
 		return best;
+	}
+
+	static bool shouldAttackNow(const CStack & enemy, const CStack & active,
+		PlayerColor player, bool lastAction, const std::vector<Snapshot> & before,
+		const std::vector<battle::Units> & order)
+	{
+		bool activeMeleeTarget = false;
+		bool enemyCanAttack = false;
+		for(const auto & old : before)
+		{
+			if(old.unit == &active)
+				activeMeleeTarget = old.owner == player && old.attack.target == &enemy
+					&& !old.attack.shooting && !active.hasBonusOfType(BonusType::BLOCKS_RETALIATION);
+			if(old.unit == &enemy)
+				enemyCanAttack = old.attack.target != nullptr;
+		}
+		// Native turn order replaces source m_expectedMoveOrder. A missing
+		// enemy in this round cannot justify the imminent-threat branch.
+		bool friendlyBeforeEnemy = true;
+		if(!order.empty())
+		{
+			bool earlierFriend = false;
+			for(const auto * unit : order.front())
+			{
+				if(unit->unitId() == enemy.unitId())
+				{
+					friendlyBeforeEnemy = earlierFriend;
+					break;
+				}
+				if(unit->unitId() == active.unitId() || inactive(*unit) || unit->isTurret())
+					continue;
+				for(const auto & old : before)
+					if(old.unit->unitId() == unit->unitId() && old.owner == player)
+						earlierFriend = true;
+			}
+		}
+		return Ports::HoMM3::hostileSpellShouldAttackNow(false, lastAction,
+			activeMeleeTarget, enemyCanAttack, friendlyBeforeEnemy);
 	}
 
 	static std::vector<spells::Target> targets(const spells::Mechanics & mechanics)
@@ -192,6 +231,8 @@ public:
 		if(friendlyTotal <= 0 || enemyTotal <= 0)
 			return std::nullopt;
 		const int rounds = Ports::HoMM3::spellPlanningRounds(friendlyAwake, enemyAwake);
+		std::vector<battle::Units> order;
+		real->battleGetTurnOrder(order, before.size(), 1);
 		bool attacksReady = false;
 		std::optional<BattleAction> best;
 		double bestValue = 0;
@@ -204,8 +245,13 @@ public:
 			const bool removal = spell->id == SpellID::CURE || spell->id == SpellID::DISPEL;
 			const bool buff = attackBuff(spell->id);
 			const bool blind = spell->id == SpellID::BLIND;
+			const bool clone = spell->id == SpellID::CLONE;
+			const bool summon = spell->id == SpellID::SUMMON_AIR_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_EARTH_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_FIRE_ELEMENTAL
+				|| spell->id == SpellID::SUMMON_WATER_ELEMENTAL;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!damage && !resurrection && !removal && !buff && !blind)
+				|| (!damage && !resurrection && !removal && !buff && !blind && !clone && !summon)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			const int cost = real->battleGetSpellCost(spell, hero);
@@ -213,7 +259,7 @@ public:
 				continue;
 			if(!environment)
 				throw std::logic_error("HoMM3 spell projection requires a native VCMI environment");
-			if((buff || blind || removal) && !attacksReady)
+			if((damage || buff || blind || removal || clone) && !attacksReady)
 			{
 				for(auto & old : before)
 					old.attack = immediateAttack(*real, *old.unit);
@@ -241,28 +287,38 @@ public:
 				bool supported = true;
 				bool castNow = damage ? targetInfo.massive || spell->getTargetType() == spells::AimType::LOCATION
 					|| spell->id == SpellID::CHAIN_LIGHTNING || lastAction
-					: targetInfo.massive || lastAction;
+					: summon || targetInfo.massive || lastAction;
+				if(aimed && real->battleGetOwner(aimed) != player)
+					for(const auto & old : before)
+						if(old.unit == aimed)
+							castNow |= shouldAttackNow(*old.unit, active, player, lastAction, before, order);
 				for(const auto & old : before)
 				{
 					const auto * after = projected->battleGetUnitByID(old.unit->unitId());
 					const int64_t health = after && after->alive() ? after->getAvailableHealth() : 0;
 					const bool friendly = old.owner == player;
+					const int successPercent = Ports::HoMM3::nativeSpellSuccessPercent(
+						mechanics->isNegativeSpell(), mechanics->isMagicalEffect(), old.unit->magicResistance());
 					if(friendly)
 						friendlyHealth += health;
 					if(damage && health < old.health && !old.unit->isTurret())
-						(friendly ? friendlyLoss : enemyLoss) += Ports::HoMM3::spellDamageValue(
-							old.value, old.health, old.health - health, inactive(*old.unit));
+						(friendly ? friendlyLoss : enemyLoss) += Ports::HoMM3::resistanceWeightedProjectedLoss(
+							old.value, old.health, old.health - health, inactive(*old.unit), successPercent);
 					if(!after || !after->alive())
 						continue;
 					const double duration = Ports::HoMM3::spellDurationValue(mechanics->getEffectDuration(), rounds, completedTurn(*old.unit));
 					if(resurrection && friendly && !after->isClone() && after->getCount() > old.count)
 					{
-						// Conservative source over-healing gate; the unported combat forecast
-						// cannot authorize its decided-battle exception.
-						if(old.unit->getKilled() < old.unit->unitBaseAmount() * 3 / 4)
+						// Native heal.lua computes this capacity before capping against
+						// wounds. The source's decided-battle exception remains unported.
+						const int64_t healable = mechanics->applySpellBonus(mechanics->getEffectValue(), old.unit)
+							/ std::max<uint32_t>(1, old.unit->getMaxHealth());
+						if(!Ports::HoMM3::resurrectionFitsCasualties(healable,
+							old.unit->unitBaseAmount() - old.count, old.unit->unitBaseAmount()))
 							continue;
+						const int urgency = friendlyAwake > enemyAwake && rounds <= 1 ? 2 : 1;
 						value += static_cast<double>(after->estimateCombatValue())
-							* (after->getCount() - old.count) / after->getCount();
+							* (after->getCount() - old.count) / after->getCount() * urgency;
 						castNow |= old.unit == &active;
 					}
 					if(buff && friendly && !hasSpell(*old.unit, spell->id) && hasSpell(*after, spell->id)
@@ -277,7 +333,7 @@ public:
 					}
 					if(blind && !friendly && !inactive(*old.unit) && inactive(*after) && old.attack.target)
 						value += Ports::HoMM3::blindSpellValue(old.value, enemyAwake,
-							spell->getLevelPower(mechanics->getEffectLevel()), duration);
+							spell->getLevelPower(mechanics->getEffectLevel()), duration) * successPercent / 100;
 					if(removal)
 					{
 						if(spell->id == SpellID::CURE && friendly && health > old.health && old.health > 0)
@@ -320,6 +376,37 @@ public:
 								old.attack.damage, newDamage, old.attack.target->getAvailableHealth(), removedDuration);
 						}
 					}
+				}
+				if(summon || clone)
+				{
+					// HypotheticBattle-created units are not present in its CStack view.
+					bool createdClone = false;
+					for(const auto * unit : projected->battleGetUnitsIf([](const battle::Unit * unit) { return !unit->isGhost(); }))
+					{
+						if(!unit->alive() || projected->battleGetOwner(unit) != player)
+							continue;
+						const auto prior = std::find_if(before.begin(), before.end(),
+							[&](const Snapshot & old) { return old.unit->unitId() == unit->unitId(); });
+						if(clone)
+						{
+							createdClone |= unit->isClone() && prior == before.end();
+							continue;
+						}
+						if(unit->isClone() || !unit->isSummoned())
+							continue;
+						const int added = unit->getCount() - (prior == before.end() ? 0 : prior->count);
+						if(added > 0)
+							value += static_cast<double>(unit->estimateCombatValue()) * added / unit->getCount();
+					}
+					if(clone && createdClone)
+						for(const auto & old : before)
+							if(old.unit == aimed && old.owner == player && !completedTurn(*old.unit) && old.attack.target)
+							{
+								value += Ports::HoMM3::spellDamageValue(
+									static_cast<double>(old.attack.target->estimateCombatValue()),
+									old.attack.target->getAvailableHealth(), static_cast<int64_t>(old.attack.damage), false);
+								castNow |= old.unit == &active;
+							}
 				}
 				if(damage)
 					value = Ports::HoMM3::massSpellDamageValue(enemyLoss, friendlyLoss, enemyTotal, friendlyTotal);

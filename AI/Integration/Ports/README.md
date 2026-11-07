@@ -183,8 +183,12 @@ responses remain incomplete.
 Current additional coverage includes source-derived hero retreat/surrender,
 farewell damage before withdrawal, deathless-round retreat, Berserk creature
 turns, Clone, offensive Teleport, Earthquake, Slayer, and selective Cure/Dispel
-valuation. These implementations use native VCMI legality and state previews;
-the older incremental descriptions above are not a complete feature inventory.
+valuation. Retreat reads the public match difficulty and uses the pinned
+Easy/Normal/Hard/Expert/Impossible thresholds, with native legality, hero-value
+and player-control gates retained. These implementations use native VCMI
+legality and state previews; the older incremental descriptions above are not
+a complete feature inventory. See `../ACCEPTANCE_MATRIX.md` for pinned CI
+evidence; subsequent revisions require their own exact-head qualification.
 
 Heroes II Berserker targets enemies, while VCMI's advanced/expert Berserk is
 indiscriminate area magic. The port now rejects an area that would newly compel
@@ -305,9 +309,16 @@ native legality, mana cost, targeting, immunity and actual projected effects.
 with any positive native Magic Mirror chance are therefore conservatively
 excluded using the engine's massive/range/negative-spell conditions. Area,
 mass, positive and neutral spells are not excluded merely because a target
-has Magic Mirror. Random magic-resistance outcomes remain unmodeled and are
-not probability-weighted: values are conditional on effects landing and may
-overestimate resistant targets. This is not a complete native outcome forecast.
+has Magic Mirror. Native resistance probabilities now discount negative magical
+spells: the already-capped native health-loss preview is discounted before the
+wake-up penalty. This is a host approximation of `getDamageValue`, whose original
+raw damage is discounted BEFORE casualty capping. Overkill therefore can rank
+differently. Blind value is discounted after its duration/retaliation formula,
+following `getBlindValue`. Positive, neutral and nonmagical effects bypass this
+native resistance gate. This is deterministic valuation, not sampled execution or
+a complete joint outcome forecast. Raw pre-cap damage for every effect and Chain
+Lightning hop is not exposed by the preview used here; exact source ordering
+remains outstanding.
 The selected command goes through the ordinary server spell callback, with
 no unit command submitted until the spell has been applied. Disabling spells
 in autocombat preferences disables this policy. Siege machines and compelled
@@ -338,9 +349,12 @@ The pinned `src/ai_tactical.cpp` supplies the following policy components:
   releasing Blind uses its remaining-duration value, without reproducing
   the original opposing-caster forecast.
 - `considerResurrect`: Resurrection and Animate Dead value actual restored
-  creatures. This slice requires at least three quarters of the original
-  stack to be lost. It does not implement the source's exceptions for a
-  small heal or a fight forecast to be won.
+  creatures. A cast that can restore no more than the actual casualty count
+  is eligible even below three-quarters losses. Over-capacity healing still
+  requires that heavy-loss threshold without the unported predicted-win
+  exception. Capacity comes from native heal.lua's pre-cap effect formula.
+  The source stronger-army/one-round urgency multiplier is applied using
+  the existing native combat-value horizon.
 - `type_AI_combat_parameters`, `getDuration`, `castSpell`: the original
   seven-rung planning horizon, completed-turn duration adjustment and
   integer-affordable-casts mana weight are retained with native combat
@@ -348,12 +362,25 @@ The pinned `src/ai_tactical.cpp` supplies the following policy components:
   Native acted and defended stacks have completed their turn; waited stacks
   remain eligible for their later action and do not receive that deduction.
 
-Single-target hostile spells currently wait for the last friendly action;
-friendly spells can also be cast for the active stack. Mass and area damage
-and Chain Lightning can be cast immediately. The original earlier
-`shouldAttackNow` opportunities and predicted-winner mana conservation are
-not implemented. Creature value mathematics, exact resistance expectation,
-kill-only valuation when badly outnumbered, other buffs/control, summoning,
+The four elemental summoning spells now follow `considerSummon`'s normal
+created-creature valuation, using native simulated new/reinforced elemental
+counts and native combat value in place of the source creature AI-value table.
+A legal candidate with no new troops has zero value. `getCloneValue` prices the
+original stack's immediate attack against its selected target, only if the
+original has not completed its turn and the preview creates a new living clone.
+Creation is read from the simulated Unit view, not the delegated CStack view.
+The source predicted-win and kill-only branches remain absent for these spells.
+
+Single-target hostile spells follow the available `shouldAttackNow` branches:
+cast on the last friendly action, before the active stack's immediate melee
+exchange unless it blocks retaliation, or before a threatening enemy acts ahead
+of every other ally. Native immediate targets and the current native turn order
+replace original precomputed AI targets and expectedMoveOrder. A missing enemy
+in the current queue does not invent imminent danger. The source kill-only
+branch and predicted-winner mana conservation remain unimplemented.
+Friendly spells can also cast for the active stack; mass/area damage and Chain
+Lightning can cast immediately. Creature value mathematics, full resistance/reflection outcome distributions,
+kill-only valuation when badly outnumbered, other buffs/control,
 Teleport, Sacrifice, Earthquake and complete cancellation remain unported.
 
 Retreat and surrender remain unsupported. The source decision is in pinned
@@ -375,8 +402,18 @@ that these cases passed or that the retail source makes identical decisions.
 projection of the published TUM Enchanted combat changes. TUM Enchanted is an
 ERA mod of HoMM3 rather than a standalone AI implementation. Its upstream
 [AI Improvements.txt](https://github.com/SadnessPower/TUM-Enchanted/blob/475d80bbf3e935ac854bcb6e68ef02019efb8de3/AI%20Improvements.txt)
-documents combat behavior, but the released combat modifications are in
-compiled ERA/DLL components, not source suitable for direct porting.
+documents combat behavior. Public source also includes the tower-selection
+functions `FU15050`/`FU15051` in
+[`Data/s/AI.erm`](https://github.com/SadnessPower/TUM-Enchanted/blob/475d80bbf3e935ac854bcb6e68ef02019efb8de3/Data/s/AI.erm)
+and Ben80's published
+[`Battle_AI` pursuit-penalty C++](https://handbookhmm.ru/forum/viewtopic.php?f=56&start=40&t=529).
+The tower script supplies numerical weights, excludes Blind/Stone/Paralyze,
+and falls back to the original AI if all targets are excluded. Its tie-break
+uses creature minimum damage. Those rules have not yet been integrated into
+VCMI's automatic tower/ballista path. The pursuit formula is also not yet
+implemented here. Public availability does not establish reuse terms: no
+explicit reusable-code license was established for these components. The
+remaining ERA/DLL behavior is not fully recovered or runtime-validated.
 
 The TUM backend explicitly composes the experimental HoMM3 baseline with
 five independently implemented overrides derived from the documentation:
@@ -389,7 +426,7 @@ five independently implemented overrides derived from the documentation:
   **cumulative projected loss over the legal volley**, capped by both live
   target HP and remaining machine ammunition. A native battle checks an
   expert-Artillery ballista proposal, server-accepted attack sequence and
-  actual result, without claiming the closed TUM numerical formula.
+  actual result, without claiming the original TUM numerical formula.
   **Manual-control boundary:** this TUM decision requires a server-delivered
   unit activation, e.g. from Artillery. Without a native `MANUAL_CONTROL`
   bonus, `BattleFlowProcessor` resolves `CPU_CONTROLLED` ballista turns
