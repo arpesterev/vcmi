@@ -6746,6 +6746,25 @@ TEST_F(AIIntegrationNativeBattle, homm3DispelChargesHarmfulMixedPrecisionAndCurs
 	// conservative refusal to combine effects with different lifetimes.
 	teachBattleSpell(defenderSideHero, SpellID::CURSE, 5);
 	ASSERT_TRUE(castOn(defenderSideHero, SpellID::CURSE, small));
+	const auto decisionRound = battle()->getRound();
+	const auto * beforeDecision = battle()->battleActiveUnit();
+	ASSERT_NE(beforeDecision, nullptr);
+	if(beforeDecision->unitSide() == BattleSide::DEFENDER)
+	{
+		ASSERT_EQ(beforeDecision, enemy);
+		ASSERT_FALSE(enemy->waited());
+		const auto attackerMana = attackerSideHero->mana;
+		const auto defenderMana = defenderSideHero->mana;
+		// Equal-speed round order can start with the defender. WAIT reaches
+		// the attacker's decision without changing the target's defense.
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battle()->getBattleID(),
+			battle()->sideToPlayer(BattleSide::DEFENDER), BattleAction::makeWait(enemy)));
+		ASSERT_EQ(battle()->getRound(), decisionRound);
+		ASSERT_TRUE(enemy->waited());
+		ASSERT_FALSE(enemy->defended());
+		ASSERT_EQ(attackerSideHero->mana, attackerMana);
+		ASSERT_EQ(defenderSideHero->mana, defenderMana);
+	}
 	attackerSideHero->removeSpellFromSpellbook(SpellID::PRECISION);
 	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
 	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
@@ -6757,6 +6776,8 @@ TEST_F(AIIntegrationNativeBattle, homm3DispelChargesHarmfulMixedPrecisionAndCurs
 	ASSERT_TRUE(small->hasBonus(curse));
 	ASSERT_FALSE(small->hasBonus(precision));
 	for(const auto & bonus : *large->getAllBonuses(precision.Or(curse)))
+		ASSERT_EQ(bonus->turnsRemain, 5);
+	for(const auto & bonus : *small->getAllBonuses(curse))
 		ASSERT_EQ(bonus->turnsRemain, 5);
 	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
 	ASSERT_NE(active, nullptr);
