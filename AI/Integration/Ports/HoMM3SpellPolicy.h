@@ -65,7 +65,7 @@ class HoMM3SpellPolicy
 	{
 		int duration = 0;
 		for(const auto & bonus : *unit.getAllBonuses(Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(spell))))
-			duration = std::max(duration, bonus->turnsRemain);
+			duration = std::max<int>(duration, bonus->turnsRemain);
 		return duration;
 	}
 

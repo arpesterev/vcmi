@@ -28,7 +28,7 @@ class BundleAuditTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.app = self.root / "VCMI.app"
         self.mac = self.app / "Contents/MacOS"
         self.frameworks = self.app / "Contents/Frameworks"
@@ -76,6 +76,27 @@ class BundleAuditTest(unittest.TestCase):
 
     def test_bundle_and_system_dependencies(self):
         self.assertEqual(self.audit()["source_commit"], SHA)
+
+    def test_bundle_under_symlinked_temporary_directory(self):
+        with tempfile.TemporaryDirectory() as target:
+            alias = self.root / "temporary-directory-alias"
+            alias.symlink_to(target, target_is_directory=True)
+            directory = tempfile.TemporaryDirectory(dir=alias)
+            fixture = BundleAuditTest()
+            try:
+                with patch.object(tempfile, "TemporaryDirectory", return_value=directory):
+                    fixture.setUp()
+                aliased_app = Path(directory.name) / "VCMI.app"
+                self.assertNotEqual(aliased_app, aliased_app.resolve())
+                result = checker.audit(aliased_app, fixture.cache, SHA)
+                self.assertEqual(result["source_commit"], SHA)
+                self.assertEqual(len(result["images"]), 4)
+                fixture.archs[fixture.facade] = "x86_64"
+                with self.assertRaisesRegex(ValueError, "Missing arm64"):
+                    checker.audit(aliased_app, fixture.cache, SHA)
+            finally:
+                fixture.doCleanups()
+                directory.cleanup()
 
     def test_plugin_inherits_launcher_rpath(self):
         self.make_image(self.app / "Contents/PlugIns/platforms/libqcocoa.dylib",
