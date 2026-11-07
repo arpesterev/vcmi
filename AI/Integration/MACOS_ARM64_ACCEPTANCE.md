@@ -46,19 +46,33 @@ SHA-256 `6ba8215909edffc79b9c55bdfa7638130d0f34de6db14388ac556ded9f9f0126`.
 Conan uses `--build=never`; a missing binary dependency fails the build instead
 of silently changing the dependency toolchain.
 
+ARM64 packaging requires Python 3.9 or later with its standard library. After
+Qt is deployed, `osx/normalize_bundle_rpaths.py` removes non-system absolute
+`LC_RPATH` entries from staged app images only. Relative and system search
+paths, dylib dependencies and install IDs are retained. External/broken symlinks
+and hard-linked images fail cleanup; the source Conan cache is never edited.
+Cleanup runs only when `CMAKE_SYSTEM_PROCESSOR=arm64`, where the existing
+signing phase re-signs the images. Intel builds do not run cleanup. Every image
+needing cleanup must contain exactly one ARM64 slice; a universal image with
+non-system absolute rpaths fails before any image is changed. The helper does
+not assume that an rpath exists in every slice of a universal image. Cleanup
+and signing errors stop packaging, and `codesign --verify --deep --strict`
+must pass on the staged ARM64 app.
+
 The mounted DMG is checked with `hdiutil verify`, `lipo`, `otool` and
-`codesign --verify --strict`. Every Mach-O image needs an ARM64 slice and a valid
-signature. Non-system dependencies must resolve inside the app, including Qt
+`codesign --verify --strict` for each image, followed by a separate
+`codesign --verify --deep --strict` on the complete app. Every Mach-O image needs
+an ARM64 slice and a valid signature. Non-system dependencies must resolve inside the app, including Qt
 plugins and any shared ONNX runtime; Homebrew, Conan-cache and runner-only
 paths are rejected. Enabled build flags and four backend identity strings in
 `libvcmi` are additional checks, not proof of native gameplay.
 
-The existing ARM64 packaging step applies **ad-hoc signatures to Mach-O
-executables and libraries** without a Developer ID certificate. Its ad-hoc
-branch skips signing the outer app bundle, so an app-wide resource seal is
-not verified here. Do not describe the whole app as Developer ID signed or
-Apple notarized. The proposed workflow does not import
-signing credentials or submit anything to Apple. If the existing Platform
+The ARM64 packaging step applies **ad-hoc signatures** without a Developer ID
+certificate. Signing the main launcher was observed to sign its app bundle in
+the native build; the explicit staged and mounted app checks now require valid
+bundle integrity instead of inferring it from that message. This is not proof
+of Developer ID signing, Apple notarization or Gatekeeper acceptance. The
+workflow does not import signing credentials or submit anything to Apple. If the existing Platform
 Builds workflow is used instead, leave `notarize_macos=false` unless separately
 authorized signing and notarization credentials are appropriate.
 
@@ -176,10 +190,15 @@ hashes and result of each check. Do not mark checks passed before execution.
 
 ## Remaining limits
 
-- No macOS build, installed launcher, Apple Silicon inference or gameplay test
-  has been executed by this local preparation.
-- Portable tests of the package verifier use synthetic Mach-O tool responses.
-  They do not replace `lipo`, `otool`, signature verification or dyld on a Mac.
+- Native ARM64 run [42378843774](https://github.com/arpesterev/vcmi/actions/runs/42378843774)
+  at `18eecbddc10c41eeea82f55f79f89d41420d3261` built the app and DMG, but failed
+  the mounted audit on a Conan-cache `LC_RPATH` in `libQt5Widgets.5.dylib`. It
+  uploaded no artifact. The cleanup repair requires a new successful native run.
+- No installed launcher, Apple Silicon inference or gameplay test has been
+  executed by this delivery preparation.
+- Portable cleanup/audit tests use synthetic Mach-O tool responses. The CMake
+  sequence tests execute install scripts with fake signing tools. These tests
+  check ordering and error propagation, not native signature restoration or dyld.
 - Official model archive hashes, manifests, configured filenames and model
   metadata were inspected; no inference was executed by the byte verifier.
 - Existing Linux neural tests are separate evidence and do not establish Mac

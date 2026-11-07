@@ -159,11 +159,12 @@ def audit(app, cache, expected_sha):
     launcher_rpaths = [expand_path(value, launcher, launcher) for value in images[launcher][1]]
     for path in images:
         visit(path, launcher, launcher_rpaths)
+    run("/usr/bin/codesign", "--verify", "--deep", "--strict", str(app))
     return {"schema_version": 1, "source_commit": expected_sha,
             "engine_version": info.get("CFBundleShortVersionString"), "build_options": settings,
             "backend_identity_strings": list(BACKENDS), "images": records,
             "scope": "Static bundle integrity only; not launcher persistence, neural inference or gameplay",
-            "app_bundle_seal": "not checked; individual Mach-O signatures verified",
+            "app_bundle_seal": "verified with codesign --verify --deep --strict",
             "notarization": "not checked", "known_h3_archives_found": False,
             "onnx_files_found": False}
 

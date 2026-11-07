@@ -12,10 +12,16 @@ if(MACOS)
 	# note: cross-compiled Qt 5 builds macdeployqt for target platform instead of host
 	vcmi_deploy_qt(macdeployqt "${macdeployqtParams}")
 
-	# perform ad-hoc codesigning
-	# Intel Macs don't need it
+	# Intel builds retain their existing signing behavior.
 	if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
 		set(NEEDS_ADHOC_SIGNING 1)
+		find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
+		install(CODE "
+execute_process(COMMAND
+	\"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_SOURCE_DIR}/normalize_bundle_rpaths.py\" --app \"${bundleDir}\"
+	COMMAND_ERROR_IS_FATAL ANY
+)
+		")
 	endif()
 
 	set(executablesToSign vcmiserver)
@@ -42,19 +48,28 @@ endif()
 if(CODE_SIGN_IDENTITY)
 	execute_process(COMMAND
 		bash -c \"
+			set -e
 			for f in '${executablesDir}/vcmibuilder' $(find '${bundleContentsDir}' -type f -iname '*.dylib'); do
 				${codesignCommand} '\${CODE_SIGN_IDENTITY}' $@ \\\"$f\\\"
 			done
 		\" \"\" \${codesignParams}
+		COMMAND_ERROR_IS_FATAL ANY
 	)
 	foreach(executable ${executablesToSign})
 		execute_process(COMMAND
 			${codesignCommand} \${CODE_SIGN_IDENTITY} \${codesignParams} --identifier eu.vcmi.\${executable} \${codesignParamsForExecutables} \"${executablesDir}/\${executable}\"
+			COMMAND_ERROR_IS_FATAL ANY
 		)
 	endforeach()
 	if(NOT CODE_SIGN_IDENTITY STREQUAL \"-\")
 		execute_process(COMMAND
 			${codesignCommand} \${CODE_SIGN_IDENTITY} \${codesignParams} \"${bundleDir}\"
+			COMMAND_ERROR_IS_FATAL ANY
+		)
+	endif()
+	if(\"${NEEDS_ADHOC_SIGNING}\")
+		execute_process(COMMAND codesign --verify --deep --strict \"${bundleDir}\"
+			COMMAND_ERROR_IS_FATAL ANY
 		)
 	endif()
 endif()

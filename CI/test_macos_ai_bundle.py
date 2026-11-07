@@ -77,6 +77,25 @@ class BundleAuditTest(unittest.TestCase):
     def test_bundle_and_system_dependencies(self):
         self.assertEqual(self.audit()["source_commit"], SHA)
 
+    def test_app_seal_is_verified_after_individual_images(self):
+        with patch.object(checker, "run", wraps=self.run_tool) as tool:
+            self.assertEqual(self.audit()["app_bundle_seal"],
+                             "verified with codesign --verify --deep --strict")
+        self.assertEqual(tool.call_args.args, ("/usr/bin/codesign", "--verify", "--deep",
+                                              "--strict", str(self.app)))
+        individual = [call for call in tool.call_args_list
+                      if call.args[:3] == ("/usr/bin/codesign", "--verify", "--strict")]
+        self.assertEqual(len(individual), 4)
+
+    def test_invalid_app_seal_fails_with_valid_individual_signatures(self):
+        def invalid_seal(tool, *args):
+            if "--deep" in args:
+                raise checker.subprocess.CalledProcessError(1, [tool, *args])
+            return self.run_tool(tool, *args)
+        with patch.object(checker, "run", invalid_seal):
+            with self.assertRaises(checker.subprocess.CalledProcessError):
+                self.audit()
+
     def test_bundle_under_symlinked_temporary_directory(self):
         with tempfile.TemporaryDirectory() as target:
             alias = self.root / "temporary-directory-alias"

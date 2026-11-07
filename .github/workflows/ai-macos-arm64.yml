@@ -39,6 +39,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           xcrun --find clang
           python3 -m unittest discover -s CI -p 'test_macos_ai_bundle.py' -v
+          python3 -m unittest discover -s CI -p 'test_macos_packaging.py' -v
           python3 -m unittest discover -s CI -p 'test_verify_mmai_1_8.py' -v
           python3 CI/test_launcher_ai_selection.py
 
