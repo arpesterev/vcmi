@@ -20718,3 +20718,323 @@ TEST_F(AIIntegrationNativeBattle, homm3SourceLossRepeatedMixedArmyDecisionIsStab
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
 	EXPECT_GT(recorder.meleeAttacks, 0);
 }
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicWaitsForObservedEnemyHeroSpell)
+{
+	prepareBattle(CreatureID(2), 500, CreatureID(19), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 4);
+	teachBattleSpell(defenderSideHero, SpellID::LIGHTNING_BOLT, 12);
+	ASSERT_EQ(battle()->battleActiveUnit()->unitSide(), BattleSide::DEFENDER);
+	const CStack * target = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->alive())
+			target = unit.get();
+	ASSERT_NE(target, nullptr);
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battle()->getBattleID());
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	EXPECT_FALSE(AIIntegration::FHeroes2SpellPolicy::choose(view, environment.get()).has_value())
+		<< "An enemy's unobserved spellbook must not supply protection value";
+	bool observedProtection = false;
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "FHeroes2Tactics", true,
+		[&](const BattleAction & action, BattleSide side, BattleHex)
+		{
+			if(side != BattleSide::ATTACKER || action.actionType != EActionType::HERO_SPELL)
+				return;
+			EXPECT_EQ(action.spell, SpellID(SpellID::ANTI_MAGIC));
+			EXPECT_FALSE(recorder.castsOf(SpellID::LIGHTNING_BOLT).empty());
+			EXPECT_GE(target->valOfBonuses(BonusType::LEVEL_SPELL_IMMUNITY), 3);
+			observedProtection = true;
+		});
+	EXPECT_TRUE(observedProtection);
+	EXPECT_FALSE(recorder.castsOf(SpellID::ANTI_MAGIC).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicRejectsUncoveredObservedSpell)
+{
+	prepareBattle(CreatureID(2), 500, CreatureID(19), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 4);
+	teachBattleSpell(defenderSideHero, SpellID::IMPLOSION, 12);
+	setMagicMastery(attackerSideHero, MasteryLevel::BASIC);
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "FHeroes2Tactics", true);
+	EXPECT_FALSE(recorder.castsOf(SpellID::IMPLOSION).empty());
+	EXPECT_TRUE(recorder.castsOf(SpellID::ANTI_MAGIC).empty())
+		<< "Basic native Anti-Magic cannot block level-five Implosion";
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicKeepsSourcePositiveEffectVeto)
+{
+	prepareBattle(CreatureID(2), 500, CreatureID(19), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * target = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->alive())
+			target = unit.get();
+	ASSERT_NE(target, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::BLESS, 30);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLESS, target));
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	attackerSideHero->removeSpellFromSpellbook(SpellID::BLESS);
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 4);
+	teachBattleSpell(defenderSideHero, SpellID::LIGHTNING_BOLT, 12);
+	ASSERT_TRUE(AIIntegration::FHeroes2ObservedMagic::hasPositiveMagic(*target));
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "FHeroes2Tactics", true);
+	EXPECT_FALSE(recorder.castsOf(SpellID::LIGHTNING_BOLT).empty());
+	EXPECT_TRUE(recorder.castsOf(SpellID::ANTI_MAGIC).empty())
+		<< "The pinned policy retains the positive-effect veto despite native preservation of Bless";
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicReleasesObservedBlindThroughFactory)
+{
+	prepareBattle(CreatureID(2), 500, CreatureID(87), 500);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * target = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->alive())
+			target = unit.get();
+	ASSERT_NE(target, nullptr);
+	const BattleHex supportHex(2 * GameConstants::BFIELD_WIDTH + 1);
+	ASSERT_EQ(battle()->battleGetUnitByPos(supportHex), nullptr);
+	const auto * support = addStack(BattleSide::ATTACKER, CreatureID::FIRE_ELEMENTAL, supportHex, 120);
+	ASSERT_NE(support, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 4);
+	teachBattleSpell(defenderSideHero, SpellID::BLIND, 12);
+	ASSERT_EQ(battle()->battleActiveUnit()->unitSide(), BattleSide::DEFENDER);
+	bool sawBlind = false;
+	bool sawRelease = false;
+	bool blindBeforeAction = false;
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "FHeroes2Tactics", true,
+		[&](const BattleAction & action, BattleSide side, BattleHex)
+		{
+			// The accepted terminal action destroys the battle and its stacks.
+			if(!recorder.battleResults.empty())
+				return;
+			if(action.actionType != EActionType::HERO_SPELL)
+			{
+				blindBeforeAction = target->hasBonusOfType(BonusType::NOT_ACTIVE);
+				return;
+			}
+			if(side == BattleSide::DEFENDER && action.spell == SpellID::BLIND)
+			{
+				sawBlind |= target->hasBonusOfType(BonusType::NOT_ACTIVE);
+			}
+			if(side == BattleSide::ATTACKER && action.spell == SpellID::ANTI_MAGIC)
+			{
+				EXPECT_TRUE(sawBlind);
+				if(!sawRelease)
+				{
+					EXPECT_TRUE(blindBeforeAction) << "The first Anti-Magic must remove Blind, not follow an attack that awakened the target";
+				}
+				EXPECT_FALSE(target->hasBonusOfType(BonusType::NOT_ACTIVE));
+				EXPECT_GE(target->valOfBonuses(BonusType::LEVEL_SPELL_IMMUNITY), 3);
+				sawRelease = true;
+			}
+			blindBeforeAction = target->hasBonusOfType(BonusType::NOT_ACTIVE);
+		});
+	EXPECT_TRUE(sawBlind);
+	EXPECT_TRUE(sawRelease);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicUsesNativeImmunityLevelsAndFutureResurrection)
+{
+	prepareBattle(CreatureID(2), 100, CreatureID(2), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto * target = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(target, nullptr);
+	ASSERT_EQ(target->unitSide(), BattleSide::ATTACKER);
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 6);
+	teachBattleSpell(attackerSideHero, SpellID::RESURRECTION, 6);
+	teachBattleSpell(defenderSideHero, SpellID::IMPLOSION, 20);
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battle()->getBattleID());
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	// Isolated projection input, not a forged delivered hero-cast event.
+	const AIIntegration::FHeroes2ObservedSpells implosion{{SpellID::IMPLOSION, false}};
+	const AIIntegration::FHeroes2ObservedMagic observed(*view, implosion, 10000);
+	const auto * spell = SpellID(SpellID::ANTI_MAGIC).toSpell();
+	for(int mastery : {MasteryLevel::BASIC, MasteryLevel::ADVANCED, MasteryLevel::EXPERT})
+	{
+		SCOPED_TRACE(mastery);
+		setMagicMastery(attackerSideHero, mastery);
+		auto projected = std::make_shared<HypotheticBattle>(environment.get(), view);
+		spells::BattleCast cast(projected.get(), attackerSideHero, spells::Mode::HERO, spell);
+		cast.castEval(projected->getServerCallback(), spells::Target{battle::Destination(target)});
+		const auto * after = projected->battleGetUnitByID(target->unitId());
+		ASSERT_NE(after, nullptr);
+		EXPECT_EQ(after->valOfBonuses(BonusType::LEVEL_SPELL_IMMUNITY), mastery + 2);
+		const double blocked = observed.newlyBlockedStrength(*view, *projected, *target, *after);
+		if(mastery == MasteryLevel::EXPERT)
+			EXPECT_GT(blocked, 200);
+		else
+			EXPECT_EQ(blocked, 0);
+		EXPECT_FALSE(target->hasBonusOfType(BonusType::LEVEL_SPELL_IMMUNITY));
+	}
+	const int cost = view->battleGetSpellCost(SpellID(SpellID::RESURRECTION).toSpell(), attackerSideHero);
+	attackerSideHero->mana = cost - 1;
+	EXPECT_FALSE(AIIntegration::FHeroes2ObservedMagic::affordableResurrection(*view, *attackerSideHero, *target));
+	attackerSideHero->mana = cost;
+	EXPECT_TRUE(AIIntegration::FHeroes2ObservedMagic::affordableResurrection(*view, *attackerSideHero, *target));
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicDispelRetainsPersistentRayAndPositiveBless)
+{
+	prepareBattle(CreatureID(2), 100, CreatureID(2), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto * target = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(target, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::BLESS, 20);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLESS, target));
+	teachBattleSpell(defenderSideHero, SpellID::DISRUPTING_RAY, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::DISRUPTING_RAY, target));
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(defenderSideHero, SpellID::BLIND, 20);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLIND, target));
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 6);
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battle()->getBattleID());
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	auto projected = std::make_shared<HypotheticBattle>(environment.get(), view);
+	spells::BattleCast cast(projected.get(), attackerSideHero, spells::Mode::HERO, SpellID(SpellID::ANTI_MAGIC).toSpell());
+	cast.castEval(projected->getServerCallback(), spells::Target{battle::Destination(target)});
+	const auto * after = projected->battleGetUnitByID(target->unitId());
+	ASSERT_NE(after, nullptr);
+	EXPECT_TRUE(AIIntegration::FHeroes2ObservedMagic::hasPositiveMagic(*after));
+	EXPECT_TRUE(AIIntegration::FHeroes2ObservedMagic::removedNegativeMagic(*target, *after));
+	EXPECT_FALSE(after->hasBonusOfType(BonusType::NOT_ACTIVE));
+	EXPECT_EQ(after->getDefense(false), target->getDefense(false));
+	EXPECT_TRUE(target->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::ANTI_MAGIC, target));
+	EXPECT_FALSE(target->hasBonusOfType(BonusType::NOT_ACTIVE));
+	EXPECT_TRUE(AIIntegration::FHeroes2ObservedMagic::hasPositiveMagic(*target));
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+}
+
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicRespectsSourceHypnotizedAllyExclusion)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 15);
+	setArmy(defenderSideHero, CreatureID(0), 100);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(139).toCreature(), 30));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * captured = nullptr;
+	const CStack * archer = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() != BattleSide::ATTACKER)
+			continue;
+		if(unit->creatureId() == CreatureID(139))
+			captured = unit.get();
+		else
+			archer = unit.get();
+	}
+	ASSERT_NE(captured, nullptr);
+	ASSERT_NE(archer, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::BLESS, 20);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLESS, archer));
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 30);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, captured));
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	attackerSideHero->removeSpellFromSpellbook(SpellID::BLESS);
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 6);
+	teachBattleSpell(defenderSideHero, SpellID::LIGHTNING_BOLT, 30);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_TRUE(captured->isHypnotized());
+	ASSERT_NE(battle()->battleGetOwner(captured), player);
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	if(battle()->battleGetOwner(active) != player)
+	{
+		ASSERT_TRUE(act(BattleAction::makeDefend(active)));
+		active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+		ASSERT_NE(active, nullptr);
+	}
+	ASSERT_EQ(battle()->battleGetOwner(active), player);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto * spell = SpellID(SpellID::ANTI_MAGIC).toSpell();
+	spells::BattleCast legality(view.get(), attackerSideHero, spells::Mode::HERO, spell);
+	ASSERT_TRUE(spell->battleMechanics(&legality)->canBeCastAt(
+		spells::Target{battle::Destination(captured)}))
+		<< "Native positive spells match initial army ownership";
+	// Isolated public-history input; event delivery is exercised separately.
+	const AIIntegration::FHeroes2ObservedSpells observed{{SpellID::LIGHTNING_BOLT, false}};
+	const auto selected = AIIntegration::FHeroes2SpellPolicy::choose(view, environment.get(), active, false, observed);
+	EXPECT_FALSE(selected.has_value())
+		<< "Source trueFriendly excludes an ally that changed sides despite native target legality";
+	EXPECT_TRUE(captured->isHypnotized());
+	EXPECT_NE(battle()->battleGetOwner(captured), player);
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2AntiMagicDoesNotReturnControlledEnemy)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 5);
+	setArmy(defenderSideHero, CreatureID(0), 100);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 2));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const CStack * controlled = nullptr;
+	const CStack * own = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER)
+			own = unit.get();
+		else if(unit->creatureId() == CreatureID(2))
+			controlled = unit.get();
+	}
+	ASSERT_NE(controlled, nullptr);
+	ASSERT_NE(own, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::BLESS, 20);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLESS, own));
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::HYPNOTIZE, controlled));
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	attackerSideHero->removeSpellFromSpellbook(SpellID::BLESS);
+	attackerSideHero->removeSpellFromSpellbook(SpellID::HYPNOTIZE);
+	teachBattleSpell(attackerSideHero, SpellID::ANTI_MAGIC, 6);
+	teachBattleSpell(defenderSideHero, SpellID::LIGHTNING_BOLT, 30);
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	ASSERT_TRUE(controlled->isHypnotized());
+	ASSERT_EQ(battle()->battleGetOwner(controlled), player);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battle()->getBattleID());
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto * spell = SpellID(SpellID::ANTI_MAGIC).toSpell();
+	spells::BattleCast legality(view.get(), attackerSideHero, spells::Mode::HERO, spell);
+	EXPECT_FALSE(spell->battleMechanics(&legality)->canBeCastAt(
+		spells::Target{battle::Destination(controlled)}));
+	const AIIntegration::FHeroes2ObservedSpells observed{{SpellID::LIGHTNING_BOLT, false}};
+	EXPECT_FALSE(AIIntegration::FHeroes2SpellPolicy::choose(view, environment.get(), nullptr, false, observed));
+	EXPECT_TRUE(controlled->isHypnotized());
+	EXPECT_EQ(battle()->battleGetOwner(controlled), player);
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+}

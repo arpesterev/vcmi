@@ -31,6 +31,7 @@
 #include "../../../lib/battle/CPlayerBattleCallback.h"
 #include "../../../lib/callback/CBattleCallback.h"
 #include "../../../lib/callback/CBattleGameInterface.h"
+#include "../../../lib/networkPacks/PacksForClientBattle.h"
 
 namespace AIIntegration
 {
@@ -250,7 +251,7 @@ public:
 		}
 		if(preferences.enableSpellsUsage && !stack->isCatapult() && !stack->isFirstAidTent())
 		{
-			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get(), stack))
+			if(const auto spell = FHeroes2SpellPolicy::choose(battle, env.get(), stack, false, observedEnemySpells[battleID.getNum()]))
 			{
 				logAi->debug("AI_PORT_SPELL backend=FHeroes2Tactics battle=%d action=%s", battleID.getNum(), spell->toString());
 				cb->battleMakeSpellAction(battleID, *spell);
@@ -269,15 +270,31 @@ void battleStart(const BattleID & battleID, const CCreatureSet *, const CCreatur
 	{
 		stalemateByBattle[battleID.getNum()].reset();
 		pendingWithdrawals.erase(battleID.getNum());
+		observedEnemySpells.erase(battleID.getNum());
 	}
 
 	void battleEnd(const BattleID & battleID, const BattleResult *, QuestionID) override
 	{
 		stalemateByBattle.erase(battleID.getNum());
 		pendingWithdrawals.erase(battleID.getNum());
+		observedEnemySpells.erase(battleID.getNum());
+	}
+
+	void battleSpellCast(const BattleID & battleID, const BattleSpellCast * event) override
+	{
+		if(!event || !event->castByHero || !event->activeCast || event->casterStack >= 0)
+			return;
+		const auto battle = cb->getBattle(battleID);
+		if(event->side != battle->otherSide(battle->battleGetMySide()))
+			return;
+		const auto * spell = event->spellID.toSpell();
+		if(!spell->isCombat() || spell->isCreatureAbility())
+			return;
+		observedEnemySpells[battleID.getNum()][event->spellID] |= event->affectedCres.size() > 1;
 	}
 
 private:
+	std::map<int32_t, FHeroes2ObservedSpells> observedEnemySpells;
 	std::map<int32_t, Ports::FHeroes2::Withdrawal> pendingWithdrawals;
 	std::map<int32_t, Ports::FHeroes2::DeathlessRoundLimiter> stalemateByBattle;
 	std::shared_ptr<CBattleCallback> cb;

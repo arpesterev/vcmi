@@ -37,7 +37,7 @@ Each backend must pass all gates:
 | Backend | Implemented in experimental branch | Missing before full identifier |
 | --- | --- | --- |
 | HoMM3Original (sushi-shi/homm3-decomp) | Source-style unit/casualty valuation, partial ranged/melee/advance/jousting/siege decisions and hero damage/area, Bless/Bloodlust/Precision, Blind, Cure/limited Dispel and resurrection policies; native VCMI legality | Complete modifier mapping (including Frenzy), future-exchange simulation, full attack-position threat map, original path planning, remaining spellcaster policy and exact buff/debuff/Dispel valuation, creature specials, hero retreat/surrender, full reference trace parity |
-| FHeroes2 (ihhub/fheroes2) | Native archer/guard/offense/defense, multi-turn pursuit, area shots, Berserk creature turns, partial hero damage/restore and buffs/debuffs, summons/Clone, offensive Teleport, Earthquake, selective Cure/Dispel, legal retreat/surrender/farewell and deathless-round limit | Anti-Magic and complete spell-effect timing/Dispel valuation, exact kiting and castle positioning, Heroes III manual creature abilities without a source equivalent, complete host-rule mapping and broad independent Heroes II/native decision comparison beyond the initial executable corpus |
+| FHeroes2 (ihhub/fheroes2) | Native archer/guard/offense/defense, multi-turn pursuit, area shots, Berserk creature turns, partial hero damage/restore and buffs/debuffs, summons/Clone, offensive Teleport, Earthquake, selective Cure/Dispel, observed-spell Anti-Magic, legal retreat/surrender/farewell and deathless-round limit | Unobserved enemy spell pressure and complete spell-effect timing/Dispel valuation, exact kiting and castle positioning, Heroes III manual creature abilities without a source equivalent, complete host-rule mapping and broad independent Heroes II/native decision comparison beyond the initial executable corpus |
 | TUMEnchanted (SadnessPower/TUM-Enchanted) | Explicit HoMM3 partial baseline plus published ballista, neutral shooter protection, siege hold, decoy and Hypnotize overrides | Public AI.erm tower rules and published Battle_AI pursuit-penalty C++ are available, with reuse terms unestablished. Implement and independently validate those rules and the remaining spell/creature/siege behavior, including the automatic server-action boundary. **Source availability and static formula recovery are not runtime parity** |
 | MMAI (smanolloff/vcmi-gym and official VCMI MMAI) | Genuine ONNX V13/V15 stack inference; attacker/defender/siege roles; strict no scripted fallback | New spell-capable observation/action schema and newly compatible trained weights before claiming neural hero spells; full special-action coverage beyond existing source-native handlers; installed GUI/model-error acceptance; long symmetrical self-play termination with source-grounded behavior |
 
@@ -91,6 +91,17 @@ Each backend must pass all gates:
   Public native modifiers and unknown enemy Artillery remain explicit host
   projections. Frenzy conversion is still a separate gap. Scalar comparisons
   against the pinned reconstructed bodies are not retail runtime proof.
+- The subsequent Anti-Magic increment records only public enemy hero-cast
+  events, then uses visible hero power/mana and native immunity checks. It
+  preserves the source positive-effect veto, negative-effect removal bonus,
+  resurrection cap and original-friendly target restriction. Eight focused
+  native cases and the full 363-case local run passed (343 passed, 20 gated),
+  with independent output/Nullkiller/reference checks. A terminal test-observer
+  lifetime error and a premature turn-owner premise were corrected without
+  changing production policy or the checked protection/ownership assertions.
+  Unlike original FHeroes2, this projection cannot protect preemptively from
+  an unknown enemy spellbook; mastery/artifact uncertainty is not hidden by
+  reading private hero fields. It is not complete source magic parity.
 - HoMM3 order/prefix and event-lifecycle kernels remain test-only. The latter
   tracks actual pre-action WAIT evidence and post-apply round changes, keeps
   initial ownership slots, and invalidates planning during hero actions.
@@ -107,8 +118,10 @@ Each backend must pass all gates:
   a separate reproducible CI source job, native four-property capture and
   fail-closed same-checkout pairing. Fresh local compilation of all 249 source
   objects and 96 processes passed with the pinned 965-file archive. Its first
-  remote execution remains required; it covers only the four declared coarse
-  properties, not identical inputs or complete ordered decisions.
+  [remote execution on 8fda4e8d](https://github.com/arpesterev/vcmi/actions/runs/42392784250)
+  passed with a clean, matching commit/tree in source, native and pairing
+  artifacts. This covers only the four declared coarse properties, not
+  identical inputs or complete ordered decisions.
 - ARM64 commit `ecd48d9296d3647685168ac8c03373e5d5479cbc`
   [passed packaging](https://github.com/arpesterev/vcmi/actions/runs/42382614048):
   the mounted DMG, 35 thin ARM64 images, dependency closure and deep strict
@@ -125,9 +138,13 @@ Each backend must pass all gates:
   strips only SGR colors, retains the exact full-SHA and isolated-HOME checks,
   and logs escaped raw output before validation. Exact DA37
   [Mac run 42391258270](https://github.com/arpesterev/vcmi/actions/runs/42391258270)
-  is running with its 522-case gate; no result or new deliverable is claimed yet.
-  The current required native ARM64 gate is 528 genuine passes, not a report
-  of completed Mac tests. See [the acceptance procedure](MACOS_ARM64_ACCEPTANCE.md).
+  passed packaging, static audit and both actual ARM64 server CLI commands.
+  Its raw version output confirms the diagnosed SGR prefix. Native test
+  compilation then failed Clang's nonvirtual-destructor warning for the
+  test-only `NativeLifecycle` receiver, so none of its 522 runtime cases ran.
+  The receiver is now explicitly final, matching its concrete ownership and
+  lack of subclasses; no warning is suppressed. The current required native
+  ARM64 gate is 536 genuine passes, not a report of completed Mac tests. See [the acceptance procedure](MACOS_ARM64_ACCEPTANCE.md).
 
 ## Evidence and controls
 

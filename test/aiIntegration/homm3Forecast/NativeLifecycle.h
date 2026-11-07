@@ -8,7 +8,7 @@
 namespace HoMM3Forecast
 {
 /// Test-only consumer of the public battle-AI event contract; never reads a hero or game state.
-class NativeLifecycle : public IBattleEventsReceiver
+class NativeLifecycle final : public IBattleEventsReceiver
 {
 	const CPlayerBattleCallback & callback;
 	std::optional<BattleID> battle;

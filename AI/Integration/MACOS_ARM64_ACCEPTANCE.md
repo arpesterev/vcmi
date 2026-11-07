@@ -130,9 +130,9 @@ cases, then verifies that the selected inventory and XML identities agree.
 Linux CI validates the compiled inventory against the Mac workflow counts
 before executing its suites. Require that check before scheduling a new Mac
 build to catch stale counts without repeating the longer compilation.
-Expected genuine passes are 317 native battle cases, 18 forecast/lifecycle cases,
+Expected genuine passes are 325 native battle cases, 18 forecast/lifecycle cases,
 48 `MMAINNOutputValidation` cases and 145 Nullkiller/resource-trading cases:
-**528 executed cases with zero skipped, disabled, failed or errored cases**.
+**536 executed cases with zero skipped, disabled, failed or errored cases**.
 These are required results, not a claim that this Mac run has already passed.
 A source change that alters the inventory requires an explicit reviewed update
 to the expected counts. XML counts alone cannot substitute for matching names.
@@ -274,8 +274,15 @@ hashes and result of each check. Do not mark checks passed before execution.
   audit for 35 ARM64 Mach-O images, including the deep/strict app seal. It
   uploaded an artifact. This proves static package integrity at that commit,
   not execution, gameplay or validation of a later source commit.
-- The packaged-server smoke is a subsequent check. Its Python contract tests
-  use mocked process results; actual execution requires a new native run.
+- The subsequent DA37 run
+  [42391258270](https://github.com/arpesterev/vcmi/actions/runs/42391258270)
+  passed the mounted audit and actual ARM64 packaged-server `--help` and
+  `--version`, with the exact source SHA and isolated HOME. It produced a DMG
+  with SHA-256 `11e561522b8cb8e76867f7c2b76762c24e680d0c8f0f6d681f22f2f27e57e5b3`.
+  Native test compilation then failed a Clang warning in a test-only lifecycle
+  receiver. Its 522 runtime cases did not run. The receiver is now final,
+  without warning suppression; the current expanded 536-case gate still needs
+  a new exact-commit Mac run.
 - No installed launcher, Apple Silicon inference or gameplay test has been
   executed by this delivery preparation.
 - Portable cleanup/audit tests use synthetic Mach-O tool responses. The CMake

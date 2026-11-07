@@ -14,6 +14,7 @@
 #include "FHeroes2TeleportPolicy.h"
 #include "FHeroes2DragonSlayer.h"
 #include "FHeroes2DispelValuation.h"
+#include "FHeroes2ObservedMagic.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
 #include "../../../lib/CStack.h"
@@ -203,7 +204,7 @@ public:
 
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
 		const Environment * environment, const CStack * activeStack = nullptr,
-		bool farewellDamageOnly = false)
+		bool farewellDamageOnly = false, const FHeroes2ObservedSpells & observedEnemySpells = {})
 	{
 		const auto * hero = real->battleGetMyHero();
 		if(!hero || real->battleCanCastSpell(hero, spells::Mode::HERO) != ESpellCastProblem::OK)
@@ -212,6 +213,7 @@ public:
 		const auto player = hero->getOwner();
 		const auto ours = army(*real, player, true);
 		const auto theirs = army(*real, player, false);
+		const FHeroes2ObservedMagic observedMagic(*real, observedEnemySpells, ours.strength);
 		if(ours.strength <= 0 || theirs.strength <= 0)
 			return std::nullopt;
 
@@ -264,11 +266,12 @@ public:
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
+			const bool antiMagicSpell = spell->id == SpellID::ANTI_MAGIC;
 			const bool unitEffectSpell = speedSpell || defenseSpell || dragonSlayerSpell
 				|| damageRangeSpell || defenseBuff || attackBuff || rangedShield
 				|| hypnotizeSpell || disablingSpell || berserkSpell;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !summonSpell && !teleportSpell && !earthquakeSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !teleportSpell && !earthquakeSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !antiMagicSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -386,6 +389,17 @@ public:
 							return Bonus::Permanent(bonus.get()) && !Bonus::NTurns(bonus.get());
 						}))
 							valuationDuration = std::max(valuationDuration, 2);
+					}
+					// Source positive effects use trueFriendly, excluding changed sides.
+					if(antiMagicSpell && friendly && friendlyAfter && after && health == old.health)
+					{
+						const double blocked = observedMagic.newlyBlockedStrength(*real, *projected, *old.unit, *after);
+						value += static_cast<double>(old.unit->estimateCombatValue())
+							* Ports::FHeroes2::antiMagicRatio(blocked, theirs.strength,
+								FHeroes2ObservedMagic::hasPositiveMagic(*old.unit),
+								FHeroes2ObservedMagic::removedNegativeMagic(*old.unit, *after),
+								FHeroes2ObservedMagic::affordableResurrection(*real, *hero, *old.unit),
+								blocked > 0, duration >= 2 || !completedTurn(*old.unit));
 					}
 					// Dispel/Cure remove existing effects even from disabled units.
 					if(unitEffectSpell && !canValueNewEffect(*old.unit, valuationDuration))
