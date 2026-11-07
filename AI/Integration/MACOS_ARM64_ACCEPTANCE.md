@@ -122,7 +122,7 @@ intentionally different from a portable app: do not apply the bundle rpath
 normalizer to this executable or change the dependency cache. A loader or
 signature failure is a test blocker, not a reason to bypass macOS protection.
 
-The reviewed next-candidate inventory contains 331 `AIIntegrationNativeBattle`
+The reviewed next-candidate inventory contains 358 `AIIntegrationNativeBattle`
 cases, 8 `HoMM3ForecastQueueNative` cases and 10
 `HoMM3ForecastLifecycleNative` cases. The runner enumerates the compiled
 binary, requires exactly the 20 named model-gated cases, excludes only those
@@ -130,9 +130,9 @@ cases, then verifies that the selected inventory and XML identities agree.
 Linux CI validates the compiled inventory against the Mac workflow counts
 before executing its suites. Require that check before scheduling a new Mac
 build to catch stale counts without repeating the longer compilation.
-Expected genuine passes are 325 native battle cases, 18 forecast/lifecycle cases,
+Expected genuine passes are 338 native battle cases, 18 forecast/lifecycle cases,
 48 `MMAINNOutputValidation` cases and 145 Nullkiller/resource-trading cases:
-**536 executed cases with zero skipped, disabled, failed or errored cases**.
+**549 executed cases with zero skipped, disabled, failed or errored cases**.
 These are required results, not a claim that this Mac run has already passed.
 A source change that alters the inventory requires an explicit reviewed update
 to the expected counts. XML counts alone cannot substitute for matching names.
@@ -281,7 +281,7 @@ hashes and result of each check. Do not mark checks passed before execution.
   with SHA-256 `11e561522b8cb8e76867f7c2b76762c24e680d0c8f0f6d681f22f2f27e57e5b3`.
   Native test compilation then failed a Clang warning in a test-only lifecycle
   receiver. Its 522 runtime cases did not run. The receiver is now final,
-  without warning suppression; the current expanded 536-case gate still needs
+  without warning suppression; the current expanded 549-case gate still needs
   a new exact-commit Mac run.
 - No installed launcher, Apple Silicon inference or gameplay test has been
   executed by this delivery preparation.

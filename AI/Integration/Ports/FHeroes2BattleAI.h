@@ -893,361 +893,193 @@ private:
 	}
 
 
-	// fheroes2 meleeUnitDefense prefers covering valuable friendly archers.
-	// This conservative VCMI projection moves a melee stack into a reachable
-	// neighboring position only when ground melee can threaten a shooter
-	// next turn. Both occupied cells of wide archers *and wide covering melee
-	// units* count in the distance check. The VCMI movement projection supplies
-	// legal wide-unit head positions; never disrupt an immediate attack.
-	// Upstream side-cover priorities and spell/area-threat spacing remain partial.
-	static std::optional<BattleAction> coverThreatenedShooter(CPlayerBattleCallback & battle,
-		const CStack & stack, const ReachabilityInfo & reachability,
+	// Pinned meleeUnitDefense ranks ordinary cover and blocker pursuit together
+	// for every archer. All placements and attack permissions remain native.
+	static std::optional<BattleAction> coverArchers(CPlayerBattleCallback & battle,
+		const CStack & guard, const ReachabilityInfo & reachability,
 		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
 	{
-		// fheroes2 meleeUnitDefense explicitly skips archer cover when the
-		// current stack's original army differs from its current controller.
-		// In VCMI this happens with Hypnotize: a stolen guard must not screen
-		// the controller's archers as though it belonged to their army.
-		if(stack.hasBonusOfType(BonusType::SHOOTER)
-			|| stack.unitOwner() != battle.battleGetOwner(&stack))
+		if(guard.isShooter() || guard.unitOwner() != battle.battleGetOwner(&guard)
+			|| !guard.getPosition().isValid())
 			return std::nullopt;
-		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-		const auto distanceToShooter = [&](const BattleHex & head, const CStack & shooter)
-		{
-			int nearest = GameConstants::BFIELD_SIZE;
-			// A wide guard covers from either occupied cell; using only its
-			// head incorrectly rejects legal screens beside the guard's tail.
-			for(const auto & guardHex : stack.getHexes(head))
-				for(const auto & shooterHex : shooter.getHexes())
-					nearest = std::min(nearest,
-						static_cast<int>(BattleHex::getDistance(guardHex, shooterHex)));
-			return nearest;
-		};
-		double totalShooterStrength = 0;
-		for(const auto * friendly : friends)
-		{
-			// Pinned ai_battle.cpp::analyzeBattleState adds to _myRangedUnitsOnly
-			// only isArchers() && !isImmovable(). The defense-distance
-			// modifier in meleeUnitDefense uses precisely that aggregate.
-			// VCMI Blind/Paralyze can retain SHOOTER and raw movement speed;
-			// their stacks must not inflate the cost of covering *other*
-			// friendly archers. Do not remove such stacks as candidate
-			// beneficiaries: the source's cover loop still visits them.
-			if(friendly != &stack && friendly->alive() && friendly->getPosition().isValid()
-				&& friendly->hasBonusOfType(BonusType::SHOOTER)
-				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
-				totalShooterStrength += strength(*friendly);
-		}
-		// Do not return just because the mobile-shooter sum is zero.
-		// Pinned meleeUnitDefense still visits individual immobile friendly
-		// archers as cover candidates, with a zero distance penalty (notably
-		// possible behind castle towers). No shooter means the loop below
-		// naturally yields no candidate.
 
-		// Pinned fheroes2 analyzeBattleState sets _avoidStackingUnits when
-		// active area-shot archers make up more than 10% of enemy strength.
-		// Its meleeUnitDefense then looks one more cell away when screening
-		// friendly archers. VCMI SHOOTS_ALL_ADJACENT is only a native splash
-		// projection, not an assertion that Heroes II and III area shots agree.
-		// In particular, incapacitated or engaged enemy shooters do not
-		// project a ranged splash shot for this turn.
+		auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
+		std::sort(friends.begin(), friends.end(),
+			[](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
+		double rangedStrength = 0;
+		for(const auto * friendly : friends)
+			if(friendly != &guard && friendly->alive() && friendly->isShooter()
+				&& friendly->getMovementRange() > 0 && !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
+				rangedStrength += strength(*friendly);
+
 		double enemyStrength = 0;
 		double areaShotStrength = 0;
 		for(const auto * enemy : enemies)
 		{
-			if(!enemy->alive())
-				continue;
-			const double value = strength(*enemy);
-			enemyStrength += value;
-			// Pinned fheroes2 analyzeBattleState excludes immovable archers
-			// from AREA_SHOT pressure. Native Blind/Paralyze can leave the
-			// creature's ranged bonus intact while forbidding its next action;
-			// do not project a future splash threat from such a stack.
-			// Source ai_battle.cpp::analyzeBattleState uses !isHandFighting():
-			// physical contact suppresses AREA_SHOT spacing even if Heroes III
-			// FREE_SHOOTING makes the native ranged action legal. Query the
-			// actual occupied footprints; this is a tactical choice, not a
-			// change to the engine's permission to shoot.
-			if(enemy->isShooter() && !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+			enemyStrength += strength(*enemy);
+			if(enemy->isShooter() && enemy->getMovementRange() > 0
+				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
 				&& enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
 				&& !battle.battleIsUnitBlocked(enemy))
-				areaShotStrength += value;
+				areaShotStrength += strength(*enemy);
 		}
-		const bool avoidSplashGrouping = enemyStrength > 0
-			&& areaShotStrength / enemyStrength > 0.1;
-		const int coverGap = avoidSplashGrouping ? 2 : 1;
-
-		BattleHex bestCoverHex;
-		double bestCoverValue = -std::numeric_limits<double>::infinity();
-		int bestTravel = GameConstants::BFIELD_SIZE;
-		for(const auto * friendly : friends)
+		const bool avoidGrouping = enemyStrength > 0 && areaShotStrength / enemyStrength > 0.1;
+		const auto footprintDistance = [&](const BattleHex & head, const CStack & other)
 		{
-			if(friendly == &stack || !friendly->alive() || !friendly->getPosition().isValid()
-				|| !friendly->hasBonusOfType(BonusType::SHOOTER))
-				continue;
-			const bool threatened = std::any_of(enemies.begin(), enemies.end(), [&](const CStack * enemy)
-			{
-				if(!enemy->getPosition().isValid() || enemy->hasBonusOfType(BonusType::SHOOTER))
-					return false;
-				// The threat is the *enemy's* real footprint, not a hypothetical
-				// footprint of this covering unit placed at an enemy cell. Reusing
-				// distanceToShooter here projected a wide guard's tail onto narrow
-				// opponents, inventing a one-hex closer melee threat.
-				int nearest = GameConstants::BFIELD_SIZE;
-				for(const auto & enemyHex : enemy->getHexes())
-					for(const auto & shooterHex : friendly->getHexes())
-						nearest = std::min(nearest,
-							static_cast<int>(BattleHex::getDistance(enemyHex, shooterHex)));
-				// The pinned source's future approach check cannot project a
-				// Blind/Paralyze-disabled melee unit across the battlefield.
-				// Keep its adjacent contact: even an immobile enemy still
-				// blocks a shooter's ranged attack from one hex away.
-				const int futureReach = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
-					? 1 : static_cast<int>(enemy->getMovementRange()) + 1;
-				return nearest <= futureReach;
-			});
-			if(!threatened)
-				continue;
-			// A guard already adjacent to one threatened shooter must not
-			// immediately defend without considering the other shooters.
-			// Treat its current screen as a zero-travel candidate, then
-			// compare every reachable cover using the same source-derived
-			// archer-strength / travel-penalty ranking.
-			if(distanceToShooter(stack.getPosition(), *friendly) == coverGap)
-			{
-				const double value = strength(*friendly);
-				if(value > bestCoverValue)
-				{
-					bestCoverValue = value;
-					bestCoverHex = stack.getPosition();
-					bestTravel = 0;
-				}
-				continue;
-			}
-
-			for(const auto & hex : available)
-			{
-				if(!hex.isAvailable() || hex == stack.getPosition()
-					|| distanceToShooter(hex, *friendly) != coverGap)
-					continue;
-				const int travel = reachability.distances[hex.toInt()];
-				if(travel <= 0 || travel > static_cast<int>(stack.getMovementRange()))
-					continue;
-				// Source: archer strength minus the path-distance penalty equal
-				// to all friendly shooter strength / 15 per traveled hex.
-				const double value = strength(*friendly) - totalShooterStrength * travel / 15.0;
-				if(value > bestCoverValue || (value == bestCoverValue
-					&& (travel < bestTravel || (travel == bestTravel
-						&& (!bestCoverHex.isValid() || hex.toInt() < bestCoverHex.toInt())))))
-				{
-					bestCoverHex = hex;
-					bestCoverValue = value;
-					bestTravel = travel;
-				}
-			}
-		}
-		return bestCoverHex.isValid() && bestCoverHex != stack.getPosition()
-			? std::optional<BattleAction>(BattleAction::makeMove(&stack, bestCoverHex))
-			: std::nullopt;
-	}
-
-	// Pinned fheroes2 meleeUnitDefense (ai_battle.cpp, lines 1774 and
-	// 2012-2039): before generic melee target selection, attack enemies
-	// physically blocking friendly archers. The source scores each blocker
-	// with BestAttackOutcome. Here the positions and damage previews are
-	// native VCMI projections, and only immediately legal attacks qualify.
-	// In particular, a blocked archer must not redirect a guard to an
-	// unrelated, more profitable melee target.
-	static std::optional<BattleAction> attackShooterBlocker(CPlayerBattleCallback & battle,
-		const CStack & guard, const ReachabilityInfo & reachability,
-		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
-	{
-		if(guard.hasBonusOfType(BonusType::SHOOTER)
-			|| guard.unitOwner() != battle.battleGetOwner(&guard))
-			return std::nullopt;
-
-		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-		const CStack * chosenBlocker = nullptr;
-		BattleHex chosenFrom;
-		BattleHex chosenTargetHex;
-		double chosenShooterValue = std::numeric_limits<double>::lowest();
-		for(const auto * shooter : friends)
+			int nearest = GameConstants::BFIELD_SIZE;
+			for(const auto & ownHex : guard.getHexes(head))
+				for(const auto & otherHex : other.getHexes())
+					nearest = std::min(nearest, static_cast<int>(BattleHex::getDistance(ownHex, otherHex)));
+			return nearest;
+		};
+		const auto access = battle.getAccessibility(&guard);
+		const auto positionAt = [&](const BattleHex & cell)
 		{
-			// Source meleeUnitDefense scans actual enemy contact with friendly
-			// archers. Heroes III FREE_SHOOTING does not erase that contact.
-			if(shooter == &guard || !shooter->alive() || !shooter->getPosition().isValid()
-				|| !shooter->isShooter())
-				continue;
-
-			const auto shooterHexes = shooter->getHexes();
-			const CStack * bestBlocker = nullptr;
-			BattleHex bestFrom;
-			BattleHex bestTargetHex;
-			Ports::FHeroes2::MeleeOutcome bestOutcome;
-			for(const auto * enemy : enemies)
+			if(cell.isAvailable() && access.accessible(cell, &guard))
+				return cell;
+			// Source Position::GetPosition tries the requested cell as head,
+			// then as tail only if that footprint does not fit.
+			if(guard.doubleWide() && cell.isAvailable())
 			{
-				// Lack of a shot can also result from a spell or empty ammo.
-				// Only real enemy contact can make a unit an archer blocker.
-				const auto enemyHexes = enemy->getHexes();
-				const bool adjacent = std::any_of(shooterHexes.begin(),
-					shooterHexes.end(), [&](const BattleHex & friendlyHex)
-					{
-						return std::any_of(enemyHexes.begin(), enemyHexes.end(),
-							[&](const BattleHex & enemyHex)
-							{
-								return BattleHex::getDistance(friendlyHex, enemyHex) == 1;
-							});
-					});
-				if(!adjacent)
-					continue;
-				for(const auto & from : available)
+				const BattleHex head = cell.cloneInDirection(guard.headDirection(), false);
+				if(head.isAvailable() && access.accessible(head, &guard))
+					return head;
+			}
+			return BattleHex();
+		};
+		const auto preferredCover = [&](const CStack & shooter)
+		{
+			const bool reflected = shooter.unitSide() == BattleSide::DEFENDER;
+			const bool sideCover = guard.doubleWide() && (shooter.doubleWide()
+				|| shooter.getPosition().getY() % 2 == (reflected ? 1 : 0));
+			const auto front = reflected ? BattleHex::LEFT : BattleHex::RIGHT;
+			const auto back = reflected ? BattleHex::RIGHT : BattleHex::LEFT;
+			const auto frontTop = reflected ? BattleHex::TOP_LEFT : BattleHex::TOP_RIGHT;
+			const auto frontBottom = reflected ? BattleHex::BOTTOM_LEFT : BattleHex::BOTTOM_RIGHT;
+			const auto backTop = reflected ? BattleHex::TOP_RIGHT : BattleHex::TOP_LEFT;
+			const auto backBottom = reflected ? BattleHex::BOTTOM_RIGHT : BattleHex::BOTTOM_LEFT;
+			const std::array<BattleHex::EDir, 6> directions = sideCover
+				? std::array<BattleHex::EDir, 6>{frontTop, frontBottom, front, backTop, backBottom, back}
+				: std::array<BattleHex::EDir, 6>{front, frontTop, frontBottom, backTop, backBottom, back};
+			for(const auto & occupied : shooter.getHexes())
+			{
+				for(const auto direction : directions)
 				{
-					if(!from.isAvailable())
+					BattleHex cell = occupied;
+					const int gap = !avoidGrouping ? 1 : guard.doubleWide() && direction == front ? 3 : 2;
+					for(int step = 0; step < gap && cell.isAvailable(); ++step)
+						cell = cell.cloneInDirection(direction, false);
+					const BattleHex head = positionAt(cell);
+					if(!head.isValid() || !reachability.isReachable(head)
+						|| footprintDistance(head, shooter) < (avoidGrouping ? 2 : 1))
 						continue;
-					const auto targets = battle.meleeAttackHexes(&guard, enemy, from);
-					// Pinned ai_battle.cpp::meleeUnitDefense delegates blockers to
-					// BestAttackOutcome, which uses optimalAttackValue/Vector.
-					// Evaluate EVERY native-legal aim, as in the offensive path:
-					// a breath or all-adjacent hit can release an archer while
-					// injuring other stacks (including friendly collateral).
-					// Merely taking targets.front() would discard the vector
-					// whose secondary victims make it the better blocker attack.
-					for(const auto & aimedHex : targets)
-					{
-						if(battle.battleGetUnitByPos(aimedHex) != enemy
-							|| !battle.battleCanAttackFromHex(available, &guard, aimedHex, from))
-							continue;
-						const double value = meleeAreaAttackValue(battle, guard, *enemy,
-							from, aimedHex, reachability.distances[from.toInt()]);
-						const Ports::FHeroes2::MeleeOutcome outcome{
-							from.toInt(), strength(*enemy), value, true};
-						if(!bestBlocker || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
-						{
-							bestBlocker = enemy;
-							bestFrom = from;
-							bestTargetHex = aimedHex;
-							bestOutcome = outcome;
-						}
-					}
+					return head;
 				}
 			}
-			if(bestBlocker && (!chosenBlocker || strength(*shooter) > chosenShooterValue))
-			{
-				chosenShooterValue = strength(*shooter);
-				chosenBlocker = bestBlocker;
-				chosenFrom = bestFrom;
-				chosenTargetHex = bestTargetHex;
-			}
-		}
-		return chosenBlocker
-			? std::optional<BattleAction>(BattleAction::makeMeleeAttack(&guard, chosenTargetHex, chosenFrom))
-			: std::nullopt;
-	}
+			return BattleHex();
+		};
 
-	// Pinned fheroes2 meleeUnitDefense (ai_battle.cpp): when a friendly
-	// shooter is engaged, BestAttackOutcome may return a *future* melee
-	// position against its blocker, not only an attack this turn. Follow
-	// the native VCMI reachability predecessor chain to a legal first step;
-	// never manufacture WALK_AND_ATTACK beyond the current movement range.
-	// Heroes II and III pathfinding, obstruction and attack geometry differ.
-	static std::optional<BattleAction> pursueShooterBlocker(CPlayerBattleCallback & battle,
-		const CStack & guard, const ReachabilityInfo & reachability,
-		const BattleHexArray & available, const std::vector<const CStack *> & enemies)
-	{
-		if(guard.hasBonusOfType(BonusType::SHOOTER)
-			|| guard.unitOwner() != battle.battleGetOwner(&guard)
-			|| !guard.getPosition().isValid() || guard.getMovementRange() == 0)
-			return std::nullopt;
-		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-		double allShooterStrength = 0;
-		// Pinned ai_battle.cpp::analyzeBattleState accumulates
-		// _myRangedUnitsOnly only for isArchers() && !isImmovable().
-		// Native Blind/Paralyze can retain SHOOTER and nonzero raw speed;
-		// disabled archers must not distort the defense-distance penalty.
-		// The source's meleeUnitDefense nevertheless visits every friendly
-		// archer, including immovable ones, as a possible beneficiary.
-		for(const auto * friendly : friends)
-			if(friendly != &guard && friendly->alive() && friendly->isShooter()
-				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
-				allShooterStrength += strength(*friendly);
-
-		BattleHexArray potentialPositions;
+		BattleHexArray positions;
 		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
 			if(reachability.isReachable(BattleHex(index)))
-				potentialPositions.insert(BattleHex(index));
-		potentialPositions.sort([&](const BattleHex & left, const BattleHex & right)
+				positions.insert(BattleHex(index));
+		positions.sort([&](const BattleHex & left, const BattleHex & right)
 		{
 			const auto leftDistance = BattleHex::getDistance(guard.getPosition(), left);
 			const auto rightDistance = BattleHex::getDistance(guard.getPosition(), right);
 			return leftDistance != rightDistance ? leftDistance < rightDistance : left.toInt() < right.toInt();
 		});
-		const auto candidates = evaluateAttackPositions(battle, guard, reachability,
-			potentialPositions, enemies);
-
-		// The source declines a remote two-turn screen if another immediate
-		// melee attack exists and the guard is too slow to reach the archer.
-		const bool immediateMeleeExists = std::any_of(candidates.begin(), candidates.end(),
-			[&](const MeleeAttackCandidate & candidate)
-			{
-				return battle.battleCanAttackFromHex(available, &guard, candidate.aimedHex, candidate.from);
-			});
-		const int speed = static_cast<int>(guard.getMovementRange());
-		BattleHex bestStep;
-		double bestPriority = -std::numeric_limits<double>::infinity();
-		int bestTravel = GameConstants::BFIELD_SIZE;
+		const auto candidates = evaluateAttackPositions(battle, guard, reachability, positions, enemies);
+		const auto immediate = [&](const MeleeAttackCandidate & candidate)
+		{
+			return battle.battleCanAttackFromHex(available, &guard, candidate.aimedHex, candidate.from);
+		};
+		const bool immediateExists = std::any_of(candidates.begin(), candidates.end(), immediate);
+		BattleHex chosenGoal;
+		const MeleeAttackCandidate * chosenAttack = nullptr;
+		double bestArcherValue = std::numeric_limits<double>::lowest();
 		for(const auto * shooter : friends)
 		{
-			// The source's future defender movement prioritizes physical
-			// blockers even when VCMI permits the engaged archer to shoot.
 			if(shooter == &guard || !shooter->alive() || !shooter->isShooter()
 				|| !shooter->getPosition().isValid())
 				continue;
-			int shortest = ReachabilityInfo::INFINITE_DIST;
-			const MeleeAttackCandidate * bestCandidate = nullptr;
-			Ports::FHeroes2::MeleeOutcome bestOutcome;
-			for(const auto & candidate : candidates)
+			const BattleHex cover = preferredCover(*shooter);
+			int distance = cover.isValid() ? reachability.distances[cover.toInt()] : static_cast<int>(ReachabilityInfo::INFINITE_DIST);
+			std::vector<const CStack *> blockers;
+			for(const auto * enemy : enemies)
 			{
-				bool blocksShooter = false;
-				for(const auto & shooterHex : shooter->getHexes())
-					for(const auto & blockerHex : candidate.enemy->getHexes())
-						blocksShooter |= BattleHex::getDistance(shooterHex, blockerHex) == 1;
-				if(!blocksShooter)
+				bool adjacent = false;
+				for(const auto & enemyHex : enemy->getHexes())
+					for(const auto & shooterHex : shooter->getHexes())
+						adjacent |= BattleHex::getDistance(enemyHex, shooterHex) == 1;
+				if(!adjacent)
 					continue;
-				shortest = std::min(shortest,
-					static_cast<int>(reachability.distances[candidate.from.toInt()]));
-				const Ports::FHeroes2::MeleeOutcome outcome{
-					candidate.from.toInt(), candidate.attackValue, candidate.positionValue,
-					battle.battleCanAttackFromHex(available, &guard, candidate.aimedHex, candidate.from)};
-				if(!bestCandidate || Ports::FHeroes2::isOutcomeImproved(outcome, bestOutcome))
+				blockers.push_back(enemy);
+				for(const auto & head : positions)
+					if(footprintDistance(head, *enemy) == 1)
+						distance = std::min(distance, static_cast<int>(reachability.distances[head.toInt()]));
+			}
+			if(distance >= ReachabilityInfo::INFINITE_DIST
+				|| (immediateExists && !guard.hasBonusOfType(BonusType::FLYING)
+					&& distance > guard.getMovementRange() * 2))
+				continue;
+			const double archerValue = strength(*shooter) - distance * rangedStrength / 15.0;
+			if(archerValue < bestArcherValue)
+				continue;
+
+			BattleHex goal = cover;
+			const MeleeAttackCandidate * attack = nullptr;
+			Ports::FHeroes2::MeleeOutcome bestBlocker;
+			for(const auto * blocker : blockers)
+			{
+				const MeleeAttackCandidate * best = nullptr;
+				Ports::FHeroes2::MeleeOutcome outcome;
+				for(const auto & candidate : candidates)
 				{
-					bestCandidate = &candidate;
-					bestOutcome = outcome;
+					if(candidate.enemy != blocker)
+						continue;
+					const Ports::FHeroes2::MeleeOutcome next{candidate.from.toInt(),
+						candidate.attackValue, candidate.positionValue, immediate(candidate)};
+					if(Ports::FHeroes2::isOutcomeImproved(next, outcome))
+					{
+						best = &candidate;
+						outcome = next;
+					}
+				}
+				if(best && Ports::FHeroes2::isOutcomeImproved(outcome, bestBlocker))
+				{
+					bestBlocker = outcome;
+					goal = best->from;
+					attack = outcome.canAttackImmediately ? best : nullptr;
 				}
 			}
-			if(!bestCandidate || bestOutcome.canAttackImmediately
-				|| (immediateMeleeExists && !guard.hasBonusOfType(BonusType::FLYING)
-					&& shortest > speed * 2))
+			// Native targetability/value can reject a source-style blocker attack.
+			// Without a legal cover placement, do not manufacture an action.
+			if(!goal.isValid())
 				continue;
-
-			const BattleHex step = firstStepTowards(guard, reachability, available, bestCandidate->from);
-			if(!step.isValid())
-				continue;
-			// Archer selection uses approach distance; the attack position uses
-			// aggregated threat, which can prefer a longer archer-blocking route.
-			const double priority = strength(*shooter)
-				- allShooterStrength * shortest / 15.0;
-			if(!bestStep.isValid() || priority > bestPriority
-				|| (priority == bestPriority && (shortest < bestTravel
-					|| (shortest == bestTravel && step.toInt() < bestStep.toInt()))))
+			if(!attack && (guard.hasBonusOfType(BonusType::BLOCKS_RETALIATION)
+				|| shooter->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)))
 			{
-				bestPriority = priority;
-				bestTravel = shortest;
-				bestStep = step;
+				double bestAttackValue = 0;
+				for(const auto & candidate : candidates)
+					if(candidate.from == goal && immediate(candidate) && candidate.attackValue > bestAttackValue)
+					{
+						bestAttackValue = candidate.attackValue;
+						attack = &candidate;
+					}
 			}
+			bestArcherValue = archerValue;
+			chosenGoal = goal;
+			chosenAttack = attack;
 		}
-
-		return bestStep.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&guard, bestStep))
-			: std::nullopt;
+		if(!chosenGoal.isValid())
+			return std::nullopt;
+		if(chosenAttack)
+			return BattleAction::makeMeleeAttack(&guard, chosenAttack->aimedHex, chosenGoal);
+		if(chosenGoal == guard.getPosition())
+			return BattleAction::makeNoAction(&guard);
+		const BattleHex step = firstStepTowards(guard, reachability, available, chosenGoal);
+		return step.isValid() ? BattleAction::makeMove(&guard, step) : BattleAction::makeNoAction(&guard);
 	}
 
 	// fheroes2 ai_battle.cpp archerDecision, pinned at 0dbfe9f386f33c2500842f4a59cd284d7f03d541:
@@ -1898,23 +1730,7 @@ private:
 		const auto stance = tactics(battle, stack, allEnemies);
 		if(stance.defensive)
 		{
-			// Pinned meleeUnitDefense covers a threatened friendly archer
-			// *before* considering unrelated melee opportunities. Previously
-			// any legal immediate attack bypassed this screen entirely.
-			// An archer's blocked shot gives its actual adjacent enemy a
-			// higher priority than unrelated melee targets. A legal native
-			// attack is required; otherwise retain the generic melee policy.
-			if(const auto unblock = attackShooterBlocker(battle, stack, reachability, available, allEnemies))
-				return *unblock;
-			if(const auto pursue = pursueShooterBlocker(battle, stack, reachability, available, allEnemies))
-				return *pursue;
-			// Pinned fheroes2 meleeUnitDefense evaluates cover for every
-			// living isArchers() stack, without a global can-shoot gate.
-			// Heroes III FORGETFULNESS (or zero ammo) can prohibit a native
-			// shot while preserving the source's shooter classification.
-			// An unrelated melee target must not eclipse that defensive screen.
-			// Actual movement remains restricted to VCMI-reachable hexes.
-			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
+			if(const auto cover = coverArchers(battle, stack, reachability, available, allEnemies))
 				return *cover;
 		}
 		// Pinned ai_battle.cpp::getMeleeBestOutcome/BestAttackOutcome uses

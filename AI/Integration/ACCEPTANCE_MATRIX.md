@@ -63,6 +63,19 @@ Each backend must pass all gates:
 
 ## Established evidence boundaries
 
+- The next cover increment follows source `meleeUnitDefense` selection across
+  all friendly archers, combining ordered cover positions and blocker outcomes.
+  Nineteen focused native cases passed: thirteen new cases and six older cases
+  with independently corrected premises. The full local run passed 356 of 376
+  cases, with exactly the same 20 model-gated skips. Output contracts (48),
+  Nullkiller (145), and the existing four source properties also passed.
+  Defensive infantry SKIP now proves it already occupies preferred cover.
+  Narrow and wide fortified-town cases prove exact reachable cover steps,
+  natural activation, server acceptance and both occupied cells inside walls.
+  This does not close the live-tower activation, attack valuation, native
+  splash mapping or complete source-policy gaps. Remote exact-commit CI and
+  the expanded Mac gate remain required before claiming this increment there.
+
 - Commit `bbc23d095500a9a05fe5d6f33df37fd9fddfd645` passed both
   [pre-merge](https://github.com/arpesterev/vcmi/actions/runs/42384115632) and
   [post-merge](https://github.com/arpesterev/vcmi/actions/runs/42384830098) Linux CI.
@@ -77,8 +90,7 @@ Each backend must pass all gates:
   also passed. The defensive fixtures preserve legal full-footprint movement
   and controller-relative positioning. Old cover tests now isolate their
   intended branch with real server actions, without forced activation or
-  weakened command assertions. Complete multi-archer cover selection remains
-  separate source coverage work.
+  weakened command assertions. The later cover increment below separately qualifies multi-archer selection.
 - The next HoMM3 unit/loss valuation increment uses pinned reconstructed
   `getUnitCombatValue` and `ComputeAttackEffect` formulas consistently for
   primary attacks, retaliation, collateral, blocking and opportunity costs.

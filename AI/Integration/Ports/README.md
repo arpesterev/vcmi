@@ -166,19 +166,32 @@ and Slow decisions and real combat resolution. This bounded port does
 not implement all upstream buff/debuff evaluation, dispels or exact
 Heroes II battlefield-geometry and tactical-stance semantics.
 
-Source-derived experimental fheroes2 extensions also cover melee pursuit of
-non-evasive targets, fast-shooter retreat from slower ground enemies, and
-melee screens for threatened friendly archers, including **double-wide archers
-and double-wide melee guards**. Cover placement and immediate melee threats
-consider both cells of a wide shooter. Candidate guard positions use the
-full footprint of a wide melee guard and VCMI's legal head destinations, rather
-than rejecting wide guards or measuring from their heads alone. Native
-regressions exercise a real Medusa Queen protected by infantry and by a
-double-wide Hydra, require engine-accepted cover movement, and then finish
-the battles through the game engine. These are bounded VCMI projections of
-pinned fheroes2 `meleeUnitDefense`, not a full source-equivalent port:
-source-specific flank preferences, defensive spacing, kiting and spell-area
-responses remain incomplete.
+Source-derived fheroes2 movement includes melee pursuit of non-evasive targets
+and fast-shooter retreat from slower ground enemies. Defensive melee now follows
+the pinned `meleeUnitDefense` cover-selection sequence for every friendly archer,
+including unthreatened and incapacitated archers. One directional cover placement
+per archer is evaluated with full native future reach and head/tail footprints.
+Current and future blocker outcomes compete in the same archer-strength minus
+travel-penalty ranking; an immediate blocker is not a global override. The source
+two-turn cutoff, front/side preferences, wide-unit splash spacing and selective
+no-retaliation/area-archer attacks from the chosen cover cell are represented.
+Changed-affiliation guards remain excluded. A guard already at the selected
+cover placement skips without receiving a Heroes III DEFEND bonus.
+
+Directed native fixtures use AIFactory, public callbacks, authoritative actions
+and completed battles. They distinguish future cover from immediate weak-blocker
+attacks, demonstrate the distance-ranking crossover, check exact preferred
+placements and test positive opportunistic attacks. Older threat-only NO_ACTION
+expectations are explicitly replaced by exact source-purpose cover routes; Blind
+still removes projected movement but does not disqualify an archer from cover.
+
+This is a native projection of the source decision sequence, not complete
+Heroes II/III parity. VCMI supplies current ownership/targetability, footprint
+facing, accessibility, gate/stop-tile rules, movement and damage values. Source
+original-force lists under control spells, reflected-wide route details, native
+stationary machines, H2 castle tower/spell advantage and exact strength/ability
+semantics remain distinct. Future positions do not simulate intervening enemy
+turns. New castle/wide-control cover combinations still need directed fixtures.
 
 Current additional coverage includes source-derived hero retreat/surrender,
 farewell damage before withdrawal, deathless-round retreat, Berserk creature
