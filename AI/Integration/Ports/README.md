@@ -180,9 +180,27 @@ pinned fheroes2 `meleeUnitDefense`, not a full source-equivalent port:
 source-specific flank preferences, defensive spacing, kiting and spell-area
 responses remain incomplete.
 
-Not implemented: complete upstream buff/debuff and creature-spell selection,
-retreat/surrender, complete archer kiting and screen placement, exact siege positioning, upstream battle
-valuation, adventure-map planning, and support validation for arbitrary mods.
+Current additional coverage includes source-derived hero retreat/surrender,
+farewell damage before withdrawal, deathless-round retreat, Berserk creature
+turns, Clone, offensive Teleport, Earthquake, Slayer, and selective Cure/Dispel
+valuation. These implementations use native VCMI legality and state previews;
+the older incremental descriptions above are not a complete feature inventory.
+
+Heroes II Berserker targets enemies, while VCMI's advanced/expert Berserk is
+indiscriminate area magic. The port now rejects an area that would newly compel
+an allied living stack, using the actual hypothetical effect transition.
+Immune or already-compelled allies do not exclude a cast. Enemy-only candidates
+retain the existing source-derived ratios. This conservative host projection
+does not claim an optimal friendly-fire tradeoff or upstream area-spell parity.
+The mixed-cluster native regression must pass server CI before this change is
+considered engine-validated.
+
+Not implemented or equivalent: source Anti-Magic valuation, complete
+effect-duration/turn-order and Dispel valuation, complete archer kiting and
+screen placement, exact siege positioning, upstream battle valuation,
+adventure-map planning, and support validation for arbitrary mods. Native
+Heroes III manual creature-spell choices are also unsupported; the pinned
+Heroes II unit planner does not supply an equivalent manual-ability policy.
 Do not use this partial policy as a quality replacement for the default AI.
 No source-policy equivalence evidence has been produced.
 
@@ -272,11 +290,84 @@ attack packets and battle completion. This remains approximate damage
 valuation, not retail HoMM3 behavior or proof of identical target choice.
 The TUM-composed partial baseline remains independent.
 
-The first implemented actions are ranged attack, melee attack, approach,
+The implemented unit actions are ranged attack, melee attack, approach,
 defence, catapult, first aid and end of tactics. There is no source-equivalence
 claim for movement, spell selection, hero retreat, battle outcome or campaign
 planning. UI labels this as a partial port and does not claim that the
 complete original HoMM3 AI has been delivered.
+
+### Independent HoMM3 hero spells
+
+`HoMM3SpellPolicy` selects hero spells without calling any other AI policy.
+It shares only VCMI's `HypotheticBattle` rule simulation. Each candidate uses
+native legality, mana cost, targeting, immunity and actual projected effects.
+`castEval` omits the native pre-cast random processing. Direct hostile spells
+with any positive native Magic Mirror chance are therefore conservatively
+excluded using the engine's massive/range/negative-spell conditions. Area,
+mass, positive and neutral spells are not excluded merely because a target
+has Magic Mirror. Random magic-resistance outcomes remain unmodeled and are
+not probability-weighted: values are conditional on effects landing and may
+overestimate resistant targets. This is not a complete native outcome forecast.
+The selected command goes through the ordinary server spell callback, with
+no unit command submitted until the spell has been applied. Disabling spells
+in autocombat preferences disables this policy. Siege machines and compelled
+Berserk activations do not open a hero spell decision.
+
+The pinned `src/ai_tactical.cpp` supplies the following policy components:
+
+- `getDamageValue`, `getMassDamageEffect`, `considerAreaEffect` and
+  `considerChainLightning`: damage is capped, damaging an incapacitated
+  enemy can have negative value, and area spells must improve both the
+  absolute exchange and the proportional army loss. Native spell previews
+  determine affected creatures, collateral damage and chain jumps.
+- `getAttackBoostValue`, `getBlessValue`, `getBloodLustValue` and
+  `getPrecisionValue`: Bless, Bloodlust and Precision use square-root attack
+  improvement, damage caps and duration. Bloodlust requires melee;
+  Precision requires a legal shot, including native ranged-only creatures
+  without melee capability. Native immediate attacks substitute for
+  the original precomputed AI targets.
+- `getBlindValue`: Blind requires a currently threatening enemy and uses
+  the source duration/last-awake-enemy retaliation distinction.
+- `getCancelValue` and `getCureValue`: Cure restores real health; Cure and
+  Dispel value removal of Blind, Curse, Bless, Bloodlust and Precision.
+  Removing friendly beneficial magic is charged against the gain. A cast
+  that also removes an unmodeled spell effect is conservatively rejected.
+  Combined attack-effect removal with equal remaining durations is a signed
+  native damage-delta approximation; mixed durations and Blind combined
+  with attack effects are conservatively rejected.
+  releasing Blind uses its remaining-duration value, without reproducing
+  the original opposing-caster forecast.
+- `considerResurrect`: Resurrection and Animate Dead value actual restored
+  creatures. This slice requires at least three quarters of the original
+  stack to be lost. It does not implement the source's exceptions for a
+  small heal or a fight forecast to be won.
+- `type_AI_combat_parameters`, `getDuration`, `castSpell`: the original
+  seven-rung planning horizon, completed-turn duration adjustment and
+  integer-affordable-casts mana weight are retained with native combat
+  values. Stable iteration replaces the original per-spell random factor.
+  Native acted and defended stacks have completed their turn; waited stacks
+  remain eligible for their later action and do not receive that deduction.
+
+Single-target hostile spells currently wait for the last friendly action;
+friendly spells can also be cast for the active stack. Mass and area damage
+and Chain Lightning can be cast immediately. The original earlier
+`shouldAttackNow` opportunities and predicted-winner mana conservation are
+not implemented. Creature value mathematics, exact resistance expectation,
+kill-only valuation when badly outnumbered, other buffs/control, summoning,
+Teleport, Sacrifice, Earthquake and complete cancellation remain unported.
+
+Retreat and surrender remain unsupported. The source decision is in pinned
+`src/ai.cpp::aiCheckRetreat`, not `ai_tactical.cpp`: it requires tavern and
+siege escape checks, scenario victory conditions, artifact/experience value,
+treasury reserves, difficulty and a combat forecast. This slice does not
+replace those checks with an invented strength ratio or another AI.
+
+`ai_homm3_spell_source` tests the scalar source projections independently.
+The `homm3Hero*`, `homm3Bless*`, `homm3Blind*`, `homm3Cure*`, `homm3Dispel*`
+and `homm3Resurrection*` native cases check selected server-accepted casts,
+real effects, mana/health preview isolation, preferences and battle results.
+They require the native VCMI test build; standalone checks do not establish
+that these cases passed or that the retail source makes identical decisions.
 
 ## TUMEnchantedTactics
 

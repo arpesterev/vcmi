@@ -1,0 +1,27 @@
+{
+  "release_url": "https://github.com/vcmi-mods/mmai/releases/tag/vcmi-1.8-latest",
+  "download_url": "https://github.com/vcmi-mods/mmai/releases/download/vcmi-1.8-latest/mod.zip",
+  "release_id": 426109309,
+  "asset_id": 683229114,
+  "source_commit": "c4ea1b3834f72cf7ffd141d80d5a195d318487ce",
+  "mod_version": "3.1.1",
+  "engine_min": "1.8.0",
+  "engine_max": "1.8.9",
+  "archive_size": 50241590,
+  "archive_sha256": "25c997888015386c59c74a426cd0368b5035048dd61b059854d5b7689acdb7d4",
+  "model_version": 15,
+  "models": {
+    "attacker": "attacker-pdpspars-202610132318.onnx",
+    "defender": "defender-zvyspars-202610152155.onnx",
+    "defender.siege": "defender-zvystown-202610140025.onnx"
+  },
+  "files": {
+    "mod.json": "7a3f92ec1271d66ba9ffd9d94005f532dae29c0c49dddb3b27e0e27026f8df31",
+    "models/attacker-pdpspars-202610132318.onnx": "03635baa1cf532583fcf607bd2f56f0ae9c91f7dd9e843c9f4fae75e81d21bab",
+    "models/defender-zvystown-202610140025.onnx": "f59219a9a97e36c8fd3a51ad736ddef6ea79744132bed6544e3be880af0f3a89",
+    "models/defender-zvyspars-202610152155.onnx": "0cc60dd40ad24965f7ec3180050e8edb9be40d8bd63308ec13dd02e29fddac0a",
+    "config/mmai-settings.json": "907126b42ff53a5a6b33af9fe8286e5b262b57a418f2f024bfcce90a8e0ae606"
+  },
+  "catalog_url": "https://raw.githubusercontent.com/vcmi/vcmi-mods-repository/develop/vcmi-1.8.json",
+  "catalog_blob": "7a74fd86de8a14d8b28b4a5cda0a83bdc8f0e805"
+}

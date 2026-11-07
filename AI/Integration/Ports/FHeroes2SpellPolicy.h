@@ -274,6 +274,19 @@ public:
 					cast.castEval(projected->getServerCallback(), target);
 					checkUnchanged(*real, *hero, mana, before);
 				}
+				// Heroes II Berserker targets enemies only. Native advanced/expert
+				// Berserk is indiscriminate area magic; keep that projection from
+				// newly compelling allies. Immune/already-compelled allies are safe.
+				if(berserkSpell && std::any_of(before.begin(), before.end(), [&](const UnitSnapshot & old)
+				{
+					if(old.owner != player || old.health <= 0
+						|| old.unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+						return false;
+					const auto * after = projected->battleGetUnitByID(old.unit->unitId());
+					return after && after->alive()
+						&& after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+				}))
+					continue;
 
 				if(farewellDamageOnly)
 				{

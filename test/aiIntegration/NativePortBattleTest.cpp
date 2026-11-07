@@ -2600,6 +2600,91 @@ TEST_F(AIIntegrationNativeBattle, fheroes2UsesNativeBerserkAndCompletesBattle)
 	EXPECT_GT(recorder.damage, 0);
 }
 
+TEST_F(AIIntegrationNativeBattle, fheroes2AreaBerserkPreservesFriendlyControl)
+{
+	prepareBattle(CreatureID(4), 20, CreatureID(2), 80);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	CStack * firstEnemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->alive())
+			firstEnemy = unit.get();
+	ASSERT_NE(firstEnemy, nullptr);
+	const BattleHex center(5 * GameConstants::BFIELD_WIDTH + 8);
+	const BattleHex left(center.toInt() - 2);
+	const BattleHex right(center.toInt() + 2);
+	ASSERT_EQ(battle()->battleGetUnitByPos(left), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(center), nullptr);
+	ASSERT_EQ(battle()->battleGetUnitByPos(right), nullptr);
+	firstEnemy->setPosition(left);
+	const auto * secondEnemy = addStack(BattleSide::DEFENDER, CreatureID(2), right, 80);
+	const auto * friendly = addStack(BattleSide::ATTACKER, CreatureID(0), center, 100);
+	ASSERT_NE(secondEnemy, nullptr);
+	ASSERT_NE(friendly, nullptr);
+	ASSERT_EQ(BattleHex::getDistance(left, right), 4);
+	teachBattleSpell(attackerSideHero, SpellID::BERSERK, 6);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::FIRE_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto realBattle = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto & spell = LIBRARY->spellh->objects.at(SpellID::BERSERK);
+	ASSERT_NE(spell, nullptr);
+	const spells::Target mixedTarget{battle::Destination(center)};
+	spells::BattleCast legality(realBattle.get(), attackerSideHero, spells::Mode::HERO, spell.get());
+	ASSERT_TRUE(spell->battleMechanics(&legality)->canBeCastAt(mixedTarget));
+	const int64_t manaBefore = attackerSideHero->mana;
+	const int64_t friendlyHealth = friendly->getAvailableHealth();
+	// The native radius-two cast can control both archers, but also our
+	// central infantry. Source enemy-only scoring preferred this unsafe area.
+	auto preview = std::make_shared<HypotheticBattle>(environment.get(), realBattle);
+	spells::BattleCast projectedCast(preview.get(), attackerSideHero, spells::Mode::HERO, spell.get());
+	projectedCast.castEval(preview->getServerCallback(), mixedTarget);
+	for(const auto * unit : {static_cast<const CStack *>(firstEnemy), secondEnemy, friendly})
+	{
+		const auto * projected = preview->battleGetUnitByID(unit->unitId());
+		ASSERT_NE(projected, nullptr);
+		ASSERT_TRUE(projected->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+		ASSERT_FALSE(unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	}
+
+	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+	ASSERT_NE(policy, nullptr);
+	policy->playerID = player;
+	AutocombatPreferences prefs;
+	prefs.enableSpellsUsage = true;
+	policy->initBattleInterface(environment, callback, prefs);
+	policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+		battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+		battle()->getSideHero(BattleSide::ATTACKER),
+		battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+	policy->activeStack(battleID, active);
+	ASSERT_TRUE(callback->action.has_value());
+	ASSERT_TRUE(callback->spellAction) << "A safe one-archer Berserk remains valuable";
+	ASSERT_EQ(callback->action->spell, SpellID(SpellID::BERSERK));
+	EXPECT_EQ(attackerSideHero->mana, manaBefore);
+	EXPECT_EQ(friendly->getAvailableHealth(), friendlyHealth);
+	EXPECT_FALSE(friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+	EXPECT_FALSE(friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+		<< "The accepted area spell must preserve allied control";
+	EXPECT_FALSE(active->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+	EXPECT_NE(firstEnemy->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE),
+		secondEnemy->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+		<< "The safe alternative affects exactly one of the separated archers";
+	policy.reset();
+	runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+	EXPECT_GT(recorder.damage, 0);
+	EXPECT_FALSE(recorder.battleResults.empty());
+}
+
 TEST_F(AIIntegrationNativeBattle, disabledMagicKeepsAutocombatPreferences)
 {
 	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
@@ -6411,6 +6496,644 @@ TEST_F(AIIntegrationNativeBattle, homm3TacticsCompletesRealMeleeBattle)
 	ASSERT_FALSE(HasFatalFailure());
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.meleeAttacks, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3HeroDamageUsesNativeSpellAndCompletesBattle)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW);
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_GT(heroSpellDecisions, 0);
+	EXPECT_GT(recorder.spellPackets, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3HeroSpellsHonorAutocombatPreference)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_TRUE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	EXPECT_EQ(heroSpellDecisions, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3HeroAreaDamageHitsRealClusteredEnemies)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(0), 80);
+	setArmy(defenderSideHero, CreatureID(0), 40);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 20));
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 40));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	std::vector<CStack *> enemies;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemies.push_back(unit.get());
+	ASSERT_EQ(enemies.size(), 2u);
+	const BattleHex nearby(enemies.front()->getPosition().toInt() - 1);
+	ASSERT_TRUE(nearby.isAvailable());
+	ASSERT_EQ(battle()->battleGetUnitByPos(nearby), nullptr);
+	enemies.back()->setPosition(nearby);
+	teachBattleSpell(attackerSideHero, SpellID::FIREBALL, 6);
+	std::set<uint32_t> hitEnemies;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured & injuries)
+	{
+		if(recorder.castsOf(SpellID::FIREBALL).empty())
+			return;
+		for(const auto & injury : injuries.stacks)
+			for(const auto * enemy : enemies)
+				if(injury.stackAttacked == enemy->unitId() && injury.damageAmount > 0)
+					hitEnemies.insert(enemy->unitId());
+	};
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::FIREBALL).empty());
+	EXPECT_EQ(hitEnemies.size(), 2u);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3HeroDamagePreviewPreservesLiveState)
+{
+	prepareBattle(CreatureID(0), 30, CreatureID(0), 30);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const CStack * active = nullptr;
+	std::map<uint32_t, std::pair<int64_t, BattleHex>> snapshot;
+	for(const auto & unit : battle()->stacks)
+	{
+		snapshot.emplace(unit->unitId(), std::make_pair(unit->getAvailableHealth(), unit->getPosition()));
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
+			active = unit.get();
+	}
+	ASSERT_NE(active, nullptr);
+	const auto mana = attackerSideHero->mana;
+	const auto spell = AIIntegration::HoMM3SpellPolicy::choose(callback->getBattle(battleID), environment.get(), *active);
+	ASSERT_TRUE(spell.has_value());
+	EXPECT_EQ(spell->actionType, EActionType::HERO_SPELL);
+	EXPECT_EQ(attackerSideHero->mana, mana);
+	for(const auto & unit : battle()->stacks)
+	{
+		EXPECT_EQ(unit->getAvailableHealth(), snapshot.at(unit->unitId()).first);
+		EXPECT_EQ(unit->getPosition(), snapshot.at(unit->unitId()).second);
+	}
+	attackerSideHero->mana = 0;
+	EXPECT_FALSE(AIIntegration::HoMM3SpellPolicy::choose(callback->getBattle(battleID), environment.get(), *active));
+	attackerSideHero->mana = mana;
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3BlessChangesNativeDamageRoll)
+{
+	prepareBattle(CreatureID(2), 50, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::BLESS);
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	bool applied = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::BLESS).empty())
+			applied |= friendly->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE);
+	};
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::BLESS).empty());
+	EXPECT_TRUE(applied);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3BlindDisablesNativeEnemy)
+{
+	prepareBattle(CreatureID(0), 100, CreatureID(2), 50);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::BLIND);
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	bool applied = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::BLIND).empty())
+			applied |= enemy->hasBonusOfType(BonusType::NOT_ACTIVE);
+	};
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::BLIND).empty());
+	EXPECT_TRUE(applied);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3CureRemovesNativeCurse)
+{
+	prepareBattle(CreatureID(2), 50, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	teachBattleSpell(defenderSideHero, SpellID::CURSE);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::CURSE, friendly));
+	ASSERT_TRUE(friendly->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
+	teachBattleSpell(attackerSideHero, SpellID::CURE);
+	bool removed = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::CURE).empty())
+			removed |= !friendly->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE);
+	};
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::CURE).empty());
+	EXPECT_TRUE(removed);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3DispelRemovesNativeEnemyBless)
+{
+	prepareBattle(CreatureID(0), 100, CreatureID(2), 50);
+	ASSERT_FALSE(HasFatalFailure());
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	teachBattleSpell(defenderSideHero, SpellID::BLESS);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::BLESS, enemy));
+	ASSERT_TRUE(enemy->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE));
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	bool removed = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::DISPEL).empty())
+			removed |= !enemy->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE);
+	};
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::DISPEL).empty());
+	EXPECT_TRUE(removed);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3ResurrectionRestoresRealCasualties)
+{
+	prepareBattle(CreatureID(1), 60, CreatureID(0), 60);
+	ASSERT_FALSE(HasFatalFailure());
+	teachBattleSpell(attackerSideHero, SpellID::RESURRECTION, 12);
+	setMagicMastery(attackerSideHero, MasteryLevel::EXPERT);
+	const CStack * friendly = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(1))
+			friendly = unit.get();
+	ASSERT_NE(friendly, nullptr);
+	injure(friendly, 460);
+	ASSERT_GE(friendly->getKilled(), friendly->unitBaseAmount() * 3 / 4);
+	const int remaining = friendly->getCount();
+	bool restored = false;
+	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	{
+		if(!recorder.castsOf(SpellID::RESURRECTION).empty())
+			restored |= friendly->getCount() > remaining;
+	};
+	runToCompletion(std::nullopt, true, "HoMM3OriginalTactics");
+	EXPECT_FALSE(recorder.castsOf(SpellID::RESURRECTION).empty());
+	EXPECT_TRUE(restored);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3DispelChargesHarmfulMixedPrecisionAndCurse)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 100);
+	setArmy(defenderSideHero, CreatureID(0), 500);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 5));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	const CStack * large = nullptr;
+	const CStack * small = nullptr;
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			(unit->getCount() == 100 ? large : small) = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	}
+	ASSERT_NE(large, nullptr);
+	ASSERT_NE(small, nullptr);
+	ASSERT_NE(enemy, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::PRECISION, 6);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::AIR_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	teachBattleSpell(defenderSideHero, SpellID::CURSE, 6);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::PRECISION, large));
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::CURSE, large));
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	// Equal remaining durations isolate the signed exchange from the separate
+	// conservative refusal to combine effects with different lifetimes.
+	teachBattleSpell(defenderSideHero, SpellID::CURSE, 5);
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::CURSE, small));
+	attackerSideHero->removeSpellFromSpellbook(SpellID::PRECISION);
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::WATER_MAGIC),
+		MasteryLevel::EXPERT, ChangeValueMode::ABSOLUTE);
+	const auto precision = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::PRECISION)));
+	const auto curse = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::CURSE)));
+	ASSERT_TRUE(large->hasBonus(precision));
+	ASSERT_TRUE(large->hasBonus(curse));
+	ASSERT_TRUE(small->hasBonus(curse));
+	ASSERT_FALSE(small->hasBonus(precision));
+	for(const auto & bonus : *large->getAllBonuses(precision.Or(curse)))
+		ASSERT_EQ(bonus->turnsRemain, 5);
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	ASSERT_TRUE(view->battleCanShoot(large, enemy->getPosition()));
+	ASSERT_TRUE(view->battleCanShoot(small, enemy->getPosition()));
+	const auto * dispel = SpellID(SpellID::DISPEL).toSpell();
+	spells::BattleCast legality(view.get(), attackerSideHero, spells::Mode::HERO, dispel);
+	const auto mechanics = dispel->battleMechanics(&legality);
+	ASSERT_TRUE(CSpell::TargetInfo(dispel, mechanics->getEffectLevel(), spells::Mode::HERO).massive);
+	spells::Target target;
+	if(mechanics->getTargetTypes() != std::vector<spells::AimType>{spells::AimType::NOTHING})
+		target.emplace_back(large);
+	ASSERT_TRUE(mechanics->canBeCastAt(target));
+	auto projected = std::make_shared<HypotheticBattle>(environment.get(), view);
+	spells::BattleCast cast(projected.get(), attackerSideHero, spells::Mode::HERO, dispel);
+	cast.castEval(projected->getServerCallback(), target);
+	const auto * afterLarge = projected->battleGetUnitByID(large->unitId());
+	const auto * afterSmall = projected->battleGetUnitByID(small->unitId());
+	ASSERT_NE(afterLarge, nullptr);
+	ASSERT_NE(afterSmall, nullptr);
+	ASSERT_FALSE(afterLarge->hasBonus(precision));
+	ASSERT_FALSE(afterLarge->hasBonus(curse));
+	ASSERT_FALSE(afterSmall->hasBonus(curse));
+	const auto expectedShot = [&](const CBattleInfoCallback & state, const battle::Unit * unit)
+	{
+		const auto damage = state.battleEstimateDamage(BattleAttackInfo(unit, enemy, 0, true));
+		return (static_cast<double>(damage.damage.min) + damage.damage.max) / 2;
+	};
+	const double beforeLarge = expectedShot(*view, large);
+	const double beforeSmall = expectedShot(*view, small);
+	const double restoredLarge = expectedShot(*projected, afterLarge);
+	const double restoredSmall = expectedShot(*projected, afterSmall);
+	ASSERT_LT(restoredLarge, beforeLarge)
+		<< "Removing Precision and Curse must hurt the large stack's actual native shot";
+	ASSERT_GT(restoredSmall, beforeSmall)
+		<< "Removing only Curse must help the small stack's actual native shot";
+	ASSERT_GT(beforeLarge - restoredLarge, restoredSmall - beforeSmall);
+	const auto mana = attackerSideHero->mana;
+	EXPECT_FALSE(AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *active))
+		<< "A small Curse removal must not hide the larger mixed-effect loss in mass Dispel";
+	EXPECT_EQ(attackerSideHero->mana, mana);
+	EXPECT_TRUE(large->hasBonus(precision));
+	EXPECT_TRUE(large->hasBonus(curse));
+	EXPECT_TRUE(small->hasBonus(curse));
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3DispelRejectsMixedAttackEffectDurations)
+{
+	prepareBattle(CreatureID(2), 100, CreatureID(0), 500);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const CStack * friendly = nullptr;
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			friendly = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	}
+	ASSERT_NE(friendly, nullptr);
+	ASSERT_NE(enemy, nullptr);
+	teachBattleSpell(attackerSideHero, SpellID::PRECISION, 3);
+	attackerSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::AIR_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	teachBattleSpell(defenderSideHero, SpellID::CURSE, 6);
+	defenderSideHero->setSecSkillLevel(SecondarySkill(SecondarySkill::FIRE_MAGIC),
+		MasteryLevel::ADVANCED, ChangeValueMode::ABSOLUTE);
+	ASSERT_TRUE(castOn(attackerSideHero, SpellID::PRECISION, friendly));
+	ASSERT_TRUE(castOn(defenderSideHero, SpellID::CURSE, friendly));
+	endRound();
+	ASSERT_FALSE(HasFatalFailure());
+	attackerSideHero->removeSpellFromSpellbook(SpellID::PRECISION);
+	teachBattleSpell(attackerSideHero, SpellID::DISPEL, 6);
+	const auto precision = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::PRECISION)));
+	const auto curse = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::CURSE)));
+	ASSERT_TRUE(friendly->hasBonus(precision));
+	ASSERT_TRUE(friendly->hasBonus(curse));
+	for(const auto & bonus : *friendly->getAllBonuses(precision))
+		ASSERT_EQ(bonus->turnsRemain, 2);
+	for(const auto & bonus : *friendly->getAllBonuses(curse))
+		ASSERT_EQ(bonus->turnsRemain, 5);
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active, friendly);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto * dispel = SpellID(SpellID::DISPEL).toSpell();
+	spells::BattleCast legality(view.get(), attackerSideHero, spells::Mode::HERO, dispel);
+	const auto mechanics = dispel->battleMechanics(&legality);
+	spells::Target target{battle::Destination(friendly)};
+	ASSERT_TRUE(mechanics->canBeCastAt(target));
+	ASSERT_TRUE(view->battleCanShoot(friendly, enemy->getPosition()));
+	auto projected = std::make_shared<HypotheticBattle>(environment.get(), view);
+	spells::BattleCast cast(projected.get(), attackerSideHero, spells::Mode::HERO, dispel);
+	cast.castEval(projected->getServerCallback(), target);
+	const auto * after = projected->battleGetUnitByID(friendly->unitId());
+	ASSERT_NE(after, nullptr);
+	ASSERT_FALSE(after->hasBonus(precision));
+	ASSERT_FALSE(after->hasBonus(curse));
+	const auto beforeDamage = view->battleEstimateDamage(BattleAttackInfo(friendly, enemy, 0, true));
+	const auto afterDamage = projected->battleEstimateDamage(BattleAttackInfo(after, enemy, 0, true));
+	ASSERT_GT(afterDamage.damage.min + afterDamage.damage.max,
+		beforeDamage.damage.min + beforeDamage.damage.max)
+		<< "The unsupported-duration refusal must not be an unprofitable or ineffective Dispel";
+	const auto mana = attackerSideHero->mana;
+	EXPECT_FALSE(AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *active))
+		<< "A short Precision and long Curse must not be valued with one maximum duration";
+	EXPECT_EQ(attackerSideHero->mana, mana);
+	EXPECT_TRUE(friendly->hasBonus(precision));
+	EXPECT_TRUE(friendly->hasBonus(curse));
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.damage, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3PrecisionValuesNativeRangedOnlyCreature)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 50);
+	setArmy(defenderSideHero, CreatureID(0), 100);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 20));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	CStack * shooter = nullptr;
+	const CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+	{
+		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(2))
+			shooter = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	}
+	ASSERT_NE(shooter, nullptr);
+	ASSERT_NE(enemy, nullptr);
+	shooter->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::SIEGE_WEAPON, BonusSource::OTHER, 1, BonusSourceID()));
+	ASSERT_FALSE(shooter->isMeleeAttacker());
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	teachBattleSpell(attackerSideHero, SpellID::PRECISION, 6);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_FALSE(view->battleCanAttackUnit(shooter, enemy));
+	ASSERT_TRUE(view->battleCanShoot(shooter, enemy->getPosition()));
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto spell = AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *shooter);
+	ASSERT_TRUE(spell.has_value())
+		<< "A legal ranged-only shot must retain the source Precision improvement value";
+	ASSERT_FALSE(spell->target.empty());
+	EXPECT_EQ(view->battleGetUnitByPos(spell->target.front().hexValue), shooter);
+	const auto before = view->battleEstimateDamage(BattleAttackInfo(shooter, enemy, 0, true));
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *spell));
+	EXPECT_FALSE(recorder.castsOf(SpellID::PRECISION).empty());
+	const auto after = view->battleEstimateDamage(BattleAttackInfo(shooter, enemy, 0, true));
+	EXPECT_GT(after.damage.min + after.damage.max, before.damage.min + before.damage.max);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+	EXPECT_GT(recorder.shots, 0);
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3RejectsDirectSpellsThatNativeMirrorReflects)
+{
+	prepareBattle(CreatureID(2), 50, CreatureID(2), 50);
+	ASSERT_FALSE(HasFatalFailure());
+	battle()->obstacles.clear();
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(2))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	enemy->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::MAGIC_MIRROR, BonusSource::OTHER, 100, BonusSourceID()));
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 1);
+	teachBattleSpell(attackerSideHero, SpellID::BLIND, 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	spells::Target target{battle::Destination(enemy)};
+	for(const SpellID id : {SpellID(SpellID::MAGIC_ARROW), SpellID(SpellID::BLIND)})
+	{
+		const auto * spell = id.toSpell();
+		spells::BattleCast legality(view.get(), attackerSideHero, spells::Mode::HERO, spell);
+		const auto mechanics = spell->battleMechanics(&legality);
+		ASSERT_TRUE(mechanics->canBeCastAt(target));
+		ASSERT_TRUE(mechanics->isNegativeSpell());
+		ASSERT_FALSE(mechanics->isMassive());
+		ASSERT_EQ(spell->getLevelInfo(mechanics->getRangeLevel()).range, std::vector<int>{0});
+	}
+	ASSERT_TRUE(view->battleCanShoot(enemy, active->getPosition()));
+	const auto ownHealth = active->getAvailableHealth();
+	const auto enemyHealth = enemy->getAvailableHealth();
+	const auto mana = attackerSideHero->mana;
+	EXPECT_FALSE(AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *active));
+	EXPECT_EQ(attackerSideHero->mana, mana);
+	EXPECT_EQ(active->getAvailableHealth(), ownHealth);
+	EXPECT_EQ(enemy->getAvailableHealth(), enemyHealth);
+	// Submit the rejected option as an engine-only reference, proving that
+	// castEval's apparent hostile damage would actually hit our sole stack.
+	const auto reference = BattleAction::makeHeroSpellcast(BattleSide::ATTACKER, target, SpellID::MAGIC_ARROW);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, reference));
+	EXPECT_LT(active->getAvailableHealth(), ownHealth);
+	EXPECT_EQ(enemy->getAvailableHealth(), enemyHealth);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3AreaSpellStillDamagesMirroredEnemy)
+{
+	prepareBattle(CreatureID(0), 50, CreatureID(0), 100);
+	ASSERT_FALSE(HasFatalFailure());
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	CStack * enemy = nullptr;
+	for(const auto & unit : battle()->stacks)
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+			enemy = unit.get();
+	ASSERT_NE(enemy, nullptr);
+	enemy->addNewBonus(std::make_shared<Bonus>(
+		BonusDuration::PERMANENT, BonusType::MAGIC_MIRROR, BonusSource::OTHER, 100, BonusSourceID()));
+	teachBattleSpell(attackerSideHero, SpellID::FIREBALL, 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto ownHealth = active->getAvailableHealth();
+	const auto enemyHealth = enemy->getAvailableHealth();
+	const auto spell = AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *active);
+	ASSERT_TRUE(spell.has_value()) << "Magic Mirror cannot reflect native area spells";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *spell));
+	EXPECT_FALSE(recorder.castsOf(SpellID::FIREBALL).empty());
+	EXPECT_EQ(active->getAvailableHealth(), ownHealth);
+	EXPECT_LT(enemy->getAvailableHealth(), enemyHealth);
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3DefendedAllyDoesNotBlockLastActionSpell)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(1), 20);
+	setArmy(defenderSideHero, CreatureID(0), 100);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 50));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const auto * first = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(first, nullptr);
+	ASSERT_EQ(first->creatureId(), CreatureID(1));
+	ASSERT_TRUE(act(BattleAction::makeDefend(first)));
+	for(int i = 0; i < 8 && battle()->battleActiveUnit()->unitSide() != BattleSide::ATTACKER; ++i)
+		ASSERT_TRUE(act(BattleAction::makeDefend(battle()->battleActiveUnit())));
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	ASSERT_NE(active, first);
+	ASSERT_TRUE(first->defended());
+	ASSERT_FALSE(first->moved());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto spell = AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *active);
+	ASSERT_TRUE(spell.has_value()) << "A defended ally has spent its action despite moved() being false";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *spell));
+	EXPECT_FALSE(recorder.castsOf(SpellID::MAGIC_ARROW).empty());
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3OneTurnBlessSkipsAlreadyDefendedShooter)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(2), 100);
+	setArmy(defenderSideHero, CreatureID(0), 500);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 5));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	battle()->obstacles.clear();
+	const auto * first = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(first, nullptr);
+	ASSERT_EQ(first->unitSide(), BattleSide::ATTACKER);
+	ASSERT_EQ(first->getCount(), 100);
+	ASSERT_TRUE(act(BattleAction::makeDefend(first)));
+	for(int i = 0; i < 8 && battle()->battleActiveUnit()->unitSide() != BattleSide::ATTACKER; ++i)
+		ASSERT_TRUE(act(BattleAction::makeDefend(battle()->battleActiveUnit())));
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	ASSERT_EQ(active->getCount(), 5);
+	ASSERT_TRUE(first->defended());
+	ASSERT_FALSE(first->moved());
+	teachBattleSpell(attackerSideHero, SpellID::BLESS, 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	const auto spell = AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *active);
+	ASSERT_TRUE(spell.has_value());
+	ASSERT_FALSE(spell->target.empty());
+	EXPECT_EQ(view->battleGetUnitByPos(spell->target.front().hexValue), active)
+		<< "The larger defended shooter cannot use this one-turn Bless";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *spell));
+	EXPECT_TRUE(active->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE));
+	EXPECT_FALSE(first->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE));
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
+}
+
+TEST_F(AIIntegrationNativeBattle, homm3WaitedAllyStillHasLaterSpellOpportunity)
+{
+	startRecordedGame();
+	ASSERT_FALSE(HasFatalFailure());
+	setArmy(attackerSideHero, CreatureID(1), 20);
+	setArmy(defenderSideHero, CreatureID(0), 100);
+	ASSERT_TRUE(gameHandler->insertNewStack(
+		StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 50));
+	gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+	ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+	const auto * waiting = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(waiting, nullptr);
+	ASSERT_EQ(waiting->creatureId(), CreatureID(1));
+	ASSERT_TRUE(act(BattleAction::makeWait(waiting)));
+	for(int i = 0; i < 8 && battle()->battleActiveUnit()->unitSide() != BattleSide::ATTACKER; ++i)
+		ASSERT_TRUE(act(BattleAction::makeDefend(battle()->battleActiveUnit())));
+	const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+	ASSERT_NE(active, nullptr);
+	ASSERT_EQ(active->unitSide(), BattleSide::ATTACKER);
+	ASSERT_NE(active, waiting);
+	ASSERT_TRUE(waiting->waited());
+	ASSERT_FALSE(waiting->defended());
+	ASSERT_FALSE(waiting->moved());
+	teachBattleSpell(attackerSideHero, SpellID::MAGIC_ARROW, 1);
+	const auto battleID = battle()->getBattleID();
+	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto callback = std::make_shared<DecisionCallback>(player);
+	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+	EXPECT_FALSE(AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *active));
+	ASSERT_TRUE(act(BattleAction::makeDefend(active)));
+	for(int i = 0; i < 8 && battle()->battleActiveUnit() != waiting; ++i)
+		ASSERT_TRUE(act(BattleAction::makeDefend(battle()->battleActiveUnit())));
+	ASSERT_EQ(battle()->battleActiveUnit(), waiting);
+	const auto spell = AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *waiting);
+	ASSERT_TRUE(spell.has_value()) << "The waited stack becomes the real last friendly action";
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *spell));
+	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 }
 
 // The pinned type_AI_combat_parameters::simulateAttack executes a second

@@ -1,0 +1,110 @@
+name: Four AI macOS ARM64 package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feature/ai-macos-arm64-package-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: four-ai-macos-arm64-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: macos-26
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      VCMI_ENABLE_LTO: 'OFF'
+      VCMI_PACKAGE_GOLDMASTER: 'OFF'
+      VCMI_PACKAGE_NAME_SUFFIX: 'Four AI experimental arm64'
+      VCMI_PACKAGE_FILE_NAME: vcmi-four-ai-arm64-${{ github.sha }}
+    steps:
+      - name: Check out the exact workflow commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Verify native ARM64 host and package checks
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          xcrun --find clang
+          python3 -m unittest discover -s CI -p 'test_macos_ai_bundle.py' -v
+          python3 -m unittest discover -s CI -p 'test_verify_mmai_1_8.py' -v
+          python3 CI/test_launcher_ai_selection.py
+
+      - name: Restore checksum-pinned official ARM64 dependencies
+        run: |
+          set -euo pipefail
+          pipx install 'conan>=2.25,<3'
+          snapshot="$RUNNER_TEMP/dependencies-mac-arm.txz"
+          curl --fail --location --proto '=https' --retry 3 --silent --show-error \
+            'https://github.com/vcmi/vcmi-dependencies/releases/download/2026-10-13/dependencies-mac-arm.txz' \
+            --output "$snapshot"
+          echo "6ba8215909edffc79b9c55bdfa7638130d0f34de6db14388ac556ded9f9f0126  $snapshot" | shasum -a 256 -c -
+          conan cache restore "$snapshot"
+          conan profile detect
+          conan install . --output-folder=conan-generated --build=never \
+            --profile=dependencies/conan_profiles/macos-arm \
+            --profile=dependencies/conan_profiles/base/apple-system \
+            --conf=tools.cmake.cmaketoolchain:generator=Ninja \
+            -o '&:with_onnxruntime=True'
+
+      - name: Configure all four combat choices
+        run: |
+          set -euo pipefail
+          cmake --preset macos-arm-conan-ninja-release \
+            -DCMAKE_OSX_ARCHITECTURES:STRING=arm64 \
+            -DENABLE_CLIENT:BOOL=ON -DENABLE_SERVER:BOOL=ON \
+            -DENABLE_LAUNCHER:BOOL=ON -DENABLE_BATTLE_AI:BOOL=ON \
+            -DENABLE_MMAI:BOOL=ON -DENABLE_STUPID_AI:BOOL=ON \
+            -DENABLE_NULLKILLER2_AI:BOOL=ON -DENABLE_GITVERSION:BOOL=ON \
+            -DENABLE_TEST:BOOL=OFF -DENABLE_CCACHE:BOOL=OFF
+
+      - name: Build the application
+        run: cmake --build --preset macos-arm-conan-ninja-release --parallel 3
+
+      - name: Create disk image without Developer ID secrets
+        run: |
+          set -euo pipefail
+          cd out/build/macos-arm-conan-ninja-release
+          packed=false
+          for attempt in 1 2 3; do
+            if cpack -C Release; then packed=true; break; fi
+            sleep 3
+          done
+          test "$packed" = true
+          test -s "$VCMI_PACKAGE_FILE_NAME.dmg"
+
+      - name: Verify the mounted deliverable, not the build tree
+        run: |
+          set -euo pipefail
+          build="$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release"
+          mkdir -p "$RUNNER_TEMP/vcmi-dmg" out/mac-ai-delivery
+          mount="$RUNNER_TEMP/vcmi-dmg"
+          hdiutil verify "$build/$VCMI_PACKAGE_FILE_NAME.dmg"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount" "$build/$VCMI_PACKAGE_FILE_NAME.dmg"
+          trap 'hdiutil detach "$mount"' EXIT
+          python3 CI/check_macos_ai_bundle.py --app "$mount/VCMI.app" \
+            --build-cache "$build/CMakeCache.txt" --expected-sha "$GITHUB_SHA" \
+            --output out/mac-ai-delivery/bundle-audit.json
+          cp "$build/$VCMI_PACKAGE_FILE_NAME.dmg" out/mac-ai-delivery/
+          cp AI/Integration/MACOS_ARM64_ACCEPTANCE.md out/mac-ai-delivery/
+          cp CI/verify_mmai_1_8.py CI/mmai_1_8_release.json out/mac-ai-delivery/
+          (cd out/mac-ai-delivery && shasum -a 256 *.dmg > SHA256SUMS.txt)
+
+      - name: Keep experimental package and audit together
+        uses: actions/upload-artifact@v7
+        with:
+          name: vcmi-four-ai-arm64-${{ github.sha }}
+          if-no-files-found: error
+          path: out/mac-ai-delivery/

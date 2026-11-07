@@ -11,6 +11,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "HoMM3SpellPolicy.h"
 #include "../../../lib/CStack.h"
 #include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/battle/BattleAction.h"
@@ -23,18 +24,21 @@ namespace AIIntegration
 class HoMM3TacticsBattleAI final : public CBattleGameInterface
 {
 public:
-	void initBattleInterface(std::shared_ptr<Environment>, std::shared_ptr<CBattleCallback> callback) override
+	void initBattleInterface(std::shared_ptr<Environment> environment, std::shared_ptr<CBattleCallback> callback) override
 	{
 		if(!callback)
 			throw std::invalid_argument("HoMM3OriginalTactics requires a battle callback");
 		cb = std::move(callback);
+		env = std::move(environment);
+		preferences = {};
 		logAi->info("AI_SOURCE_POLICY backend=HoMM3OriginalTactics source=e12906accf96c2662b1abadbc49ddc111991bf21 partial=true projection=VCMI");
 	}
 
 	void initBattleInterface(std::shared_ptr<Environment> environment, std::shared_ptr<CBattleCallback> callback,
-		AutocombatPreferences) override
+		AutocombatPreferences prefs) override
 	{
 		initBattleInterface(std::move(environment), std::move(callback));
+		preferences = prefs;
 	}
 
 	void yourTacticPhase(const BattleID & battleID, int) override
@@ -52,6 +56,18 @@ public:
 		const auto battle = cb->getBattle(battleID);
 		if(!battle)
 			throw std::logic_error("HoMM3OriginalTactics received an unknown battle");
+		if(preferences.enableSpellsUsage && !stack->isCatapult() && !stack->isFirstAidTent()
+			&& !stack->isBallista() && !stack->isAmmoCart() && !stack->isTurret()
+			&& !stack->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
+		{
+			if(const auto spell = HoMM3SpellPolicy::choose(battle, env.get(), *stack))
+			{
+				logAi->debug("AI_PORT_SPELL backend=HoMM3OriginalTactics battle=%d action=%s",
+					battleID.getNum(), spell->toString());
+				cb->battleMakeSpellAction(battleID, *spell);
+				return;
+			}
+		}
 		const auto action = chooseAction(*battle, *stack);
 		logAi->debug("AI_PORT_ACTION backend=HoMM3OriginalTactics battle=%d unit=%d action=%s",
 			battleID.getNum(), stack->unitId(), action.toString());
@@ -60,6 +76,8 @@ public:
 
 private:
 	std::shared_ptr<CBattleCallback> cb;
+	std::shared_ptr<Environment> env;
+	AutocombatPreferences preferences;
 
 	static int visibleHeroGrantedAttacks(CPlayerBattleCallback & battle, const CStack & attacker)
 	{
