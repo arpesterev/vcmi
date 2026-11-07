@@ -935,6 +935,208 @@ protected:
 		EXPECT_GT(recorder.damage, 0);
 	}
 
+	enum class DefensiveAreaCase
+	{
+		FUTURE,
+		FUTURE_WITH_BAIT,
+		CONTROLLED_FUTURE,
+		OUTSIDE_ONLY
+	};
+
+	void checkDefensiveAreaPosition(CreatureID guardCreature, int guardCount, DefensiveAreaCase scenario)
+	{
+		const bool controlled = scenario == DefensiveAreaCase::CONTROLLED_FUTURE;
+		if(controlled)
+			prepareBattle(CreatureID(3), 60, guardCreature, guardCount);
+		else
+			prepareBattle(guardCreature, guardCount, CreatureID(0), 100);
+		ASSERT_FALSE(HasFatalFailure());
+		battle()->obstacles.clear();
+		CStack * guard = nullptr;
+		CStack * reserve = nullptr;
+		CStack * friendly = nullptr;
+		for(const auto & unit : battle()->stacks)
+		{
+			if(unit->unitSide() == (controlled ? BattleSide::DEFENDER : BattleSide::ATTACKER)
+				&& unit->creatureId() == guardCreature)
+				guard = unit.get();
+			if(!controlled && unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(0))
+				reserve = unit.get();
+			if(controlled && unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(3))
+				friendly = unit.get();
+		}
+		ASSERT_NE(guard, nullptr);
+		if(controlled)
+		{
+			ASSERT_NE(friendly, nullptr);
+			ASSERT_EQ(battle()->battleActiveUnit(), friendly);
+			reserve = addStack(BattleSide::DEFENDER, CreatureID(0), BattleHex(15, 9), 100);
+		}
+		else
+		{
+			ASSERT_EQ(battle()->battleActiveUnit(), guard);
+		}
+		ASSERT_NE(reserve, nullptr);
+		const bool hasOutsideBait = scenario == DefensiveAreaCase::FUTURE_WITH_BAIT
+			|| scenario == DefensiveAreaCase::OUTSIDE_ONLY;
+		const bool hasFutureTarget = scenario != DefensiveAreaCase::OUTSIDE_ONLY;
+		guard->setPosition(BattleHex(hasOutsideBait ? 7 : 3, 9));
+		reserve->setPosition(BattleHex(hasOutsideBait ? 11 : 15, 9));
+		guard->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+			BonusType::STACKS_SPEED, BonusSource::OTHER,
+			4 - static_cast<int>(guard->getMovementRange()), BonusSourceID()));
+		ASSERT_EQ(guard->getMovementRange(), 4u);
+		ASSERT_FALSE(guard->hasBonusOfType(BonusType::FLYING));
+		if(controlled)
+			friendly->setPosition(BattleHex(2, 0));
+		else
+			friendly = addStack(BattleSide::ATTACKER, CreatureID(2), BattleHex(2, 0), 60);
+		const auto * invader = hasFutureTarget
+			? addStack(BattleSide::DEFENDER, CreatureID(0), BattleHex(7, 2), 1) : nullptr;
+		ASSERT_NE(friendly, nullptr);
+		if(hasFutureTarget)
+		{
+			ASSERT_NE(invader, nullptr);
+		}
+		// The source's cover branch must have no reachable archer-cover cell.
+		// An isolated shooter still supplies ranged strength and legal shots.
+		auto ring = std::make_shared<SpellCreatedObstacle>();
+		ring->uniqueID = 1201;
+		ring->ID = SpellID::FORCE_FIELD;
+		ring->casterSide = BattleSide::ATTACKER;
+		ring->pos = friendly->getPosition();
+		ring->customSize = friendly->getSurroundingHexes();
+		for(const auto & hex : ring->customSize)
+			ASSERT_EQ(battle()->battleGetUnitByPos(hex), nullptr);
+		battle()->obstacles.push_back(ring);
+
+		const auto battleID = battle()->getBattleID();
+		const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+		if(controlled)
+		{
+			teachBattleSpell(attackerSideHero, SpellID::HYPNOTIZE, 30);
+			ASSERT_EQ(battle()->battleGetOwner(battle()->battleActiveUnit()), player);
+			const auto cast = BattleAction::makeHeroSpellcast(BattleSide::ATTACKER,
+				battle::Target{battle::Destination(guard)}, SpellID::HYPNOTIZE);
+			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, cast));
+			ASSERT_TRUE(guard->isHypnotized());
+			ASSERT_EQ(guard->unitSide(), BattleSide::DEFENDER);
+			ASSERT_EQ(battle()->battleGetOwner(guard), player);
+			for(size_t count = 0; count < battle()->stacks.size() * 2
+				&& battle()->battleActiveUnit() != guard; ++count)
+			{
+				const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+				ASSERT_NE(active, nullptr);
+				ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID,
+					battle()->battleGetOwner(active), BattleAction::makeNoAction(active)));
+			}
+		}
+		ASSERT_EQ(battle()->battleActiveUnit(), guard);
+		auto callback = std::make_shared<DecisionCallback>(player);
+		callback->onBattleStarted(battle());
+		const auto view = callback->getBattle(battleID);
+		ASSERT_NE(view, nullptr);
+		ASSERT_TRUE(view->battleCanShoot(friendly));
+		const double ownStrength = guard->estimateCombatValue() + friendly->estimateCombatValue();
+		const double enemyStrength = reserve->estimateCombatValue() + (invader ? invader->estimateCombatValue() : 0);
+		ASSERT_LE(ownStrength, enemyStrength * 10);
+		ASSERT_GE(friendly->estimateCombatValue() / ownStrength, 0.15);
+		const auto routes = view->getReachability(guard);
+		const auto available = view->battleGetAvailableHexes(routes, guard, false);
+		const auto defended = [&](const BattleHex & head)
+		{
+			const auto footprint = guard->getHexes(head);
+			return std::all_of(footprint.begin(), footprint.end(), [](const BattleHex & hex)
+			{
+				return hex.isAvailable() && hex.getX() < GameConstants::BFIELD_WIDTH / 2;
+			});
+		};
+		ASSERT_TRUE(defended(guard->getPosition()));
+		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+		{
+			const BattleHex head(index);
+			if(routes.isReachable(head))
+			{
+				ASSERT_TRUE(view->meleeAttackHexes(guard, friendly, head).empty())
+					<< "The isolated friendly archer must have no reachable cover footprint";
+			}
+		}
+		bool outsideImmediateAttack = false;
+		for(const auto & from : available)
+		{
+			if(view->meleeAttackHexes(guard, reserve, from).empty())
+				continue;
+			ASSERT_FALSE(defended(from));
+			outsideImmediateAttack |= view->battleCanAttackFromHex(available, guard, reserve->getPosition(), from);
+		}
+		EXPECT_EQ(outsideImmediateAttack, hasOutsideBait);
+		BattleHexArray futureSteps;
+		for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+		{
+			BattleHex goal(index);
+			if(!goal.isAvailable() || !routes.isReachable(goal) || !defended(goal))
+				continue;
+			ASSERT_TRUE(view->meleeAttackHexes(guard, reserve, goal).empty());
+			if(!invader || view->meleeAttackHexes(guard, invader, goal).empty())
+				continue;
+			ASSERT_FALSE(available.contains(goal));
+			BattleAttackInfo preview(guard, invader, guard->getMovementRange(), false);
+			preview.attackerPos = goal;
+			ASSERT_GE(view->battleEstimateDamage(preview).damage.min, invader->getAvailableHealth());
+			for(int steps = 0; steps < GameConstants::BFIELD_SIZE && goal.isValid(); ++steps)
+			{
+				if(available.contains(goal) && goal != guard->getPosition())
+				{
+					futureSteps.insert(goal);
+					break;
+				}
+				const auto previous = routes.predecessors[goal.toInt()];
+				if(previous == goal)
+					break;
+				goal = previous;
+			}
+		}
+		ASSERT_EQ(!futureSteps.empty(), hasFutureTarget);
+
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
+		ASSERT_NE(policy, nullptr);
+		policy->playerID = player;
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		AutocombatPreferences prefs;
+		prefs.enableSpellsUsage = false;
+		policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER),
+			battle()->getSideArmy(BattleSide::DEFENDER), battle()->getLocation(),
+			battle()->getSideHero(BattleSide::ATTACKER),
+			battle()->getSideHero(BattleSide::DEFENDER), BattleSide::ATTACKER, false);
+		std::vector<std::tuple<const CStack *, BattleHex, int64_t>> before;
+		for(const auto * unit : view->battleGetAllStacks())
+			before.emplace_back(unit, unit->getPosition(), unit->getAvailableHealth());
+		const int originalDefense = guard->getDefense(false);
+		policy->activeStack(battleID, guard);
+		for(const auto & [unit, position, health] : before)
+		{
+			EXPECT_EQ(unit->getPosition(), position);
+			EXPECT_EQ(unit->getAvailableHealth(), health);
+		}
+		ASSERT_TRUE(callback->action.has_value());
+		ASSERT_EQ(callback->action->actionType, hasFutureTarget ? EActionType::WALK : EActionType::NO_ACTION);
+		if(hasFutureTarget)
+		{
+			ASSERT_FALSE(callback->action->target.empty());
+			const BattleHex destination = callback->action->target.front().hexValue;
+			EXPECT_TRUE(futureSteps.contains(destination));
+			EXPECT_TRUE(available.contains(destination));
+			EXPECT_TRUE(defended(destination));
+		}
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+		EXPECT_EQ(guard->getDefense(false), originalDefense);
+		policy.reset();
+		runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+		EXPECT_GT(recorder.damage, 0);
+		EXPECT_FALSE(recorder.battleResults.empty());
+	}
+
 	void verifyFHeroes2DifficultyWithdrawal(int enemyCount, const std::array<bool, 5> & retreats)
 	{
 		prepareBattle(CreatureID(0), 10, CreatureID(0), enemyCount);
@@ -4618,8 +4820,8 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedMeleeStopsProjectingShooterCove
 			guard = unit.get();
 	ASSERT_NE(guard, nullptr);
 	const BattleHex origin = guard->getPosition();
-	const BattleHex archerHex(origin.toInt() + 3 * GameConstants::BFIELD_WIDTH);
-	const BattleHex threatHex(archerHex.toInt() + 5);
+	const BattleHex archerHex(4, 8);
+	const BattleHex threatHex(9, 8);
 	ASSERT_TRUE(archerHex.isAvailable());
 	ASSERT_TRUE(threatHex.isAvailable());
 	ASSERT_EQ(battle()->battleGetUnitByPos(archerHex), nullptr);
@@ -4638,6 +4840,28 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedMeleeStopsProjectingShooterCove
 
 	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::ATTACKER);
+	auto inspection = std::make_shared<DecisionCallback>(player);
+	inspection->onBattleStarted(battle());
+	const auto view = inspection->getBattle(battleID);
+	const auto routes = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(routes, guard, false);
+	ASSERT_TRUE(std::any_of(available.begin(), available.end(), [&](const BattleHex & from)
+	{
+		return BattleHex::getDistance(from, archerHex) == 1;
+	})) << "A mobile threat must have an available screen";
+	// No enemy has an attack position in the defended half, even on a later turn.
+	// This isolates cover suppression from the source's generic future-target fallback.
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex from(index);
+		if(!from.isAvailable() || from.getX() >= GameConstants::BFIELD_WIDTH / 2
+			|| !routes.isReachable(from))
+			continue;
+		for(const auto * enemy : view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+		{
+			ASSERT_TRUE(view->meleeAttackHexes(guard, enemy, from).empty());
+		}
+	}
 	const auto decide = [&]() -> std::optional<BattleAction>
 	{
 		auto callback = std::make_shared<DecisionCallback>(player);
@@ -4665,18 +4889,30 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedMeleeStopsProjectingShooterCove
 		<< "A mobile enemy approaching the archer demands a close screen";
 
 	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
-	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, threat))
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player,
+		BattleAction::makeHeroSpellcast(BattleSide::ATTACKER,
+			battle::Target{battle::Destination(threat)}, SpellID::BLIND)))
 		<< "An authoritative spell must disable the enemy instead of a mock state flag";
 	ASSERT_TRUE(threat->hasBonusOfType(BonusType::NOT_ACTIVE));
 	ASSERT_GT(threat->getMovementRange(), 0)
 		<< "This regression needs raw VCMI speed to remain nonzero under Blind";
 	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	for(const auto * enemy : view->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY))
+	{
+		ASSERT_FALSE(enemy->isShooter());
+		const int reach = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+			? 1 : static_cast<int>(enemy->getMovementRange()) + 1;
+		ASSERT_GT(BattleHex::getDistance(enemy->getPosition(), archerHex), reach)
+			<< "No enemy may project a mobile or adjacent cover threat after Blind";
+	}
+	const int originalDefense = guard->getDefense(false);
 	const auto after = decide();
 	ASSERT_TRUE(after.has_value());
 	EXPECT_EQ(after->actionType, EActionType::NO_ACTION)
 		<< "An incapacitated distant enemy must not force a screen or invent DEFEND";
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *after))
 		<< "The native server rejected the source-derived choice after disabling the threat";
+	EXPECT_EQ(guard->getDefense(false), originalDefense);
 	runToCompletion(std::nullopt, false, "FHeroes2Tactics", "HoMM3OriginalTactics");
 	EXPECT_GT(recorder.damage, 0);
 }
@@ -4785,24 +5021,28 @@ TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerA
 	// still belongs to its original army. Hypnotize changes the controller
 	// without changing the source army. Test a real VCMI spell, not a mock
 	// owner flag, and require a legal resulting unit action.
-	prepareBattle(CreatureID(0), 10, CreatureID(0), 8);
+	prepareBattle(CreatureID(0), 10, CreatureID(3), 120);
 	ASSERT_FALSE(HasFatalFailure());
 	battle()->obstacles.clear();
-	const CStack * guard = nullptr;
+	CStack * guard = nullptr;
+	CStack * shooter = nullptr;
 	for(const auto & unit : battle()->stacks)
+	{
 		if(unit->unitSide() == BattleSide::ATTACKER && unit->creatureId() == CreatureID(0))
 			guard = unit.get();
+		if(unit->unitSide() == BattleSide::DEFENDER && unit->creatureId() == CreatureID(3))
+			shooter = unit.get();
+	}
 	ASSERT_NE(guard, nullptr);
-	const BattleHex initial = guard->getPosition();
-	const BattleHex shooterHex(initial.toInt() + 3 * GameConstants::BFIELD_WIDTH);
-	const BattleHex enemyHex(shooterHex.toInt() + 5);
-	ASSERT_TRUE(shooterHex.isAvailable());
-	ASSERT_TRUE(enemyHex.isAvailable());
-	ASSERT_EQ(battle()->battleGetUnitByPos(shooterHex), nullptr);
-	ASSERT_EQ(battle()->battleGetUnitByPos(enemyHex), nullptr);
-	const CStack * shooter = addStack(BattleSide::DEFENDER, CreatureID(2), shooterHex, 120);
-	const CStack * enemy = addStack(BattleSide::ATTACKER, CreatureID(0), enemyHex, 45);
 	ASSERT_NE(shooter, nullptr);
+	ASSERT_EQ(battle()->battleActiveUnit(), shooter);
+	guard->setPosition(BattleHex(14, 2));
+	shooter->setPosition(BattleHex(11, 6));
+	const BattleHex initial = guard->getPosition();
+	const BattleHex shooterHex = shooter->getPosition();
+	const BattleHex enemyHex(6, 6);
+	ASSERT_EQ(battle()->battleGetUnitByPos(enemyHex), nullptr);
+	const CStack * enemy = addStack(BattleSide::ATTACKER, CreatureID(0), enemyHex, 400);
 	ASSERT_NE(enemy, nullptr);
 	ASSERT_GT(BattleHex::getDistance(initial, enemyHex),
 		static_cast<int>(guard->getMovementRange()) + 1)
@@ -4811,20 +5051,67 @@ TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerA
 		static_cast<int>(enemy->getMovementRange()) + 1)
 		<< "The foreign archer must be threatened for this regression";
 
-	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
-	ASSERT_TRUE(castOn(defenderSideHero, SpellID::HYPNOTIZE, guard));
-	ASSERT_TRUE(guard->isHypnotized());
+	const auto battleID = battle()->getBattleID();
 	const auto player = battle()->sideToPlayer(BattleSide::DEFENDER);
+	teachBattleSpell(defenderSideHero, SpellID::HYPNOTIZE, 20);
+	ASSERT_EQ(battle()->battleGetOwner(battle()->battleActiveUnit()), player);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player,
+		BattleAction::makeHeroSpellcast(BattleSide::DEFENDER,
+			battle::Target{battle::Destination(guard)}, SpellID::HYPNOTIZE)));
+	ASSERT_TRUE(guard->isHypnotized());
 	ASSERT_NE(guard->unitOwner(), player);
 	ASSERT_EQ(battle()->battleGetOwner(guard), player)
 		<< "The actual spell must transfer tactical control";
 	ASSERT_TRUE(shooter->isShooter());
-	// Select this live stack's activation. As with the fixture's act(),
-	// the test changes turn scheduling only, never combat/game rules.
-	battle()->activeStack = guard->unitId();
-	const auto battleID = battle()->getBattleID();
+	for(size_t count = 0; count < battle()->stacks.size() * 2
+		&& battle()->battleActiveUnit() != guard; ++count)
+	{
+		const auto * active = dynamic_cast<const CStack *>(battle()->battleActiveUnit());
+		ASSERT_NE(active, nullptr);
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID,
+			battle()->battleGetOwner(active), BattleAction::makeNoAction(active)));
+	}
+	ASSERT_EQ(battle()->battleActiveUnit(), guard);
+	ASSERT_TRUE(guard->isHypnotized());
 	auto callback = std::make_shared<DecisionCallback>(player);
 	callback->onBattleStarted(battle());
+	const auto view = callback->getBattle(battleID);
+	ASSERT_GE(initial.getX(), GameConstants::BFIELD_WIDTH / 2)
+		<< "The stolen guard must be inside its controller's defended half";
+	const double ownStrength = guard->estimateCombatValue() + shooter->estimateCombatValue();
+	ASSERT_LE(ownStrength, enemy->estimateCombatValue() * 10);
+	ASSERT_GE(shooter->estimateCombatValue() / ownStrength, 0.15);
+	ASSERT_TRUE(view->battleCanShoot(shooter));
+	ASSERT_EQ(view->battleGetOwner(enemy), battle()->sideToPlayer(BattleSide::ATTACKER));
+	ASSERT_FALSE(enemy->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_GE(enemy->moraleVal(), 0);
+	// The ordinary attacker must survive a full lucky double shot and one
+	// additional morale activation before its own policy receives a turn.
+	BattleAttackInfo incoming(shooter, enemy, 0, true);
+	incoming.luckyStrike = true;
+	const int64_t maximumRangedActivation = view->battleEstimateDamage(incoming).damage.max
+		* shooter->getTotalAttacks(true);
+	ASSERT_GT(maximumRangedActivation, 0);
+	ASSERT_GT(enemy->getAvailableHealth(), 2 * maximumRangedActivation);
+	RecordProperty("hypnotize_ordinary_attacker_hp", std::to_string(enemy->getAvailableHealth()));
+	RecordProperty("hypnotize_two_lucky_volley_bound", std::to_string(2 * maximumRangedActivation));
+	const int ordinaryAttackerId = enemy->unitId();
+	const auto routes = view->getReachability(guard);
+	const auto available = view->battleGetAvailableHexes(routes, guard, false);
+	ASSERT_TRUE(std::any_of(available.begin(), available.end(), [&](const BattleHex & from)
+	{
+		return BattleHex::getDistance(from, shooterHex) == 1;
+	})) << "Cover must be reachable, so only the changed affiliation forbids screening";
+	for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+	{
+		const BattleHex from(index);
+		if(!from.isAvailable() || from.getX() < GameConstants::BFIELD_WIDTH / 2
+			|| !routes.isReachable(from))
+			continue;
+		ASSERT_TRUE(view->meleeAttackHexes(guard, enemy, from).empty())
+			<< "The generic defensive fallback must have no target in the controller's half";
+	}
+	const int originalDefense = guard->getDefense(false);
 	auto policy = AIFactory::createBattleAI("FHeroes2Tactics");
 	ASSERT_NE(policy, nullptr);
 	policy->playerID = player;
@@ -4843,8 +5130,11 @@ TEST_F(AIIntegrationNativeBattle, fheroes2HypnotizedMeleeDoesNotCoverControllerA
 		<< callback->action->toString();
 	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action))
 		<< "Engine rejected the hypnotized unit's defensive command";
+	EXPECT_EQ(guard->getDefense(false), originalDefense);
 	policy.reset();
 	runToCompletion(std::nullopt, false, "HoMM3OriginalTactics", "FHeroes2Tactics");
+	EXPECT_TRUE(lastFirstAcceptedActionTypeByUnit.contains(ordinaryAttackerId))
+		<< "The surviving ordinary attacker must receive an actual policy decision";
 	EXPECT_GT(recorder.damage, 0);
 }
 
@@ -19882,4 +20172,31 @@ TEST_F(AIIntegrationNativeBattle, fheroes2FutureBlockerRouteValuesAdjacentEnemyA
 TEST_F(AIIntegrationNativeBattle, fheroes2WideFutureBlockerRouteValuesTailContact)
 {
 	checkFutureArcherBlockingPosition(CreatureID(110), 2);
+}
+
+// Paired by policy branch with the original pinned-engine defense-area corpus.
+// Native positions, strengths and movement budgets intentionally remain H3 rules.
+TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveAreaPursuesFutureTarget)
+{
+	checkDefensiveAreaPosition(CreatureID(0), 40, DefensiveAreaCase::FUTURE);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2WideDefensiveAreaPursuesFutureTarget)
+{
+	checkDefensiveAreaPosition(CreatureID(110), 2, DefensiveAreaCase::FUTURE);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveAreaRejectsImmediateEnemyHalfBait)
+{
+	checkDefensiveAreaPosition(CreatureID(0), 40, DefensiveAreaCase::FUTURE_WITH_BAIT);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveAreaSkipsWithoutDefendedTarget)
+{
+	checkDefensiveAreaPosition(CreatureID(0), 40, DefensiveAreaCase::OUTSIDE_ONLY);
+}
+
+TEST_F(AIIntegrationNativeBattle, fheroes2DefensiveAreaFollowsHypnotizedControllerSide)
+{
+	checkDefensiveAreaPosition(CreatureID(0), 40, DefensiveAreaCase::CONTROLLED_FUTURE);
 }

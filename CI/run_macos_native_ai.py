@@ -50,7 +50,7 @@ GATED_NATIVE_NAMES = (
     "mmaiDefenderAgainstTUMAttackerRealBattle",
 )
 GATED_NATIVE = {"AIIntegrationNativeBattle." + name for name in GATED_NATIVE_NAMES}
-FULL_NATIVE_FILTER = "AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*"
+FULL_NATIVE_FILTER = "AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*"
 NATIVE_FILTER = FULL_NATIVE_FILTER + "-" + ":".join(sorted(GATED_NATIVE))
 
 
@@ -241,9 +241,11 @@ def read_inventory(binary, output, env, name, selected):
     return identities
 
 
-def verify_native_inventory(identities, native_count, forecast_count):
+def verify_native_inventory(identities, native_count, forecast_count, lifecycle_count=0):
     native = {identity for identity in identities if identity.startswith("AIIntegrationNativeBattle.")}
-    forecast = {identity for identity in identities if identity.startswith("HoMM3ForecastQueueNative.")}
+    queue = {identity for identity in identities if identity.startswith("HoMM3ForecastQueueNative.")}
+    lifecycle = {identity for identity in identities if identity.startswith("HoMM3ForecastLifecycleNative.")}
+    forecast = queue | lifecycle
     possible_gates = {identity for identity in native
                       if any(fnmatch.fnmatchcase(identity, pattern) for pattern in (
                           "AIIntegrationNativeBattle.mmaiV13*",
@@ -252,7 +254,7 @@ def verify_native_inventory(identities, native_count, forecast_count):
     if possible_gates != GATED_NATIVE:
         raise ValueError("Native inventory does not contain exactly the reviewed 20 gated names")
     if (len(native) != native_count + len(GATED_NATIVE) or len(forecast) != forecast_count
-            or native | forecast != identities):
+            or len(lifecycle) != lifecycle_count or native | forecast != identities):
         raise ValueError("Native/forecast inventory differs from the caller's expected candidate counts")
     return identities - GATED_NATIVE
 
@@ -338,7 +340,9 @@ def main(argv=None):
     parser.add_argument("--expected-native-count", required=True, type=int,
                         help="Reviewed candidate's non-neural AIIntegrationNativeBattle count")
     parser.add_argument("--expected-forecast-count", required=True, type=int,
-                        help="Reviewed candidate's HoMM3ForecastQueueNative count")
+                        help="Reviewed candidate's combined queue and lifecycle forecast count")
+    parser.add_argument("--expected-lifecycle-count", type=int, default=0,
+                        help="Reviewed HoMM3ForecastLifecycleNative subset of the forecast count")
     parser.add_argument("--output-dir", type=Path, required=True,
                         help="New or empty directory for JSON, logs and XML only")
     args = parser.parse_args(argv)
@@ -353,13 +357,15 @@ def main(argv=None):
               "scope": "Non-neural native regressions; no packaged gameplay or neural inference claim",
               "expected_native_count": args.expected_native_count,
               "expected_forecast_count": args.expected_forecast_count,
+              "expected_lifecycle_count": args.expected_lifecycle_count,
               "excluded_gated_tests": sorted(GATED_NATIVE),
               "suites": []}
     try:
         if not re.fullmatch(r"[0-9a-f]{40}", args.source_sha):
             raise ValueError("Source SHA must be a full lowercase 40-hex commit ID")
-        if args.expected_native_count <= 0 or args.expected_forecast_count < 0:
-            raise ValueError("Expected native count must be positive; forecast count must not be negative")
+        if (args.expected_native_count <= 0 or args.expected_forecast_count < 0
+                or not 0 <= args.expected_lifecycle_count <= args.expected_forecast_count):
+            raise ValueError("Expected counts require positive native, nonnegative forecast and lifecycle within forecast")
         binary = args.test_binary.resolve(strict=True)
         fixture = args.fixture_archive.resolve(strict=True)
         with tempfile.TemporaryDirectory(prefix="vcmi-macos-native-") as temporary_name:
@@ -376,7 +382,7 @@ def main(argv=None):
                 capture(["/usr/bin/otool", "-L", str(binary)], env=env), encoding="utf-8")
             full_inventory = read_inventory(binary, output, env, "full-native", FULL_NATIVE_FILTER)
             native_inventory = verify_native_inventory(
-                full_inventory, args.expected_native_count, args.expected_forecast_count)
+                full_inventory, args.expected_native_count, args.expected_forecast_count, args.expected_lifecycle_count)
             suites = selected_suites(args.expected_native_count, args.expected_forecast_count)
             inventories = {}
             for suite in suites:

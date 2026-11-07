@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Portable smoke-runner contracts; no native Mac execution is simulated as proof."""
 
+import contextlib
+import io
+import json
 import plistlib
 import subprocess
 import tempfile
@@ -29,6 +32,8 @@ class PackagedSmokeTest(unittest.TestCase):
         self.home = None
         self.help = "Allowed options\n  --help\n  --version\n"
         self.version_sha = SHA
+        self.version_prefix = ""
+        self.version_line = None
         self.exit_code = 0
         self.bad_path = False
 
@@ -53,7 +58,8 @@ class PackagedSmokeTest(unittest.TestCase):
                  "user extracted": data / "extracted"}
         if self.bad_path:
             paths["user data"] = self.root / "outside"
-        version = "1.8.0." + self.version_sha + "\n"
+        version = self.version_prefix + (self.version_line if self.version_line is not None
+                                         else "1.8.0." + self.version_sha) + "\n"
         version += "\n".join(f"  {label}:\t\t{value}" for label, value in paths.items()) + "\n"
         output = self.help if arguments[-1] == "--help" else version
         return subprocess.CompletedProcess(arguments, self.exit_code, output, "")
@@ -78,6 +84,52 @@ class PackagedSmokeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "expected help"):
             self.smoke()
         self.assertFalse(self.home.exists())
+
+    def test_logger_color_reset_prefix_accepts_exact_version(self):
+        self.version_prefix = "\x1b[1;32mVCMI - Open Heroes 3 1.8.0." + SHA + " (server)\n\x1b[0m"
+        result = self.smoke()
+        self.assertEqual(result["server_version"], "1.8.0." + SHA)
+        self.assertIn("\x1b[0m1.8.0." + SHA, result["commands"][1]["stdout"])
+        self.assertEqual(result["isolated_home_paths"], "verified")
+
+    def test_colored_wrong_version_fails_despite_correct_banner_sha(self):
+        self.version_prefix = "\x1b[1;32mVCMI - Open Heroes 3 1.8.0." + SHA + " (server)\n\x1b[0m"
+        self.version_sha = "0" * 40
+        with self.assertRaisesRegex(ValueError, "report the exact source commit"):
+            self.smoke()
+
+    def test_correct_banner_without_standalone_version_fails(self):
+        self.version_prefix = "\x1b[1;32mVCMI - Open Heroes 3 1.8.0." + SHA + " (server)\n\x1b[0m"
+        self.version_line = ""
+        with self.assertRaisesRegex(ValueError, "report the exact source commit"):
+            self.smoke()
+
+    def test_non_sgr_control_sequence_is_not_stripped(self):
+        self.version_prefix = "\x1b[2K"
+        with self.assertRaisesRegex(ValueError, "report the exact source commit"):
+            self.smoke()
+
+    def test_colored_output_still_rejects_escaped_home(self):
+        self.version_prefix = "\x1b[0m"
+        self.bad_path = True
+        with self.assertRaisesRegex(ValueError, "escaped the isolated HOME"):
+            self.smoke()
+
+    def test_raw_outputs_are_escaped_and_logged_before_validation_failure(self):
+        self.version_prefix = "\x1b[0m"
+        self.version_sha = "0" * 40
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            with self.assertRaisesRegex(ValueError, "report the exact source commit"):
+                self.smoke()
+        text = output.getvalue()
+        self.assertNotIn("\x1b", text)
+        self.assertNotIn(str(self.home), text)
+        records = [json.loads(line.removeprefix("SERVER_CLI ")) for line in text.splitlines()]
+        self.assertEqual([record["option"] for record in records], ["--help", "--version"])
+        self.assertTrue(records[1]["stdout"].startswith("\x1b[0m"))
+        self.assertIn("<isolated-home>", records[1]["stdout"])
+        self.assertEqual(records[1]["exit_code"], 0)
 
     def test_wrong_binary_commit_fails(self):
         self.version_sha = "0" * 40

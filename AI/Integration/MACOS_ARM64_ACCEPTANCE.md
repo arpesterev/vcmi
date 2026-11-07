@@ -122,13 +122,17 @@ intentionally different from a portable app: do not apply the bundle rpath
 normalizer to this executable or change the dependency cache. A loader or
 signature failure is a test blocker, not a reason to bypass macOS protection.
 
-The reviewed next-candidate inventory contains 326 `AIIntegrationNativeBattle`
-cases and 8 `HoMM3ForecastQueueNative` cases. The runner enumerates the compiled
+The reviewed next-candidate inventory contains 331 `AIIntegrationNativeBattle`
+cases, 8 `HoMM3ForecastQueueNative` cases and 10
+`HoMM3ForecastLifecycleNative` cases. The runner enumerates the compiled
 binary, requires exactly the 20 named model-gated cases, excludes only those
 cases, then verifies that the selected inventory and XML identities agree.
-Expected genuine passes are 306 native battle cases, 8 forecast cases,
+Linux CI validates the compiled inventory against the Mac workflow counts
+before executing its suites. Require that check before scheduling a new Mac
+build to catch stale counts without repeating the longer compilation.
+Expected genuine passes are 311 native battle cases, 18 forecast/lifecycle cases,
 48 `MMAINNOutputValidation` cases and 145 Nullkiller/resource-trading cases:
-**507 executed cases with zero skipped, disabled, failed or errored cases**.
+**522 executed cases with zero skipped, disabled, failed or errored cases**.
 These are required results, not a claim that this Mac run has already passed.
 A source change that alters the inventory requires an explicit reviewed update
 to the expected counts. XML counts alone cannot substitute for matching names.

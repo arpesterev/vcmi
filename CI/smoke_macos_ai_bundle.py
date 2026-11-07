@@ -18,6 +18,10 @@ def run_cli(server, option, home):
                                  "PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
                             stdin=subprocess.DEVNULL, capture_output=True, text=True,
                             timeout=30, check=False)
+    print("SERVER_CLI " + json.dumps({
+        "option": option, "exit_code": result.returncode,
+        "stdout": result.stdout.replace(str(home), "<isolated-home>"),
+        "stderr": result.stderr.replace(str(home), "<isolated-home>")}, ensure_ascii=True), flush=True)
     if result.returncode != 0:
         raise ValueError(f"Packaged server {option} exited {result.returncode}:\n"
                          f"{result.stdout}\n{result.stderr}")
@@ -41,10 +45,13 @@ def smoke(app, expected_sha):
         home = Path(directory).resolve()
         (home / "tmp").mkdir()
         help_result = run_cli(server, "--help", home)
-        if not all(token in help_result.stdout for token in ("Allowed options", "--help", "--version")):
+        help_text = re.sub(r"\x1b\[[0-9;]*m", "", help_result.stdout)
+        if not all(token in help_text for token in ("Allowed options", "--help", "--version")):
             raise ValueError("Packaged server did not return its expected help")
         version_result = run_cli(server, "--version", home)
-        match = re.search(rf"(?m)^([0-9]+\.[0-9]+\.[0-9]+\.{expected_sha})\r?$", version_result.stdout)
+        # Console logging emits a color reset after its newline, before the version.
+        version_text = re.sub(r"\x1b\[[0-9;]*m", "", version_result.stdout)
+        match = re.search(rf"(?m)^([0-9]+\.[0-9]+\.[0-9]+\.{expected_sha})\r?$", version_text)
         if not match:
             raise ValueError("Packaged server did not report the exact source commit")
         data = home / "Library/Application Support/vcmi"
@@ -52,7 +59,7 @@ def smoke(app, expected_sha):
                           "user config": data / "config", "user logs": home / "Library/Logs/vcmi",
                           "user saves": data / "Saves", "user extracted": data / "extracted"}
         for label, expected in expected_paths.items():
-            reported = re.search(rf"(?m)^\s*{label}:\s+([^\r\n]+)", version_result.stdout)
+            reported = re.search(rf"(?m)^\s*{label}:\s+([^\r\n]+)", version_text)
             if not reported or Path(reported[1]).resolve() != expected:
                 raise ValueError(f"Packaged server {label} escaped the isolated HOME")
         commands = [{"arguments": ["/usr/bin/arch", "-arm64", "Contents/MacOS/vcmiserver", option],

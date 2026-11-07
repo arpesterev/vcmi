@@ -145,6 +145,21 @@ class InventoryAndXMLContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "20 gated"):
             runner.verify_native_inventory(full | {"AIIntegrationNativeBattle.mmaiUnreviewedRealBattle"}, 307, 8)
 
+    def test_lifecycle_namespace_is_selected_and_counted_exactly(self):
+        selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(306)}
+        selected |= {f"HoMM3ForecastQueueNative.case{x}" for x in range(8)}
+        selected |= {f"HoMM3ForecastLifecycleNative.case{x}" for x in range(10)}
+        full = selected | runner.GATED_NATIVE
+        self.assertEqual(runner.verify_native_inventory(full, 306, 18, 10), selected)
+        self.assertTrue(all(runner.matches_filter(x, runner.NATIVE_FILTER) for x in selected))
+        self.assertEqual(runner.selected_suites(306, 18)[0][2], 324)
+        with self.assertRaisesRegex(ValueError, "candidate counts"):
+            runner.verify_native_inventory(full, 306, 18, 9)
+        with self.assertRaisesRegex(ValueError, "candidate counts"):
+            runner.verify_native_inventory(full, 306, 8, 0)
+        with self.assertRaisesRegex(ValueError, "candidate counts"):
+            runner.verify_native_inventory(full | {"HoMM3ForecastLifecycleNativeExtra.case0"}, 306, 19, 10)
+
     def test_base_inventory_is_an_explicit_separate_mode(self):
         selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(304)}
         self.assertEqual(runner.verify_native_inventory(selected | runner.GATED_NATIVE, 304, 0), selected)

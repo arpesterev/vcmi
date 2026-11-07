@@ -131,11 +131,15 @@ jobs:
         id: native_battles
         run: |
           cd out/build/linux-gcc-test/bin
-          ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*' --gtest_list_tests > native-port-names.txt
+          ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*' --gtest_list_tests > native-port-names.txt
           grep -q '^AIIntegrationNativeBattle\.' native-port-names.txt
           grep -q '^HoMM3ForecastQueueNative\.' native-port-names.txt
+          grep -q '^HoMM3ForecastLifecycleNative\.' native-port-names.txt
+          python3 "$GITHUB_WORKSPACE/CI/check_native_ai_inventory.py" \
+            --inventory native-port-names.txt \
+            --mac-workflow "$GITHUB_WORKSPACE/.github/workflows/ai-macos-arm64.yml"
           status=0
-          timeout 180 ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*' \
+          timeout 180 ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*' \
             --gtest_output=xml:native-port-battles.xml > "$RUNNER_TEMP/native-battles.log" 2>&1 || status=$?
           tail -n 120 "$RUNNER_TEMP/native-battles.log"
           python3 - <<'PY'

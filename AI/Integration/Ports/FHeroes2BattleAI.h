@@ -543,6 +543,57 @@ private:
 		return attackCandidates;
 	}
 
+	static bool isPositionInDefendedArea(CPlayerBattleCallback & battle,
+		const CStack & stack, const BattleHex & head)
+	{
+		// Hypnotize changes the defended side, not the native head/tail facing.
+		const auto side = battle.playerToSide(battle.battleGetOwner(&stack));
+		const bool defendingCastle = side == BattleSide::DEFENDER
+			&& battle.battleGetDefendedTown() != nullptr
+			&& battle.battleGetWallState(EWallPart::GATE) != EWallState::NONE;
+		return Ports::FHeroes2::isPositionInDefendedArea(stack.getHexes(head),
+			[&](const BattleHex & hex)
+			{
+				if(!hex.isAvailable())
+					return false;
+				if(defendingCastle)
+					return battle.battleIsInsideWalls(hex);
+				return side == BattleSide::ATTACKER
+					? hex.getX() < GameConstants::BFIELD_WIDTH / 2
+					: hex.getX() >= GameConstants::BFIELD_WIDTH / 2;
+			});
+	}
+
+	static BattleHex firstStepTowards(const CStack & stack, const ReachabilityInfo & reachability,
+		const BattleHexArray & available, BattleHex goal)
+	{
+		BattleHex step;
+		if(stack.hasBonusOfType(BonusType::FLYING))
+		{
+			int remaining = BattleHex::getDistance(stack.getPosition(), goal);
+			for(const auto & landing : available)
+			{
+				const int distance = BattleHex::getDistance(landing, goal);
+				if(distance < remaining)
+				{
+					remaining = distance;
+					step = landing;
+				}
+			}
+			return step;
+		}
+		for(int turns = 0; turns < GameConstants::BFIELD_SIZE && goal.isValid(); ++turns)
+		{
+			if(available.contains(goal) && goal != stack.getPosition())
+				return goal;
+			const auto previous = reachability.predecessors[goal.toInt()];
+			if(previous == goal)
+				break;
+			goal = previous;
+		}
+		return step;
+	}
+
 	static Ports::FHeroes2::Tactics tactics(CPlayerBattleCallback & battle, const CStack & stack,
 		const std::vector<const CStack *> & enemies)
 	{
@@ -572,25 +623,10 @@ private:
 		// fheroes2 includes defensive castle/tower advantage when deciding
 		// whether to hold the line. The native projection requires actual
 		// surviving fortifications; an undefended open-field battle is not a siege.
-		input.defendingCastle = stack.unitSide() == BattleSide::DEFENDER
+		input.defendingCastle = battle.playerToSide(battle.battleGetOwner(&stack)) == BattleSide::DEFENDER
 			&& battle.battleGetDefendedTown() != nullptr
 			&& battle.battleGetWallState(EWallPart::GATE) != EWallState::NONE;
-		// Pinned fheroes2 isPositionLocatedInDefendedArea checks the entire
-		// Battle::Position, not only a wide stack's head. During castle defense
-		// it uses castle cells instead of the open-field midpoint. VCMI owns
-		// the occupied-cell geometry and siege wall classification.
-		const auto isDefended = [&](const BattleHex & hex)
-		{
-			if(!hex.isValid())
-				return false;
-			if(input.defendingCastle)
-				return battle.battleIsInsideWalls(hex);
-			return stack.unitSide() == BattleSide::ATTACKER
-				? hex.getX() < GameConstants::BFIELD_WIDTH / 2
-				: hex.getX() >= GameConstants::BFIELD_WIDTH / 2;
-		};
-		input.insideDefendedArea = Ports::FHeroes2::isPositionInDefendedArea(
-			stack.getHexes(), isDefended);
+		input.insideDefendedArea = isPositionInDefendedArea(battle, stack, stack.getPosition());
 		return Ports::FHeroes2::selectTactics(input);
 	}
 
@@ -1176,36 +1212,7 @@ private:
 					&& shortest > speed * 2))
 				continue;
 
-			BattleHex goal = bestCandidate->from;
-			BattleHex step;
-			if(guard.hasBonusOfType(BonusType::FLYING))
-			{
-				int remaining = BattleHex::getDistance(guard.getPosition(), goal);
-				for(const auto & landing : available)
-				{
-					const int distance = BattleHex::getDistance(landing, goal);
-					if(distance < remaining)
-					{
-						remaining = distance;
-						step = landing;
-					}
-				}
-			}
-			else
-			{
-				for(int turns = 0; turns < GameConstants::BFIELD_SIZE; ++turns)
-				{
-					if(available.contains(goal) && goal != guard.getPosition())
-					{
-						step = goal;
-						break;
-					}
-					const auto previous = reachability.predecessors[goal.toInt()];
-					if(!previous.isValid() || previous == goal)
-						break;
-					goal = previous;
-				}
-			}
+			const BattleHex step = firstStepTowards(guard, reachability, available, bestCandidate->from);
 			if(!step.isValid())
 				continue;
 			// Archer selection uses approach distance; the attack position uses
@@ -1901,18 +1908,38 @@ private:
 		// loses the incentive to block several archers from one position;
 		// using raw defender strength for attackValue changes the tie-break.
 		// Preserve that source ranking with native VCMI damage projections.
+		BattleHexArray attackPositions = available;
+		if(stance.defensive)
+		{
+			// meleeUnitDefense's fallback includes future attack positions,
+			// restricted by the entire defended footprint before comparison.
+			attackPositions.clear();
+			for(int index = 0; index < GameConstants::BFIELD_SIZE; ++index)
+			{
+				const BattleHex head(index);
+				if(reachability.isReachable(head) && isPositionInDefendedArea(battle, stack, head))
+					attackPositions.insert(head);
+			}
+			attackPositions.sort([&](const BattleHex & left, const BattleHex & right)
+			{
+				const auto leftDistance = BattleHex::getDistance(stack.getPosition(), left);
+				const auto rightDistance = BattleHex::getDistance(stack.getPosition(), right);
+				return leftDistance != rightDistance ? leftDistance < rightDistance : left.toInt() < right.toInt();
+			});
+		}
 		const auto attackCandidates = evaluateAttackPositions(battle, stack,
-			reachability, available, enemies);
+			reachability, attackPositions, enemies);
 		const CStack * target = nullptr;
 		BattleHex targetHex;
 		Ports::FHeroes2::MeleeOutcome best;
 		for(const auto & attack : attackCandidates)
 		{
-			if(!battle.battleCanAttackFromHex(available, &stack, attack.aimedHex, attack.from))
+			const bool immediate = battle.battleCanAttackFromHex(available, &stack, attack.aimedHex, attack.from);
+			if(!stance.defensive && !immediate)
 				continue;
 			const Ports::FHeroes2::MeleeOutcome candidate{
-				attack.from.toInt(), attack.attackValue, attack.positionValue, true};
-			if(!target || Ports::FHeroes2::isOutcomeImproved(candidate, best))
+				attack.from.toInt(), attack.attackValue, attack.positionValue, immediate};
+			if(Ports::FHeroes2::isOutcomeImproved(candidate, best))
 			{
 				target = attack.enemy;
 				targetHex = attack.aimedHex;
@@ -1922,6 +1949,11 @@ private:
 		if(target)
 		{
 			const BattleHex from(best.fromIndex);
+			if(!best.canAttackImmediately)
+			{
+				const BattleHex step = firstStepTowards(stack, reachability, available, from);
+				return step.isValid() ? BattleAction::makeMove(&stack, step) : BattleAction::makeNoAction(&stack);
+			}
 			const auto * occupant = battle.battleGetUnitByPos(targetHex);
 			if(!available.contains(from) || occupant != target)
 				throw std::logic_error("FHeroes2Tactics invalid melee candidate: unit=" + std::to_string(stack.unitId())
@@ -1933,8 +1965,6 @@ private:
 		}
 		if(stance.defensive)
 		{
-			if(const auto cover = coverThreatenedShooter(battle, stack, reachability, available, allEnemies))
-				return *cover;
 			// Pinned meleeUnitDefense may find neither an attack nor a screen.
 			// planUnitTurn then emits SKIP, not a native DEFEND bonus.
 			return BattleAction::makeNoAction(&stack);

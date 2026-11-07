@@ -73,11 +73,14 @@ inline std::int32_t statusTurns(const battle::Unit & unit, SpellID spell, BonusT
 	return duration.value_or(0);
 }
 
-/// Test-only adapter for retained initial ordinary troop slots. It never reads heroes.
-inline ForecastInput captureInitialTroops(const CPlayerBattleCallback & callback, const PhaseHistory & history)
+/// Test-only adapter for the complete retained initial roster, including corpses and ghosts.
+/// secondPhase must come from a verified lifecycle event, not the current turn status alone.
+inline ForecastInput captureInitialTroops(const CPlayerBattleCallback & callback, bool secondPhase)
 {
 	ForecastInput result;
-	result.secondPhase = history.secondPhase(callback);
+	result.secondPhase = secondPhase;
+	if(!callback.battleActiveUnit())
+		throw UnsupportedSnapshot("HoMM3 snapshot: no active unit");
 	result.actingSide = sourceSide(callback.battleActiveUnit()->unitSide());
 	auto visible = callback.battleGetUnitsIf([](const battle::Unit *) { return true; });
 	std::sort(visible.begin(), visible.end(), [](const auto * lhs, const auto * rhs)
@@ -89,9 +92,9 @@ inline ForecastInput captureInitialTroops(const CPlayerBattleCallback & callback
 	std::array<int, 2> previousSlot{-1, -1};
 	for(const auto * unit : visible)
 	{
-		if(!unit->unitSlot().validSlot() || unit->isClone() || unit->isGhost() || unit->isTurret()
+		if(!unit->unitSlot().validSlot() || unit->isClone() || unit->isTurret()
 			|| unit->isCatapult() || unit->isBallista() || unit->isFirstAidTent() || unit->isAmmoCart())
-			throw UnsupportedSnapshot("HoMM3 snapshot: created/clone/ghost/machine lifecycle is not mapped");
+			throw UnsupportedSnapshot("HoMM3 snapshot: created/clone/machine lifecycle is not mapped");
 		ForecastUnit projected;
 		projected.order.id = unit->unitId();
 		projected.order.owningSide = sourceSide(unit->unitSide());
@@ -136,4 +139,10 @@ inline ForecastInput captureInitialTroops(const CPlayerBattleCallback & callback
 	}
 	return result;
 }
+
+inline ForecastInput captureInitialTroops(const CPlayerBattleCallback & callback, const PhaseHistory & history)
+{
+	return captureInitialTroops(callback, history.secondPhase(callback));
+}
+
 }

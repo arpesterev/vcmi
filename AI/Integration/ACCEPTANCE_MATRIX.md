@@ -65,19 +65,27 @@ Each backend must pass all gates:
 
 - Commit `bbc23d095500a9a05fe5d6f33df37fd9fddfd645` passed both
   [pre-merge](https://github.com/arpesterev/vcmi/actions/runs/42384115632) and
-  [post-merge](https://github.com/arpesterev/vcmi/actions/runs/42384830098) Linux
-  CI. Its local native baseline enumerated 324 cases: 304 passed and 20 were
-  explicitly model-gated. Separate CI V13/V15 phases exercised supplied
-  official weights. Those results apply to that commit, not later changes.
-- The next locally tested increment adds two FHeroes2 defensive archer-support
-  cases and eight HoMM3 move-order/ownership-prefix cases. All 314 non-model
-  cases passed; 20 model-gated cases were explicitly skipped locally. ONNX
-  output contracts (48) and Nullkiller regressions (145) also passed. The
-  HoMM3 prefix kernel is test-only: it uses reconstructed source bodies with
-  controlled damage stubs and a constrained native snapshot. It does not yet
-  supply production combat forecasting. Missing phase history and created
-  units remain explicit unsupported mappings. Exact-commit CI is still
-  required for this increment.
+  [post-merge](https://github.com/arpesterev/vcmi/actions/runs/42384830098) Linux CI.
+  Later commit `707183d3650ed25f45ae52a85f3b64811696bb34`
+  [passed Linux CI](https://github.com/arpesterev/vcmi/actions/runs/42387052438):
+  334 main native cases, 314 passed and 20 explicitly model-gated. Separate
+  V13/V15 phases exercised official weights. These results are commit-specific.
+- This subsequent local increment adds five FHeroes2 generic defensive-area
+  cases and ten HoMM3 event-lifecycle cases. The full 349-case local native
+  run passed 329 cases with exactly 20 model-gated skips. Output contracts
+  (48), Nullkiller regressions (145) and the four mapped source properties
+  also passed. The defensive fixtures preserve legal full-footprint movement
+  and controller-relative positioning. Old cover tests now isolate their
+  intended branch with real server actions, without forced activation or
+  weakened command assertions. Complete multi-archer cover selection remains
+  separate source coverage work.
+- HoMM3 order/prefix and event-lifecycle kernels remain test-only. The latter
+  tracks actual pre-action WAIT evidence and post-apply round changes, keeps
+  initial ownership slots, and invalidates planning during hero actions.
+  Unknown late-registration phase and created-unit identity are still explicit
+  unsupported mappings. No complete production combat forecast, winner
+  estimate or retreat policy is claimed. Exact-commit CI is required after
+  publication of this locally tested increment.
 - Local execution of [pinned fheroes2](https://github.com/ihhub/fheroes2/tree/0dbfe9f386f33c2500842f4a59cd284d7f03d541) now supplies an independent no-UI source corpus:
   32 initial and 40 additional cases, each run uninstrumented and twice with
   observation. Source outcomes and RNG match across observation modes, and
@@ -90,10 +98,17 @@ Each backend must pass all gates:
   application signature were verified. The DMG SHA-256 is
   `3007995fc3a35aafdb4d040e477e72e4dfbea7c9db5e6d1ba53abed2d581e132`.
   This ad-hoc-signed package predates `bbc23d0`; it is not notarized and does
-  not establish installed GUI or gameplay acceptance. The subsequent workflow
-  adds isolated packaged-server startup and 507 build-tree native checks;
-  those new Mac stages have not yet run. See
-  [the ARM64 acceptance procedure](MACOS_ARM64_ACCEPTANCE.md).
+  not establish installed GUI or gameplay acceptance.
+- [Mac run 42387085354](https://github.com/arpesterev/vcmi/actions/runs/42387085354)
+  at `707183d` passed compilation, disk-image integrity and the strict bundle
+  audit. Both server CLI commands exited zero, but version parsing failed;
+  package upload and native regression execution were skipped. No artifact
+  from that run is a deliverable. Source inspection and a Linux server probe
+  reproduce an ANSI reset before the version line. The revised smoke parser
+  strips only SGR colors, retains the exact full-SHA and isolated-HOME checks,
+  and logs escaped raw output before validation. Its new Mac run is pending.
+  The current required native ARM64 gate is 522 genuine passes, not a report
+  of completed Mac tests. See [the acceptance procedure](MACOS_ARM64_ACCEPTANCE.md).
 
 ## Evidence and controls
 

@@ -200,6 +200,7 @@ if(ENABLE_BATTLE_AI)
 		battleAI/SpellTargetsEvaluatorTest.cpp
 		aiIntegration/NativePortBattleTest.cpp
 		aiIntegration/HoMM3ForecastQueueTest.cpp
+		aiIntegration/HoMM3ForecastLifecycleTest.cpp
 		aiIntegration/homm3Forecast/MoveOrder.cpp
 		aiIntegration/homm3Forecast/OwnershipPrefix.cpp
 		aiIntegration/MMAINNOutputValidationTest.cpp
