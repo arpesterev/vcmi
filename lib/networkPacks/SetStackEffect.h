@@ -14,6 +14,8 @@
 #include "../bonuses/Bonus.h"
 
 class IBattleState;
+class HypotheticFrameArena;
+namespace scripting::api { struct BonusDescriptor; }
 
 struct DLL_LINKAGE SetStackEffect : public CPackForClient
 {
@@ -26,10 +28,26 @@ struct DLL_LINKAGE SetStackEffect : public CPackForClient
 
 	template <typename Handler> void serialize(Handler & h)
 	{
+		if(!h.saving)
+			descriptorEffect.reset();
 		h & battleID;
 		h & toAdd;
 		h & toUpdate;
 		h & toRemove;
 		assert(battleID != BattleID::NONE);
 	}
+private:
+	struct DescriptorEffect
+	{
+		BattleID battleID;
+		ui32 unit;
+		bool cumulative;
+		Bonus value;
+		std::vector<std::byte> configuration;
+	};
+	// Local producer proof is not part of the network/save format.
+	std::shared_ptr<const DescriptorEffect> descriptorEffect;
+	static std::vector<std::byte> snapshotDescriptorValue(const Bonus & value);
+	friend struct scripting::api::BonusDescriptor;
+	friend class HypotheticFrameArena;
 };

@@ -56,14 +56,14 @@ float BattleExchangeVariant::trackAttack(
 
 		if(damageDealt > 0)
 		{
-			unitToUpdate->damage(damageDealt);
+			hb->damageUnit(unitToUpdate->unitId(), damageDealt);
 		}
 
 		if(unitToUpdate->unitSide() == attacker->unitSide())
 		{
 			if(unitToUpdate->unitId() == attacker->unitId())
 			{
-				unitToUpdate->afterAttack(ap.attack.shooting, false);
+				hb->recordUnitAttack(unitToUpdate->unitId(), ap.attack.shooting, false);
 
 #if BATTLE_TRACE_LEVEL>=1
 				logAi->trace(
@@ -90,7 +90,7 @@ float BattleExchangeVariant::trackAttack(
 			{
 				if(unitToUpdate->ableToRetaliate() && !affectedUnit->ableToRetaliate())
 				{
-					unitToUpdate->afterAttack(ap.attack.shooting, true);
+					hb->recordUnitAttack(unitToUpdate->unitId(), ap.attack.shooting, true);
 				}
 
 #if BATTLE_TRACE_LEVEL>=1
@@ -127,8 +127,8 @@ float BattleExchangeVariant::trackAttack(
 }
 
 float BattleExchangeVariant::trackAttack(
-	std::shared_ptr<StackWithBonuses> attacker,
-	std::shared_ptr<StackWithBonuses> defender,
+	std::shared_ptr<const StackWithBonuses> attacker,
+	std::shared_ptr<const StackWithBonuses> defender,
 	bool shooting,
 	bool isOurAttack,
 	DamageCache & damageCache,
@@ -163,8 +163,8 @@ float BattleExchangeVariant::trackAttack(
 		else
 			dpsScore.ourDamageReduce += defenderDamageReduce;
 
-		defender->damage(attackDamage);
-		attacker->afterAttack(shooting, false);
+		hb->damageUnit(defender->unitId(), attackDamage);
+		hb->recordUnitAttack(attacker->unitId(), shooting, false);
 	}
 
 	if(mode == AttackMode::FIRST_STRIKE && defender->alive() && defender->ableToRetaliate() && !counterAttacksBlocked && !shooting)
@@ -192,8 +192,8 @@ float BattleExchangeVariant::trackAttack(
 			attackerValue[defender->unitId()].value += attackerDamageReduce;
 		}
 
-		attacker->damage(retaliationDamage);
-		defender->afterAttack(false, true);
+		hb->damageUnit(attacker->unitId(), retaliationDamage);
+		hb->recordUnitAttack(defender->unitId(), false, true);
 	}
 
 	auto score = defenderDamageReduce - attackerDamageReduce;
@@ -937,34 +937,33 @@ void BattleExchangeEvaluator::updateReachabilityMap(std::shared_ptr<HypotheticBa
 	reachabilityMap.update(turnOrder, hb);
 }
 
-const battle::Units & ReachabilityMapCache::getOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, std::shared_ptr<Environment> env, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex)
+const battle::Units & ReachabilityMapCache::getOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex)
 {
 	auto & turnData = hexReachabilityPerTurn[turn];
 
 	if (!turnData.isValid[hex.toInt()])
 	{
-		turnData.hexes[hex.toInt()] = computeOneTurnReachableUnits(cb, env, turnOrder, turn, hex);
+		turnData.hexes[hex.toInt()] = computeOneTurnReachableUnits(cb, turnOrder, turn, hex);
 		turnData.isValid.set(hex.toInt());
 	}
 
 	return turnData.hexes[hex.toInt()];
 }
 
-battle::Units ReachabilityMapCache::computeOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, std::shared_ptr<Environment> env, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex)
+battle::Units ReachabilityMapCache::computeOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex)
 {
 	battle::Units result;
 
 	for(int i = 0; i < turnOrder.size(); i++, turn++)
 	{
 		auto & turnQueue = turnOrder[i];
-		HypotheticBattle turnBattle(env.get(), cb);
 
 		for(const battle::Unit * unit : turnQueue)
 		{
 			if(unit->isTurret())
 				continue;
 
-			if(turnBattle.battleCanShoot(unit))
+			if(cb->battleCanShoot(unit))
 			{
 				result.push_back(unit);
 
@@ -977,7 +976,7 @@ battle::Units ReachabilityMapCache::computeOneTurnReachableUnits(std::shared_ptr
 			auto reachabilityIter = unitReachabilityMap.find(unit->unitId());
 			assert(reachabilityIter != unitReachabilityMap.end()); // missing updateReachabilityMap call?
 
-			ReachabilityInfo unitReachability = reachabilityIter != unitReachabilityMap.end() ? reachabilityIter->second : turnBattle.getReachability(unit);
+			ReachabilityInfo unitReachability = reachabilityIter != unitReachabilityMap.end() ? reachabilityIter->second : cb->getReachability(unit);
 
 			bool reachable = unitReachability.distances.at(hex.toInt()) <= radius;
 
@@ -1008,7 +1007,7 @@ battle::Units ReachabilityMapCache::computeOneTurnReachableUnits(std::shared_ptr
 
 const battle::Units & BattleExchangeEvaluator::getOneTurnReachableUnits(uint8_t turn, const BattleHex & hex) const
 {
-	return reachabilityMap.getOneTurnReachableUnits(cb, env, turnOrder, turn, hex);
+	return reachabilityMap.getOneTurnReachableUnits(cb, turnOrder, turn, hex);
 }
 
 // avoid blocking path for stronger stack by weaker stack
@@ -1021,14 +1020,15 @@ bool BattleExchangeEvaluator::checkPositionBlocksOurStacks(const HypotheticBattl
 	float blockingScore = 0;
 
 	auto activeUnitDamage = activeUnit->getMinDamage(hb.battleCanShoot(activeUnit)) * activeUnit->getCount();
+	if(turnOrder.empty()) return false;
+
+	auto turnBattle = forkSourceBattle();
+	auto unitToUpdate = turnBattle->getForUpdate(activeUnit->unitId());
+	unitToUpdate->setPosition(position);
 
 	for(int turn = 0; turn < turnOrder.size(); turn++)
 	{
 		auto & turnQueue = turnOrder[turn];
-		HypotheticBattle turnBattle(env.get(), cb);
-
-		auto unitToUpdate = turnBattle.getForUpdate(activeUnit->unitId());
-		unitToUpdate->setPosition(position);
 
 		for(const battle::Unit * unit : turnQueue)
 		{
@@ -1038,7 +1038,7 @@ bool BattleExchangeEvaluator::checkPositionBlocksOurStacks(const HypotheticBattl
 			auto blockedUnitDamage = unit->getMinDamage(hb.battleCanShoot(unit)) * unit->getCount();
 			float ratio = blockedUnitDamage / (float)(blockedUnitDamage + activeUnitDamage + 0.01);
 
-			auto unitReachability = turnBattle.getReachability(unit);
+			auto unitReachability = turnBattle->getReachability(unit);
 			auto unitSpeed = unit->getMovementRange(turn); // Cached value, to avoid performance hit
 
 			for(BattleHex hex = BattleHex::TOP_LEFT; hex.isValid(); ++hex)
@@ -1048,7 +1048,7 @@ bool BattleExchangeEvaluator::checkPositionBlocksOurStacks(const HypotheticBattl
 
 				if(!reachable && unitReachability.accessibility[hex.toInt()] == EAccessibility::ALIVE_STACK)
 				{
-					const battle::Unit * hexStack = turnBattle.battleGetUnitByPos(hex);
+					const battle::Unit * hexStack = turnBattle->battleGetUnitByPos(hex);
 
 					if(hexStack && cb->battleMatchOwner(unit, hexStack, false))
 					{
@@ -1077,4 +1077,9 @@ bool BattleExchangeEvaluator::checkPositionBlocksOurStacks(const HypotheticBattl
 #endif
 
 	return blockingScore > BLOCKING_THRESHOLD;
+}
+
+std::shared_ptr<HypotheticBattle> BattleExchangeEvaluator::forkSourceBattle() const
+{
+ return std::make_shared<HypotheticBattle>(env.get(), sourceBattle);
 }

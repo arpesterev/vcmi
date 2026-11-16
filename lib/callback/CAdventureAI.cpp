@@ -50,14 +50,23 @@ void CAdventureAI::battleCatapultAttacked(const BattleID & battleID, const Catap
 	battleAI->battleCatapultAttacked(battleID, ca);
 }
 
+void CAdventureAI::battleStartBefore(const BattleID & battleID, const CCreatureSet *, const CCreatureSet *, int3, const CGHeroInstance *, const CGHeroInstance *)
+{
+	freshBattleStartToken.before(battleID, bool(battleAI));
+}
+
 void CAdventureAI::battleStart(const BattleID & battleID, const CCreatureSet * army1, const CCreatureSet * army2, int3 tile,
 							   const CGHeroInstance * hero1, const CGHeroInstance * hero2, BattleSide side, bool replayAllowed)
 {
+	const bool freshPacket = freshBattleStartToken.consume(battleID);
 	assert(!battleAI);
 	assert(cbc);
 	suspendWaitTillRealize();
 	battleAI = AIFactory::createBattleAI(getBattleAIName());
 	battleAI->initBattleInterface(env, cbc);
+	if(freshPacket)
+		if(auto * observer = dynamic_cast<IFreshBattleStartObserver *>(battleAI.get()))
+			observer->onFreshBattleStart(battleID);
 	battleAI->battleStart(battleID, army1, army2, tile, hero1, hero2, side, replayAllowed);
 }
 
@@ -113,6 +122,7 @@ void CAdventureAI::battleSpellCast(const BattleID & battleID, const BattleSpellC
 
 void CAdventureAI::battleEnd(const BattleID & battleID, const BattleResult * br, QuestionID questionID)
 {
+	freshBattleStartToken.cancel();
 	battleAI->battleEnd(battleID, br, questionID);
 	battleAI.reset();
 	restoreWaitTillRealize();

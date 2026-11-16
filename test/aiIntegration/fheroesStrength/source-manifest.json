@@ -1,0 +1,36 @@
+{
+  "repository": "ihhub/fheroes2",
+  "commit": "0dbfe9f386f33c2500842f4a59cd284d7f03d541",
+  "files": {
+    "pinned-monster_info.cpp": {
+      "upstream_path": "src/fheroes2/monster/monster_info.cpp",
+      "sha256": "e09a822890ca8b6256cc70e80e8c772c336db07972667927ddfbcb74557ea502",
+      "git_blob": "8e7f5b6f07eea214240a8d1539d376c3faaaa8be"
+    },
+    "pinned-monster.cpp": {
+      "upstream_path": "src/fheroes2/monster/monster.cpp",
+      "sha256": "b681cd131bd5e85dba39557a4d677409ca99294c063ec5992158f2fe2ce3ef41",
+      "git_blob": "9aa3627b3d9a89281eacb0625decd6b421c28803"
+    },
+    "pinned-army_troop.cpp": {
+      "upstream_path": "src/fheroes2/army/army_troop.cpp",
+      "sha256": "7f76ef23b6bb1943f8810281ec29bfdb6af4f90aeebc765634f4a347ba08cc70",
+      "git_blob": "5fe61fc5ab043460647076ba45febcb3c14f01ef"
+    },
+    "pinned-monster_info.h": {
+      "upstream_path": "src/fheroes2/monster/monster_info.h",
+      "sha256": "092a661e1ff8e7f2e55705fd0a526ead66f1026e03c520d0d7889f299be51b1d",
+      "git_blob": "78abefe8e2e67c8dd9a1e294f1166114b60546b8"
+    },
+    "pinned-speed.h": {
+      "upstream_path": "src/fheroes2/kingdom/speed.h",
+      "sha256": "bfcac0c02df365e9703777cc7c23ab7efb24420910ba7bb5b5feefab2510b18a",
+      "git_blob": "0661946ad55cc4a159852f3d92679e1fd398c80a"
+    },
+    "pinned-ai_battle_spell.cpp": {
+      "upstream_path": "src/fheroes2/ai/ai_battle_spell.cpp",
+      "sha256": "ae0f61c93e75c9172f354adf3355f1e98ff31df03d283098254d930d65dba769",
+      "git_blob": "ae8efc60d5af7f51ae225f2ffd52671453cc12ce"
+    }
+  }
+}

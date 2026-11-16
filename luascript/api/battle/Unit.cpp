@@ -125,7 +125,7 @@ void UnitProxy::registerMethods(MethodRegistrar & R)
 
 const Creature * UnitProxy::getCreature(const Unit & unit)
 {
-	return unit.creatureId().toEntity(LIBRARY);
+	return unit.unitType();
 }
 
 std::optional<std::string> UnitProxy::getTurretPart(const Unit & unit)

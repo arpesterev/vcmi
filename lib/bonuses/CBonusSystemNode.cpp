@@ -11,12 +11,111 @@
 #include "StdInc.h"
 
 #include "CBonusSystemNode.h"
+#include "BonusGraphMutation.h"
+#include "BonusGraphAlgorithms.h"
 #include "Limiters.h"
 #include "Updaters.h"
 #include "Propagators.h"
 
 constexpr bool cachingEnabled = true;
 static std::atomic<int32_t> globalCounter = 1;
+
+class BonusGraphMutationStorage
+{
+public:
+	using Node = CBonusSystemNode *;
+	using ConstNode = const CBonusSystemNode *;
+	using Bonus = std::shared_ptr<::Bonus>;
+
+	const auto & inheritanceParents(ConstNode node) const { return node->parentsToInherit; }
+	const auto & propagationParents(ConstNode node) const { return node->parentsToPropagate; }
+	const auto & children(ConstNode node) const { return node->children; }
+	const auto & exported(ConstNode node) const { return node->exportedBonuses; }
+	auto & active(Node node) { return node->bonuses; }
+	bool sourceOnly(ConstNode node) const { return node->actsAsBonusSourceOnly(); }
+	bool hypothetical(ConstNode node) const { return node->isHypothetic(); }
+	bool hasPropagator(const Bonus & bonus) const { return bool(bonus->propagator); }
+	bool hasPropagationUpdater(const Bonus & bonus) const { return bool(bonus->propagationUpdater); }
+	template<class Candidate>
+	bool samePropagationUpdater(const Candidate & left, const Bonus & right) const
+	{
+		return left->propagationUpdater && left->propagationUpdater == right->propagationUpdater;
+	}
+	bool shouldAttach(const Bonus & bonus, Node node) const { return bonus->propagator->shouldBeAttached(node); }
+	Bonus materialize(const Bonus & bonus, ConstNode source) const
+	{
+		return bonus->propagationUpdater ? source->getUpdatedBonus(bonus, bonus->propagationUpdater) : bonus;
+	}
+	void eraseExportedFirst(Node node, const Bonus & bonus) { node->exportedBonuses -= bonus; }
+	void appendActive(Node node, const Bonus & bonus) { node->bonuses.push_back(bonus); }
+	void eraseActive(Node node, size_t index) { node->bonuses.erase(index); }
+	template<class Predicate> void eraseActiveMatching(Node node, Predicate predicate)
+	{
+		node->bonuses.remove_if(predicate);
+	}
+	void propagated(Node node, const Bonus & bonus)
+	{
+		logBonus->trace("Bonus (type=%d, val=%d) propagated to %s", static_cast<int>(bonus->type), bonus->val, node->nodeName());
+		node->nodeHasChanged();
+	}
+	void unpropagated(Node node, const Bonus & bonus, bool removed)
+	{
+		if(!bonus->propagationUpdater)
+		{
+			if(removed)
+				logBonus->trace("Bonus (type=%d, val=%d) is no longer propagated to %s", static_cast<int>(bonus->type), bonus->val, node->nodeName());
+			else
+				logBonus->warn("Attempt to remove bonus (type=%d, val=%d), which is not propagated to %s", static_cast<int>(bonus->type), bonus->val, node->nodeName());
+		}
+		if(removed)
+			node->nodeHasChanged();
+	}
+	void beginEdgeChange() { ++globalCounter; }
+	void invalidate(Node node) { node->invalidateChildrenNodes(globalCounter); }
+	void changed(Node node) { node->nodeHasChanged(); }
+	void appendInheritance(Node node, ConstNode parent)
+	{
+		assert(!vstd::contains(node->parentsToInherit, parent));
+		node->parentsToInherit.push_back(parent);
+	}
+	void appendPropagation(Node node, Node parent)
+	{
+		assert(!vstd::contains(node->parentsToPropagate, parent));
+		node->parentsToPropagate.push_back(parent);
+	}
+	void appendChild(Node parent, Node node)
+	{
+		assert(!vstd::contains(parent->children, node));
+		parent->children.push_back(node);
+	}
+	void requireInheritance(Node node, ConstNode parent) const { assert(vstd::contains(node->parentsToInherit, parent)); }
+	void requirePropagation(Node node, Node parent) const { assert(vstd::contains(node->parentsToPropagate, parent)); }
+	void eraseInheritance(Node node, ConstNode parent)
+	{
+		if(vstd::contains(node->parentsToInherit, parent))
+			node->parentsToInherit -= parent;
+		else
+			logBonus->error("Error on Detach. Node %s (nodeType=%d) has not parent %s (nodeType=%d)",
+				node->nodeShortInfo(), static_cast<int>(node->nodeType), parent->nodeShortInfo(), static_cast<int>(parent->nodeType));
+	}
+	void erasePropagation(Node node, Node parent)
+	{
+		if(vstd::contains(node->parentsToPropagate, parent))
+			node->parentsToPropagate -= parent;
+		else
+			logBonus->error("Error on Detach. Node %s (nodeType=%d) has not parent %s (nodeType=%d)",
+				node->nodeShortInfo(), static_cast<int>(node->nodeType), parent->nodeShortInfo(), static_cast<int>(parent->nodeType));
+	}
+	void eraseChild(Node parent, Node node)
+	{
+		if(vstd::contains(parent->children, node))
+			parent->children -= node;
+		else
+			logBonus->error("Error on Detach. Node %s (nodeType=%d) is not a child of %s (nodeType=%d)",
+				node->nodeShortInfo(), static_cast<int>(node->nodeType), parent->nodeShortInfo(), static_cast<int>(parent->nodeType));
+	}
+};
+
 
 std::shared_ptr<Bonus> CBonusSystemNode::getLocalBonus(const CSelector & selector)
 {
@@ -50,20 +149,11 @@ void CBonusSystemNode::getDirectParents(TCNodes & out) const /*retrieves list of
 		out.insert(elem);
 }
 
-void CBonusSystemNode::getAllBonusesRec(BonusList &out) const
+void CBonusSystemNode::getAllBonusesRec(BonusList & out) const
 {
-	BonusList beforeUpdate;
-
-	for(const auto * parent : parentsToInherit)
-		parent->getAllBonusesRec(beforeUpdate);
-
-	bonuses.getAllBonuses(beforeUpdate);
-
-	for(const auto & b : beforeUpdate)
-	{
-		auto updated = b->updater ? getUpdatedBonus(b, b->updater) : b;
-		out.push_back(updated);
-	}
+	BonusGraphAlgorithms::collect(parentsToInherit, bonuses,
+		[](const CBonusSystemNode * parent, BonusList & result) { parent->getAllBonusesRec(result); },
+		[this](const std::shared_ptr<Bonus> & bonus, const TUpdaterPtr & updater) { return getUpdatedBonus(bonus, updater); }, out);
 }
 
 TConstBonusListPtr CBonusSystemNode::getAllBonuses(const CSelector &selector, const std::string &cachingStr) const
@@ -182,101 +272,31 @@ CBonusSystemNode::~CBonusSystemNode()
 
 void CBonusSystemNode::attachTo(CBonusSystemNode & parent)
 {
-	assert(!vstd::contains(parentsToPropagate, &parent));
-	parentsToPropagate.push_back(&parent);
-
-	attachToSource(parent);
-
-	if(!isHypothetic())
-	{
-		if(!parent.actsAsBonusSourceOnly())
-			newRedDescendant(parent);
-
-		assert(!vstd::contains(parent.children, this));
-		parent.children.push_back(this);
-	}
-
-	// The new branch was invalidated by attachToSource. Adding it does not
-	// change the parent or existing branches; propagation invalidates every
-	// node whose bonuses actually change.
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.attach(this, &parent);
 }
 
 void CBonusSystemNode::attachToSource(const CBonusSystemNode & parent)
 {
-	assert(!vstd::contains(parentsToInherit, &parent));
-	parentsToInherit.push_back(&parent);
-
-	++globalCounter;
-
-	if(!isHypothetic())
-	{
-		if(parent.actsAsBonusSourceOnly())
-			parent.newRedDescendant(*this);
-	}
-
-	invalidateChildrenNodes(globalCounter);
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.attachSource(this, &parent);
 }
 
 void CBonusSystemNode::detachFrom(CBonusSystemNode & parent)
 {
-	assert(vstd::contains(parentsToPropagate, &parent));
-
-	if(!isHypothetic())
-	{
-		if(!parent.actsAsBonusSourceOnly())
-			removedRedDescendant(parent);
-	}
-
-	detachFromSource(parent);
-
-	if (vstd::contains(parentsToPropagate, &parent))
-	{
-		parentsToPropagate -= &parent;
-	}
-	else
-	{
-		logBonus->error("Error on Detach. Node %s (nodeType=%d) has not parent %s (nodeType=%d)",
-			nodeShortInfo(), static_cast<int>(nodeType), parent.nodeShortInfo(), static_cast<int>(parent.nodeType));
-	}
-
-	if(!isHypothetic())
-	{
-		if(vstd::contains(parent.children, this))
-			parent.children -= this;
-		else
-		{
-			logBonus->error("Error on Detach. Node %s (nodeType=%d) is not a child of %s (nodeType=%d)",
-				nodeShortInfo(), static_cast<int>(nodeType), parent.nodeShortInfo(), static_cast<int>(parent.nodeType));
-		}
-	}
-
-	parent.nodeHasChanged();
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.detach(this, &parent);
 }
 
 
 void CBonusSystemNode::detachFromSource(const CBonusSystemNode & parent)
 {
-	assert(vstd::contains(parentsToInherit, &parent));
-
-	++globalCounter;
-
-	if(!isHypothetic())
-	{
-		if(parent.actsAsBonusSourceOnly())
-			parent.removedRedDescendant(*this);
-	}
-
-	if (vstd::contains(parentsToInherit, &parent))
-	{
-		parentsToInherit -= &parent;
-	}
-	else
-	{
-		logBonus->error("Error on Detach. Node %s (nodeType=%d) has not parent %s (nodeType=%d)",
-			nodeShortInfo(), static_cast<int>(nodeType), parent.nodeShortInfo(), static_cast<int>(parent.nodeType));
-	}
-
-	invalidateChildrenNodes(globalCounter);
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.detachSource(this, &parent);
 }
 
 void CBonusSystemNode::removeBonusesRecursive(const CSelector & s)
@@ -325,16 +345,8 @@ void CBonusSystemNode::accumulateBonus(const std::shared_ptr<Bonus>& b)
 
 void CBonusSystemNode::removeBonus(const std::shared_ptr<Bonus>& b)
 {
-	exportedBonuses -= b;
-	if(b->propagator)
-	{
-		unpropagateBonus(b);
-	}
-	else
-	{
-		bonuses -= b;
-		nodeHasChanged();
-	}
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation(storage).removeBonus(this, b);
 }
 
 void CBonusSystemNode::removeBonuses(const CSelector & selector)
@@ -361,48 +373,16 @@ bool CBonusSystemNode::actsAsBonusSourceOnly() const
 
 void CBonusSystemNode::propagateBonus(const std::shared_ptr<Bonus> & b, const CBonusSystemNode & source)
 {
-	if(b->propagator->shouldBeAttached(this))
-	{
-		auto propagated = b->propagationUpdater
-			? source.getUpdatedBonus(b, b->propagationUpdater)
-			: b;
-		bonuses.push_back(propagated);
-		logBonus->trace("Bonus (type=%d, val=%d) propagated to %s", static_cast<int>(propagated->type), propagated->val, nodeName());
-		invalidateChildrenNodes(globalCounter);
-	}
-
-	TNodes lchildren;
-	getRedChildren(lchildren);
-	for(CBonusSystemNode *pname : lchildren)
-		pname->propagateBonus(b, source);
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.propagate(this, b, &source);
 }
 
 void CBonusSystemNode::unpropagateBonus(const std::shared_ptr<Bonus> & b)
 {
-	if(b->propagator->shouldBeAttached(this))
-	{
-		if (b->propagationUpdater)
-		{
-			bonuses.remove_if([b](const auto & bonus)
-			{
-				return bonus->propagationUpdater && bonus->propagationUpdater == b->propagationUpdater;
-			});
-		}
-		else
-		{
-			if (bonuses -= b)
-				logBonus->trace("Bonus (type=%d, val=%d) is no longer propagated to %s", static_cast<int>(b->type), b->val, nodeName());
-			else
-				logBonus->warn("Attempt to remove bonus (type=%d, val=%d), which is not propagated to %s", static_cast<int>(b->type), b->val, nodeName());
-		}
-
-		invalidateChildrenNodes(globalCounter);
-	}
-
-	TNodes lchildren;
-	getRedChildren(lchildren);
-	for(CBonusSystemNode *pname : lchildren)
-		pname->unpropagateBonus(b);
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.unpropagate(this, b);
 }
 
 void CBonusSystemNode::detachFromAll()
@@ -433,103 +413,43 @@ std::string CBonusSystemNode::nodeShortInfo() const
 
 void CBonusSystemNode::getRedParents(TCNodes & out) const
 {
-	TCNodes lparents;
-	getDirectParents(lparents);
-	for(const CBonusSystemNode *pname : lparents)
-	{
-		if(pname->actsAsBonusSourceOnly())
-		{
-			out.insert(pname);
-		}
-	}
-
-	if(!actsAsBonusSourceOnly())
-	{
-		for(const CBonusSystemNode *child : children)
-		{
-			out.insert(child);
-		}
-	}
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.redParents(this, out);
 }
 
 void CBonusSystemNode::getRedChildren(TNodes &out)
 {
-	for(CBonusSystemNode *pname : parentsToPropagate)
-	{
-		if(!pname->actsAsBonusSourceOnly())
-		{
-			out.insert(pname);
-		}
-	}
-
-	if(actsAsBonusSourceOnly())
-	{
-		for(CBonusSystemNode *child : children)
-		{
-			out.insert(child);
-		}
-	}
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.redChildren(this, out);
 }
 
 void CBonusSystemNode::newRedDescendant(CBonusSystemNode & descendant) const
 {
-	for(const auto & b : exportedBonuses)
-	{
-		if(b->propagator)
-			descendant.propagateBonus(b, *this);
-	}
-	TCNodes redParents;
-	getRedAncestors(redParents); //get all red parents recursively
-
-	for(const auto * parent : redParents)
-	{
-		for(const auto & b : parent->exportedBonuses)
-		{
-			if(b->propagator)
-				descendant.propagateBonus(b, *this);
-		}
-	}
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.newDescendant(this, &descendant);
 }
 
 void CBonusSystemNode::removedRedDescendant(CBonusSystemNode & descendant) const
 {
-	for(const auto & b : exportedBonuses)
-		if(b->propagator)
-			descendant.unpropagateBonus(b);
-
-	TCNodes redParents;
-	getRedAncestors(redParents); //get all red parents recursively
-
-	for(auto * parent : redParents)
-	{
-		for(const auto & b : parent->exportedBonuses)
-			if(b->propagator)
-				descendant.unpropagateBonus(b);
-	}
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.removedDescendant(this, &descendant);
 }
 
 void CBonusSystemNode::getRedAncestors(TCNodes &out) const
 {
-	getRedParents(out);
-
-	TCNodes redParents;
-	getRedParents(redParents);
-
-	for(const CBonusSystemNode * parent : redParents)
-		parent->getRedAncestors(out);
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation kernel(storage);
+	kernel.redAncestors(this, out);
 }
 
 void CBonusSystemNode::exportBonus(const std::shared_ptr<Bonus> & b)
 {
-	if(b->propagator)
-	{
-		propagateBonus(b, *this);
-	}
-	else
-	{
-		bonuses.push_back(b);
-		nodeHasChanged();
-	}
+	BonusGraphMutationStorage storage;
+	BonusGraphMutation(storage).exportBonus(this, b);
 }
 
 void CBonusSystemNode::exportBonuses()
@@ -558,39 +478,13 @@ const BonusList & CBonusSystemNode::getExportedBonusList() const
 	return exportedBonuses;
 }
 
-void CBonusSystemNode::limitBonuses(const BonusList &allBonuses, BonusList &out) const
+void CBonusSystemNode::limitBonuses(const BonusList & allBonuses, BonusList & out) const
 {
-	assert(&allBonuses != &out); //todo should it work in-place?
-
-	BonusList undecided = allBonuses;
-	BonusList & accepted = out;
-
-	while(true)
+	BonusGraphAlgorithms::limit(allBonuses, out, [this](const Bonus & bonus, const BonusList & accepted, const BonusList & undecided)
 	{
-		int undecidedCount = static_cast<int>(undecided.size());
-		for(int i = 0; i < undecided.size(); i++)
-		{
-			auto b = undecided[i];
-			BonusLimitationContext context = {*b, *this, out, undecided};
-			auto decision = b->limiter ? b->limiter->limit(context) : ILimiter::EDecision::ACCEPT; //bonuses without limiters will be accepted by default
-			if(decision == ILimiter::EDecision::DISCARD || decision == ILimiter::EDecision::NOT_APPLICABLE)
-			{
-				undecided.erase(i);
-				i--; continue;
-			}
-			else if(decision == ILimiter::EDecision::ACCEPT)
-			{
-				accepted.push_back(b);
-				undecided.erase(i);
-				i--; continue;
-			}
-			else
-				assert(decision == ILimiter::EDecision::NOT_SURE);
-		}
-
-		if(undecided.size() == undecidedCount) //we haven't moved a single bonus -> limiters reached a stable state
-			return;
-	}
+		BonusLimitationContext context = {bonus, *this, accepted, undecided};
+		return bonus.limiter ? bonus.limiter->limit(context) : ILimiter::EDecision::ACCEPT;
+	});
 }
 
 void CBonusSystemNode::nodeHasChanged()

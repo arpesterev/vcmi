@@ -17,6 +17,7 @@
 
 #include "texts/CGeneralTextHandler.h"
 #include "battle/BattleInfo.h"
+#include "battle/AmmoCartQuery.h"
 #include "GameLibrary.h"
 #include "networkPacks/PacksForClientBattle.h"
 #include "spells/CSpell.h"
@@ -77,6 +78,9 @@ void CStack::localInit(BattleInfo * battleInfo)
 	}
 	CUnitState::localInit(this); //it causes execution of the CStack::isOnNativeTerrain where nativeTerrain will be considered
 	position = initialPosition;
+	// Initialization queried bonuses before final health count and position existed.
+	// Publish the completed state without replaying any propagated materialization.
+	nodeHasChanged();
 }
 
 int32_t CStack::unitLevel() const
@@ -223,13 +227,12 @@ const IBonusBearer* CStack::getBonusBearer() const
 
 bool CStack::unitHasAmmoCart(const battle::Unit * unit) const
 {
-	for(const auto & st : battle->stacks)
-	{
-		if(battle->battleMatchOwner(st.get(), unit, true) && st->isAmmoCart())
-		{
-			return st->alive();
-		}
-	}
+ return AmmoCartQuery::evaluate(battle->stacks,
+  [&](const auto & stack) { return battle->battleMatchOwner(stack.get(), unit, true); },
+  [](const auto & stack) { return stack->isAmmoCart(); },
+  [](const auto & stack) { return stack->alive(); },
+  [&]()
+  {
 	//ammo cart works during creature bank battle while not on battlefield
 	const auto * ownerHero = battle->battleGetOwnerHero(unit);
 	if(ownerHero && ownerHero->artifactsWorn.find(ArtifactPosition::MACH2) != ownerHero->artifactsWorn.end())
@@ -240,6 +243,7 @@ bool CStack::unitHasAmmoCart(const battle::Unit * unit) const
 		}
 	}
 	return false; //will be always false if trying to examine enemy hero in "special battle"
+  });
 }
 
 PlayerColor CStack::unitEffectiveOwner(const battle::Unit * unit) const

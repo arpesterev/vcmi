@@ -34,6 +34,7 @@ class JsonSerializeFormat;
 class DLL_LINKAGE CCreature : public Creature, public CBonusSystemNode
 {
 	friend class CCreatureHandler;
+	friend class OrdinaryPreviewDefinitionGuardTestPeer;
 	std::string modScope;
 	std::string identifier;
 
@@ -133,6 +134,7 @@ public:
 	void registerIcons(const IconRegistar & cb) const override;
 	CreatureID getId() const override;
 	const IBonusBearer * getBonusBearer() const override;
+	ArtifactID getWarMachine() const override;
 
 	int32_t getAdvMapAmountMin() const override;
 	int32_t getAdvMapAmountMax() const override;

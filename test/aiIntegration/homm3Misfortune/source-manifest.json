@@ -1,0 +1,14 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "source_git_blob": "cd842fed2bdce90fc97a876456eac8fb2b79092c",
+  "functions": [
+    {
+      "signature": "long type_AI_spellcaster::getMisfortuneValue(const army* enemy, type_enchant_data caster) const",
+      "source_start_line": 1442,
+      "source_end_line": 1461,
+      "body_sha256": "c802cc7f574ab41a69a7183afa582598053f530f9410ea24e23ebee9e1a270c6"
+    }
+  ],
+  "adaptation": "Exact getMisfortuneValue body; input-only resistance/duration/attack-bit stubs. Shared valueOfLuckAndMorale from homm3Mirth; aiValueOfLuck uses source float storage0.0173f/-0.0122f from lines57-58, promoted to double."
+}

@@ -9,6 +9,12 @@
 #include "../AI/Integration/Ports/FHeroes2RetreatDecision.h"
 #include "../AI/Integration/Ports/FHeroes2DispelValuation.h"
 
+#include "../AI/Integration/Ports/FHeroes2RangedPressure.h"
+#include "../test/aiIntegration/fheroesRangedPressure/PinnedRangedPressure.h"
+
+#include "../AI/Integration/Ports/FHeroes2SiegePressure.h"
+#include "../test/aiIntegration/fheroesSiegePressure/PinnedSiegePressure.h"
+
 #include <array>
 #include <iostream>
 #include <string>
@@ -26,6 +32,90 @@ void require(bool condition, const char * message)
 
 int main()
 {
+
+	{
+		namespace Ref = PinnedFHeroesSiegePressure;
+		using namespace AIIntegration::Ports::FHeroes2;
+		for(bool castle : {false,true})
+		for(int mask=0; mask<8; ++mask)
+		for(bool defend : {false,true})
+		for(bool artifact : {false,true})
+		for(int archery : {0,1,2,3})
+		{
+			Ref::Battle::Arena arena;
+			arena.hasCastle=castle;
+			arena.attacker.hero.artifacts.bypass=artifact;
+			arena.attacker.hero.archery=archery;
+			double towers=0;
+			for(int j=0; j<3; ++j)
+			{
+				const bool live=(mask & (1<<j)) != 0;
+				arena.towers[j]={live, (j+1)*10.0};
+				if(live) towers+=arena.towers[j].strength;
+			}
+			Ref::Planner expected;
+			expected._myColor=defend ? 1 : 0;
+			expected._myShootersStrength=120;
+			expected._enemyShootersStrength=90;
+			expected.apply(arena);
+			TacticsInput input;
+			input.armyStrength=400; input.enemyArmyStrength=500;
+			input.shootersStrength=120; input.enemyShootersStrength=90;
+			applySiegePressure(input, {castle && mask!=0, defend, towers, artifact || archery!=0});
+			require(input.shootersStrength==expected._myShootersStrength
+				&& input.enemyShootersStrength==expected._enemyShootersStrength
+				&& input.defendingCastle==expected._defendingCastle,
+				"Siege pressure matches pinned live-tower, side and cover branches");
+			require(input.armyStrength==400 && input.enemyArmyStrength==500,
+				"Tower pressure never enters troop-strength denominators");
+		}
+		TacticsInput order;
+		order.shootersStrength=1.2; order.enemyShootersStrength=10;
+		applySiegePressure(order, {true,false,30,false});
+		addHeroRangedPressure(order.shootersStrength,order.enemyShootersStrength,100,200);
+		require(order.shootersStrength < 1 && order.enemyShootersStrength==240,
+			"Cover reduction precedes the strict own-hero pressure threshold");
+		TacticsInput unknown;
+		unknown.shootersStrength=120; unknown.enemyShootersStrength=90;
+		applySiegePressure(unknown,{true,true,30,std::nullopt});
+		require(unknown.shootersStrength==150 && unknown.enemyShootersStrength==90,
+			"Unknown hostile cover bypass cannot justify reducing its pressure");
+	}
+
+	{
+		namespace Ref = PinnedFHeroesRangedPressure;
+		using namespace AIIntegration::Ports::FHeroes2;
+		for(int mana : {0, 4, 5, 10, 100})
+		for(double raw : {0.0, 1.0, 100.0, 1000000.0})
+		{
+			Ref::HeroBase hero{mana, {{false,true,0,raw*10}, {true,false,0,raw*10},
+				{true,true,5,raw}, {true,true,10,raw*2}, {true,true,0,1}}};
+			MaximumSpellDamage actual(mana);
+			for(const auto & spell : hero.spells)
+				actual.consider(spell.combat, spell.damage, spell.cost, spell.magnitude);
+			require(actual.value() == Ref::commanderMaximumSpellDamageValue(hero),
+				"Maximum damage matches pinned combat/damage/mana gates, not sum");
+			for(double own : {0.0, 1.0, 1.00001, 200.0})
+			for(double enemy : {0.0, 1.0, 300.0})
+			for(bool ownHero : {false, true})
+			for(bool enemyHero : {false, true})
+			{
+				Ref::Planner reference;
+				reference._commander = ownHero ? &hero : nullptr;
+				reference._myShootersStrength = own;
+				reference._enemyShootersStrength = enemy;
+				reference.apply({enemyHero ? &hero : nullptr});
+				double ours = own, theirs = enemy;
+				addHeroRangedPressure(ours, theirs, ownHero ? actual.value() : 0,
+					enemyHero ? actual.value() : 0);
+				require(ours == reference._myShootersStrength && theirs == reference._enemyShootersStrength,
+					"Hero pressure preserves source asymmetry and strict own threshold");
+			}
+		}
+		MaximumSpellDamage invalid(100);
+		invalid.consider(true,true,-1,1000);
+		require(invalid.value() == 0, "Invalid native negative costs cannot create pressure");
+	}
 	using namespace AIIntegration::Ports;
 	using HoMM3::rangedAttackValue;
 	using HoMM3::preferEqualValueMeleeHex;

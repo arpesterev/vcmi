@@ -1,0 +1,100 @@
+[
+  {
+    "file": "findpath.cpp",
+    "signature": "bool searchArray::buildCombatPath(",
+    "sha256": "62da79e437cbbc9f6e4c4997bed9ecfa8ddacb0764a37ef83f2cb60f896bb586"
+  },
+  {
+    "file": "cmbtmgr.cpp",
+    "signature": "long combatManager::getDistance(",
+    "sha256": "e8cd17af1b6230a794500b6b71f40f4a20df6e6802306780c0c13ba4ca452f8d"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "static long getAttackValue(",
+    "sha256": "6e25b382e02155b6041723170dec4c5e2634b94594f14d89621ed4f68d863126"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "long combatManager::getAttackChange(",
+    "sha256": "e03b01414abb5371ec5c7d0a08b29f3b59a7b76ff47ee464ab120822444c3a48"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "static long getEnemyAttackLimit(",
+    "sha256": "86c139288de2662aa206178884a289dc652ee38289d5769476cd17beefb5fe1a"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "void combatManager::markFriendlyArmies(",
+    "sha256": "e79c1e1027ffa93cf7220b141e33a15e16a39be8a61e0cf39a7e62e999723c16"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "void combatManager::markEnemyAttacks(",
+    "sha256": "9e5ed1691e340f55abc2bf540ee057c27f0957406ac416b053936153491a4adb"
+  },
+  {
+    "file": "ai_tactical.cpp",
+    "signature": "type_AI_attack_hex_chooser::type_AI_attack_hex_chooser(",
+    "sha256": "a2f4536a03cd7ca3ffc967bae5073892c904c2c49322aec3466c26f30efbf959"
+  },
+  {
+    "file": "ai_tactical.cpp",
+    "signature": "long type_AI_attack_hex_chooser::getHexAttackValue(",
+    "sha256": "cc19153fe576fb0afa895db9ede83eb14975f74c937704cb4c054ee28082b2c8"
+  },
+  {
+    "file": "ai_tactical.cpp",
+    "signature": "long type_AI_attack_hex_chooser::getAttackTime(",
+    "sha256": "0174e10c34c4ea0075bef7b463a9fd43731b404c13c50fb239f28a2ef3451c5d"
+  },
+  {
+    "file": "ai_tactical.cpp",
+    "signature": "void type_AI_attack_hex_chooser::checkAdjacentHexes(",
+    "sha256": "3193f67ee3a685f40f2f44df1c99682615e3774b5fdb85c6aaf9a6d813138c62"
+  },
+  {
+    "file": "ai_tactical.cpp",
+    "signature": "unsigned char type_AI_attack_hex_chooser::findAttackHex(",
+    "sha256": "d4ee4a96a683f0c3755ed39062b0899198c11713947d38c52ab456d51d2418eb"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "unsigned char combatManager::moveToward(",
+    "sha256": "4b43561035a561beaae712ee32ce9c6bdb2f5d1301261ab96eb71c433a427b84"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "bool combatManager::chooseMeleeTarget(",
+    "sha256": "551bffd40f33b1fb8c8c45ec1e335802e1b77d95e6e00605cbad04a46131ed30"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "long combatManager::chooseMeleeAction(",
+    "sha256": "042e93f697f32883b5b8ebc71f4034af0cbfb785b56bac27ad3aa5c8f33d7026"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "void combatManager::simulateMeleeAttack(army* currentArmy, long hex,",
+    "sha256": "8a52a6d8b046da52543dad9a490de96e589254675f0ce3d1e4d213e81c069e21"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "void combatManager::simulateMeleeAttack(army* currentArmy, army* target,",
+    "sha256": "a3f5248a15a41fb3fd99650c22d721e5fb35957057be020c7a295435e2c3d708"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "unsigned char combatManager::chooseToRun(",
+    "sha256": "6a0f8e8918222c377ba6d9b4aa9f399458ea7a257c2f60a2261a8fd07af79a78"
+  },
+  {
+    "file": "ai.cpp",
+    "signature": "unsigned char combatManager::hasRangedAdvantage(",
+    "sha256": "c149c4cc006b86286ff8d0f12ad4407d70d7d7c5eb626b04bd2b54da72ba2a02"
+  },
+  {
+    "abstraction": "hasRangedAdvantage uses supplied exact heroRangedValue, no hero spellbook/siege; getAreaEffect returns supplied exact ordinary no-special source areaLoss; path methods delegated to separately pinned original path bodies, actor/map copied without algorithm substitution."
+  }
+]

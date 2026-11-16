@@ -1,0 +1,33 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "functions": [
+    {
+      "file": "ai.cpp",
+      "signature": "unsigned char combatManager::chooseDefenseHex(",
+      "file_sha256": "7d88213a2d550424a51cc41dbb6a4291f2635a41a9392116c800bdc359f913e5",
+      "body_sha256": "fa9b4a194ec1ae9932c447cf29b660ec34c0e1a0ede655f5e3e47cedec249912",
+      "adapted_sha256": "fa9b4a194ec1ae9932c447cf29b660ec34c0e1a0ede655f5e3e47cedec249912"
+    },
+    {
+      "file": "ai.cpp",
+      "signature": "unsigned char combatManager::attemptShooterDefense(",
+      "file_sha256": "7d88213a2d550424a51cc41dbb6a4291f2635a41a9392116c800bdc359f913e5",
+      "body_sha256": "6bcd317df20eb676e2fbe16fbf51ff18c6c77448b8e7b1f313aea89c2a4d3f78",
+      "adapted_sha256": "6bcd317df20eb676e2fbe16fbf51ff18c6c77448b8e7b1f313aea89c2a4d3f78"
+    },
+    {
+      "file": "ai.cpp",
+      "signature": "void combatManager::doCompAI(",
+      "file_sha256": "7d88213a2d550424a51cc41dbb6a4291f2635a41a9392116c800bdc359f913e5",
+      "body_sha256": "070f24305853d9fdb7ca9cc422f6bd94ec377c9551f5d599b64310677b5f06e7",
+      "adapted_sha256": "070f24305853d9fdb7ca9cc422f6bd94ec377c9551f5d599b64310677b5f06e7"
+    },
+    {
+      "file": "findpath.cpp",
+      "signature": "long searchArray::getTravelTime(",
+      "file_sha256": "194eab23af3492197ab4d3912ee86140979f82ffaf3db7442ec58db30a77ad5e",
+      "body_sha256": "e63bc064e91c300aad2fc97120d109ed52d54329e92dd5b90a091c6bad5b3df3",
+      "adapted_sha256": "d889976899b839cd5c2d2d47a611f6a9bc9c4ac30215254789cc6f238f78cc34"
+    }
+  ]
+}

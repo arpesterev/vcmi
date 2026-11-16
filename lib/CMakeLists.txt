@@ -62,6 +62,10 @@ set(lib_MAIN_SRCS
 	battle/CBattleInfoCallback.cpp
 	battle/CBattleInfoEssentials.cpp
 	battle/CObstacleInstance.cpp
+	battle/OwnedCreature.cpp
+	battle/OwnedCreatureContext.cpp
+	battle/OwnedDetachedUnit.cpp
+	battle/OwnedBattleBonusModel.cpp
 	battle/CombatValue.cpp
 	battle/CPlayerBattleCallback.cpp
 	battle/CUnitState.cpp
@@ -81,6 +85,17 @@ set(lib_MAIN_SRCS
 	battle/actions/SpellCastActions.cpp
 	battle/actions/WalkAction.cpp
 
+	bonuses/BonusEvaluationFacts.cpp
+	bonuses/BonusEvaluationSnapshot.cpp
+	bonuses/SealedBonusSnapshot.cpp
+	bonuses/ClosedBonusCapture.cpp
+	bonuses/OwnedBonusValues.cpp
+	bonuses/OwnedBonusEventDomain.cpp
+	bonuses/OwnedBonusLogicalDomain.cpp
+	bonuses/OwnedBonusGraphSession.cpp
+	bonuses/BonusLimiterContext.cpp
+	bonuses/BonusGraphMutationState.cpp
+	bonuses/BonusGraphSnapshot.cpp
 	bonuses/Bonus.cpp
 	bonuses/BonusCache.cpp
 	bonuses/BonusEnum.cpp
@@ -484,6 +499,12 @@ set(lib_MAIN_HEADERS
 	battle/CBattleInfoCallback.h
 	battle/CBattleInfoEssentials.h
 	battle/CObstacleInstance.h
+	battle/AmmoCartQuery.h
+	battle/OwnedCreature.h
+	battle/OwnedCreatureContext.h
+	battle/OwnedDetachedUnit.h
+	battle/OwnedBattleBonusModel.h
+	battle/OwnedStackEffect.h
 	battle/CombatValue.h
 	battle/CPlayerBattleCallback.h
 	battle/CUnitState.h
@@ -507,6 +528,21 @@ set(lib_MAIN_HEADERS
 	battle/actions/SpellCastActions.h
 	battle/actions/WalkAction.h
 
+	bonuses/BonusEvaluationFacts.h
+	bonuses/BonusEvaluationSnapshot.h
+	bonuses/SealedBonusSnapshot.h
+	bonuses/ClosedBonusCapture.h
+	bonuses/OwnedBonusValues.h
+	bonuses/OwnedBonusEventDomain.h
+	bonuses/OwnedBonusLogicalDomain.h
+	bonuses/OwnedBonusGraphSession.h
+	bonuses/OwnedBonusValueCopier.h
+	bonuses/BonusGraphAlgorithms.h
+	bonuses/BonusLimiterContext.h
+	bonuses/BonusGraphMutation.h
+	bonuses/BonusGraphMutationState.h
+	bonuses/BonusGraphSnapshot.h
+	bonuses/BonusUpdaterContext.h
 	bonuses/Bonus.h
 	bonuses/BonusCache.h
 	bonuses/BonusEnum.h

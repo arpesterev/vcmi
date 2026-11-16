@@ -13,6 +13,7 @@
 #include "mock/mock_UnitInfo.h"
 #include "mock/mock_UnitEnvironment.h"
 #include "../../lib/battle/CUnitState.h"
+#include "../../lib/bonuses/OwnedBonusGraphSession.h"
 #include "../../lib/CCreatureHandler.h"
 
 namespace test
@@ -276,6 +277,95 @@ TEST_F(UnitStateTest, getMaxDamage)
 
 	EXPECT_EQ(subject.getMaxDamage(false), 20);
 	EXPECT_EQ(subject.getMaxDamage(true), 10);
+}
+
+TEST_F(UnitStateTest, BonusCacheSnapshotDoesNotInitializeOrWarmColdUnit)
+{
+ const auto before = subject.captureBonusCaches();
+ subject.bindEnvironment(&envMock);
+ const auto after = subject.captureBonusCaches();
+ for(size_t i = 0; i < before.unit.size(); ++i)
+ {
+  EXPECT_EQ(before.unit[i].version, after.unit[i].version);
+  EXPECT_EQ(before.unit[i].value, after.unit[i].value);
+ }
+ EXPECT_FALSE(after.speed.list);
+ EXPECT_FALSE(after.immobilized.list);
+ EXPECT_EQ(before.combat.entry.version, after.combat.entry.version);
+ EXPECT_EQ(before.casts.version, after.casts.version);
+ EXPECT_EQ(before.shots.version, after.shots.version);
+}
+
+TEST_F(UnitStateTest, BonusCacheRestorePreservesDestinationTarget)
+{
+ setDefaultExpectations();
+ EXPECT_EQ(subject.getMaxHealth(), DEFAULT_HP);
+ const auto snapshot = subject.captureBonusCaches();
+ BonusBearerMock destinationBonuses;
+ auto health = std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH,
+  BonusSource::CREATURE_ABILITY, 77, BonusSourceID());
+ destinationBonuses.addNewBonus(health);
+ battle::CUnitStateDetached destination(&infoMock, &destinationBonuses);
+ destination.bindEnvironment(&envMock);
+ destination.restoreBonusCaches(snapshot);
+ // Its different epoch must query the destination bearer, never the source.
+ EXPECT_EQ(destination.getMaxHealth(), 77);
+ EXPECT_EQ(subject.getMaxHealth(), DEFAULT_HP);
+}
+
+TEST(BonusProxySnapshotTest, DerivedVariantAndWarmScalarSurviveRestore)
+{
+ BonusBearerMock first, second;
+ BonusDerivedValueCache source(&first), destination(&second);
+ int calls = 0;
+ EXPECT_EQ(source.getValue([&] { ++calls; return 42; }, 17), 42);
+ destination.restore(source.snapshot());
+ EXPECT_EQ(destination.getValue([&] { ++calls; return 99; }, 17), 42);
+ EXPECT_EQ(calls, 1);
+ EXPECT_EQ(destination.getValue([&] { ++calls; return 99; }, 18), 99);
+ EXPECT_EQ(calls, 2);
+ first.addNewBonus(std::make_shared<Bonus>());
+ EXPECT_EQ(destination.getValue([&] { ++calls; return 55; }, 18), 99);
+ EXPECT_EQ(calls, 2);
+}
+
+TEST(BonusProxySnapshotTest, PerTurnMembershipSharesDurationAliasesAcrossCaptureAndFork)
+{
+ CBonusSystemNode native(BonusNodeType::GLOBAL_EFFECTS);
+ auto bonus = std::make_shared<Bonus>(BonusDuration::N_TURNS, BonusType::STACKS_SPEED, BonusSource::OTHER, 7, BonusSourceID());
+ bonus->turnsRemain = 10;
+ native.addNewBonus(bonus);
+ const auto selector = Selector::type()(BonusType::STACKS_SPEED);
+ BonusCachePerTurn source(&native, selector, BonusCacheMode::VALUE);
+ EXPECT_EQ(source.getValue(0), 7);
+ auto state = source.snapshot();
+ auto evaluation = BonusEvaluationSnapshot::capture({&native}, [](const CBonusSystemNode & node)
+ {
+  BonusLimiterFacts facts;
+  facts.type = node.getNodeType(); facts.originalOwner = node.getOwner(); return facts;
+ }, {state.list});
+ const auto node = evaluation.graph().roots().front();
+ auto session = std::make_shared<OwnedBonusGraphSession>(OwnedBonusGraphSession::capture(evaluation));
+ state.membership = std::make_shared<const std::vector<OwnedBonusValueId>>(session->capturedMembership(evaluation.graph().capturedExtraLists().front()));
+ state.list.reset();
+ class Bearer final : public IBonusBearer
+ {
+ public:
+  std::shared_ptr<OwnedBonusGraphSession> session;
+  size_t node;
+  Bearer(std::shared_ptr<OwnedBonusGraphSession> value, size_t id) : session(std::move(value)), node(id) {}
+  TConstBonusListPtr getAllBonuses(const CSelector & selector, const std::string & key = "") const override { return session->query(node, selector, key); }
+  int32_t getTreeVersion() const override { return static_cast<int32_t>(session->nodeVersion(node)); }
+ } owned(session, node), sibling(std::make_shared<OwnedBonusGraphSession>(session->fork()), node);
+ BonusCachePerTurn projected(&owned, selector, BonusCacheMode::VALUE), forked(&sibling, selector, BonusCacheMode::VALUE);
+ projected.bindOwnedSession(session, node); projected.restore(state);
+ forked.bindOwnedSession(sibling.session, node); forked.restore(state);
+ bonus->turnsRemain = 1;
+ session->setTurnsRemain(evaluation.graph().nodes().at(node).exported.front(), 1);
+ EXPECT_EQ(projected.getValue(0), source.getValue(0));
+ EXPECT_EQ(projected.getValue(9), source.getValue(9));
+ EXPECT_EQ(projected.getValue(9), 0);
+ EXPECT_EQ(forked.getValue(9), 7);
 }
 
 }

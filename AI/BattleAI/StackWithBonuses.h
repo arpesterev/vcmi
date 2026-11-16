@@ -19,6 +19,9 @@
 #include "../../lib/battle/CUnitState.h"
 
 class HypotheticBattle;
+class HypotheticFrameArena;
+class OrdinaryUnitViewStore;
+class BattleInfo;
 
 ///Fake random generator, used by AI to evaluate random server behavior
 class RNGStub final : public vstd::RNG
@@ -80,7 +83,7 @@ public:
 	StackWithBonuses & operator= (const battle::CUnitState & other);
 
 	///IUnitInfo
-	const CCreature * unitType() const override;
+	const Creature * unitType() const override;
 
 	int32_t unitBaseAmount() const override;
 
@@ -103,11 +106,19 @@ public:
 	void spendMana(ServerCallback * server, const int spellCost) const override;
 	std::string getDescription() const override;
 
+protected:
+ // Owned-frame subclass sets every identity value and supplies its own bearer.
+ StackWithBonuses(const Creature * type, uint32_t amount, uint32_t id,
+  BattleSide side, PlayerColor owner, SlotID slot);
+ virtual bool hasOwnedFrame() const { return false; }
+ enum class LocalBonusMutation { Add, Update, Remove };
+ virtual bool mutateLocalBonuses(LocalBonusMutation, const std::vector<Bonus> &) { return false; }
+ virtual bool removeLocalBonuses(const CSelector &) { return false; }
 private:
-	const IBonusBearer * origBearer;
+ const IBonusBearer * origBearer;
 	const HypotheticBattle * owner;
 
-	const CCreature * type;
+	const Creature * type;
 	ui32 baseAmount;
 	uint32_t id;
 	BattleSide side;
@@ -115,6 +126,10 @@ private:
 	SlotID slot;
 };
 
+class OwnedLogicalBonusEvent;
+struct OwnedStackEffect;
+struct OwnedFreshStackEffect;
+struct SetStackEffect;
 class HypotheticBattle final : public BattleProxy, public battle::IUnitEnvironment
 {
 public:
@@ -123,12 +138,61 @@ public:
 	const Environment * env;
 
 	HypotheticBattle(const Environment * ENV, Subject realBattle);
+ // Experimental, serialized caller-held native read epoch. No AI enablement.
+ static std::shared_ptr<HypotheticBattle> captureOwnedFixture(const BattleInfo & battle);
+ std::shared_ptr<HypotheticBattle> forkOwnedFixture() const;
+ // Typed owned events only. Raw external component vectors remain unsupported.
+ OwnedLogicalBonusEvent makeOwnedBonusEvent(const std::vector<Bonus> & values) const;
+ OwnedLogicalBonusEvent ownedEventFromUnitExports(uint32_t id, const CSelector & selector) const;
+ void addUnitBonus(uint32_t id, const OwnedLogicalBonusEvent & event);
+ void updateUnitBonus(uint32_t id, const OwnedLogicalBonusEvent & event);
+ void removeUnitBonus(uint32_t id, const OwnedLogicalBonusEvent & event);
+ /// Certify a component-free packet without applying it; rejects foreign battle IDs.
+ OwnedStackEffect makeOwnedScalarStackEffect(const SetStackEffect & effect) const;
+ /// Constructs fresh value-described components; all native component handles are rejected.
+ OwnedStackEffect makeOwnedFreshStackEffect(const OwnedFreshStackEffect & effect) const;
+ void applyOwnedStackEffect(const OwnedStackEffect & effect);
+ /// Bonuses only; no turn state, log, combat events or obstacle processing.
+ int applyOwnedDefendBonuses(uint32_t id);
+ /// Bonus-only native expiry phases. Caller owns state updates and combat dispatch.
+ void expireOwnedRoundBonuses(bool firstRound);
+ void expireOwnedTurnBonuses(uint32_t id, BattleUnitTurnReason reason);
+ void expireOwnedAttackBonuses(uint32_t id, bool counter);
+ void expireOwnedDamageBonuses(uint32_t id, int64_t healthDelta);
+ /// Ordered StacksInjured pre-load phase; not gated on health delta.
+ void expireOwnedIndirectDamageBonuses(const std::vector<uint32_t> & ids);
+ /// Query checkpoint at the caller-selected native melee/ranged sequence boundary.
+ OwnedStackEffect captureOwnedScalarSequenceCleanup(const std::vector<uint32_t> & ids) const;
+ /// Bounded produced-state packet allowlist. No combat generation.
+ void applyOwnedStatePacket(CPackForClient & packet);
+
 
 	bool unitHasAmmoCart(const battle::Unit * unit) const override;
 	PlayerColor unitEffectiveOwner(const battle::Unit * unit) const override;
 
 	std::shared_ptr<StackWithBonuses> getForUpdate(uint32_t id);
+	/// Copies scalar state without lifecycle processing or bonus changes.
+	std::shared_ptr<StackWithBonuses> copyUnitState(uint32_t id, const battle::CUnitState & state);
+	void damageUnit(uint32_t id, int64_t & amount);
+	void recordUnitAttack(uint32_t id, bool ranged, bool counter);
 
+ std::optional<PlayerColor> getPlayerID() const override;
+ TStacks getStacksIf(const TStackFilter & predicate) const override;
+ BattleField getBattlefieldType() const override;
+ TerrainId getTerrainType() const override;
+ ObstacleCList getAllObstacles() const override;
+ PlayerColor getSidePlayer(BattleSide side) const override;
+ const CArmedInstance * getSideArmy(BattleSide side) const override;
+ const CGHeroInstance * getSideHero(BattleSide side) const override;
+ ui8 getTacticDist() const override;
+ BattleSide getTacticsSide() const override;
+ int32_t getRound() const override;
+ const CGTownInstance * getDefendedTown() const override;
+ EWallState getWallState(EWallPart partOfWall) const override;
+ EGateState getGateState() const override;
+ int32_t getCastSpells(BattleSide side) const override;
+ int32_t getEnchanterCounter(BattleSide side) const override;
+ const IBonusBearer * getBonusBearer() const override;
 	BattleID getBattleID() const override;
 
 	int32_t getActiveStackID() const override;
@@ -174,7 +238,11 @@ public:
 
 private:
 
-	class HypotheticServerCallback : public ServerCallback
+ explicit HypotheticBattle(std::shared_ptr<HypotheticFrameArena> arena, int32_t active, BattleID battleID);
+ std::shared_ptr<HypotheticFrameArena> ownedArena;
+ std::shared_ptr<OrdinaryUnitViewStore> ordinaryStore;
+ BattleID ownedBattleID;
+ class HypotheticServerCallback : public ServerCallback
 	{
 	public:
 		HypotheticServerCallback(HypotheticBattle * owner_);
@@ -213,6 +281,7 @@ private:
 		const Environment * env;
 	};
 
+	std::vector<uint32_t> unitOrder;
 	int32_t bonusTreeVersion;
 	int32_t activeUnitId;
 	mutable uint32_t nextId;

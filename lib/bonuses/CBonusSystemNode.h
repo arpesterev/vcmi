@@ -144,4 +144,6 @@ public:
 	}
 
 	friend class CBonusProxy;
+	friend class BonusGraphMutationStorage;
+	friend class BonusGraphSnapshot;
 };

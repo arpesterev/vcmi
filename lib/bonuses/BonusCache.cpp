@@ -9,6 +9,8 @@
  */
 
 #include "StdInc.h"
+#include "BonusGraphSnapshot.h"
+#include "OwnedBonusGraphSession.h"
 #include "BonusCache.h"
 #include "IBonusBearer.h"
 
@@ -21,6 +23,7 @@
 
 int BonusCacheBase::getBonusValueImpl(BonusCacheEntry & currentValue, const CSelector & selector, BonusCacheMode mode) const
 {
+ auto access = lockAccess();
 	if (target->getTreeVersion() == currentValue.version)
 	{
 		return currentValue.value;
@@ -135,34 +138,42 @@ const std::array<std::atomic<int32_t>, 4> & PrimarySkillsCache::getSkills() cons
 
 int BonusCachePerTurn::getValueUncached(int turns) const
 {
+ auto access = lockAccess();
 	std::lock_guard lock(bonusListMutex);
 
 	int nodeTreeVersion = target->getTreeVersion();
 
 	if (bonusListVersion != nodeTreeVersion)
 	{
-		bonusList = target->getBonuses(selector);
+		if(ownedSession)
+  {
+   membership = std::make_shared<const std::vector<OwnedBonusValueId>>(ownedSession->queryMembership(ownedNode, selector));
+   bonusList.reset();
+  }
+  else bonusList = target->getBonuses(selector);
 		bonusListVersion = nodeTreeVersion;
 	}
 
-	if (mode == BonusCacheMode::VALUE)
-	{
-		if (turns != 0)
-			return bonusList->valOfBonuses(Selector::turns(turns));
+	const auto values = ownedSession ? ownedSession->resolveMembership(*membership) : bonusList;
+ if (mode == BonusCacheMode::VALUE)
+ {
+  if (turns != 0)
+			return values->valOfBonuses(Selector::turns(turns));
 		else
-			return bonusList->totalValue();
+			return values->totalValue();
 	}
 	else
 	{
 		if (turns != 0)
-			return bonusList->getFirst(Selector::turns(turns)) != nullptr;
+			return values->getFirst(Selector::turns(turns)) != nullptr;
 		else
-			return !bonusList->empty();
+			return !values->empty();
 	}
 }
 
 int BonusCachePerTurn::getValue(int turns) const
 {
+ auto access = lockAccess();
 	int nodeTreeVersion = target->getTreeVersion();
 
 	if (turns < cachedTurns)
@@ -219,4 +230,33 @@ const UnitBonusValuesProxy::SelectorsArray * UnitBonusValuesProxy::generateSelec
 	};
 
 	return &selectors;
+}
+
+BonusCachePerTurn::State BonusCachePerTurn::snapshot() const
+{
+ auto access = lockAccess();
+ std::lock_guard lock(bonusListMutex);
+ State result;
+ result.listVersion = bonusListVersion.load();
+ for(size_t i = 0; i < cache.size(); ++i) result.entries[i] = cache[i].snapshot();
+ result.list = bonusList;
+ result.membership = membership;
+ return result;
+}
+void BonusCachePerTurn::restore(const State & state) noexcept
+{
+ auto access = lockAccess();
+ std::lock_guard lock(bonusListMutex);
+ bonusList = state.list;
+ membership = state.membership;
+ bonusListVersion = state.listVersion;
+ for(size_t i = 0; i < cache.size(); ++i) cache[i].restore(state.entries[i]);
+}
+
+void BonusCachePerTurn::bindOwnedSession(std::shared_ptr<const OwnedBonusGraphSession> session, size_t node) noexcept
+{
+ auto access = lockAccess();
+ std::lock_guard lock(bonusListMutex);
+ ownedSession = std::move(session);
+ ownedNode = node;
 }

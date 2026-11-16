@@ -14,6 +14,7 @@
 #include "scripting/ApiTags.h"
 
 class CreatureID;
+class ArtifactID;
 class ResourceSet;
 class GameResID;
 
@@ -70,4 +71,5 @@ public:
 	virtual bool hasUpgrades() const = 0;
 
 	virtual bool isDoubleWide() const = 0;
+	virtual ArtifactID getWarMachine() const = 0;
 };

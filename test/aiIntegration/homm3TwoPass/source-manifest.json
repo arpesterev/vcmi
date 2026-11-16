@@ -1,0 +1,83 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "width": "Exact long tokens compiled as int32_t for source ABI, harness declarations matched; no LP64 arithmetic oracle",
+  "bodies": [
+    {
+      "source": "src/ai.cpp",
+      "signature": "long combatManager::getTotalCombatValue(",
+      "sha256": "07f09d11cef81815d14aef041c9553c287b58f0f9520dd34ebeeafa8f7e27bf7"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "long combatManager::chooseShooterTarget(",
+      "sha256": "74b9f774dcbd6101c16249c693a5e2a574c5185fcefb34f88eda99cfbc033ebe"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "void combatManager::chooseShooterAction(",
+      "sha256": "0676ea7b05c5bb8630caa366c24f86d83f4811edb0adbfc6dea6a0b6422812f1"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "static long getMoveOrder(",
+      "sha256": "889ebd0cbae5a437909136db9c5512b23e63a17f57084582e116720dd28aaae1"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "unsigned char func_moves_before::operator()(",
+      "sha256": "f7aee06787b374a1f8419bff998765bcb386c381aa2d76a4aa5d2c0b20c6bf69"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "void combatManager::findMoveOrder(",
+      "sha256": "02f9d803d2de6142b8e66c18e9c0712ff2d2a6c96be96f918505d8e6e872a8f4"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "static void simulateSimpleAttack(",
+      "sha256": "361aab106d94f7579fae322a5593b52bd7ba3a86a19683dffc884ee00980828a"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "long combatManager::simulateActions(",
+      "sha256": "e52a68463ed134442077e4b330185e2c9171ede37fc9478c4ad7f75ee2c1867e"
+    },
+    {
+      "source": "src/ai.cpp",
+      "signature": "void combatManager::simulateCombat(",
+      "sha256": "0aaa0b4a7e851f9a34bd58adec4cd614929ac71520a68a24989288d340e7348d"
+    },
+    {
+      "source": "src/ai_tactical.cpp",
+      "signature": "long type_AI_combat_parameters::getRangedAttackValue(",
+      "sha256": "1917dd13c1717bda422c6443b33a91fe7f8f398ca16e26557eeaf1de14e7079b"
+    },
+    {
+      "source": "src/ai_tactical.cpp",
+      "signature": "type_AI_combat_parameters::type_AI_combat_parameters(",
+      "sha256": "a129c320d11b44bbd8548676e914a9bcc180187592b14cc3b4aea87fcf7d64f7"
+    },
+    {
+      "source": "src/army.cpp",
+      "signature": "long army::getTotalCombatValue(",
+      "sha256": "44ca444e87505dd92add2937ce928c98fe8e61ac6f091a08f51fc2a3d558e966"
+    },
+    {
+      "source": "src/army.cpp",
+      "signature": "void army::setAIExpectedDamage(",
+      "sha256": "838c406fc84f59f71937098e168bb7b8fe1f84cb7fee616aa39515c5b7015dac"
+    }
+  ],
+  "instrumentation": "Renamed four methods to source-prefixed names for trace wrappers; one damage trace assignment. Scalar/census bodies untouched, no production algorithm used.",
+  "supplemental_and_inherited_sha256": {
+    "homm3TwoPass/ai_tactical.h.snapshot": "115da3bd53d96a22cc5d81cbb08e771d82864abe7b7d6102fd688e953ed86344",
+    "homm3TwoPass/cmbtmgr.h.snapshot": "7ecf6a3539d7d2c2991dce68267060fc3ca289006b8e6e224c0ec7305266af6d",
+    "homm3Exchange/hero-factor-tables.pinned.inc": "59b96e649915973dc9f39915a7564bd6d2cdf6dac1f0202e1351b9340c4e3d64",
+    "homm3Exchange/hero-factors.pinned.inc": "d15cebb3b52d51d21a3e361b4bb3be43f2e5bf4276861b484ee0eadf236b5a95",
+    "homm3Exchange/GeometrySourceBodies.inc": "fd721c59b0e86985bf74afa385831ceed9a02925776e8980d01a74a3514a00ad",
+    "homm3Exchange/census-bodies.pinned.inc": "92e03abfb20e880918189474daa76491f3a85adbb7691ce57f238563df6400d5",
+    "homm3Exchange/NativeCensusContextBodies.inc": "040efc1e938d218f131a6aef5c4aa48550ca24a54317c7e1ecd99e318f0a7d09",
+    "homm3Exchange/exchange-bodies.pinned.inc": "c154fbd45e157b062e6d60ac93bcaa5df2dcc35e9149560911d1a4b4cf39b768",
+    "homm3Exchange/NativeTerrainSourceBody.inc": "b0c78d82a29a580e33c2a8ab055cd54a11d342da8c8ba6e2aa2382ee724f30e4"
+  }
+}

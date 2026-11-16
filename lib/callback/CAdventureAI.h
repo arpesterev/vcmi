@@ -10,6 +10,7 @@
 #pragma once
 
 #include "CGlobalAI.h"
+#include "IFreshBattleStartObserver.h"
 
 //class to  be inherited by adventure-only AIs, it cedes battle actions to given battle-AI
 class CAdventureAI : public CGlobalAI
@@ -29,6 +30,7 @@ private:
 	/// so the flag has to be restored once the battle is over. Owned here - and only here - so that
 	/// nested battle AI instances can not restore it out of order.
 	std::optional<bool> waitTillRealizeBeforeBattle;
+	FreshBattleStartToken freshBattleStartToken;
 
 	void suspendWaitTillRealize();
 	void restoreWaitTillRealize();
@@ -41,6 +43,7 @@ public:
 
 	void battleNewRound(const BattleID & battleID) override;
 	void battleCatapultAttacked(const BattleID & battleID, const CatapultAttack & ca) override;
+	void battleStartBefore(const BattleID & battleID, const CCreatureSet *army1, const CCreatureSet *army2, int3 tile, const CGHeroInstance *hero1, const CGHeroInstance *hero2) override;
 	void battleStart(const BattleID & battleID, const CCreatureSet *army1, const CCreatureSet *army2, int3 tile, const CGHeroInstance *hero1, const CGHeroInstance *hero2, BattleSide side, bool replayAllowed) override;
 	void battleStacksAttacked(const BattleID & battleID, const std::vector<BattleStackAttacked> & bsa, bool ranged) override;
 	void actionStarted(const BattleID & battleID, const BattleAction &action) override;

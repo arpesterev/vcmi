@@ -1,0 +1,32 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "source_git_blob": "cd842fed2bdce90fc97a876456eac8fb2b79092c",
+  "functions": [
+    {
+      "signature": "long type_AI_spellcaster::getAttackBoostValue(const army* ourArmy,\n    const army* enemy, long oldDamage, long duration, double increase) const",
+      "source_start_line": 1000,
+      "source_end_line": 1015,
+      "body_sha256": "45e1dc77af137bc1ff527edbd1e7c9569fdb235c8e725cdcbcb57de11cb0987d"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getAttackBoostValue(const army* ourArmy,\n    const army* enemy, long duration, double increase) const",
+      "source_start_line": 1019,
+      "source_end_line": 1025,
+      "body_sha256": "026589a208483c1dbd36eb631f8c53ae716cffd3c259dd0b917ec3d4aff2bfd4"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getAttackSkillValue(const army* ourArmy, const army* enemy, long duration, long bonus) const",
+      "source_start_line": 1108,
+      "source_end_line": 1119,
+      "body_sha256": "8e861c9284c9b210e208a2eb0fff0d9a2695c1c2a710787c0b8f4c662d0a6374"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getWeaknessValue(const army* enemy, type_enchant_data caster) const",
+      "source_start_line": 1423,
+      "source_end_line": 1437,
+      "body_sha256": "b369abf3cc39e9153b5c83df3a53e418994568c5e7cbc055b9fb54088650609d"
+    }
+  ],
+  "adaptation": "Exact four source bodies; input-only source damage and estimated-damage stubs. Copied testArmy attack increment selects positive hypothetical estimate; does not reinterpret Weakness as native damage savings."
+}

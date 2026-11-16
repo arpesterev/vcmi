@@ -20,6 +20,47 @@ set(test_SRCS
  		battle/CBattleInfoCallbackTest.cpp
  		battle/CHealthTest.cpp
 		battle/CUnitStateTest.cpp
+		battle/OrdinaryUnitStoreAtomicMutationTest.cpp
+		battle/OrdinaryAmmoRoutingTest.cpp
+		battle/OrdinaryAmmoEnvironmentTest.cpp
+		battle/OrdinaryDescriptorEffectTest.cpp
+		battle/OrdinaryAmmoPrototypeMirrorTest.cpp
+		battle/OrdinaryUnitViewStoreTest.cpp
+		battle/OrdinaryUnitStoreLifecycleTest.cpp
+		battle/HypotheticCopyStateTest.cpp
+		battle/HypotheticExchangeBoundaryTest.cpp
+		battle/HypotheticExchangeEntryTest.cpp
+		prototype/NativeSnapshotAccessTest.cpp
+		prototype/OrdinaryPreviewDefinitionGuardTest.cpp
+		prototype/OwnedFrameTest.cpp
+		prototype/OwnedBonusGraphSessionTest.cpp
+		prototype/OwnedCacheCaptureTest.cpp
+		prototype/OwnedCacheSessionTest.cpp
+		prototype/SealedBonusSnapshotTest.cpp
+		prototype/ClosedBonusCaptureTest.cpp
+		prototype/OwnedTypedUnitEffectsTest.cpp
+		prototype/OwnedTypedRemovalTest.cpp
+		prototype/OwnedDurationExpiryTest.cpp
+		prototype/OwnedStatePacketTest.cpp
+		prototype/OwnedResurrectionPacketTest.cpp
+		prototype/OwnedMixedUnitPacketTest.cpp
+		prototype/OwnedTurnFacadeTest.cpp
+		prototype/OwnedBattleBearerTest.cpp
+		prototype/OwnedRoundLifecycleTest.cpp
+		prototype/OwnedDefendEffectsTest.cpp
+		prototype/OwnedComponentProducerTest.cpp
+		prototype/OwnedScalarProducerTest.cpp
+		prototype/OwnedDetachedUnitTest.cpp
+		prototype/OwnedDetachedAliasTest.cpp
+		prototype/OwnedCreatureContextTest.cpp
+		prototype/NativeAddInitOracleTest.cpp
+		prototype/OwnedArenaMaterializationContractTestV2.cpp
+		prototype/OwnedLeafAppendTest.cpp
+		prototype/OwnedUnsupportedFacadeTest.cpp
+		prototype/OwnedArenaLifetimeTest.cpp
+		prototype/OwnedArenaNativeParityTest.cpp
+		prototype/OwnedCreatureTest.cpp
+		prototype/OwnedCreatureCacheTest.cpp
 		battle/CUnitStateMagicTest.cpp
 		battle/battle_UnitTest.cpp
 
@@ -199,6 +240,37 @@ if(ENABLE_BATTLE_AI)
 		battleAI/BattleEvaluatorTest.cpp
 		battleAI/SpellTargetsEvaluatorTest.cpp
 		aiIntegration/NativePortBattleTest.cpp
+	aiIntegration/HoMM3OrdinaryTwoPassNativeTest.cpp
+	aiIntegration/HoMM3LiveShooterNativeTest.cpp
+	aiIntegration/HoMM3GroundNativeTest.cpp
+	aiIntegration/HoMM3GroundControllerTest.cpp
+	aiIntegration/HoMM3OwnHeroGroundTest.cpp
+	aiIntegration/HoMM3FailedSiegeTest.cpp
+	aiIntegration/HoMM3ForecastRetreatTest.cpp
+	aiIntegration/HoMM3MixedNativeTest.cpp
+	aiIntegration/FHeroes2NativeStrengthTest.cpp
+	aiIntegration/FHeroes2NativeThreatTest.cpp
+	aiIntegration/FHeroes2DoubleAttackTest.cpp
+	aiIntegration/FHeroes2WolfStrengthTest.cpp
+	aiIntegration/FHeroes2DoubleShotTest.cpp
+	aiIntegration/FHeroes2AreaResistanceTest.cpp
+	aiIntegration/FHeroes2FarewellAreaTest.cpp
+	aiIntegration/HoMM3PrayerTest.cpp
+	aiIntegration/HoMM3PrayerRemovalTest.cpp
+	aiIntegration/HoMM3MixedDefendTest.cpp
+		aiIntegration/homm3Defend/NativeDefendTest.cpp
+		aiIntegration/FHeroes2CloneCascadeTest.cpp
+		aiIntegration/FHeroes2BerserkAmmoTest.cpp
+		aiIntegration/FHeroes2ShieldAmmoTest.cpp
+		aiIntegration/FHeroes2CloneAmmoTest.cpp
+		aiIntegration/FHeroes2FireballResistanceTest.cpp
+		aiIntegration/homm3Defend/DamageCapabilityTest.cpp
+		aiIntegration/homm3Defend/CurrentDefendTest.cpp
+		aiIntegration/homm3Exchange/GeometryNativeTest.cpp
+		aiIntegration/HoMM3ForecastQueueTest.cpp
+		aiIntegration/HoMM3ForecastLifecycleTest.cpp
+		aiIntegration/homm3Forecast/MoveOrder.cpp
+		aiIntegration/homm3Forecast/OwnershipPrefix.cpp
 		aiIntegration/MMAINNOutputValidationTest.cpp
 	)
 endif()
@@ -329,3 +401,6 @@ foreach(resource ${testdata})
 	set(output "${CMAKE_BINARY_DIR}/bin/test/testdata/${output}/${filename}")
 	configure_file(${resource} ${output} COPYONLY)
 endforeach()
+
+add_subdirectory(aiIntegration/fheroesStrength)
+add_subdirectory(aiIntegration/fheroesThreat)

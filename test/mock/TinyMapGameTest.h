@@ -96,6 +96,9 @@ public:
 	void overrideSettingBeforeInit(EGameSettings option, bool value);
 
 protected:
+	/// Rebind fixture access after a real server load creates a fresh game state.
+	/// Call only outside battle; existing object pointers/callbacks are invalid.
+	void adoptLoadedGameState(std::shared_ptr<CGameState> loadedState);
 	virtual void onMapStarted() {}
 	/// Services the game state is initialized with. The mock covers map-level tests; a test that
 	/// runs real game logic overrides this with the game library.

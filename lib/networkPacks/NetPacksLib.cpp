@@ -16,6 +16,10 @@
 #include "PacksForLobby.h"
 #include "SetStackEffect.h"
 #include "NetPackVisitor.h"
+#include "../bonuses/BonusParameters.h"
+#include "../bonuses/Propagators.h"
+#include "../bonuses/Updaters.h"
+#include "../serializer/CMemorySerializer.h"
 
 void CPack::visit(ICPackVisitor & visitor)
 {
@@ -494,6 +498,42 @@ void EndAction::visitTyped(ICPackVisitor & visitor)
 void BattleSpellCast::visitTyped(ICPackVisitor & visitor)
 {
 	visitor.visitBattleSpellCast(*this);
+}
+
+namespace
+{
+struct DescriptorParameterOwners
+{
+	std::function<void(const Bonus &)> visit;
+	void operator&(const BonusParameters::storage_type & data)
+	{
+		if(const auto * combat = std::get_if<BonusParametersOnCombatEvent>(&data))
+			for(const auto & effect : combat->effects)
+				if(const auto * bonus = std::get_if<BonusParametersOnCombatEvent::CombatEffectBonus>(&effect))
+					if(bonus->bonus) visit(*bonus->bonus);
+	}
+};
+}
+
+std::vector<std::byte> SetStackEffect::snapshotDescriptorValue(const Bonus & value)
+{
+	CMemorySerializer serializer;
+	serializer.oser & value;
+	std::set<const Bonus *> visited;
+	const std::function<void(const Bonus &)> owners = [&](const Bonus & bonus)
+	{
+		if(!visited.insert(&bonus).second) return;
+		// Bonus ownership is local runtime state, omitted from normal wire serialization.
+		serializer.oser & bonus.bonusOwner;
+		if(bonus.parameters)
+		{
+			auto parameters = *bonus.parameters;
+			DescriptorParameterOwners reader{owners};
+			parameters.serialize(reader);
+		}
+	};
+	owners(value);
+	return serializer.extractBuffer();
 }
 
 void SetStackEffect::visitTyped(ICPackVisitor & visitor)

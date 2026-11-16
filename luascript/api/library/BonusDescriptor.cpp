@@ -13,6 +13,7 @@
 
 #include "../../../lib/bonuses/Bonus.h"
 #include "../../../lib/json/JsonBonus.h"
+#include "../../../lib/networkPacks/SetStackEffect.h"
 
 namespace scripting::api
 {
@@ -52,6 +53,18 @@ JsonNode BonusDescriptor::toJson() const
 Bonus BonusDescriptor::toBonus() const
 {
 	return *JsonUtils::parseBonus(toJson());
+}
+
+SetStackEffect BonusDescriptor::toUnitEffect(BattleID battleID, ui32 unit, bool cumulative) const
+{
+	SetStackEffect result;
+	result.battleID = battleID;
+	const auto value = toBonus();
+	auto & entries = cumulative ? result.toAdd : result.toUpdate;
+	entries.emplace_back(unit, std::vector<Bonus>{value});
+	result.descriptorEffect = std::make_shared<const SetStackEffect::DescriptorEffect>(
+		SetStackEffect::DescriptorEffect{battleID, unit, cumulative, value, SetStackEffect::snapshotDescriptorValue(value)});
+	return result;
 }
 
 }

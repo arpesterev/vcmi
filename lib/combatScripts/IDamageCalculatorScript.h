@@ -109,6 +109,14 @@ class DLL_LINKAGE IDamageCalculatorScript
 public:
 	virtual ~IDamageCalculatorScript() = default;
 
+	/// Explicit capability of the host bindings, not a statement about numeric damage.
+	/// True means this implementation cannot directly mutate authoritative battle/game
+	/// state while initializing, declaring bonuses or calculating. Returned damage may
+	/// still cause injury when the engine applies it. NOT a public-information guarantee,
+	/// deterministic-result guarantee, or source-policy equivalence. Unknown native
+	/// implementations fail closed. Callers must separately exclude reaction/spell paths.
+	virtual bool hasReadOnlyBattleStateAccess() const { return false; }
+
 	/// `info` arrives with everything the engine knows and is completed by the implementation, which
 	/// is what lets a script be told only about the bonuses it asked for.
 	virtual DamageEstimation calculate(const CBattleInfoCallback & battle, DamageAttackInfo & info) const = 0;

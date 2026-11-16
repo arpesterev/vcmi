@@ -10,6 +10,7 @@
 #pragma once
 
 #include "BattleActionType.h"
+#include "../../bonuses/Bonus.h"
 
 /// NO_ACTION: the unit ends its turn without acting
 class SkipTurnAction : public BattleActionType
@@ -35,6 +36,15 @@ public:
 	std::optional<battle::UnitTurnStatus> getStartTurnStatus(const BattleAction & action) const override;
 	void apply(IBattleActionEnvironment & env, const CBattleInfoCallback & battle, const BattleAction & action) const override;
 };
+
+/// Scalar defend effects only; turn status, combat events and obstacles are applied separately.
+struct DLL_LINKAGE DefendBonusEffects
+{
+	std::vector<Bonus> bonuses;
+	int defenseIncrease;
+};
+
+DLL_LINKAGE DefendBonusEffects makeDefendBonusEffects(const battle::Unit & unit);
 
 class DefendAction : public BattleActionType
 {

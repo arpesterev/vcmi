@@ -189,7 +189,7 @@ bool LuaUnitStateProxy::hasAbsoluteImmunity(const LuaUnitState & state, const sp
 
 const Creature * LuaUnitStateProxy::getCreature(const LuaUnitState & state)
 {
-	return state.getState()->creatureId().toEntity(LIBRARY);
+	return state.getState()->unitType();
 }
 
 BattleHexArray LuaUnitStateProxy::getHexes(const LuaUnitState & state)

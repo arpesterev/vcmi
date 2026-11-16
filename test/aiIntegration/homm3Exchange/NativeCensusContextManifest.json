@@ -1,0 +1,13 @@
+{
+  "repository": "sushi-shi/homm3-decomp",
+  "commit": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "src/ai_tactical.cpp",
+  "license": "CC0-1.0",
+  "snapshot_sha256": "3b8793b6e708eb5b3b6260eb9b4c16d41470b5ee27c56815c290a3e7300dd8eb",
+  "functions": [
+    "type_AI_combat_parameters::type_AI_combat_parameters(const combatManager* combat, long side)",
+    "unsigned char type_AI_spellcaster::isLastAction() const"
+  ],
+  "extracted_file": "NativeCensusContextBodies.inc",
+  "extracted_sha256": "040efc1e938d218f131a6aef5c4aa48550ca24a54317c7e1ecd99e318f0a7d09"
+}

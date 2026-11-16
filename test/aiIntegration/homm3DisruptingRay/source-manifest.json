@@ -1,0 +1,7 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "function": "long type_AI_spellcaster::getDisruptiveRayValue(const army* enemy, type_enchant_data caster) const",
+  "body_sha256": "a0d0af49de4206594849283d13fe7de6fe2a2ec3a427e378400932ee415912fd",
+  "adaptation": "Exact function text with input-only army/manager/caster harness. Oracle executes only nonnegative signed-32-bit totals, bonuses 0..20 and finite probabilities 0..1. Production helper is not wired to native selection: source AI-target census remains unavailable."
+}

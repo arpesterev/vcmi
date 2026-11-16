@@ -41,3 +41,5 @@ public:
 		h & nodeType;
 	}
 };
+
+DLL_LINKAGE bool matchesBonusPropagationType(BonusNodeType destination, BonusNodeType propagated);

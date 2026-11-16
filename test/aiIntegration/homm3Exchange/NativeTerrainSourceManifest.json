@@ -1,0 +1,10 @@
+{
+  "repository": "sushi-shi/homm3-decomp",
+  "commit": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "src/army.cpp",
+  "function": "army::initialize",
+  "license": "CC0-1.0",
+  "snapshot_sha256": "c3ae2e3038707ea4f32e6abe340333f28c0228927bf430c842702a7c47032917",
+  "extracted_file": "NativeTerrainSourceBody.inc",
+  "extracted_sha256": "b0c78d82a29a580e33c2a8ab055cd54a11d342da8c8ba6e2aa2382ee724f30e4"
+}

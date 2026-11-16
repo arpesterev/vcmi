@@ -29,7 +29,7 @@ static void replacePlural(MetaString & text, const std::string & token, DamageRa
 
 static std::string unitNameTextID(const battle::Unit & unit)
 {
-	const auto * creature = unit.creatureId().toEntity(LIBRARY);
+	const auto * creature = unit.unitType();
 	return unit.getCount() == 1 ? creature->getNameSingularTextID() : creature->getNamePluralTextID();
 }
 

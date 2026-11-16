@@ -1,0 +1,20 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "source_git_blob": "cd842fed2bdce90fc97a876456eac8fb2b79092c",
+  "functions": [
+    {
+      "signature": "long type_AI_spellcaster::getAttackBoostValue(const army* ourArmy,\n    const army* enemy, long oldDamage, long duration, double increase) const",
+      "source_start_line": 1000,
+      "source_end_line": 1015,
+      "body_sha256": "45e1dc77af137bc1ff527edbd1e7c9569fdb235c8e725cdcbcb57de11cb0987d"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getFortuneValue(const army* ourArmy, type_enchant_data caster) const",
+      "source_start_line": 1192,
+      "source_end_line": 1226,
+      "body_sha256": "8fa7e0aa89229f03a04ef196c8b787408af6ca251ad74e9efc503b081569e18e"
+    }
+  ],
+  "adaptation": "Exact bodies. Input-only duration, target, damage, luck and combat-value stubs. Scalar tests use representable source32 results; overflow admission tested separately."
+}

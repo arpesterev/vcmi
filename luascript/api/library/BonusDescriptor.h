@@ -17,6 +17,8 @@
 #include "../SignatureOf.h"
 
 struct Bonus;
+struct SetStackEffect;
+class BattleID;
 
 namespace scripting::api
 {
@@ -56,6 +58,9 @@ struct BonusDescriptor final : ApiSerializable<BonusDescriptor>
 
 	/// Materializes a Bonus by routing through JsonUtils::parseBonus.
 	Bonus toBonus() const;
+
+	/// Builds the native packet and its local descriptor provenance together.
+	SetStackEffect toUnitEffect(BattleID battleID, ui32 unit, bool cumulative) const;
 
 	template<typename Serializer>
 	void serializeScript(Serializer & s)

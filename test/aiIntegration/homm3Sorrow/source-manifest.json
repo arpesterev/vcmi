@@ -1,0 +1,23 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "functions": [
+    {
+      "signature": "long type_AI_spellcaster::getSorrowValue(const army* enemy, type_enchant_data caster) const",
+      "source_start_line": 1157,
+      "source_end_line": 1180,
+      "body_sha256": "4f8e1c140258310efb550217127406efb80137973b1914caf8d2e02bad98113a"
+    }
+  ],
+  "adaptation": "Exact getSorrowValue body with input-only spell-resistance, morale, attack-bit and duration stubs. aiValueOfMorale/valueOfLuckAndMorale reused from adjacent homm3Mirth pinned harness. Native policy values are host projections; scalar comparisons do not establish complete original post-simulation equivalence.",
+  "source_git_blob": "cd842fed2bdce90fc97a876456eac8fb2b79092c",
+  "source_size_bytes": 122240,
+  "shared_helpers": [
+    {
+      "manifest": "../homm3Mirth/source-manifest.json",
+      "function": "valueOfLuckAndMorale",
+      "source_start_line": 102,
+      "source_end_line": 126
+    }
+  ]
+}

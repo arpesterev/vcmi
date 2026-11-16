@@ -79,6 +79,11 @@ CreatureID CCreature::getId() const
 	return idNumber;
 }
 
+ArtifactID CCreature::getWarMachine() const
+{
+	return warMachine;
+}
+
 const IBonusBearer * CCreature::getBonusBearer() const
 {
 	return this;

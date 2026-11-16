@@ -23,6 +23,6 @@ public:
 
 	MOCK_CONST_METHOD0(unitSlot, SlotID());
 
-	MOCK_CONST_METHOD0(unitType, const CCreature * ());
+	MOCK_CONST_METHOD0(unitType, const Creature * ());
 };
 

@@ -33,7 +33,7 @@ CAmmo::CAmmo(const battle::Unit * Owner, CSelector totalSelector):
 	reset();
 }
 
-CAmmo & CAmmo::operator= (const CAmmo & other)
+CAmmo & CAmmo::operator= (const CAmmo & other) noexcept
 {
 	used = other.used;
 	return *this;
@@ -90,6 +90,12 @@ CShots::CShots(const battle::Unit * Owner)
 {
 }
 
+CShots & CShots::operator=(const CShots & other) noexcept
+{
+	CAmmo::operator=(other);
+	return *this;
+}
+
 bool CShots::isLimited() const
 {
 	return !shooter.hasBonus() || !env->unitHasAmmoCart(owner);
@@ -123,6 +129,13 @@ CRetaliations::CRetaliations(const battle::Unit * Owner)
 {
 }
 
+CRetaliations & CRetaliations::operator=(const CRetaliations & other) noexcept
+{
+	CAmmo::operator=(other);
+	totalCache = other.totalCache;
+	return *this;
+}
+
 bool CRetaliations::isLimited() const
 {
 	return !unlimited.hasBonus() || noRetaliation.hasBonus();
@@ -130,6 +143,7 @@ bool CRetaliations::isLimited() const
 
 int32_t CRetaliations::total() const
 {
+ auto access = lockCacheAccess();
 	if(noRetaliation.hasBonus())
 		return 0;
 
@@ -147,6 +161,7 @@ void CRetaliations::reset()
 
 void CRetaliations::serializeJson(JsonSerializeFormat & handler)
 {
+ auto access = lockCacheAccess();
 	CAmmo::serializeJson(handler);
 	//we may be serialized in the middle of turn
 	handler.serializeInt("totalCache", totalCache, 0);
@@ -159,7 +174,7 @@ CHealth::CHealth(const battle::Unit * Owner):
 	reset();
 }
 
-CHealth & CHealth::operator=(const CHealth & other)
+CHealth & CHealth::operator=(const CHealth & other) noexcept
 {
 	//do not change owner
 	firstHPleft = other.firstHPleft;
@@ -338,8 +353,9 @@ CUnitState::CUnitState():
 
 }
 
-CUnitState & CUnitState::operator=(const CUnitState & other)
+CUnitState & CUnitState::operator=(const CUnitState & other) noexcept
 {
+ auto sourceAccess = other.lockBonusCacheAccess();
 	//do not change unit and bonus info
 
 	cloned = other.cloned;
@@ -460,7 +476,7 @@ PlayerColor CUnitState::getCasterOwner() const
 
 std::string CUnitState::getCasterNameTextID() const
 {
-	const auto * creature = creatureId().toEntity(LIBRARY);
+	const auto * creature = unitType();
 	return creature->getNamePluralTextID();
 }
 
@@ -831,6 +847,42 @@ void CUnitState::serializeJson(JsonSerializeFormat & handler)
 	position = posValue;
 }
 
+void CUnitState::bindBonusCacheAccess(std::recursive_mutex & mutex) noexcept
+{
+ bonusCacheAccess = &mutex;
+ immobilizedPerTurn.bindAccessMutex(mutex);
+ stackSpeedPerTurn.bindAccessMutex(mutex);
+ bonusCache.bindAccessMutex(mutex);
+ combatValue.bindAccessMutex(mutex);
+ casts.bindCacheAccess(mutex);
+ shots.bindCacheAccess(mutex);
+ counterAttacks.bindCacheAccess(mutex);
+}
+void CUnitState::bindOwnedBonusSession(std::shared_ptr<const OwnedBonusGraphSession> session, size_t node) noexcept
+{
+ immobilizedPerTurn.bindOwnedSession(session, node);
+ stackSpeedPerTurn.bindOwnedSession(std::move(session), node);
+}
+CUnitState::BonusCaches CUnitState::captureBonusCaches() const
+{
+ auto access = lockBonusCacheAccess();
+ return {bonusCache.snapshot(), combatValue.snapshot(), immobilizedPerTurn.snapshot(), stackSpeedPerTurn.snapshot(),
+  casts.captureTotalCache(), shots.captureTotalCache(), counterAttacks.captureTotalCache(), shots.captureShooterCache(), counterAttacks.captureRetaliationCache()};
+}
+void CUnitState::restoreBonusCaches(const BonusCaches & state) noexcept
+{
+ auto access = lockBonusCacheAccess();
+ bonusCache.restore(state.unit); combatValue.restore(state.combat);
+ immobilizedPerTurn.restore(state.immobilized); stackSpeedPerTurn.restore(state.speed);
+ casts.restoreTotalCache(state.casts); shots.restoreTotalCache(state.shots);
+ counterAttacks.restoreTotalCache(state.retaliation); shots.restoreShooterCache(state.shooter);
+ counterAttacks.restoreRetaliationCache(state.retaliationFlags);
+}
+void CUnitState::bindEnvironment(const IUnitEnvironment * environment) noexcept
+{
+ env = environment;
+ shots.setEnv(environment);
+}
 void CUnitState::localInit(const IUnitEnvironment * env_)
 {
 	env = env_;
@@ -1006,7 +1058,7 @@ BattleSide CUnitStateDetached::unitSide() const
 	return unit->unitSide();
 }
 
-const CCreature * CUnitStateDetached::unitType() const
+const Creature * CUnitStateDetached::unitType() const
 {
 	return unit->unitType();
 }

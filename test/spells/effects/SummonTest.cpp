@@ -50,6 +50,11 @@ public:
 		EXPECT_CALL(unit, unitOwner()).WillRepeatedly(Return(PlayerColor(5)));
 		EXPECT_CALL(unit, isClone()).WillRepeatedly(Return(false));
 		EXPECT_CALL(unit, creatureId()).WillRepeatedly(Return(otherSummoned));
+		EXPECT_CALL(unit, unitType()).WillRepeatedly(Return(otherSummoned == toSummon
+			? static_cast<const Creature *>(&creatureStub)
+			: static_cast<const Creature *>(&otherSummonedType)));
+		if(otherSummoned != toSummon)
+			EXPECT_CALL(otherSummonedType, getJsonKey()).WillRepeatedly(Return("core:fireElemental"));
 		EXPECT_CALL(unit, isValidTarget(Eq(false))).WillRepeatedly(Return(true));
 		EXPECT_CALL(unit, getPosition()).WillRepeatedly(Return(BattleHex(5,5)));
 		EXPECT_CALL(unit, doubleWide()).WillRepeatedly(Return(false));
@@ -106,7 +111,6 @@ TEST_P(SummonTest, Applicable)
 		EXPECT_CALL(creatureServiceMock, getById(otherSummoned)).WillRepeatedly(Return(&otherSummonedType));
 		EXPECT_CALL(creatureServiceMock, getByIndex(otherSummoned.getNum())).WillRepeatedly(Return(&otherSummonedType));
 		EXPECT_CALL(creatureServiceMock, getByName("core:fireElemental")).WillRepeatedly(Return(&otherSummonedType));
-		EXPECT_CALL(otherSummonedType, getJsonKey()).WillRepeatedly(Return("core:fireElemental"));
 	}
 
 	EXPECT_CALL(creatureServiceMock, getByName("core:airElemental")).WillRepeatedly(Return(&creatureStub));

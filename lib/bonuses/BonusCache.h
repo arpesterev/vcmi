@@ -11,6 +11,9 @@
 #pragma once
 
 #include "BonusSelector.h"
+#include "OwnedBonusLogicalDomain.h"
+#include <mutex>
+class OwnedBonusGraphSession;
 
 enum class BonusCacheMode : int8_t
 {
@@ -18,10 +21,23 @@ enum class BonusCacheMode : int8_t
 	PRESENCE, // presence of bonus will be cached
 };
 
+struct BonusCacheScalarState
+{
+ int32_t version = 0;
+ int32_t value = 0;
+};
+
 /// Internal base class with no own cache
 class BonusCacheBase
 {
+ friend class OrdinaryPreviewCacheAccessTestPeer;
+ std::recursive_mutex * accessMutex = nullptr;
+public:
+ /// Bind once before publishing an owner-backed cache. Native caches remain unbound.
+ void bindAccessMutex(std::recursive_mutex & mutex) noexcept { accessMutex = &mutex; }
 protected:
+ std::unique_lock<std::recursive_mutex> lockAccess() const
+ { return accessMutex ? std::unique_lock<std::recursive_mutex>(*accessMutex) : std::unique_lock<std::recursive_mutex>(); }
 	const IBonusBearer * target;
 
 	explicit BonusCacheBase(const IBonusBearer * target):
@@ -32,6 +48,9 @@ protected:
 	{
 		std::atomic<int32_t> version = 0;
 		std::atomic<int32_t> value = 0;
+
+		BonusCacheScalarState snapshot() const noexcept { return {version.load(), value.load()}; }
+		void restore(const BonusCacheScalarState & state) noexcept { value = state.value; version = state.version; }
 
 		BonusCacheEntry() = default;
 		BonusCacheEntry(const BonusCacheEntry & other)
@@ -57,6 +76,8 @@ class BonusValueCache : public BonusCacheBase
 	mutable BonusCacheEntry value;
 public:
 	BonusValueCache(const IBonusBearer * target, const CSelector & selector);
+	BonusCacheScalarState snapshot() const noexcept { auto access = lockAccess(); return value.snapshot(); }
+ void restore(const BonusCacheScalarState & state) noexcept { auto access = lockAccess(); value.restore(state); }
 	int getValue() const;
 	bool hasBonus() const;
 };
@@ -69,6 +90,9 @@ class BonusDerivedValueCache : public BonusCacheBase
 
     int getTreeVersion() const;
 public:
+	struct State { BonusCacheScalarState entry; int32_t variant; };
+ State snapshot() const noexcept { auto access = lockAccess(); return {entry.snapshot(), variant.load()}; }
+ void restore(const State & state) noexcept { auto access = lockAccess(); entry.restore(state.entry); variant = state.variant; }
 	explicit BonusDerivedValueCache(const IBonusBearer * target)
 		: BonusCacheBase(target)
 	{}
@@ -77,6 +101,7 @@ public:
 	template<typename Compute>
 	int getValue(const Compute & compute, int32_t of) const
 	{
+        auto access = lockAccess();
         auto version = getTreeVersion();
 
 		if(entry.version != version || variant != of)
@@ -96,6 +121,9 @@ class BonusValuesArrayCache : public BonusCacheBase
 {
 public:
 	using SelectorsArray = std::array<const CSelector, SIZE>;
+ using State = std::array<BonusCacheScalarState, SIZE>;
+ State snapshot() const noexcept { auto access = lockAccess(); State result; for(size_t i = 0; i < SIZE; ++i) result[i] = cache[i].snapshot(); return result; }
+ void restore(const State & state) noexcept { auto access = lockAccess(); for(size_t i = 0; i < SIZE; ++i) cache[i].restore(state[i]); }
 
 	BonusValuesArrayCache(const IBonusBearer * target, const SelectorsArray * selectors)
 		: BonusCacheBase(target)
@@ -122,6 +150,7 @@ private:
 class UnitBonusValuesProxy
 {
 public:
+ void bindAccessMutex(std::recursive_mutex & mutex) noexcept { cache.bindAccessMutex(mutex); }
 	enum ECacheKeys : int8_t
 	{
 		TOTAL_ATTACKS_MELEE,
@@ -151,6 +180,9 @@ public:
 	static constexpr size_t KEYS_COUNT = static_cast<size_t>(ECacheKeys::TOTAL_KEYS);
 
 	using SelectorsArray = BonusValuesArrayCache<KEYS_COUNT>::SelectorsArray;
+ using State = BonusValuesArrayCache<KEYS_COUNT>::State;
+ State snapshot() const noexcept { return cache.snapshot(); }
+ void restore(const State & state) noexcept { cache.restore(state); }
 
 	UnitBonusValuesProxy(const IBonusBearer * Target):
 		cache(Target, generateSelectors())
@@ -213,6 +245,9 @@ class BonusCachePerTurn : public BonusCacheBase
 
 	const CSelector selector;
 	mutable TConstBonusListPtr bonusList;
+ std::shared_ptr<const OwnedBonusGraphSession> ownedSession;
+ size_t ownedNode = 0;
+ mutable std::shared_ptr<const std::vector<OwnedBonusValueId>> membership;
 	mutable std::mutex bonusListMutex;
 	mutable std::atomic<int32_t> bonusListVersion = 0;
 	mutable std::array<BonusCacheEntry, cachedTurns> cache;
@@ -226,5 +261,15 @@ public:
 		, mode(mode)
 	{}
 
-	int getValue(int turns) const;
+	struct State
+ {
+  TConstBonusListPtr list;
+  std::shared_ptr<const std::vector<OwnedBonusValueId>> membership;
+  int32_t listVersion = 0;
+  std::array<BonusCacheScalarState, cachedTurns> entries;
+ };
+ void bindOwnedSession(std::shared_ptr<const OwnedBonusGraphSession> session, size_t node) noexcept;
+ State snapshot() const;
+ void restore(const State & state) noexcept;
+ int getValue(int turns) const;
 };

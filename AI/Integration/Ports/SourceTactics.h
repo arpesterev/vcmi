@@ -295,9 +295,9 @@ inline Tactics selectTactics(const TacticsInput & input)
 }
 
 // Source: fheroes2 AI::BattlePlanner::getSpellHasteRatio and
-// getSpellSlowRatio (ai_battle_spell.cpp). The before/after speeds must
-// come from actual VCMI spell simulation: if no speed changes, the spell
-// has no movement value, including when its effect is already active.
+// getSpellSlowRatio (ai_battle_spell.cpp). Active-unit speeds come from native
+// spell simulation. Dispel uses the pinned STANDING-to-Haste transformation
+// for source-mapped disables; that source heuristic is not native movement.
 inline double hasteSpeedRatio(int before, int after, double enemyAverageSpeed,
 	bool currentlySlowed, bool shooter, bool defensiveTactics)
 {
@@ -438,8 +438,8 @@ inline double blindControlRatio(bool isLastEnemy, bool unlimitedRetaliations,
 // Pinned fheroes2 BattlePlanner::spellEffectValue: Berserker is worth 85%
 // of the affected enemy's strength, except when only one enemy remains.
 // Non-archers receive the original distance-from-approach-edge penalty.
-// This ratio may be used only after the native hypothetical cast confirms
-// a newly applied Berserk status (rather than resistance or another disable).
+// The native cast must confirm application or removal of Berserk. Dispel
+// skips the already-disabled guard and never marks allied targets as last.
 inline double berserkControlRatio(bool lastEnemy, bool shooter, int distanceFromApproachEdge,
 	bool alreadyDisabled, bool effectiveNativeChange)
 {

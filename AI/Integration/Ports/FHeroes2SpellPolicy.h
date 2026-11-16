@@ -9,15 +9,23 @@
  */
 #pragma once
 
+#include "FHeroes2NativeStrength.h"
+
 #include "SourceTactics.h"
+#include <map>
+#include "FHeroes2ArcherClassification.h"
+#include "FHeroes2TacticsContext.h"
 #include "FHeroes2EarthquakePolicy.h"
 #include "FHeroes2TeleportPolicy.h"
 #include "FHeroes2DragonSlayer.h"
 #include "FHeroes2DispelValuation.h"
+#include "FHeroes2ObservedMagic.h"
+#include "FHeroes2MagicValue.h"
 #include "../../BattleAI/StackWithBonuses.h"
 #include "../../../lib/GameLibrary.h"
 #include "../../../lib/CStack.h"
 #include "../../../lib/battle/BattleAction.h"
+#include "../../../lib/battle/BattleAttackInfo.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
 #include "../../../lib/spells/CSpellHandler.h"
 #include "../../../lib/spells/ISpellMechanics.h"
@@ -65,14 +73,91 @@ class FHeroes2SpellPolicy
 			: static_cast<int>(unit.getMovementRange());
 	}
 
-	static Army army(const CPlayerBattleCallback & battle, PlayerColor player, bool friendly)
+	static double removedHasteRatio(const battle::Unit & before, const battle::Unit & after,
+		double enemyAverageSpeed, bool defensiveTactics)
+	{
+		const auto effect = [](SpellID id)
+		{
+			return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
+		};
+		if(before.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& (before.hasBonus(effect(SpellID(SpellID::BLIND)))
+				|| before.hasBonus(effect(SpellID(SpellID::PARALYZE)))))
+		{
+			// Pinned GetSpeed(false,true) is STANDING; Haste ExtraValue is still 2.
+			constexpr int sourceHasteBonus = 2;
+			return Ports::FHeroes2::hasteSpeedRatio(0, sourceHasteBonus,
+				enemyAverageSpeed, false, fheroes2IsArcher(before), defensiveTactics);
+		}
+		if(before.hasBonusOfType(BonusType::NOT_ACTIVE) || after.hasBonusOfType(BonusType::NOT_ACTIVE))
+			return 0;
+		return Ports::FHeroes2::hasteSpeedRatio(actingSpeed(after), actingSpeed(before),
+			enemyAverageSpeed, false, fheroes2IsArcher(before), defensiveTactics);
+	}
+
+	static double removedSlowRatio(const battle::Unit & before, const battle::Unit & after,
+		double friendlyAverageSpeed, bool attackingCastle, int distance)
+	{
+		const auto effect = [](SpellID id)
+		{
+			return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
+		};
+		if(before.hasBonusOfType(BonusType::NOT_ACTIVE)
+			&& (before.hasBonus(effect(SpellID(SpellID::BLIND)))
+				|| before.hasBonus(effect(SpellID(SpellID::PARALYZE)))))
+		{
+			// Source Slow checks archers/castle before STANDING speed.
+			return fheroes2IsArcher(before) || attackingCastle ? 0.01 : 0;
+		}
+		if(before.hasBonusOfType(BonusType::NOT_ACTIVE) || after.hasBonusOfType(BonusType::NOT_ACTIVE))
+			return 0;
+		return Ports::FHeroes2::slowSpeedRatio(actingSpeed(after), actingSpeed(before),
+			friendlyAverageSpeed, fheroes2IsArcher(before), attackingCastle, false,
+			before.hasBonusOfType(BonusType::FLYING), distance);
+	}
+
+	static bool effectiveRangedShield(const CPlayerBattleCallback & real,
+		const HypotheticBattle & projected, const CStack & protectedUnit, const battle::Unit & after)
+	{
+		// Isolate Shield from other effects removed by Dispel. Native factors,
+		// integer rounding and the one-damage floor decide whether it helps.
+		StackWithBonuses shielded(&projected, static_cast<const battle::Unit *>(&protectedUnit));
+		StackWithBonuses unshielded(&projected, static_cast<const battle::Unit *>(&protectedUnit));
+		const auto effect = Selector::source(BonusSource::SPELL_EFFECT,
+			BonusSourceID(SpellID(SpellID::AIR_SHIELD)));
+		unshielded.removeUnitBonus(effect);
+		if(!protectedUnit.hasBonus(effect))
+		{
+			std::vector<Bonus> added;
+			const auto effects = after.getAllBonuses(effect);
+			for(const auto & bonus : *effects)
+				added.push_back(*bonus);
+			shielded.addUnitBonus(added);
+		}
+		for(const auto * unit : real.battleGetAllStacks())
+		{
+			// Preserve the source's future-volley classification, not current shot legality.
+			if(!unit->alive() || real.battleGetOwner(unit) == real.battleGetOwner(&protectedUnit)
+				|| !fheroes2IsArcher(*unit) || actingSpeed(*unit) <= 0)
+				continue;
+			StackWithBonuses shooter(&projected, static_cast<const battle::Unit *>(unit));
+			const auto withShield = real.calculateDmgRange(BattleAttackInfo(&shooter, &shielded, 0, true)).damage;
+			const auto withoutShield = real.calculateDmgRange(BattleAttackInfo(&shooter, &unshielded, 0, true)).damage;
+			if(withShield.min < withoutShield.min || withShield.max < withoutShield.max)
+				return true;
+		}
+		return false;
+	}
+
+	static Army army(const CPlayerBattleCallback & battle, PlayerColor player, bool friendly, bool forceNativeStrength = false)
 	{
 		Army result;
+		const Ports::FHeroes2::NativeStrengthModel strengthModel(battle, forceNativeStrength);
 		for(const auto * unit : battle.battleGetAllStacks())
 		{
 			if(!unit->alive() || (battle.battleGetOwner(unit) == player) != friendly)
 				continue;
-			const double strength = static_cast<double>(unit->estimateCombatValue());
+			const double strength = strengthModel.value(*unit);
 			result.strength += strength;
 			// Source ai_battle.cpp::analyzeBattleState uses GetSpeed(false, true)
 			// for projected army speed and isImmovable() for archer strength.
@@ -81,7 +166,7 @@ class FHeroes2SpellPolicy
 			const int nextTurnSpeed = unit->hasBonusOfType(BonusType::NOT_ACTIVE)
 				? 0 : static_cast<int>(unit->getMovementRange());
 			result.weightedSpeed += strength * nextTurnSpeed;
-			if(unit->isShooter() && nextTurnSpeed > 0)
+			if(fheroes2IsArcher(*unit) && nextTurnSpeed > 0)
 				result.shooters += strength;
 		}
 		return result;
@@ -142,21 +227,20 @@ class FHeroes2SpellPolicy
 		return result;
 	}
 
-	static double damageValue(const CStack & unit, int64_t damage, const Army & side)
+	static double damageValue(const Ports::FHeroes2::NativeStrengthModel & strengthModel, const CStack & unit, int64_t damage, const Army & side)
 	{
 		const double health = static_cast<double>(unit.getAvailableHealth());
 		if(damage <= 0 || health <= 0)
 			return 0;
-		const double strength = static_cast<double>(unit.estimateCombatValue());
+		const double strength = strengthModel.value(unit);
 		if(static_cast<double>(damage) >= health)
 		{
 			// Pinned ai_battle_spell.cpp::spellDamageValue uses Unit::GetSpeed(),
 			// which is STANDING for Blind/Paralyze, even when the creature's
 			// ordinary base speed is still nonzero. Native NOT_ACTIVE is the
 			// corresponding combat-disable projection, not VCMI isFrozen().
-			// Heroes II also considers its already-moved flag here; that
-			// difference is not silently inferred from VCMI movement range.
-			const int effectiveSpeed = unit.hasBonusOfType(BonusType::NOT_ACTIVE)
+			// Native moved/defended project the source TR_MOVED check; WAIT does not.
+			const int effectiveSpeed = unit.hasBonusOfType(BonusType::NOT_ACTIVE) || completedTurn(unit)
 				? 0 : static_cast<int>(unit.getMovementRange());
 			return strength + side.strength * (effectiveSpeed > side.averageSpeed() ? 0.07 : 0.035);
 		}
@@ -168,6 +252,146 @@ class FHeroes2SpellPolicy
 		if(unit.hasBonusOfType(BonusType::NOT_ACTIVE))
 			fraction += fraction - 1;
 		return strength * fraction;
+	}
+
+	// Pinned spellDamageValue folds a Mirror owner's linked copy strength into
+	// the owner's lethal score. It does NOT grant another stack-kill bonus for
+	// that automatic disappearance. Native state snapshots enumerate both.
+	static std::optional<uint32_t> directCascadeClone(const CPlayerBattleCallback & real,
+		const HypotheticBattle & projected, const CSpell & spell, const spells::Mechanics & mechanics,
+		const battle::Unit * aimed, PlayerColor player, const std::vector<UnitSnapshot> & before)
+	{
+		const auto * owner = dynamic_cast<const CStack *>(aimed);
+		if(!owner || !owner->alive() || owner->isClone() || owner->cloneID < 0
+			|| real.battleGetOwner(owner) == player || owner->magicResistance() != 0)
+			return std::nullopt;
+		const auto & level = spell.getLevelInfo(mechanics.getEffectLevel());
+		const auto & effects = level.battleEffects;
+		if(!spell.isDamage() || !mechanics.isNegativeSpell() || !mechanics.isMagicalEffect()
+			|| mechanics.isMassive() || level.range != std::vector<int>{0}
+			|| spell.getTargetType() != spells::AimType::CREATURE
+			|| !level.smartTarget || level.clearTarget || level.clearAffected
+			|| !(level.effects.isNull() || (level.effects.isStruct() && level.effects.Struct().empty()))
+			|| !(level.cumulativeEffects.isNull() || (level.cumulativeEffects.isStruct() && level.cumulativeEffects.Struct().empty()))
+			|| !effects.isStruct() || effects.Struct().size() != 1
+			|| !effects["directDamage"].isStruct() || effects["directDamage"].Struct().size() != 1
+			|| effects["directDamage"]["type"].String() != "damage")
+			return std::nullopt;
+		// Arbitrary reactions can create a different cause of disappearance.
+		for(const auto * unit : real.battleGetAllStacks(true))
+			if(unit->hasBonusOfType(BonusType::ON_COMBAT_EVENT)
+				|| unit->hasBonusOfType(BonusType::COMBAT_EVENT_TRIGGER))
+				return std::nullopt;
+		const auto clone = std::find_if(before.begin(), before.end(), [&](const UnitSnapshot & old)
+		{
+			return old.unit->unitId() == static_cast<uint32_t>(owner->cloneID);
+		});
+		if(clone == before.end() || clone->health <= 0 || !clone->unit->isClone()
+			|| clone->owner != real.battleGetOwner(owner) || clone->unit->unitSide() != owner->unitSide())
+			return std::nullopt;
+		int owners = 0;
+		for(const auto & old : before)
+		{
+			if(old.unit->cloneID == owner->cloneID) ++owners;
+			const auto * after = projected.battleGetUnitByID(old.unit->unitId());
+			const auto health = after && after->alive() ? after->getAvailableHealth() : 0;
+			if(old.unit->unitId() == owner->unitId() || old.unit->unitId() == clone->unit->unitId())
+			{
+				if(health != 0) return std::nullopt;
+			}
+			else if(health != old.health)
+				return std::nullopt;
+		}
+		return owners == 1 ? std::optional<uint32_t>(clone->unit->unitId()) : std::nullopt;
+	}
+
+	// Pinned area damage applies the resistance discount before nonlinear
+	// kill/wake valuation. This is source policy, not native expected utility:
+	// native resistance still rolls all-or-none independently per target.
+	// Explicit host shape mapping. Unknown spells keep their existing path;
+	// recognized spells with altered shapes cannot use this certificate.
+	static std::vector<int> ordinaryAreaRange(SpellID id)
+	{
+		switch(id.num)
+		{
+		case SpellID::FIREBALL:
+		case SpellID::METEOR_SHOWER: return {0, 1};
+		case SpellID::FROST_RING: return {1};
+		case SpellID::INFERNO: return {0, 1, 2};
+		default: return {};
+		}
+	}
+
+	struct OrdinaryAreaResistanceProjection
+	{
+		std::map<uint32_t, int64_t> raw;
+		std::map<uint32_t, uint32_t> discounted;
+		std::vector<UnitSnapshot> roster;
+	};
+
+	static std::optional<OrdinaryAreaResistanceProjection> ordinaryAreaResistanceProjection(
+		const CPlayerBattleCallback & real, const CSpell & spell, const spells::Mechanics & mechanics,
+		const std::vector<const CStack *> & affected)
+	{
+		const auto & level = spell.getLevelInfo(mechanics.getEffectLevel());
+		const auto & effects = level.battleEffects;
+		const auto expectedRange = ordinaryAreaRange(spell.id);
+		if(expectedRange.empty() || !spell.isDamage() || !mechanics.isNegativeSpell()
+			|| !mechanics.isMagicalEffect() || mechanics.isMassive()
+			|| !spell.counteredSpells.empty()
+			|| spell.getTargetType() != spells::AimType::LOCATION
+			|| level.range != expectedRange || level.smartTarget || mechanics.isSmart()
+			|| spell.getLevelInfo(mechanics.getRangeLevel()).range != expectedRange
+			|| level.clearTarget || level.clearAffected
+			|| !(level.effects.isNull() || (level.effects.isStruct() && level.effects.Struct().empty()))
+			|| !(level.cumulativeEffects.isNull() || (level.cumulativeEffects.isStruct() && level.cumulativeEffects.Struct().empty()))
+			|| !effects.isStruct() || effects.Struct().size() != 1
+			|| !effects["directDamage"].isStruct() || effects["directDamage"].Struct().size() != 1
+			|| effects["directDamage"]["type"].String() != "damage")
+			return std::nullopt;
+		OrdinaryAreaResistanceProjection result;
+		// Include corpses/turrets: death/action callbacks can live outside the area.
+		for(const auto * unit : real.battleGetAllStacks(true))
+		{
+			if(unit->hasBonusOfType(BonusType::ON_COMBAT_EVENT)
+				|| unit->hasBonusOfType(BonusType::COMBAT_EVENT_TRIGGER))
+				return std::nullopt;
+			result.roster.push_back({unit, unit->getAvailableHealth(), unit->getCount(),
+				unit->getPosition(), real.battleGetOwner(unit)});
+		}
+		for(const auto * unit : affected)
+		{
+			if(!unit || !unit->alive() || unit->isClone() || unit->cloneID >= 0 || unit->isTurret()
+				|| unit->hasBonusOfType(BonusType::DISINTEGRATE))
+				return std::nullopt;
+			const int resistance = unit->magicResistance();
+			const int64_t raw = mechanics.adjustEffectValue(unit);
+			const auto adjusted = Ports::FHeroes2::resistedDamage(raw, resistance);
+			if(!adjusted || !result.raw.emplace(unit->unitId(), raw).second)
+				return std::nullopt;
+			if(resistance > 0 && resistance < 100)
+				result.discounted.emplace(unit->unitId(), *adjusted);
+		}
+		return result;
+	}
+
+	static bool ordinaryAreaAftermath(const HypotheticBattle & projected,
+		const OrdinaryAreaResistanceProjection & projection)
+	{
+		const auto afterRoster = projected.battleGetUnitsIf([](const battle::Unit * unit) { return !unit->isGhost(); });
+		if(afterRoster.size() != projection.roster.size())
+			return false;
+		for(const auto & old : projection.roster)
+		{
+			const auto * after = projected.battleGetUnitByID(old.unit->unitId());
+			if(!after || after->getPosition() != old.position || projected.battleGetOwner(after) != old.owner)
+				return false;
+			const auto raw = projection.raw.find(old.unit->unitId());
+			const int64_t expected = raw == projection.raw.end() ? old.health : std::max<int64_t>(0, old.health - raw->second);
+			if(after->getAvailableHealth() != expected)
+				return false;
+		}
+		return true;
 	}
 
 	static void checkUnchanged(const CPlayerBattleCallback & battle, const CGHeroInstance & hero,
@@ -198,22 +422,39 @@ public:
 	static double sourceDamageValue(const CPlayerBattleCallback & battle,
 		const CStack & target, int64_t damage)
 	{
-		return damageValue(target, damage, army(battle, battle.battleGetOwner(&target), true));
+		return damageValue(Ports::FHeroes2::NativeStrengthModel(battle), target, damage, army(battle, battle.battleGetOwner(&target), true));
 	}
 
 	static std::optional<BattleAction> choose(const std::shared_ptr<CPlayerBattleCallback> & real,
 		const Environment * environment, const CStack * activeStack = nullptr,
-		bool farewellDamageOnly = false)
+		bool farewellDamageOnly = false, const FHeroes2ObservedSpells & observedEnemySpells = {},
+		bool forceNativeStrength = false)
 	{
 		const auto * hero = real->battleGetMyHero();
 		if(!hero || real->battleCanCastSpell(hero, spells::Mode::HERO) != ESpellCastProblem::OK)
 			return std::nullopt;
 
+		const Ports::FHeroes2::NativeStrengthModel strengthModel(*real, forceNativeStrength);
 		const auto player = hero->getOwner();
-		const auto ours = army(*real, player, true);
-		const auto theirs = army(*real, player, false);
+		const auto ours = army(*real, player, true, forceNativeStrength);
+		const auto theirs = army(*real, player, false, forceNativeStrength);
+		const FHeroes2ObservedMagic observedMagic(*real, observedEnemySpells, ours.strength);
 		if(ours.strength <= 0 || theirs.strength <= 0)
 			return std::nullopt;
+
+		// Source uses the current planner stance, including when reversing enemy Haste.
+		auto stanceEnemies = real->battleGetStacks(CBattleInfoEssentials::ONLY_ENEMY);
+		vstd::erase_if(stanceEnemies, [](const CStack * unit)
+		{
+			return !unit->alive() || unit->isInvincible();
+		});
+		std::sort(stanceEnemies.begin(), stanceEnemies.end(),
+			[](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
+		const bool defensiveTactics = activeStack
+			&& FHeroes2TacticsContext::tactics(*real, *activeStack, stanceEnemies, observedEnemySpells, forceNativeStrength).defensive;
+
+		const bool attackingCastle = real->battleGetDefendedTown() != nullptr
+			&& real->battleGetMySide() == BattleSide::ATTACKER;
 
 		double threshold = ours.strength * ours.strength / theirs.strength * 0.04;
 		if(theirs.shooters / theirs.strength > 0.5)
@@ -233,7 +474,8 @@ public:
 		for(const auto & old : before)
 			if(old.owner != player && old.health > 0
 				&& old.unit->hasBonusOfType(BonusType::DRAGON_NATURE))
-				enemyDragonStrength += static_cast<double>(old.unit->estimateCombatValue());
+				enemyDragonStrength += strengthModel.value(*old.unit);
+		std::shared_ptr<HypotheticBattle> previewBaseline;
 		std::optional<BattleAction> best;
 		double bestValue = 0;
 
@@ -264,11 +506,12 @@ public:
 			const bool disablingSpell = spell->id == SpellID::BLIND;
 			const bool berserkSpell = spell->id == SpellID::BERSERK;
 			const bool mirrorImageSpell = spell->id == SpellID::CLONE;
+			const bool antiMagicSpell = spell->id == SpellID::ANTI_MAGIC;
 			const bool unitEffectSpell = speedSpell || defenseSpell || dragonSlayerSpell
 				|| damageRangeSpell || defenseBuff || attackBuff || rangedShield
 				|| hypnotizeSpell || disablingSpell || berserkSpell;
 			if(!spell->isCombat() || spell->isCreatureAbility()
-				|| (!spell->isDamage() && !resurrection && !summonSpell && !teleportSpell && !earthquakeSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !dispelSpell && spell->id != SpellID::CURE)
+				|| (!spell->isDamage() && !resurrection && !summonSpell && !teleportSpell && !earthquakeSpell && !speedSpell && !defenseSpell && !dragonSlayerSpell && !damageRangeSpell && !defenseBuff && !attackBuff && !rangedShield && !hypnotizeSpell && !disablingSpell && !berserkSpell && !mirrorImageSpell && !antiMagicSpell && !dispelSpell && spell->id != SpellID::CURE)
 				|| !spell->canBeCast(real.get(), spells::Mode::HERO, hero))
 				continue;
 			if(!environment)
@@ -282,15 +525,108 @@ public:
 			if(rangedShield && duration == 1
 				&& std::none_of(before.begin(), before.end(), [&](const UnitSnapshot & old)
 				{
-					return old.owner != player && old.health > 0 && old.unit->isShooter()
+					return old.owner != player && old.health > 0 && fheroes2IsArcher(*old.unit)
 						&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
 						&& !completedTurn(*old.unit);
 				}))
 				continue;
+			bool areaPartialPossible = false;
+			if(!ordinaryAreaRange(spell->id).empty())
+				for(const auto * unit : real->battleGetAllStacks(true))
+					if(unit->alive() && unit->magicResistance() > 0 && unit->magicResistance() < 100)
+						{ areaPartialPossible = true; break; }
 			const auto legalTargets = teleportSpell
 				? teleportTargets(*mechanics, activeStack) : targets(*mechanics);
 			for(const auto & target : legalTargets)
 			{
+				// Native castEval does not execute beforeCast/reflect. Do not score
+				// apparent enemy effects when a hero's direct negative spell may
+				// actually reflect onto our army. This is a conservative native
+				// availability boundary, not an evaluated reflection distribution.
+				const auto * aimed = target.empty() ? nullptr
+					: real->battleGetUnitByPos(target.front().hexValue, true);
+				if(aimed && mechanics->isNegativeSpell() && !mechanics->isMassive()
+					&& spell->getLevelInfo(mechanics->getRangeLevel()).range == std::vector<int>{0}
+					&& !aimed->getAllBonuses(Selector::type()(BonusType::MAGIC_MIRROR))->empty()
+					&& aimed->valOfBonuses(BonusType::MAGIC_MIRROR) > 0)
+					continue;
+                // Bounded source-order damage projection. Chain, area and control
+                // continue through their existing policies, not this approximation.
+                const bool ordinaryDirect = spell->id == SpellID::MAGIC_ARROW
+                    || spell->id == SpellID::ICE_BOLT || spell->id == SpellID::LIGHTNING_BOLT
+                    || spell->id == SpellID::IMPLOSION;
+                if(ordinaryDirect && aimed && aimed->magicResistance() > 0 && aimed->magicResistance() < 100)
+                {
+                    const auto * aimedStack = dynamic_cast<const CStack *>(aimed);
+                    if(!aimedStack)
+                        continue;
+                    // Only partial resistance enters this new projection. Zero
+                    // resistance retains the pre-existing native preview, including
+                    // clone/linked and modded-effect behavior.
+                    // Combat scripts may resurrect or damage other stacks on death;
+                    // their arbitrary aftermath is outside this scalar projection.
+                    // Keep corpses: UNIT_DEATH and ACTION_FINISHED can dispatch
+                    // to dead units. This native roster excludes removed ghosts.
+                    const auto triggerRoster = real->battleGetAllStacks(true);
+                    if(std::any_of(triggerRoster.begin(), triggerRoster.end(), [](const CStack * unit)
+                        { return unit->hasBonusOfType(BonusType::COMBAT_EVENT_TRIGGER)
+                            || unit->hasBonusOfType(BonusType::ON_COMBAT_EVENT); }))
+                        continue;
+                    const auto & level = spell->getLevelInfo(mechanics->getEffectLevel());
+                    const auto & effects = level.battleEffects;
+                    // IDs can be modded: admit precisely the standard damage effect,
+                    // with no chain/count/percentage/additional scripted semantics.
+                    if(!aimed || aimed->isClone() || aimedStack->cloneID >= 0
+                        || real->battleGetOwner(aimed) == player || !aimed->alive()
+                        || !mechanics->isNegativeSpell() || !mechanics->isMagicalEffect()
+                        || mechanics->isMassive() || level.range != std::vector<int>{0}
+                        || spell->getTargetType() != spells::AimType::CREATURE
+                        || !level.smartTarget || level.clearTarget || level.clearAffected
+                        || !(level.effects.isNull() || (level.effects.isStruct() && level.effects.Struct().empty()))
+                        || !(level.cumulativeEffects.isNull() || (level.cumulativeEffects.isStruct() && level.cumulativeEffects.Struct().empty()))
+                        || !effects.isStruct() || effects.Struct().size() != 1
+                        || !effects["directDamage"].isStruct()
+                        || effects["directDamage"].Struct().size() != 1
+                        || effects["directDamage"]["type"].String() != "damage")
+                        continue;
+                    const auto damage = Ports::FHeroes2::resistedDamage(
+                        mechanics->adjustEffectValue(aimed), aimed->magicResistance());
+                    if(!damage || *damage == 0)
+                        continue;
+                    double value = 0;
+                    if(farewellDamageOnly)
+                    {
+                        const auto remaining = std::max<int64_t>(0, aimed->getAvailableHealth() - *damage);
+                        const auto hp = aimed->getMaxHealth();
+                        if(hp <= 0 || aimed->getCount() <= 0)
+                            continue;
+                        const auto survivors = remaining / hp + (remaining % hp != 0);
+                        const auto killed = std::clamp<int64_t>(aimed->getCount() - survivors, 0, aimed->getCount());
+                        value = strengthModel.value(*aimed) / aimed->getCount() * killed;
+                    }
+                    else
+                        value = damageValue(strengthModel, *aimedStack, *damage, theirs)
+                            / std::sqrt(std::max(1, cost) / 3.0);
+                    if(std::isfinite(value) && value > bestValue && (farewellDamageOnly || value > threshold))
+                    {
+                        bestValue = value;
+                        best = BattleAction::makeHeroSpellcast(real->battleGetMySide(), target, spell->id);
+                    }
+                    continue;
+                }
+				std::optional<OrdinaryAreaResistanceProjection> areaProjection;
+				if(areaPartialPossible)
+				{
+					const auto affected = mechanics->getAffectedStacks(target);
+					const bool partial = std::any_of(affected.begin(), affected.end(), [](const CStack * unit)
+						{ return unit && unit->magicResistance() > 0 && unit->magicResistance() < 100; });
+					if(partial)
+					{
+						areaProjection = ordinaryAreaResistanceProjection(*real, *spell, *mechanics, affected);
+						if(!areaProjection)
+							continue;
+					}
+				}
 				if(mirrorImageSpell)
 				{
 					const auto * source = target.empty() ? nullptr
@@ -298,7 +634,9 @@ public:
 					if(!source || !canValueNewEffect(*source, duration))
 						continue;
 				}
-				auto projected = std::make_shared<HypotheticBattle>(environment, real);
+				if(!previewBaseline)
+					previewBaseline = std::make_shared<HypotheticBattle>(environment, real);
+				auto projected = std::make_shared<HypotheticBattle>(environment, previewBaseline);
 				// Earthquake is randomized; rank expected wall damage.
 				if(!earthquakeSpell)
 				{
@@ -306,6 +644,14 @@ public:
 					cast.castEval(projected->getServerCallback(), target);
 					checkUnchanged(*real, *hero, mana, before);
 				}
+				if(strengthModel.usesSourceScale())
+				{
+					const auto units = projected->battleGetUnitsIf([](const battle::Unit * unit) { return !unit->isGhost(); });
+					if(std::any_of(units.begin(), units.end(), [&](const battle::Unit * unit) { return !strengthModel.supports(*unit); }))
+						return choose(real, environment, activeStack, farewellDamageOnly, observedEnemySpells, true);
+				}
+				if(areaProjection && !ordinaryAreaAftermath(*projected, *areaProjection))
+					continue;
 				// Heroes II Berserker targets enemies only. Native advanced/expert
 				// Berserk is indiscriminate area magic; keep that projection from
 				// newly compelling allies. Immune/already-compelled allies are safe.
@@ -322,10 +668,9 @@ public:
 
 				if(farewellDamageOnly)
 				{
-					// Pinned spellDamageValue(retreating=true) ignores partial HP
-					// damage, clones and future battlefield pressure: the army
-					// is leaving. Rank only actual creature deaths predicted by
-					// VCMI. Never burn the acting stack with farewell area damage.
+					// Farewell values kills after the source raw-damage resistance
+					// discount, without the ordinary stack-kill or wake-up bonuses.
+					// Keep the native full-hit preview for active-stack survival.
 					double killedValue = 0;
 					bool killsActingStack = false;
 					for(const auto & old : before)
@@ -334,7 +679,7 @@ public:
 							continue;
 						const auto * after = projected->battleGetUnitByID(old.unit->unitId());
 						const int survivors = after && after->alive() ? after->getCount() : 0;
-						const int killed = std::clamp(old.count - survivors, 0, old.count);
+						int killed = std::clamp(old.count - survivors, 0, old.count);
 						if(activeStack && old.unit->unitId() == activeStack->unitId() && killed == old.count)
 						{
 							killsActingStack = true;
@@ -342,8 +687,18 @@ public:
 						}
 						if(old.unit->isClone())
 							continue;
+						if(areaProjection && areaProjection->discounted.contains(old.unit->unitId()))
+						{
+							const auto damage = areaProjection->discounted.at(old.unit->unitId());
+							const auto remaining = std::max<int64_t>(0, old.health - damage);
+							const auto hp = old.unit->getMaxHealth();
+							if(hp <= 0)
+								throw std::logic_error("Farewell spell target has invalid maximum health");
+							const auto remainingCount = remaining / hp + (remaining % hp != 0);
+							killed = static_cast<int>(std::clamp<int64_t>(old.count - remainingCount, 0, old.count));
+						}
 						const double perCreatureStrength
-							= static_cast<double>(old.unit->estimateCombatValue()) / old.count;
+							= strengthModel.value(*old.unit) / old.count;
 						killedValue += (old.owner == player ? -1.0 : 1.0)
 								* perCreatureStrength * killed;
 					}
@@ -355,6 +710,9 @@ public:
 					continue;
 				}
 
+				const auto cascadeClone = ordinaryDirect
+					? directCascadeClone(*real, *projected, *spell, *mechanics, aimed, player, before)
+					: std::nullopt;
 				double value = 0;
 				int64_t friendlyHealth = 0;
 				for(const auto & old : before)
@@ -367,11 +725,30 @@ public:
 					if(friendlyAfter)
 						friendlyHealth += health;
 					if(health < old.health)
-						value += (friendly ? -1 : 1) * damageValue(*old.unit, old.health - health, friendly ? ours : theirs);
+					{
+						// Keep the actual full-hit preview for friendlyHealth/safety below.
+						// Only numerical source damage value receives the discount.
+						if(areaProjection && areaProjection->discounted.contains(old.unit->unitId()))
+							value += (friendly ? -1 : 1) * damageValue(strengthModel, *old.unit,
+								areaProjection->discounted.at(old.unit->unitId()), friendly ? ours : theirs);
+						else if(cascadeClone && old.unit->unitId() == *cascadeClone)
+							value += strengthModel.value(*old.unit);
+						else
+							value += (friendly ? -1 : 1) * damageValue(strengthModel, *old.unit, old.health - health, friendly ? ours : theirs);
+					}
 					else if(health > old.health && after && !after->isClone() && !summonSpell)
 					{
-						const double restored = static_cast<double>(after->estimateCombatValue())
+						double restored = strengthModel.value(*after)
 							* static_cast<double>(health - old.health) / static_cast<double>(health);
+						if(resurrection && friendlyAfter)
+						{
+							// CHealth::heal adds newly raised creatures to getResurrected()
+							// only for ONE_BATTLE healing. Do not infer permanence from mastery.
+							const bool permanent = after->getCount() > old.count
+								&& after->getResurrected() == old.unit->getResurrected();
+							restored = Ports::FHeroes2::resurrectionValue(
+								restored, ours.strength, theirs.strength, permanent);
+						}
 						value += friendlyAfter ? restored : -restored;
 					}
 					int valuationDuration = duration;
@@ -387,8 +764,23 @@ public:
 						}))
 							valuationDuration = std::max(valuationDuration, 2);
 					}
+					// Source positive effects use trueFriendly, excluding changed sides.
+					if(antiMagicSpell && friendly && friendlyAfter && after && health == old.health)
+					{
+						const double blocked = observedMagic.newlyBlockedStrength(*real, *projected, *old.unit, *after);
+						value += strengthModel.value(*old.unit)
+							* Ports::FHeroes2::antiMagicRatio(blocked, theirs.strength,
+								FHeroes2ObservedMagic::hasPositiveMagic(*old.unit),
+								FHeroes2ObservedMagic::removedNegativeMagic(*old.unit, *after),
+								FHeroes2ObservedMagic::affordableResurrection(*real, *hero, *old.unit),
+								blocked > 0, duration >= 2 || !completedTurn(*old.unit));
+					}
 					// Dispel/Cure remove existing effects even from disabled units.
 					if(unitEffectSpell && !canValueNewEffect(*old.unit, valuationDuration))
+						continue;
+					// spellDispelValue retains spellDurationMultiplier, but HP healing is immediate.
+					if((dispelSpell || spell->id == SpellID::CURE)
+						&& duration < 2 && completedTurn(*old.unit))
 						continue;
 					if((dispelSpell || spell->id == SpellID::CURE) && after && after->alive())
 					{
@@ -397,7 +789,7 @@ public:
 						if(old.unit->hasBonus(hypnotize) && !after->hasBonus(hypnotize)
 							&& old.unit->isHypnotized() && !after->isHypnotized())
 							value += Ports::FHeroes2::dispelledHypnotizeValue(
-								static_cast<double>(old.unit->estimateCombatValue()), friendly, friendlyAfter);
+								strengthModel.value(*old.unit), friendly, friendlyAfter);
 					}
 					// Pinned spellDragonSlayerValue only values this buff when
 					// enemy dragons exist. VCMI's SLAYER is a target-dependent
@@ -409,7 +801,7 @@ public:
 						const bool nativeEffectGained = after->hasBonusOfType(BonusType::SLAYER)
 							&& !old.unit->hasBonusOfType(BonusType::SLAYER);
 						value += Ports::FHeroes2::dragonSlayerValue(
-							static_cast<double>(old.unit->estimateCombatValue()),
+							strengthModel.value(*old.unit),
 							enemyDragonStrength, theirs.strength, nativeEffectGained);
 					}
 					// Pinned fheroes2 values Disrupting Ray against enemy defense.
@@ -417,7 +809,7 @@ public:
 					// defense and no-op effects. No source-equivalence claim is made.
 					if(defenseSpell && !friendly && after && after->alive() && health == old.health)
 					{
-						const double enemyStrength = static_cast<double>(old.unit->estimateCombatValue());
+						const double enemyStrength = strengthModel.value(*old.unit);
 						value += enemyStrength * Ports::FHeroes2::disruptingRayDefenseRatio(
 							old.unit->getDefense(false), after->getDefense(false),
 							ours.strength, enemyStrength);
@@ -440,7 +832,7 @@ public:
 							const bool counteracting = old.unit->hasBonus(Selector::source(
 								BonusSource::SPELL_EFFECT, BonusSourceID(opposite)));
 							const auto * creature = old.unit->unitType();
-							value += static_cast<double>(old.unit->estimateCombatValue())
+							value += strengthModel.value(*old.unit)
 								* Ports::FHeroes2::blessCurseDamageRatio(
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(),
 									counteracting, changed);
@@ -458,11 +850,8 @@ public:
 							BonusSourceID(SpellID(SpellID::HASTE)));
 						if(old.unit->hasBonus(haste) && !after->hasBonus(haste))
 						{
-							const int hasted = actingSpeed(*old.unit);
-							const int restored = actingSpeed(*after);
-							value += static_cast<double>(old.unit->estimateCombatValue())
-								* Ports::FHeroes2::hasteSpeedRatio(restored, hasted,
-									ours.averageSpeed(), false, old.unit->isShooter(), false);
+							value += strengthModel.value(*old.unit)
+								* removedHasteRatio(*old.unit, *after, theirs.averageSpeed(), defensiveTactics);
 						}
 						// In the pinned fheroes2 spellDispelValue an enemy's
 						// positive Bless contributes the same spellEffectValue
@@ -477,7 +866,7 @@ public:
 							&& !after->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE))
 						{
 							const auto * creature = old.unit->unitType();
-							value += static_cast<double>(old.unit->estimateCombatValue())
+							value += strengthModel.value(*old.unit)
 								* Ports::FHeroes2::blessCurseDamageRatio(
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
 						}
@@ -491,7 +880,7 @@ public:
 							BonusSourceID(SpellID(SpellID::STONE_SKIN)));
 						if(old.unit->hasBonus(stoneSkin) && !after->hasBonus(stoneSkin))
 						{
-							value += static_cast<double>(old.unit->estimateCombatValue())
+							value += strengthModel.value(*old.unit)
 								* Ports::FHeroes2::stoneSkinDefenseRatio(
 									after->getDefense(false), old.unit->getDefense(false));
 						}
@@ -499,7 +888,7 @@ public:
 							BonusSourceID(SpellID(SpellID::BLOODLUST)));
 						if(old.unit->hasBonus(bloodlust) && !after->hasBonus(bloodlust))
 						{
-							value += static_cast<double>(old.unit->estimateCombatValue())
+							value += strengthModel.value(*old.unit)
 								* Ports::FHeroes2::bloodlustAttackRatio(
 									after->getAttack(false), old.unit->getAttack(false));
 						}
@@ -507,17 +896,16 @@ public:
 						// spellDispelValue when dispelling a buffed enemy. VCMI's
 						// analogous ranged protection is AIR_SHIELD, not SHIELD.
 						// Only credit its removal if the native projection actually
-						// clears the spell and the ranged mitigation bonus. Use
+						// clears the spell and reduces ranged mitigation. Use
 						// OUR archer strength as the threat to the protected enemy.
 						const auto airShield = Selector::source(BonusSource::SPELL_EFFECT,
 							BonusSourceID(SpellID(SpellID::AIR_SHIELD)));
 						if(old.unit->hasBonus(airShield) && !after->hasBonus(airShield)
-							&& old.unit->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION)
-							&& !after->hasBonusOfType(BonusType::GENERAL_DAMAGE_REDUCTION))
+							&& effectiveRangedShield(*real, *projected, *old.unit, *after))
 						{
-							value += static_cast<double>(old.unit->estimateCombatValue())
+							value += strengthModel.value(*old.unit)
 								* Ports::FHeroes2::shieldRangedRatio(
-									ours.shooters, ours.strength, old.unit->isShooter(), true);
+									ours.shooters, ours.strength, fheroes2IsArcher(*old.unit), true);
 						}
 					}
 					// Pinned fheroes2 spellDispelValue also values CURE as removal
@@ -532,10 +920,11 @@ public:
 						};
 						const auto curse = sourceEffect(SpellID(SpellID::CURSE));
 						if(old.unit->unitType() && old.unit->hasBonus(curse) && !after->hasBonus(curse)
+							&& old.unit->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE)
 							&& !after->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE))
 						{
 							const auto * creature = old.unit->unitType();
-							value += static_cast<double>(old.unit->estimateCombatValue())
+							value += strengthModel.value(*old.unit)
 								* Ports::FHeroes2::blessCurseDamageRatio(
 									creature->getBaseDamageMin(), creature->getBaseDamageMax(), false, true);
 						}
@@ -546,42 +935,43 @@ public:
 						const auto slow = sourceEffect(SpellID(SpellID::SLOW));
 						if(old.unit->hasBonus(slow) && !after->hasBonus(slow) && old.position.isValid())
 						{
-							const int slowedSpeed = actingSpeed(*old.unit);
-							const int restoredSpeed = actingSpeed(*after);
 							const int distance = old.unit->unitSide() == BattleSide::DEFENDER
 								? old.position.getX()
 								: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
-							value += static_cast<double>(old.unit->estimateCombatValue())
-								* Ports::FHeroes2::slowSpeedRatio(
-									restoredSpeed, slowedSpeed, ours.averageSpeed(),
-									old.unit->isShooter(), false, false,
-									old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
+							value += strengthModel.value(*old.unit)
+								* removedSlowRatio(*old.unit, *after, ours.averageSpeed(),
+									attackingCastle, std::max(1, distance));
 						}
 						const auto blind = sourceEffect(SpellID(SpellID::BLIND));
-						if(old.unit->hasBonus(blind) && !after->hasBonus(blind))
-							value += static_cast<double>(old.unit->estimateCombatValue())
+						if(old.unit->hasBonus(blind) && !after->hasBonus(blind)
+							&& old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+							&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
+							value += strengthModel.value(*old.unit)
 								* Ports::FHeroes2::blindControlRatio(false, false, true, false, true);
-						// Pinned fheroes2 spellDispelValue also restores allies
-						// affected by hostile Berserker. Its spellEffectValue
-						// assigns 85% of stack strength to this loss of control.
-						// Cure must actually remove both the spell and VCMI's
-						// ATTACKS_NEAREST_CREATURE behavior; merely permitting a
-						// cast or having an unrelated Berserk-like bonus scores zero.
-						// Heroes II Berserker and Heroes III Berserk do not have
-						// identical targeting or movement rules.
+						// spellDispelValue reuses Berserker's distance discount.
 						const auto berserk = sourceEffect(SpellID(SpellID::BERSERK));
 						if(old.unit->hasBonus(berserk) && !after->hasBonus(berserk)
 							&& old.unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
-							&& !after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE))
-							value += static_cast<double>(old.unit->estimateCombatValue()) * 0.85;
+							&& !after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
+							&& old.position.isValid())
+						{
+							const int distance = old.unit->unitSide() == BattleSide::DEFENDER
+								? old.position.getX()
+								: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
+							value += strengthModel.value(*old.unit)
+								* Ports::FHeroes2::berserkControlRatio(
+									false, fheroes2IsArcher(*old.unit), std::max(1, distance), false, true);
+						}
 
 						// Native Paralyze is a creature-origin disabling spell;
 						// source spellEffectValue gives 0.85 for multi-stack
 						// Paralyze, conditioned on actual effect removal.
 						const auto paralyze = sourceEffect(SpellID(SpellID::PARALYZE));
-						if(old.unit->hasBonus(paralyze) && !after->hasBonus(paralyze))
+						if(old.unit->hasBonus(paralyze) && !after->hasBonus(paralyze)
+							&& old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+							&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
 							value += Ports::FHeroes2::dispelledEffectValue(
-								static_cast<double>(old.unit->estimateCombatValue()),
+								strengthModel.value(*old.unit),
 								0.85, true, true, true);
 					}
 					// Pinned spellDispelValue also SUBTRACTS value when a
@@ -595,22 +985,13 @@ public:
 						{
 							return Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(id));
 						};
-						const double strength = static_cast<double>(old.unit->estimateCombatValue());
+						const double strength = strengthModel.value(*old.unit);
 						if(friendlyAfter)
 						{
 							if(old.unit->hasBonus(effect(SpellID(SpellID::HASTE)))
-								&& !after->hasBonus(effect(SpellID(SpellID::HASTE)))
-								// Source GetSpeed(false,true) is STANDING while Blind/Paralyze.
-								// If a broad Dispel also lifts the disable, the restored
-								// movement is NOT a benefit of removing friendly Haste.
-								&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
-								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
-							{
-								const double haste = Ports::FHeroes2::hasteSpeedRatio(
-									actingSpeed(*after), actingSpeed(*old.unit),
-									theirs.averageSpeed(), false, old.unit->isShooter(), false);
-								value -= strength * haste;
-							}
+								&& !after->hasBonus(effect(SpellID(SpellID::HASTE))))
+								value -= strength * removedHasteRatio(
+									*old.unit, *after, theirs.averageSpeed(), defensiveTactics);
 							if(old.unit->unitType() && old.unit->hasBonus(effect(SpellID(SpellID::BLESS)))
 								&& !after->hasBonus(effect(SpellID(SpellID::BLESS)))
 								&& old.unit->hasBonusOfType(BonusType::ALWAYS_MAXIMUM_DAMAGE)
@@ -629,9 +1010,10 @@ public:
 								value -= strength * Ports::FHeroes2::bloodlustAttackRatio(
 									after->getAttack(false), old.unit->getAttack(false));
 							if(old.unit->hasBonus(effect(SpellID(SpellID::AIR_SHIELD)))
-								&& !after->hasBonus(effect(SpellID(SpellID::AIR_SHIELD))))
+								&& !after->hasBonus(effect(SpellID(SpellID::AIR_SHIELD)))
+								&& effectiveRangedShield(*real, *projected, *old.unit, *after))
 								value -= strength * Ports::FHeroes2::shieldRangedRatio(
-									theirs.shooters, theirs.strength, old.unit->isShooter(), true);
+									theirs.shooters, theirs.strength, fheroes2IsArcher(*old.unit), true);
 						}
 						else
 						{
@@ -647,29 +1029,41 @@ public:
 							}
 							if(old.unit->hasBonus(effect(SpellID(SpellID::SLOW)))
 								&& !after->hasBonus(effect(SpellID(SpellID::SLOW)))
-								&& old.position.isValid()
-								// Do not mistake a simultaneous release from Blind
-								// for the tactical cost of removing hostile Slow.
-								&& !old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
-								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
+								&& old.position.isValid())
 							{
 								const int distance = old.unit->unitSide() == BattleSide::DEFENDER
 									? old.position.getX()
 									: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
-								value -= strength * Ports::FHeroes2::slowSpeedRatio(
-									actingSpeed(*after), actingSpeed(*old.unit),
-									ours.averageSpeed(), old.unit->isShooter(), false, false,
-									old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
+								value -= strength * removedSlowRatio(*old.unit, *after, ours.averageSpeed(),
+									attackingCastle, std::max(1, distance));
 							}
-							if(old.unit->hasBonus(effect(SpellID(SpellID::BLIND)))
-								&& !after->hasBonus(effect(SpellID(SpellID::BLIND))))
+							// Source retaliation is unavailable while these disables remain active.
+							// Blind retaliation is only enabled inside an attack sequence.
+							if(enemyCount != 1
+								&& old.unit->hasBonus(effect(SpellID(SpellID::BLIND)))
+								&& !after->hasBonus(effect(SpellID(SpellID::BLIND)))
+								&& old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
 								value -= strength * Ports::FHeroes2::blindControlRatio(
 									false, false, true, false, true);
+							// Removing Berserker from the final enemy has no source penalty.
 							if(old.unit->hasBonus(effect(SpellID(SpellID::BERSERK)))
-								&& !after->hasBonus(effect(SpellID(SpellID::BERSERK))))
-								value -= strength * 0.85;
-							if(old.unit->hasBonus(effect(SpellID(SpellID::PARALYZE)))
-								&& !after->hasBonus(effect(SpellID(SpellID::PARALYZE))))
+								&& !after->hasBonus(effect(SpellID(SpellID::BERSERK)))
+								&& old.unit->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
+								&& !after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE)
+								&& old.position.isValid())
+							{
+								const int distance = old.unit->unitSide() == BattleSide::DEFENDER
+									? old.position.getX()
+									: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
+								value -= strength * Ports::FHeroes2::berserkControlRatio(
+									enemyCount == 1, fheroes2IsArcher(*old.unit), std::max(1, distance), false, true);
+							}
+							if(enemyCount != 1
+								&& old.unit->hasBonus(effect(SpellID(SpellID::PARALYZE)))
+								&& !after->hasBonus(effect(SpellID(SpellID::PARALYZE)))
+								&& old.unit->hasBonusOfType(BonusType::NOT_ACTIVE)
+								&& !after->hasBonusOfType(BonusType::NOT_ACTIVE))
 								value -= strength * 0.85;
 						}
 					}
@@ -678,7 +1072,7 @@ public:
 					// gain; immunities and already-active buffs must score zero.
 					if(defenseBuff && friendly && after && after->alive() && health == old.health)
 					{
-						value += static_cast<double>(old.unit->estimateCombatValue())
+						value += strengthModel.value(*old.unit)
 							* Ports::FHeroes2::stoneSkinDefenseRatio(
 								old.unit->getDefense(false), after->getDefense(false));
 					}
@@ -691,10 +1085,11 @@ public:
 						const auto shieldEffect = Selector::source(BonusSource::SPELL_EFFECT,
 							BonusSourceID(SpellID(SpellID::AIR_SHIELD)));
 						const bool newlyProtected = after->hasBonus(shieldEffect)
-							&& !old.unit->hasBonus(shieldEffect);
-						value += static_cast<double>(old.unit->estimateCombatValue())
+							&& !old.unit->hasBonus(shieldEffect)
+							&& effectiveRangedShield(*real, *projected, *old.unit, *after);
+						value += strengthModel.value(*old.unit)
 							* Ports::FHeroes2::shieldRangedRatio(theirs.shooters,
-								theirs.strength, old.unit->isShooter(), newlyProtected);
+								theirs.strength, fheroes2IsArcher(*old.unit), newlyProtected);
 					}
 					// Pinned fheroes2 spellEffectValue gives Bloodlust 10% of
 					// friendly stack strength. VCMI applies the attack bonus only
@@ -702,7 +1097,7 @@ public:
 					// Resisted and already-active effects must not use mana.
 					if(attackBuff && friendly && after && after->alive() && health == old.health)
 					{
-						value += static_cast<double>(old.unit->estimateCombatValue())
+						value += strengthModel.value(*old.unit)
 							* Ports::FHeroes2::bloodlustAttackRatio(
 								old.unit->getAttack(false), after->getAttack(false));
 					}
@@ -722,7 +1117,7 @@ public:
 						const bool newlyControlled = after->isHypnotized()
 							&& !old.unit->isHypnotized()
 							&& projected->battleGetOwner(after) == player;
-						value += static_cast<double>(old.unit->estimateCombatValue())
+						value += strengthModel.value(*old.unit)
 							* Ports::FHeroes2::hypnotizeControlRatio(alreadyDisabled, newlyControlled);
 					}
 					// Pinned fheroes2 spellEffectValue values Blind at 0.8 of
@@ -741,7 +1136,7 @@ public:
 							|| hasEffect(old.unit, SpellID(SpellID::PARALYZE));
 						const bool newBlind = hasEffect(after, SpellID(SpellID::BLIND))
 							&& !hasEffect(old.unit, SpellID(SpellID::BLIND));
-						value += static_cast<double>(old.unit->estimateCombatValue())
+						value += strengthModel.value(*old.unit)
 							* Ports::FHeroes2::blindControlRatio(
 								enemyCount == 1,
 								old.unit->hasBonusOfType(BonusType::UNLIMITED_RETALIATIONS),
@@ -770,9 +1165,9 @@ public:
 						const int distance = old.unit->unitSide() == BattleSide::DEFENDER
 							? old.position.getX()
 							: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
-						value += static_cast<double>(old.unit->estimateCombatValue())
+						value += strengthModel.value(*old.unit)
 							* Ports::FHeroes2::berserkControlRatio(
-								enemyCount == 1, old.unit->isShooter(), std::max(1, distance),
+								enemyCount == 1, fheroes2IsArcher(*old.unit), std::max(1, distance),
 								alreadyDisabled, gainedBerserk);
 					}
 					// fheroes2 spellEffectValue values Haste/Slow based on the
@@ -783,26 +1178,24 @@ public:
 					{
 						const int beforeSpeed = actingSpeed(*old.unit);
 						const int afterSpeed = actingSpeed(*after);
-						const double strength = static_cast<double>(old.unit->estimateCombatValue());
+						const double strength = strengthModel.value(*old.unit);
 						if(friendly && spell->id == SpellID::HASTE)
 						{
 							const bool slowed = old.unit->hasBonus(Selector::source(
 								BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::SLOW))));
 							value += strength * Ports::FHeroes2::hasteSpeedRatio(
 								beforeSpeed, afterSpeed, theirs.averageSpeed(), slowed,
-								old.unit->isShooter(), false);
+								fheroes2IsArcher(*old.unit), defensiveTactics);
 						}
 						else if(!friendly && spell->id == SpellID::SLOW && old.position.isValid())
 						{
 							const bool hasted = old.unit->hasBonus(Selector::source(
 								BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::HASTE))));
-							const bool attackingCastle = real->battleGetDefendedTown() != nullptr
-								&& real->battleGetMySide() == BattleSide::ATTACKER;
 							const int distance = old.unit->unitSide() == BattleSide::DEFENDER
 								? old.position.getX()
 								: GameConstants::BFIELD_WIDTH - 1 - old.position.getX();
 							value += strength * Ports::FHeroes2::slowSpeedRatio(
-								beforeSpeed, afterSpeed, ours.averageSpeed(), old.unit->isShooter(),
+								beforeSpeed, afterSpeed, ours.averageSpeed(), fheroes2IsArcher(*old.unit),
 								attackingCastle, hasted,
 								old.unit->hasBonusOfType(BonusType::FLYING), std::max(1, distance));
 						}
@@ -812,7 +1205,7 @@ public:
 				// teleport ONLY for a ground melee stack lacking an immediate
 				// melee engagement. Native Lua validates wall/moat, two-step
 				// targeting and actual landing; no opponent-target fallback.
-				if(teleportSpell && activeStack && !activeStack->isShooter()
+				if(teleportSpell && !defensiveTactics && activeStack && !fheroes2IsArcher(*activeStack)
 					&& !activeStack->hasBonusOfType(BonusType::FLYING)
 					&& !activeStack->isHypnotized()
 					&& real->battleGetOwner(activeStack) == player)
@@ -853,7 +1246,7 @@ public:
 							return distance;
 						};
 						value += Ports::FHeroes2::offensiveTeleportValue(
-							static_cast<double>(activeStack->estimateCombatValue()),
+							strengthModel.value(*activeStack),
 							true, canMeleeNow, simulated->getPosition() != activeStack->getPosition(),
 							distanceToEnemy(*activeStack), distanceToEnemy(*simulated));
 					}
@@ -867,12 +1260,12 @@ public:
 					double meleeStrength = 0;
 					for(const auto & old : before)
 						if(old.owner == player && old.health > 0
-							&& !old.unit->isShooter()
+							&& !fheroes2IsArcher(*old.unit)
 							&& !old.unit->hasBonusOfType(BonusType::FLYING)
 							&& !old.unit->isTurret() && !old.unit->isCatapult())
 						{
 							++meleeStacks;
-							meleeStrength += static_cast<double>(old.unit->estimateCombatValue());
+							meleeStrength += strengthModel.value(*old.unit);
 						}
 					int standing = 0;
 					int total = 0;
@@ -913,7 +1306,7 @@ public:
 							[&](const UnitSnapshot & old) { return old.unit->unitId() == clone->unitId(); });
 						if(!newlyCreated)
 							continue;
-						value += static_cast<double>(clone->estimateCombatValue())
+						value += strengthModel.value(*clone)
 							* Ports::FHeroes2::mirrorImageCloneRatio(
 								clone->isShooter(), clone->hasBonusOfType(BonusType::FLYING),
 								static_cast<int>(clone->getMovementRange()), theirs.averageSpeed(), true);
@@ -938,7 +1331,7 @@ public:
 						});
 						if(prior == before.end())
 						{
-							summonedValue += static_cast<double>(unit->estimateCombatValue());
+							summonedValue += strengthModel.value(*unit);
 						}
 						else if(prior->unit->unitSlot() == SlotID::SUMMONED_SLOT_PLACEHOLDER
 							&& unit->getAvailableHealth() > prior->health)
@@ -946,7 +1339,7 @@ public:
 							// Some VCMI summon configurations reinforce the original
 							// elemental stack instead of creating a second unit ID.
 							const double newHealth = static_cast<double>(unit->getAvailableHealth());
-							summonedValue += static_cast<double>(unit->estimateCombatValue())
+							summonedValue += strengthModel.value(*unit)
 								* (newHealth - static_cast<double>(prior->health)) / newHealth;
 						}
 					}
@@ -955,7 +1348,7 @@ public:
 				if(friendlyHealth <= 0)
 					continue;
 				// Only ordinary turns reach this branch; farewell ranks
-				// actual killed creatures above, without future mana conservation.
+				// whole kills above, without future mana conservation.
 				const double scaled = value / std::sqrt(std::max(1, cost) / 3.0);
 				if(std::isfinite(scaled) && scaled > bestValue && (resurrection || scaled > threshold))
 				{

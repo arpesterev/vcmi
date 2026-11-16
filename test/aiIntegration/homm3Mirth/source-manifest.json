@@ -1,0 +1,15 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "functions": [
+    {
+      "signature": "double valueOfLuckAndMorale(long value, long change, double goodValueMultiplier, double badValueMultiplier)",
+      "body_sha256": "a1542016c2f35cc7ff19675b3fe66d89e87648a82ca5b9d7789c994c182fe18e"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getMirthValue(const army* ourArmy, type_enchant_data caster) const",
+      "body_sha256": "876f95a16162976482ba2f072d0f0a93c952dd851d55b6b54381af0bf82d2360"
+    }
+  ],
+  "adaptation": "Exact function bodies with an input-only API harness. Comparison covers canonical positive Mirth amounts and base morale from -3 to +3; native combat values remain host projections."
+}

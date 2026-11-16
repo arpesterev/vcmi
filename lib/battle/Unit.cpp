@@ -45,22 +45,22 @@ bool Unit::isTurret() const
 
 bool Unit::isCatapult() const
 {
-	return unitType()->warMachine == ArtifactID::CATAPULT;
+	return unitType()->getWarMachine() == ArtifactID::CATAPULT;
 }
 
 bool Unit::isBallista() const
 {
-	return unitType()->warMachine == ArtifactID::BALLISTA;
+	return unitType()->getWarMachine() == ArtifactID::BALLISTA;
 }
 
 bool Unit::isFirstAidTent() const
 {
-	return unitType()->warMachine == ArtifactID::FIRST_AID_TENT;
+	return unitType()->getWarMachine() == ArtifactID::FIRST_AID_TENT;
 }
 
 bool Unit::isAmmoCart() const
 {
-	return unitType()->warMachine == ArtifactID::AMMO_CART;
+	return unitType()->getWarMachine() == ArtifactID::AMMO_CART;
 }
 
 int32_t Unit::getAbilitySpellLevel(int32_t abilityLevel, const spells::Spell * spell) const

@@ -1,0 +1,56 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "repository": "sushi-shi/homm3-decomp",
+  "functions": [
+    {
+      "source": "findpath.cpp",
+      "function": "void searchArray::seedCombatPosition",
+      "sha256": "75a3581b7b9eac509873759015af2141fd85f5a8ce9d42a973f6750c853e9b02"
+    },
+    {
+      "source": "findpath.cpp",
+      "function": "void searchArray::markEnemy",
+      "sha256": "198ca87c77c5387c7ec0062a80d735f457af2f9fc9ebdaae0e02c4a32202b57f"
+    },
+    {
+      "source": "findpath.cpp",
+      "function": "bool searchArray::checkEnemyArmies",
+      "sha256": "530d19e77a4059d5290a010107e468095fde6131050e65f525c005c5ab7c68db"
+    },
+    {
+      "source": "findpath.cpp",
+      "function": "bool searchArray::findCombatPath",
+      "sha256": "4d44e1a224a5f3c6136bbccdcdae92767874470cc31ed92aa234f7a1f42451c6"
+    },
+    {
+      "source": "findpath.cpp",
+      "function": "void searchArray::pushCombatPoint",
+      "sha256": "c5281208be11f2b0ed18167c3d6a2247663bd3d9ac663697ab9db603f3fc9062"
+    },
+    {
+      "source": "army.cpp",
+      "function": "int army::canFit",
+      "sha256": "ae656ac2055856f425e66076d2b5731c44dfbe5ec24b9a53009b6d9e9ef55bfe"
+    },
+    {
+      "source": "path.cpp",
+      "function": "int army::getAdjacentCellIndex",
+      "sha256": "c73b497f7479afe9bcaf4cca0ca3c8c59d7df7e3131b3315c42c73d5ca3e5b8f"
+    },
+    {
+      "source": "cmbtmgr.cpp",
+      "function": "void combatManager::setupAdjacencyArray",
+      "sha256": "e43f0d5d6ad5dc0cda226c9caa14f8bd5c25c4dc77a00e52c7d8511ada601ec7"
+    },
+    {
+      "source": "cmbtmgr.cpp",
+      "function": "bool combatManager::hexIsBlocked",
+      "sha256": "79b67fc85d55da9e45b6f93f796a18829876b3e380702fe79b393915e106c4bd"
+    },
+    {
+      "source": "hexcell.cpp",
+      "function": "army* hexcell::getArmy",
+      "sha256": "ca1c7899507eceb7759dc9eb59341fe392c59167eaa5bda41520cbd59381263b"
+    }
+  ]
+}

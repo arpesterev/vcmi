@@ -1,0 +1,15 @@
+{
+  "repository": "sushi-shi/homm3-decomp",
+  "commit": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "license": "CC0-1.0",
+  "snapshots": {
+    "army.cpp.snapshot": "c3ae2e3038707ea4f32e6abe340333f28c0228927bf430c842702a7c47032917",
+    "ai.cpp.snapshot": "7d88213a2d550424a51cc41dbb6a4291f2635a41a9392116c800bdc359f913e5"
+  },
+  "exact_bodies": [
+    "src/army.cpp::army::considerAttack",
+    "src/army.cpp::army::getAITargetTime(long)"
+  ],
+  "consumer": "src/ai.cpp::combatManager::findAITargets",
+  "scope": "Reducer only. No native census, pathfinding, source exchange-value producer, or Ray integration."
+}

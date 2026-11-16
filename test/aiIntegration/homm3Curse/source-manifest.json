@@ -1,0 +1,9 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "function": "long type_AI_spellcaster::getCurseValue(",
+  "body_sha256": "8c4dff0d52c991fb2a353763e9d75faae25f75dfe681a2621d2ba256d06bc707",
+  "adaptation": "Exact function text; input-only army/manager/caster API harness. Test values stay within signed 32-bit source-long range. Native host long width does not affect these bounded cases.",
+  "constructor_horizon_tail_sha256": "3c6aa25fc659054c08827818008e9776c98a84b258fcb3b0df14c86bf7016bc3",
+  "constructor_horizon_harness": "Exact constructor tail with bounded int32 inputs and named source odds ladder; unsupported overflow inputs never execute oracle."
+}

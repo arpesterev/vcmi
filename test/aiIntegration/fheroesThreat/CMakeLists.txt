@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.16)
+project(FHeroes2OrdinaryThreatOracle LANGUAGES CXX)
+enable_testing()
+add_executable(fheroes2-ordinary-threat-oracle ThreatOracle.cpp)
+target_compile_features(fheroes2-ordinary-threat-oracle PRIVATE cxx_std_17)
+add_test(NAME fheroes2-ordinary-threat-oracle COMMAND fheroes2-ordinary-threat-oracle)

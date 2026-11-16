@@ -160,3 +160,11 @@ void TinyMapGameTest::overrideSettingBeforeInit(EGameSettings option, bool value
 {
 	pendingOverrides.push_back({ option, value });
 }
+
+void TinyMapGameTest::adoptLoadedGameState(std::shared_ptr<CGameState> loadedState)
+{
+	ASSERT_NE(loadedState, nullptr);
+	ASSERT_TRUE(loadedState->currentBattles.empty());
+	currentGameState = std::move(loadedState);
+	loadedMap = &currentGameState->getMap();
+}

@@ -8,11 +8,12 @@
 
 #include "../../lib/callback/CBattleGameInterface.h"
 #include "EventChannel.h"
+#include "../../lib/callback/IFreshBattleStartObserver.h"
 
 namespace AIIntegration
 {
 /// Preserves native event payloads and ordering; does not emulate foreign rules.
-class BattleEventAdapter final : public CBattleGameInterface
+class BattleEventAdapter final : public CBattleGameInterface, public IFreshBattleStartObserver
 {
 public:
 	BattleEventAdapter(std::string name, std::shared_ptr<CBattleGameInterface> implementation,
@@ -34,6 +35,12 @@ public:
 	{
 		syncIdentity();
 		events.deliver(-1, "initializeAutocombat", [&] { implementation->initBattleInterface(std::move(env), std::move(cb), prefs); });
+	}
+
+	void onFreshBattleStart(const BattleID & battleID) override
+	{
+		if(auto * observer = dynamic_cast<IFreshBattleStartObserver *>(implementation.get()))
+			events.deliver(battleID.getNum(), "freshBattleStart", [&] { observer->onFreshBattleStart(battleID); });
 	}
 
 	void activeStack(const BattleID & battleID, const CStack * stack) override

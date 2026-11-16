@@ -79,10 +79,8 @@ std::optional<battle::UnitTurnStatus> DefendAction::getStartTurnStatus(const Bat
 	return battle::UnitTurnStatus::DEFENDED;
 }
 
-void DefendAction::apply(IBattleActionEnvironment & env, const CBattleInfoCallback & battle, const BattleAction & action) const
+DefendBonusEffects makeDefendBonusEffects(const battle::Unit & unit)
 {
-	const battle::Unit & unit = getActor(battle, action);
-
 	//defensive stance, TODO: filter out spell boosts from bonus (stone skin etc.)
 	Bonus defenseBonusToAdd(BonusDuration::STACK_GETS_TURN, BonusType::PRIMARY_SKILL, BonusSource::OTHER, 20, BonusSourceID(), BonusSubtypeID(PrimarySkill::DEFENSE), BonusValueType::PERCENT_TO_ALL);
 	Bonus bonus2(BonusDuration::STACK_GETS_TURN, BonusType::PRIMARY_SKILL, BonusSource::OTHER, unit.valOfBonuses(BonusType::DEFENSIVE_STANCE), BonusSourceID(), BonusSubtypeID(PrimarySkill::DEFENSE), BonusValueType::ADDITIVE_VALUE);
@@ -110,10 +108,18 @@ void DefendAction::apply(IBattleActionEnvironment & env, const CBattleInfoCallba
 	buffer.push_back(bonus2);
 	buffer.push_back(tagBonus);
 
-	env.updateUnitBonuses(unit, buffer);
+	return {std::move(buffer), difference};
+}
+
+void DefendAction::apply(IBattleActionEnvironment & env, const CBattleInfoCallback & battle, const BattleAction & action) const
+{
+	const battle::Unit & unit = getActor(battle, action);
+	const auto effects = makeDefendBonusEffects(unit);
+
+	env.updateUnitBonuses(unit, effects.bonuses);
 
 	MetaString text = unit.formatGeneralMessage(120);
-	text.replaceNumber(difference);
+	text.replaceNumber(effects.defenseIncrease);
 
 	env.addBattleLogLine(text);
 

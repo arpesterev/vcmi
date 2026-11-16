@@ -1,0 +1,7 @@
+{
+  "pin": "0dbfe9f386f33c2500842f4a59cd284d7f03d541",
+  "source": "https://github.com/ihhub/fheroes2/blob/0dbfe9f386f33c2500842f4a59cd284d7f03d541/src/fheroes2/ai/ai_battle.cpp",
+  "maximum_function_sha256": "862166756e76c00017c76389e02f4287b8f97f1886a1f34f3d0987a982a275b5",
+  "hero_branch_sha256": "666d236a72b8ea73c6d3d8f6eb585df4c0989b013fcd6825a50bca8aebd1a560",
+  "adaptation": "Exact maximum function and hero branch with input-only API substitutes. Native own spells use H3 target-independent calculateDamage; enemy spells use only public observed casts and untrained PublicCaster, not source omniscience. Tower and cover modifiers remain unported."
+}

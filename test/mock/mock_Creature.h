@@ -63,4 +63,5 @@ public:
 	MOCK_CONST_METHOD1(getRecruitCost, int32_t(GameResID));
 	MOCK_CONST_METHOD0(getFullRecruitCost, const ResourceSet &());
 	MOCK_CONST_METHOD0(hasUpgrades, bool());
+	MOCK_CONST_METHOD0(getWarMachine, ArtifactID());
 };

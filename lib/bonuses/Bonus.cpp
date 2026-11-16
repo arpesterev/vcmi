@@ -133,7 +133,20 @@ JsonNode Bonus::toJsonNode() const
 	if(updater)
 		root["updater"] = updater->toJsonNode();
 	if(propagator)
-		root["propagator"].String() = vstd::findKey(bonusPropagatorMap, propagator);
+	{
+		std::string name = vstd::findKey(bonusPropagatorMap, propagator);
+		if(typeid(*propagator) == typeid(CPropagatorNodeType))
+		{
+			// Independently owned propagators serialize by value, not registry address.
+			for(const auto & [key, registered] : bonusPropagatorMap)
+				if(registered->getPropagatorType() == propagator->getPropagatorType())
+				{
+					name = key;
+					break;
+				}
+		}
+		root["propagator"].String() = name;
+	}
 	if(hidden)
 		root["hidden"].Bool() = hidden;
 	return root;

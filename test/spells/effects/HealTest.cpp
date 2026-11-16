@@ -388,6 +388,7 @@ TEST_P(HealApplyTest, Heals)
 	EXPECT_CALL(mechanicsMock, applySpellBonus(Eq(effectValue), Eq(&targetUnit))).WillRepeatedly(Return(effectValue));
 	EXPECT_CALL(mechanicsMock, getUnitCaster()).WillRepeatedly(Return(&actualCaster));
 	EXPECT_CALL(actualCaster, creatureId()).WillRepeatedly(Return(CreatureID(unitId)));
+	EXPECT_CALL(actualCaster, unitType()).WillRepeatedly(Return(pikeman));
 	EXPECT_CALL(actualCaster, getHeroCaster()).WillRepeatedly(Return(nullptr));
 
 	GTEST_ASSERT_EQ(targetUnitState->getAvailableHealth(), unitAmount * unitHP / 2 + 1);

@@ -1,0 +1,124 @@
+{
+  "repository": "sushi-shi/homm3-decomp",
+  "commit": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "license": "CC0-1.0",
+  "files": [
+    {
+      "name": "cmbtmgr.cpp",
+      "path": "src/cmbtmgr.cpp",
+      "git_blob_sha1": "07539553bd732c48fd63bd97902f8ade08ab0824",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/cmbtmgr.cpp",
+      "verified_git_blob": true,
+      "sha256": "3cdb3ccb5cc133fa91d450e5eb7b9974d1a78358f8267cf86273fc4888e90573",
+      "bytes": 163833
+    },
+    {
+      "name": "findpath.cpp",
+      "path": "src/findpath.cpp",
+      "git_blob_sha1": "8beac425e8b68dd5ce99d56536556f636b62374b",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/findpath.cpp",
+      "verified_git_blob": true,
+      "sha256": "194eab23af3492197ab4d3912ee86140979f82ffaf3db7442ec58db30a77ad5e",
+      "bytes": 55132
+    },
+    {
+      "name": "hexcell.cpp",
+      "path": "src/hexcell.cpp",
+      "git_blob_sha1": "731360e9637997d31fa6111d3c530550b2376821",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/hexcell.cpp",
+      "verified_git_blob": true,
+      "sha256": "1fb0fe9ecacf1bcdf2c245ce97e483e1492a27e186223a8b2cdeadb7c3386db9",
+      "bytes": 959
+    },
+    {
+      "name": "path.cpp",
+      "path": "src/path.cpp",
+      "git_blob_sha1": "f52bad925600e5ec8bbf51db2bd6c96dda37f79d",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/path.cpp",
+      "verified_git_blob": true,
+      "sha256": "e965311634ec057f505fddb4a419c993456159d5e699f0d9aa4408e0e0c811a4",
+      "bytes": 15803
+    },
+    {
+      "name": "search.cpp",
+      "path": "src/search.cpp",
+      "git_blob_sha1": "94d52fcb284d1adb50db005a35da72c5bc0997b4",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/search.cpp",
+      "verified_git_blob": true,
+      "sha256": "5dab39a916a9acbe23254432f15e7e2a9c381b1c01fbfe3efa6afe48addf9e41",
+      "bytes": 30985
+    },
+    {
+      "name": "army.h",
+      "path": "include/army.h",
+      "git_blob_sha1": "25442591a84d29ca10c5fc82f71432d39ab1fc5d",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/army.h",
+      "verified_git_blob": true,
+      "sha256": "1b345ec7930fd6be25f1c56af18f9ff6968867572e5036d761dd4e3c29f40a61",
+      "bytes": 71771
+    },
+    {
+      "name": "cmbtmgr.h",
+      "path": "include/cmbtmgr.h",
+      "git_blob_sha1": "03fbbf252f0f795af3fce926674ca99205ae772a",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/cmbtmgr.h",
+      "verified_git_blob": true,
+      "sha256": "7ecf6a3539d7d2c2991dce68267060fc3ca289006b8e6e224c0ec7305266af6d",
+      "bytes": 106794
+    },
+    {
+      "name": "findpath.h",
+      "path": "include/findpath.h",
+      "git_blob_sha1": "609d75cd0fa670e60836e45d7ab7a2db32a5398f",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/findpath.h",
+      "verified_git_blob": true,
+      "sha256": "6e7f300714239581952b7d834a647c9d4a43e28b483492046af455266053bb20",
+      "bytes": 16280
+    },
+    {
+      "name": "hexcell.h",
+      "path": "include/hexcell.h",
+      "git_blob_sha1": "23fa01a13381388fdff0731241664afa8cd35dcc",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/hexcell.h",
+      "verified_git_blob": true,
+      "sha256": "51714218f278437769de77d30bc8fb47f5093ee9b6b87b85a6c5f20f0a8d0c98",
+      "bytes": 6376
+    },
+    {
+      "name": "terrain.h",
+      "path": "include/terrain.h",
+      "git_blob_sha1": "34515f1889ef3c78a596717271422f21997b6dc4",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/terrain.h",
+      "verified_git_blob": true,
+      "sha256": "dad098490d7cdaaade04599391a6a5b58497dbdf678b59fb70f4ce4b1fee1381",
+      "bytes": 6521
+    },
+    {
+      "name": "ai.cpp",
+      "path": "src/ai.cpp",
+      "git_blob_sha1": "6a63d8bbb8d59af217f6ca6cc47f3636b99071b4",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai.cpp",
+      "verified_git_blob": true,
+      "sha256": "7d88213a2d550424a51cc41dbb6a4291f2635a41a9392116c800bdc359f913e5",
+      "bytes": 97003
+    },
+    {
+      "name": "ai_tactical.cpp",
+      "path": "src/ai_tactical.cpp",
+      "git_blob_sha1": "cd842fed2bdce90fc97a876456eac8fb2b79092c",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+      "verified_git_blob": true,
+      "sha256": "3b8793b6e708eb5b3b6260eb9b4c16d41470b5ee27c56815c290a3e7300dd8eb",
+      "bytes": 122240
+    },
+    {
+      "name": "army.cpp",
+      "path": "src/army.cpp",
+      "git_blob_sha1": "964e4b9bbde3c40c10897ed58d98e792cac2c10f",
+      "url": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/army.cpp",
+      "verified_git_blob": true,
+      "sha256": "c3ae2e3038707ea4f32e6abe340333f28c0228927bf430c842702a7c47032917",
+      "bytes": 176320
+    }
+  ]
+}

@@ -318,14 +318,7 @@ void ServerCallbackProxy::removeUnitBonuses(ServerCallback & object, const IBatt
 
 void ServerCallbackProxy::addUnitBonus(ServerCallback & object, const IBattleInfoCallback & battle, const battle::Unit & unit, const BonusDescriptor & data, bool cumulative)
 {
-	Bonus b = data.toBonus();
-
-	SetStackEffect sse;
-	sse.battleID = battle.getBattle()->getBattleID();
-	if(cumulative)
-		sse.toAdd.emplace_back(unit.unitId(), std::vector<Bonus>{b});
-	else
-		sse.toUpdate.emplace_back(unit.unitId(), std::vector<Bonus>{b});
+	auto sse = data.toUnitEffect(battle.getBattle()->getBattleID(), unit.unitId(), cumulative);
 	object.apply(sse);
 }
 

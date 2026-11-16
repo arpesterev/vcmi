@@ -16,6 +16,7 @@
 #include "../bonuses/BonusCache.h"
 
 class JsonSerializeFormat;
+class OrdinaryPreviewCacheAccessTestPeer;
 class UnitChanges;
 
 namespace vstd
@@ -30,9 +31,10 @@ class CUnitState;
 class DLL_LINKAGE CAmmo
 {
 public:
+ void bindCacheAccess(std::recursive_mutex & mutex) noexcept { cacheAccess = &mutex; totalProxy.bindAccessMutex(mutex); }
 	explicit CAmmo(const battle::Unit * Owner, CSelector totalSelector);
 
-	CAmmo & operator=(const CAmmo & other);
+	CAmmo & operator=(const CAmmo & other) noexcept;
 	CAmmo & operator=(CAmmo && other) = delete;
 
 	int32_t available() const;
@@ -42,8 +44,13 @@ public:
 	virtual int32_t total() const;
 	virtual void use(int32_t amount = 1);
 
+	BonusCacheScalarState captureTotalCache() const noexcept { return totalProxy.snapshot(); }
+ void restoreTotalCache(const BonusCacheScalarState & state) noexcept { totalProxy.restore(state); }
 	virtual void serializeJson(JsonSerializeFormat & handler);
 protected:
+ std::recursive_mutex * cacheAccess = nullptr;
+ std::unique_lock<std::recursive_mutex> lockCacheAccess() const
+ { return cacheAccess ? std::unique_lock<std::recursive_mutex>(*cacheAccess) : std::unique_lock<std::recursive_mutex>(); }
 	int32_t used;
 	const battle::Unit * owner;
 	BonusValueCache totalProxy;
@@ -52,13 +59,21 @@ protected:
 class DLL_LINKAGE CShots : public CAmmo
 {
 public:
+ void bindCacheAccess(std::recursive_mutex & mutex) noexcept { CAmmo::bindCacheAccess(mutex); shooter.bindAccessMutex(mutex); }
 	explicit CShots(const battle::Unit * Owner);
+	CShots & operator=(const CShots & other) noexcept;
 
 	bool isLimited() const override;
 	int32_t total() const override;
 
+	BonusCacheScalarState captureShooterCache() const noexcept { return shooter.snapshot(); }
+ void restoreShooterCache(const BonusCacheScalarState & state) noexcept { shooter.restore(state); }
 	void setEnv(const IUnitEnvironment * env_);
 private:
+ friend class ::OrdinaryPreviewCacheAccessTestPeer;
+ std::recursive_mutex * bonusCacheAccess = nullptr;
+ std::unique_lock<std::recursive_mutex> lockBonusCacheAccess() const
+ { return bonusCacheAccess ? std::unique_lock<std::recursive_mutex>(*bonusCacheAccess) : std::unique_lock<std::recursive_mutex>(); }
 	const IUnitEnvironment * env;
 
 	BonusValueCache shooter;
@@ -73,7 +88,13 @@ public:
 class CRetaliations : public CAmmo
 {
 public:
+ void bindCacheAccess(std::recursive_mutex & mutex) noexcept
+ { CAmmo::bindCacheAccess(mutex); noRetaliation.bindAccessMutex(mutex); unlimited.bindAccessMutex(mutex); }
 	explicit CRetaliations(const battle::Unit * Owner);
+	CRetaliations & operator=(const CRetaliations & other) noexcept;
+ struct ProxyState { BonusCacheScalarState noRetaliation, unlimited; };
+ ProxyState captureRetaliationCache() const noexcept { return {noRetaliation.snapshot(), unlimited.snapshot()}; }
+ void restoreRetaliationCache(const ProxyState & state) noexcept { noRetaliation.restore(state.noRetaliation); unlimited.restore(state.unlimited); }
 
 	bool isLimited() const override;
 	int32_t total() const override;
@@ -93,7 +114,7 @@ public:
 	explicit CHealth(const battle::Unit * Owner);
 	CHealth(const CHealth & other) = default;
 
-	CHealth & operator=(const CHealth & other);
+	CHealth & operator=(const CHealth & other) noexcept;
 
 	void init();
 	void reset();
@@ -152,7 +173,7 @@ public:
 	CUnitState(const CUnitState & other) = delete;
 	CUnitState(CUnitState && other) = delete;
 
-	CUnitState & operator= (const CUnitState & other);
+	CUnitState & operator= (const CUnitState & other) noexcept;
 	CUnitState & operator= (CUnitState && other) = delete;
 
 	bool doubleWide() const override;
@@ -251,7 +272,24 @@ public:
 	void damage(int64_t & amount) override;
 	HealInfo heal(int64_t & amount, EHealLevel level, EHealPower power) override;
 
-	void localInit(const IUnitEnvironment * env_);
+	struct BonusCaches
+ {
+  UnitBonusValuesProxy::State unit;
+  BonusDerivedValueCache::State combat;
+  BonusCachePerTurn::State immobilized, speed;
+  BonusCacheScalarState casts, shots, retaliation, shooter;
+  CRetaliations::ProxyState retaliationFlags;
+ };
+ /// Caller excludes state writes and cache-filling reads for capture and restore.
+ BonusCaches captureBonusCaches() const;
+protected:
+ /// The frame owner outlives these proxies; scalar assignment does not rebind it.
+ void bindBonusCacheAccess(std::recursive_mutex & mutex) noexcept;
+public:
+ void bindOwnedBonusSession(std::shared_ptr<const OwnedBonusGraphSession> session, size_t node) noexcept;
+ void restoreBonusCaches(const BonusCaches & caches) noexcept;
+ void bindEnvironment(const IUnitEnvironment * environment) noexcept;
+ void localInit(const IUnitEnvironment * env_);
 	void serializeJson(JsonSerializeFormat & handler);
 
 	FactionID getFactionID() const override;
@@ -267,6 +305,10 @@ public:
 	void onRemoved();
 
 private:
+ friend class ::OrdinaryPreviewCacheAccessTestPeer;
+ std::recursive_mutex * bonusCacheAccess = nullptr;
+ std::unique_lock<std::recursive_mutex> lockBonusCacheAccess() const
+ { return bonusCacheAccess ? std::unique_lock<std::recursive_mutex>(*bonusCacheAccess) : std::unique_lock<std::recursive_mutex>(); }
 	const IUnitEnvironment * env;
 
 	UnitTurnStatus turnStatus = UnitTurnStatus::READY;
@@ -295,7 +337,7 @@ public:
 	uint32_t unitId() const override;
 	BattleSide unitSide() const override;
 
-	const CCreature * unitType() const override;
+	const Creature * unitType() const override;
 	PlayerColor unitOwner() const override;
 
 	SlotID unitSlot() const override;

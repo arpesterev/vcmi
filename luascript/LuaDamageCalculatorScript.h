@@ -25,6 +25,11 @@ public:
 	LuaDamageCalculatorScript(const LuaScriptInstance * script);
 	~LuaDamageCalculatorScript() override;
 
+	// Audited standard Lua loader: this script role receives only query handles and
+	// numeric inputs; no server mutation handle. Script-kind gates must remain intact.
+	// Lua's obstacle queries may see ALL_KNOWING: this is NOT a privacy certificate.
+	bool hasReadOnlyBattleStateAccess() const override { return true; }
+
 	DamageEstimation calculate(const CBattleInfoCallback & battle, DamageAttackInfo & info) const override;
 
 private:

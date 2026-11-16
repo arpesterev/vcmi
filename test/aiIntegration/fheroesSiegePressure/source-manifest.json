@@ -1,0 +1,7 @@
+{
+  "pin": "0dbfe9f386f33c2500842f4a59cd284d7f03d541",
+  "source": "https://github.com/ihhub/fheroes2/blob/0dbfe9f386f33c2500842f4a59cd284d7f03d541/src/fheroes2/ai/ai_battle.cpp",
+  "siege_block_sha256": "ca7d119a1efbfc2d1c0b9200eefcfb5360a90ee7bbeac7deaf6727fbc390de7e",
+  "wall_penalty_source": "src/fheroes2/game/game_static.cpp::getCastleWallRangedPenalty returns 50",
+  "adaptation": "Exact siege block, input-only tower strengths and hero predicates. Native strengths are not H2 values. Unknown native cover metadata is conservatively not discounted; oracle covers supported predicates."
+}

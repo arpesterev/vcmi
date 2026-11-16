@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+	project(FHeroes2StrengthOracle LANGUAGES CXX)
+	enable_testing()
+endif()
+add_executable(fheroes2-strength-oracle StrengthOracle.cpp)
+target_compile_features(fheroes2-strength-oracle PRIVATE cxx_std_20)
+add_test(NAME fheroes2-strength-oracle COMMAND fheroes2-strength-oracle)

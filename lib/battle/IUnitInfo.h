@@ -13,7 +13,7 @@
 #include "../GameConstants.h"
 #include "BattleSide.h"
 
-class CCreature;
+class Creature;
 
 namespace battle
 {
@@ -38,7 +38,7 @@ public:
 	virtual PlayerColor unitOwner() const = 0;
 	virtual SlotID unitSlot() const = 0;
 
-	virtual const CCreature * unitType() const = 0;
+	virtual const Creature * unitType() const = 0;
 };
 
 }

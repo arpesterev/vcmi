@@ -1,0 +1,15 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "file_sha256": "3b8793b6e708eb5b3b6260eb9b4c16d41470b5ee27c56815c290a3e7300dd8eb",
+  "bodies": [
+    {
+      "signature": "long type_AI_spellcaster::getDispelValue(",
+      "sha256": "3e4714b97cbe80a0be1c33b720fd0705351f1da5b4c2328a66ed245a12543d1c"
+    },
+    {
+      "signature": "void type_AI_spellcaster::considerEnchantment(",
+      "sha256": "f1294d669a7c630c3a478ad93393606769824723165e8002aca85f83d58f0191"
+    }
+  ],
+  "dispel_dispatch_sha256": "8d7097dcb55a6c93131c38aa2e266a10cc7a89bdae078b47ca7bb4c7daad4ec7"
+}

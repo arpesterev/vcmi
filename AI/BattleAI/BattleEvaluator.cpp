@@ -62,11 +62,11 @@ BattleEvaluator::BattleEvaluator(
 	BattleSide side,
 	float strengthRatio,
 	int simulationTurnsCount)
-	:scoreEvaluator(cb->getBattle(battleID), env, strengthRatio, simulationTurnsCount),
+	:hb(std::make_shared<HypotheticBattle>(env.get(), cb->getBattle(battleID))),
+	scoreEvaluator(cb->getBattle(battleID), env, hb, strengthRatio, simulationTurnsCount),
 	cachedAttack(), playerID(playerID), side(side), env(env),
 	cb(cb), strengthRatio(strengthRatio), battleID(battleID), simulationTurnsCount(simulationTurnsCount)
 {
-	hb = std::make_shared<HypotheticBattle>(env.get(), cb->getBattle(battleID));
 	damageCache.buildDamageCache(hb, side);
 
 	targets = std::make_unique<PotentialTargets>(activeStack, damageCache, hb);
@@ -655,6 +655,8 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 	if(possibleCasts.empty())
 		return false;
 
+	const auto previewBaseline = scoreEvaluator.forkSourceBattle();
+
 	using ValueMap = PossibleSpellcast::ValueMap;
 
 	auto evaluateQueue = [&](ValueMap & values, const std::vector<battle::Units> & queue, std::shared_ptr<HypotheticBattle> state, size_t minTurnSpan, bool * enemyHadTurnOut) -> bool
@@ -703,8 +705,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 				{
 					AttackPossibility attackPossibility = potentialTargets.bestAction();
 
-					auto stackWithBonuses = state->getForUpdate(unit->unitId());
-					*stackWithBonuses = *attackPossibility.attackerState;
+					auto stackWithBonuses = state->copyUnitState(unit->unitId(), *attackPossibility.attackerState);
 
 					if(attackPossibility.defenderDamageReduce > 0)
 					{
@@ -716,8 +717,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 
 					for(auto affected : attackPossibility.affectedUnits)
 					{
-						stackWithBonuses = state->getForUpdate(affected->unitId());
-						*stackWithBonuses = *affected;
+						stackWithBonuses = state->copyUnitState(affected->unitId(), *affected);
 
 						if(attackPossibility.defenderDamageReduce > 0)
 							stackWithBonuses->removeUnitBonus(Bonus::UntilBeingAttacked);
@@ -780,7 +780,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 	{
 		bool enemyHadTurn = false;
 
-		auto state = std::make_shared<HypotheticBattle>(env.get(), cb->getBattle(battleID));
+		auto state = std::make_shared<HypotheticBattle>(env.get(), previewBaseline);
 
 		evaluateQueue(valueOfStack, turnOrder, state, 0, &enemyHadTurn);
 
@@ -820,7 +820,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 				}
 #endif
 
-				auto state = std::make_shared<HypotheticBattle>(env.get(), cb->getBattle(battleID));
+				auto state = std::make_shared<HypotheticBattle>(env.get(), previewBaseline);
 
 				spells::BattleCast cast(state.get(), hero, spells::Mode::HERO, ps.spell);
 				cast.castEval(state->getServerCallback(), ps.dest);
@@ -936,7 +936,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 								"Spell %s to %d affects %s (%d), dps: %2f oldHealth: %d newHealth: %d",
 								ps.spell->getNameTranslated(),
 								ps.dest.at(0).hexValue.toInt(),  // Safe to access .at(0) now
-								unit->creatureId().toCreature()->getNameSingularTranslated(),
+								unit->unitType()->getNameSingularTranslated(),
 								unit->getCount(),
 								dpsReduce,
 								oldHealth,
@@ -948,7 +948,7 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 							logAi->trace(
 								"Spell %s has no destination, affects %s (%d), dps: %2f oldHealth: %d newHealth: %d",
 								ps.spell->getNameTranslated(),
-								unit->creatureId().toCreature()->getNameSingularTranslated(),
+								unit->unitType()->getNameSingularTranslated(),
 								unit->getCount(),
 								dpsReduce,
 								oldHealth,
@@ -1007,14 +1007,14 @@ bool BattleEvaluator::attemptCastingSpell(const CStack * activeStack)
 
 void BattleEvaluator::evaluateCreatureSpellcast(const CStack * stack, PossibleSpellcast & ps)
 {
-	HypotheticBattle state(env.get(), cb->getBattle(battleID));
+	auto state = scoreEvaluator.forkSourceBattle();
 
-	spells::BattleCast cast(&state, stack, spells::Mode::CREATURE_ACTIVE, ps.spell);
-	cast.castEval(state.getServerCallback(), ps.dest);
+	spells::BattleCast cast(state.get(), stack, spells::Mode::CREATURE_ACTIVE, ps.spell);
+	cast.castEval(state->getServerCallback(), ps.dest);
 
 	float totalGain = 0;
 
-	for(const auto * after : state.battleGetUnitsIf([](const battle::Unit * u) -> bool { return u->isValidTarget(true); }))
+	for(const auto * after : state->battleGetUnitsIf([](const battle::Unit * u) -> bool { return u->isValidTarget(true); }))
 	{
 		const auto & context = damageCache.facing.at(after->unitSide());
 		const auto * before = cb->getBattle(battleID)->battleGetUnitByID(after->unitId());

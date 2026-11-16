@@ -1,0 +1,42 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "file_sha256": "3b8793b6e708eb5b3b6260eb9b4c16d41470b5ee27c56815c290a3e7300dd8eb",
+  "bodies": [
+    {
+      "signature": "long type_AI_spellcaster::getCancelValue(",
+      "sha256": "7724f6b76c7aed30ab186505edf084c57c47926546d38f60da4c6ed5df96d459"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getPrayerValue(",
+      "sha256": "b5c196bcb96e5e7fd49137458f526b83537a19dc80163b6638659297d630cb9a"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getDefenseSkillValue(",
+      "sha256": "b3f98c45fa1756a8540a821ef4252d63ef8d2b32632ffc3b1edd2704eb6730e8"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getDefenseBoostValue(",
+      "sha256": "0ec3471381b2082efdf5c736d92e617906e54510be2da1c89b96eef668b6bf63"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getAttackSkillValue(",
+      "sha256": "71dc02a16023c63a3068cead0d1d6e2e050db34bd78d704b4cd2988ae23273c5"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getAttackBoostValue(const army* ourArmy,\n    const army* enemy, long oldDamage,",
+      "sha256": "7747ec87c8bef297ecadb1ceb2f6381d195fd28e37b2969d60d769c91b3fdc78"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getAttackBoostValue(const army* ourArmy,\n    const army* enemy, long duration,",
+      "sha256": "2137c8daee3f25eac4766d29f6690288104ee6848f9b36ad69069e3d8172b592"
+    },
+    {
+      "signature": "long type_AI_spellcaster::getSpeedValue(",
+      "sha256": "a7a2495c3c42c3c3d08e9ad081baa887b00cce2e08ca8ad0801cf657fd9373a9"
+    },
+    {
+      "signature": "double type_AI_spellcaster::getDuration(",
+      "sha256": "6ca20086c808da8e58ca934b0f16cf5271273ba4a09b8674ac84234ebbb9b46d"
+    }
+  ]
+}

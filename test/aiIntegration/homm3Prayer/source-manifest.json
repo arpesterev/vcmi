@@ -1,0 +1,7 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp",
+  "signature": "long type_AI_spellcaster::getPrayerValue(const army* ourArmy, type_enchant_data caster) const",
+  "body_sha256": "b5c196bcb96e5e7fd49137458f526b83537a19dc80163b6638659297d630cb9a",
+  "scope": "Exact component composition only. Component values in native adapter remain existing host projections, not a complete source target/forecast model."
+}

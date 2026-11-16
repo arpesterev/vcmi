@@ -1,5 +1,55 @@
 # Native source-policy ports
 
+The current prioritized gaps and validation boundaries are tracked in
+[`REMAINING_GAPS.md`](REMAINING_GAPS.md). Standalone source/contract tests do
+not establish native engine compilation, server acceptance or game quality.
+
+## Latest unpublished candidates (2026-11-08)
+
+FHeroes2 creature and spell decisions now share their existing native stance
+projection. Haste application/removal and offensive Teleport use that stance;
+lethal-spell speed value accounts for moved/defended units. Original hero/tower
+ranged-strength inputs and exact Heroes II geometry remain unported.
+
+HoMM3 now evaluates Stone Skin, Shield and Air Shield through a separate native
+incoming-threat census and source-derived mitigation value. This is a partial
+non-winning-branch projection without the original winner/expected-damage
+suppression. Supported shooter-prefix wins already enable the healing-only
+filter; broader decided-fight suppression remains unqualified. Haste/Slow now have a partial
+stable-target approach projection plus a bounded single-hex melee ordered
+exchange contribution when speed crosses a target. Native damage/loss and
+unsupported-effect gates remain projections; per-effect winner suppression is absent.
+Incompatible native counterspell/modifier speed results are excluded.
+
+FHeroes2 Air Shield application and both removal directions now require the
+ranged protection factor to change, independently of retained melee protection.
+The fixed source weight remains a projection rather than exact damage benefit.
+Haste removal under mapped Blind/Paralyze now preserves the pinned
+STANDING-to-Haste contribution in both ownership directions. This source
+heuristic does not imply restored native movement while the disable remains.
+Disabled Slow removal likewise retains the source archer/caster-side castle
+weight, without confusing simultaneous awakening with restored Slow movement.
+
+HoMM3 now has a bounded production ownership-prefix shooter forecast, using
+retained lifecycle and native detached-HP damage. Source incapacitation priority
+permits a sole active target among disabled alternatives, then recomputes after
+each projected kill. Multiple active peers remain unsupported. A bounded non-shooter incapacitated-peer extension uses source loss-value ranking when all kills-only/difficulty modes agree; see HoMM3Forecast/SOURCE_NOTICE.md.
+A supported spellsNotRequired
+result retains only healing spells; unsupported cases preserve prior policy.
+It is not a full battle simulation or retail damage parity. Full peer target
+and melee ranking and broader winner-dependent choices remain open.
+
+FHeroes2 ranged-stance strength now requires usable ammunition on both sides.
+Exhausted shooters no longer force defensive tactics; native ammo-cart supply
+and loaded-but-blocked classification are retained. Zero-movement shooters now
+contribute to ranged stance strength. Native NOT_ACTIVE remains broader than
+source Blind/Paralyze immovability; tower/hero weights and native
+strength/geometry projections remain.
+
+These new changes have standalone production-slice coverage, not native engine
+qualification. Historical native results described below concern earlier
+revisions. See the gap inventory for precise next work and validation limits.
+
 ## FHeroes2Tactics
 
 `FHeroes2Tactics` is a partial, experimental combat policy constructed by the
@@ -166,19 +216,32 @@ and Slow decisions and real combat resolution. This bounded port does
 not implement all upstream buff/debuff evaluation, dispels or exact
 Heroes II battlefield-geometry and tactical-stance semantics.
 
-Source-derived experimental fheroes2 extensions also cover melee pursuit of
-non-evasive targets, fast-shooter retreat from slower ground enemies, and
-melee screens for threatened friendly archers, including **double-wide archers
-and double-wide melee guards**. Cover placement and immediate melee threats
-consider both cells of a wide shooter. Candidate guard positions use the
-full footprint of a wide melee guard and VCMI's legal head destinations, rather
-than rejecting wide guards or measuring from their heads alone. Native
-regressions exercise a real Medusa Queen protected by infantry and by a
-double-wide Hydra, require engine-accepted cover movement, and then finish
-the battles through the game engine. These are bounded VCMI projections of
-pinned fheroes2 `meleeUnitDefense`, not a full source-equivalent port:
-source-specific flank preferences, defensive spacing, kiting and spell-area
-responses remain incomplete.
+Source-derived fheroes2 movement includes melee pursuit of non-evasive targets
+and fast-shooter retreat from slower ground enemies. Defensive melee now follows
+the pinned `meleeUnitDefense` cover-selection sequence for every friendly archer,
+including unthreatened and incapacitated archers. One directional cover placement
+per archer is evaluated with full native future reach and head/tail footprints.
+Current and future blocker outcomes compete in the same archer-strength minus
+travel-penalty ranking; an immediate blocker is not a global override. The source
+two-turn cutoff, front/side preferences, wide-unit splash spacing and selective
+no-retaliation/area-archer attacks from the chosen cover cell are represented.
+Changed-affiliation guards remain excluded. A guard already at the selected
+cover placement skips without receiving a Heroes III DEFEND bonus.
+
+Directed native fixtures use AIFactory, public callbacks, authoritative actions
+and completed battles. They distinguish future cover from immediate weak-blocker
+attacks, demonstrate the distance-ranking crossover, check exact preferred
+placements and test positive opportunistic attacks. Older threat-only NO_ACTION
+expectations are explicitly replaced by exact source-purpose cover routes; Blind
+still removes projected movement but does not disqualify an archer from cover.
+
+This is a native projection of the source decision sequence, not complete
+Heroes II/III parity. VCMI supplies current ownership/targetability, footprint
+facing, accessibility, gate/stop-tile rules, movement and damage values. Source
+original-force lists under control spells, reflected-wide route details, native
+stationary machines, H2 castle tower/spell advantage and exact strength/ability
+semantics remain distinct. Future positions do not simulate intervening enemy
+turns. New castle/wide-control cover combinations still need directed fixtures.
 
 Current additional coverage includes source-derived hero retreat/surrender,
 farewell damage before withdrawal, deathless-round retreat, Berserk creature
@@ -199,10 +262,12 @@ does not claim an optimal friendly-fire tradeoff or upstream area-spell parity.
 The mixed-cluster native regression must pass server CI before this change is
 considered engine-validated.
 
-Not implemented or equivalent: source Anti-Magic valuation, complete
+Not implemented or source-equivalent: complete enemy magic valuation,
 effect-duration/turn-order and Dispel valuation, complete archer kiting and
 screen placement, exact siege positioning, upstream battle valuation,
-adventure-map planning, and support validation for arbitrary mods. Native
+adventure-map planning, and support validation for arbitrary mods. Anti-Magic
+currently values publicly observed hostile spells with untrained native
+cost/damage; it does not read the enemy's hidden spellbook or artifacts. Native
 Heroes III manual creature-spell choices are also unsupported; the pinned
 Heroes II unit planner does not supply an equivalent manual-ability policy.
 Do not use this partial policy as a quality replacement for the default AI.
@@ -310,10 +375,11 @@ with any positive native Magic Mirror chance are therefore conservatively
 excluded using the engine's massive/range/negative-spell conditions. Area,
 mass, positive and neutral spells are not excluded merely because a target
 has Magic Mirror. Native resistance probabilities now discount negative magical
-spells: the already-capped native health-loss preview is discounted before the
-wake-up penalty. This is a host approximation of `getDamageValue`, whose original
-raw damage is discounted BEFORE casualty capping. Overkill therefore can rank
-differently. Blind value is discounted after its duration/retaliation formula,
+spells: the complete successful health-loss score, including the wake-up
+penalty, is weighted by landing probability. A resisted effect cannot wake the
+target. This native expected-score projection differs from `getDamageValue`,
+whose original raw damage is discounted before casualty capping and its
+wake-up penalty. Overkill and disabled-target choices can therefore differ. Blind value is discounted after its duration/retaliation formula,
 following `getBlindValue`. Positive, neutral and nonmagical effects bypass this
 native resistance gate. This is deterministic valuation, not sampled execution or
 a complete joint outcome forecast. Raw pre-cap damage for every effect and Chain
@@ -565,3 +631,98 @@ teaches an attacker hero Magic Arrow, confirms hero casting is legal, then
 checks that a completed ONNX-controlled battle has accepted neural unit actions
 but no scripted spell cast. Spell policy learning or an explicit non-neural
 hybrid mode will be needed before full MMAI feature parity can be claimed.
+
+## Revision 10: FHeroes2 ammunition consumers
+
+Army descriptors, speed-spell valuation and defensive cover use the shared remaining-ammunition classifier. Direct CUnitState access preserves its supplied environment; generic Unit access retains an owned acquired state. These changes classify live before states and do not replace archer identity with target legality. Portable production slices and original source oracles pass; native engine execution remains UNRUN.
+
+HypotheticBattle::unitHasAmmoCart remains false. Hypothetical supply fidelity requires preserving first-cart order, asymmetric ownership, artifact fallback and removed-cart bonus detachment. No host ammo-cart repair is included.
+
+### Bounded decided-battle resurrection
+
+A supported same-callback shooter-prefix win now feeds the original
+considerResurrect casualty exception, below-Advanced Resurrection refusal and
+immediate timing. The existing healing-only filter retains Resurrection and
+Animate Dead. Unknown/undecided forecasts preserve the non-winning branch.
+Native spell effects, count deltas and combat values remain projections; this
+is not native battle qualification or temporary-to-permanent conversion.
+Current supported shooter wins already imply spellsNotRequired, so adding
+protective-buff winner suppression would not change this bounded domain.
+
+### Revision 12 scope
+
+Offensive Teleport and Earthquake now share usable-ammunition archer checks.
+HoMM3 adds a conservative adjacent melee ownership prefix for one enemy under
+known NORMAL..IMPOSSIBLE difficulty, ordinary-unit and source chooser gates.
+Survivor retaliation can distinguish winning from healing-only spell filtering.
+Native midpoint damage remains an adaptation. Source protective winner gates,
+coupled FHeroes2 tower stance and native qualification remain open. The
+hypothetical ammunition-query experiment is not merged because lifecycle
+parity fails. See [`REMAINING_GAPS.md`](REMAINING_GAPS.md).
+
+### Revision 13: per-target winning defense
+
+Stone Skin, Shield and Air Shield now consume the bounded prefix's same-side
+ordinary-target facts. On a win, a target whose capped expected damage plus
+initial top-creature wound is strictly below one creature HP receives zero
+defensive value. This is independent of whole-army `spellsNotRequired` and is
+observable in revision 12's casualty-winning melee domain. Unknown/non-winning
+forecasts and mismatched/unsupported per-target facts preserve the old value.
+
+The original `army::setAIExpectedDamage` caps at live HP; recovered projected
+loss therefore matches this source quantity. Source signed32 addition is
+checked before admitting the new suppression. Health includes temporarily
+resurrected troops, as the source total-health function does. Created/clone
+units remain unavailable through the existing native prefix gates.
+
+Matching health, wound, ownership and mode facts are not a complete freshness
+proof: the production caller owns and passes the forecast synchronously before
+hypothetical casts. Native threat geometry, midpoint damage and spell effects
+remain adaptations. Actual native compilation and battles remain UNRUN.
+
+### Revision 13: ammunition-aware action dispatch
+
+FHeroes2 creature dispatch now uses the existing active-archer predicate for
+retreat, blocked-archer melee, the choice before cover and advancing enemy
+threats. Exhausted shooters can enter melee/cover branches and threaten a
+retreating unit as the pinned source does. The real native ammunition query
+continues to supply ammunition availability; source-body doubles cover 57
+directed cases. Native geometry, cart lifecycle and coupled tower stance
+remain unqualified.
+
+The bonus-model design is an excluded experiment, not a production repair.
+Its 10,252 math/stacking assertions do not test native graph integration.
+
+## Native prebattle deployment adaptation
+
+FHeroes2Tactics and HoMM3OriginalTactics use NativeTacticsDeployment for VCMI's
+prebattle tactics phase. This is an explicitly host-authored deployment policy,
+not a recovered original-game tactics-phase algorithm. FHeroes2's pinned
+ai_battle.cpp::BattlePlanner::meleeUnitDefense (line 1760) describes covering
+archers during combat; `_defensiveTactics` is the stance selector. The
+pinned HoMM3 ai_tactical.cpp provides combat target and spell evaluation, not
+an established equivalent deployment routine. Those combat policies remain
+unchanged. No BattleAI, TacticsHandler, fallback AI or experimental owned
+forecast model is called by this deployment adapter.
+
+The adapter snapshots its own initial unit IDs, ordering ammunition-capable
+shooters first and then by unit ID. Shooters prefer the rear column. Other
+mobile units prefer a forward-facing adjacent screen of a friendly shooter;
+without a shooter, they prefer the front of the tactics zone. Equal placements
+prefer less displacement and then the smaller head-cell ID. This heuristic
+is shared by both named combat policies and is not a retail parity claim.
+
+Each stack gets at most one move. Every destination is recomputed after the
+preceding action finishes, using native reachable tactics cells and exact-head
+accessibility for the full single/wide footprint. Immovable, incapacitated,
+foreign-side and no-longer-owned stacks are skipped. Units created after the
+phase begins are not added to its finite queue. State is isolated per AI
+instance and battle ID, cleared on initialization/end, and retains an ended
+marker to reject duplicate END commands. After the finite queue it sends END.
+No-tactics or wrong-side notifications send no command. Empty and already
+optimal eligible armies send only END. Native server validation remains the
+final authority; callbacks are not evidence of server acceptance.
+
+This is a conservative deterministic formation heuristic. It does not optimize
+siege gates, enemy area attacks, breath, threat, path hazards, or joint formation
+search. It must not be presented as original prebattle source fidelity.

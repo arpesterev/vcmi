@@ -43,7 +43,7 @@ public:
 	MOCK_CONST_METHOD0(unitSide, BattleSide());
 	MOCK_CONST_METHOD0(unitOwner, PlayerColor());
 	MOCK_CONST_METHOD0(unitSlot, SlotID());
-	MOCK_CONST_METHOD0(unitType, const CCreature * ());
+	MOCK_CONST_METHOD0(unitType, const Creature * ());
 
 	MOCK_CONST_METHOD0(doubleWide, bool());
 

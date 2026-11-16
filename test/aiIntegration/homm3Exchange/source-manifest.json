@@ -1,0 +1,105 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source_base": "https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/",
+  "bodies": {
+    "long army::getAdjustedAttack(": {
+      "source": "army.cpp",
+      "sha256": "83b47281e40aa96548bd0c16d08c60bbad9ebd76704a50defdb9ea042e2ec6b1"
+    },
+    "long army::getAdjustedDefense(": {
+      "source": "army.cpp",
+      "sha256": "ce4e9fea1d468e6942c9c62bd6d181cea253f7d9d901aa4e8a761fe815147771"
+    },
+    "long army::getAttackModifier(": {
+      "source": "army.cpp",
+      "sha256": "ac99c65fd8c045d6c378fb37cd5b4cb64541346bcd85d618def65d118bcbd312"
+    },
+    "long army::getDefenseModifier()": {
+      "source": "army.cpp",
+      "sha256": "19147da69816bf69fc574ecbeae3b934dc5ac126a0e8709846417cd8ec273eb2"
+    },
+    "inline double army::getDefenseDamageModifier(": {
+      "source": "army.cpp",
+      "sha256": "241b8c74475edf6ad504f2688cf988614c23dc54d3549ebcec5e99350d8749f2"
+    },
+    "double army::getAverageDamage() const": {
+      "source": "army.cpp",
+      "sha256": "42431f6ab55d6d30803e656c32265aa9e0428af9c5e04126b478aa0e44173b6d"
+    },
+    "long army::getAverageDamage(const army&": {
+      "source": "army.cpp",
+      "sha256": "02b4541f4abcac259cc41150363e6e7983264de94d7399c4bcead297a7731cbe"
+    },
+    "int army::computeAttackerBonus(": {
+      "source": "army.cpp",
+      "sha256": "8a5adc8320aa630e96acdf097447a13b4bd755fad92a8e32d28f317d4e611dc3"
+    },
+    "int army::computeAttackerDamageBonuses(": {
+      "source": "army.cpp",
+      "sha256": "f98bb57c2ff7555220d1dade35ef231fe5ba1668ae602e05967e55f33862f812"
+    },
+    "inline int army::computeDefenderDamageBonuses(": {
+      "source": "army.cpp",
+      "sha256": "76f072446439999c5da88ff2e1d83528b3e1e6d9b1d6615b9a7b11360f256d3a"
+    },
+    "double army::computeAttackerDamageReduction(": {
+      "source": "army.cpp",
+      "sha256": "a906561db42418dd563f29d16f70e568471e824fb8ad7aea643a8fdaacaeeb85"
+    },
+    "double army::computeDefenderDamageReduction(": {
+      "source": "army.cpp",
+      "sha256": "695d1ed6fc94ddcb9877da088b0c3c9eafb11086f61fe8e261c09686aa512a8d"
+    },
+    "long army::adjustDamage(": {
+      "source": "army.cpp",
+      "sha256": "0bfb3972f6667415fb70aadaacafcf0f91940b9f45f9fb6962abfd898bd96554"
+    },
+    "double army::getUnitCombatValue(": {
+      "source": "army.cpp",
+      "sha256": "5ae58414ca7b710a3a306548182a95b95d823ddf65e9dc34be38a77d61a1975e"
+    },
+    "long army::getLossCombatValue(": {
+      "source": "army.cpp",
+      "sha256": "a2a542eef7b0475c38bdfa7d84744035116eb5eba9be18484e7a6c2b4c672040"
+    },
+    "long army::getTotalHitPoints(": {
+      "source": "army.cpp",
+      "sha256": "db3eaaae53822fc1ce1a10374f749041be411e3ae4b71edb7615ebddd4467de2"
+    },
+    "long aiGetAttackDamage(": {
+      "source": "ai_tactical.cpp",
+      "sha256": "6a2d647f1592e1bd1bf2c5c3c47a76b65476a8c0a4aeaafee8658c8bedb54d6a"
+    },
+    "void type_AI_combat_parameters::simulateSingleAttack(": {
+      "source": "ai_tactical.cpp",
+      "sha256": "3e219c367c2ba1755eb3b250bfd24552bb2420dd39036a56f53630ae1df9a60c"
+    },
+    "void type_AI_combat_parameters::simulateAttack(": {
+      "source": "ai_tactical.cpp",
+      "sha256": "55c249c37ea8b1f635b7c23d8f0b9785b40943465f16a9daedaabbb57bc1ecd6"
+    },
+    "long type_AI_combat_parameters::getSimpleAttackEffect(const army& currentArmy, long ourTotal": {
+      "source": "ai_tactical.cpp",
+      "sha256": "615f90acc932071c0271c9b19f2c8c1d1179acf9b04ab3ae78e3dab4044ad01c"
+    },
+    "long type_AI_combat_parameters::getSimpleAttackEffect(const army& currentArmy, const army&": {
+      "source": "ai_tactical.cpp",
+      "sha256": "c2ab34c02db1b2fd70a77a20662ab8e280ed5941700270dda356195224a0bf53"
+    },
+    "void army::considerAttack(": {
+      "source": "army.cpp",
+      "sha256": "9817c04cb9c62ed27775e60895ae55c6e53b157ebbdf2476c4b561df717075b4"
+    },
+    "long army::getAITargetTime(long speed)": {
+      "source": "army.cpp",
+      "sha256": "ebbd2a53e20a01e81bc09ccd5f6a102dfa9a2a177f22c88950787cc9235af90c"
+    },
+    "void combatManager::findAITargets(": {
+      "source": "ai.cpp",
+      "sha256": "4e70d61fdac6111d979193d1aabb1ded8505cef4bbd51c9d4746ebb8e7bf7e51"
+    }
+  },
+  "hero_factors_sha256": "d15cebb3b52d51d21a3e361b4bb3be43f2e5bf4276861b484ee0eadf236b5a95",
+  "adaptation": "Exact source bodies in scalar API harness. Excluded creature special, specialty, fire shield and residual-control branches have input-only stubs. Damage arithmetic is never delegated to production. Host-long oracle is run only on checked source signed32 domains.",
+  "hero_factor_tables_sha256": "59b96e649915973dc9f39915a7564bd6d2cdf6dac1f0202e1351b9340c4e3d64"
+}

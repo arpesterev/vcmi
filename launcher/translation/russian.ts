@@ -672,6 +672,24 @@ Do you want to turn off this check and try again? You can turn it back on at any
 <context>
     <name>CSettingsView</name>
     <message>
+        <source>Experimental, bounded source-derived HoMM3 tactical port for attack, movement and spell decisions using VCMI battle rules. Not a complete original AI or adventure planner; full original-game parity is not established.</source>
+        <oldsource>Independent HoMM3 ranged target weights with VCMI legality and damage estimates. Not the full original combat AI; spells, tactical retreat and original path valuation are not implemented.</oldsource>
+        <translation>Экспериментальный частичный тактический порт HoMM3 на основе исходного кода: выбор атак, перемещений и заклинаний по правилам боя VCMI. Это не полный оригинальный ИИ и не планировщик карты приключений; полное соответствие оригинальной игре не подтверждено.</translation>
+    </message>
+    <message>
+        <source>Experimental, bounded source-derived fheroes2 tactical port for attack, movement and spell decisions using VCMI battle rules. Not a complete original AI or adventure planner; full original-game parity is not established.</source>
+        <oldsource>Partial tactical port with native attack, movement, damage/restoration spell selection and mana conservation. Complete fheroes2 retreat, creature spells and tactical valuations are not implemented.</oldsource>
+        <translation>Экспериментальный частичный тактический порт fheroes2 на основе исходного кода: выбор атак, перемещений и заклинаний по правилам боя VCMI. Это не полный оригинальный ИИ и не планировщик карты приключений; полное соответствие оригинальной игре не подтверждено.</translation>
+    </message>
+    <message>
+        <source>HoMM3 tactics (partial port, experimental)</source>
+        <translation>Тактика HoMM3 (частичный порт, экспериментальный)</translation>
+    </message>
+    <message>
+        <source>FHeroes2 tactics (partial port, experimental)</source>
+        <translation>Тактика FHeroes2 (частичный порт, экспериментальный)</translation>
+    </message>
+    <message>
         <location filename="../settingsView/csettingsview_moc.ui" line="589"/>
         <source>Interface Scaling</source>
         <translation type="unfinished">Масштабирование интерфейса</translation>

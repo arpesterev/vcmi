@@ -4,6 +4,9 @@ set(battleAI_SRCS
 		BattleEvaluator.cpp
 		PossibleSpellcast.cpp
 		PotentialTargets.cpp
+		OrdinaryUnitViewStore.cpp
+		HypotheticFrameArena.cpp
+		OrdinaryStackEffect.cpp
 		StackWithBonuses.cpp
 		SpellTargetsEvaluator.cpp
 		TacticsHandler.cpp
@@ -19,6 +22,8 @@ set(battleAI_HEADERS
 		BattleEvaluator.h
 		PotentialTargets.h
 		PossibleSpellcast.h
+		OrdinaryUnitViewStore.h
+		HypotheticFrameArena.h
 		StackWithBonuses.h
 		SpellTargetsEvaluator.h
 		TacticsHandler.h

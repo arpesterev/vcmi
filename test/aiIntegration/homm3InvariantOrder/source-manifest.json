@@ -1,0 +1,20 @@
+{
+  "repository": "sushi-shi/homm3-decomp",
+  "commit": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "file": "ai.cpp",
+  "methods": [
+    {
+      "signature": "static long getMoveOrder(",
+      "sha256": "c30c1163eaa0ddda50e772fe020f456baea1ade214f9a779dd1df81d5e65441d"
+    },
+    {
+      "signature": "unsigned char func_moves_before::operator()(",
+      "sha256": "f4deae177301e5164acdcdcbc7657126bc5f241e283ed452b5d9911a5ae0735b"
+    },
+    {
+      "signature": "void combatManager::findMoveOrder(",
+      "sha256": "dea88028a3a783038835381fed21084a7b1f6c6946b7453d2f2a52212e605551"
+    }
+  ],
+  "instrumentation": "After original std::sort, inject a caller-supplied comparator-valid tie permutation. Original key/comparator/alternating-side/rank statements unchanged."
+}

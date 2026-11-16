@@ -102,8 +102,8 @@ public:
 		DamageCache & damageCache);
 
 	float trackAttack(
-		std::shared_ptr<StackWithBonuses> attacker,
-		std::shared_ptr<StackWithBonuses> defender,
+		std::shared_ptr<const StackWithBonuses> attacker,
+		std::shared_ptr<const StackWithBonuses> defender,
 		bool shooting,
 		bool isOurAttack,
 		DamageCache & damageCache,
@@ -140,9 +140,9 @@ class ReachabilityMapCache
 	std::map<uint32_t, ReachabilityInfo> unitReachabilityMap; // unit ID -> reachability
 	std::map<uint32_t, PerTurnData> hexReachabilityPerTurn;
 
-	battle::Units computeOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, std::shared_ptr<Environment> env, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex);
+	battle::Units computeOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex);
 public:
-	const battle::Units & getOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, std::shared_ptr<Environment> env, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex);
+	const battle::Units & getOneTurnReachableUnits(std::shared_ptr<CBattleInfoCallback> cb, const std::vector<battle::Units> & turnOrder, uint8_t turn, const BattleHex & hex);
 	void update(const std::vector<battle::Units> & turnOrder, std::shared_ptr<HypotheticBattle> hb);
 };
 
@@ -151,6 +151,7 @@ class BattleExchangeEvaluator
 private:
 	std::shared_ptr<CBattleInfoCallback> cb;
 	std::shared_ptr<Environment> env;
+	std::shared_ptr<HypotheticBattle> sourceBattle;
 	mutable ReachabilityMapCache reachabilityMap;
 	std::vector<battle::Units> turnOrder;
 	float negativeEffectMultiplier;
@@ -173,9 +174,25 @@ public:
 		std::shared_ptr<CBattleInfoCallback> cb,
 		std::shared_ptr<Environment> env,
 		float strengthRatio,
-		int simulationTurnsCount): cb(cb), env(env), simulationTurnsCount(simulationTurnsCount){
+		int simulationTurnsCount)
+		: BattleExchangeEvaluator(cb, env, std::make_shared<HypotheticBattle>(env.get(), cb),
+			strengthRatio, simulationTurnsCount) {}
+
+	/// Reuse the same stable source captured for this evaluation, not a modified alternative.
+	BattleExchangeEvaluator(
+		std::shared_ptr<CBattleInfoCallback> cb,
+		std::shared_ptr<Environment> env,
+		std::shared_ptr<HypotheticBattle> sourceBattle,
+		float strengthRatio,
+		int simulationTurnsCount)
+		: cb(std::move(cb)), env(std::move(env)), sourceBattle(std::move(sourceBattle)),
+		simulationTurnsCount(simulationTurnsCount)
+	{
+		if(!this->sourceBattle) throw std::invalid_argument("Missing exchange source preview");
 		negativeEffectMultiplier = strengthRatio >= 1 ? 1 : strengthRatio * strengthRatio;
 	}
+
+	std::shared_ptr<HypotheticBattle> forkSourceBattle() const;
 
 	EvaluationResult findBestTarget(
 		const battle::Unit * activeStack,

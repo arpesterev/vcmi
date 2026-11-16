@@ -50,13 +50,13 @@ BonusNodeType CPropagatorNodeType::getPropagatorType() const
 	return nodeType;
 }
 
+bool matchesBonusPropagationType(BonusNodeType destination, BonusNodeType propagated)
+{
+	return propagated == destination || (propagated == BonusNodeType::ARMY
+		&& (destination == BonusNodeType::HERO || destination == BonusNodeType::TOWN));
+}
+
 bool CPropagatorNodeType::shouldBeAttached(CBonusSystemNode *dest) const
 {
-	if (nodeType == dest->getNodeType())
-		return true;
-
-	if (nodeType == BonusNodeType::ARMY)
-		return dest->getNodeType() == BonusNodeType::HERO || dest->getNodeType() == BonusNodeType::TOWN;
-
-	return false;
+	return matchesBonusPropagationType(dest->getNodeType(), nodeType);
 }

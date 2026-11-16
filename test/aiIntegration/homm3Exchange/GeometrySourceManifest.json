@@ -1,0 +1,31 @@
+{
+  "pin": "e12906accf96c2662b1abadbc49ddc111991bf21",
+  "source": "src/cmbtmgr.cpp",
+  "distanceLines": [
+    3523,
+    3534
+  ],
+  "shotLines": [
+    2752,
+    2774
+  ],
+  "gridSource": "include/cmbtmgr.h",
+  "gridLines": [
+    174,
+    179
+  ],
+  "coordinatesLines": [
+    1752,
+    1758
+  ],
+  "distanceBody": "long combatManager::getDistance(long start, long stop)\n{\n    int sx = gridX(start);\n    int sy = gridY(start);\n    int tx = gridX(stop);\n    int ty = gridY(stop);\n    long a = (sy + 1) / 2 - (ty + 1) / 2 - sx + tx;\n    long b = ty / 2 - sy / 2 - sx + tx;\n    if ((a < 0) == (b < 0))\n        return max(abs(a), abs(b));  // DC 0x62ed8: includes.h wrapper.\n    return abs(a) + abs(b);\n}\n",
+  "shotBody": "bool combatManager::shotIsNotOptimal(const army* attacker, const army* defender) const\n{\n    int side = attacker->getControllingSide();\n    if (m_heroes[side]\n            && (m_heroes[side]->isWieldingArtifact(ARTIFACT_GOLDEN_BOW)\n                || m_heroes[side]->isWieldingArtifact(\n                    ARTIFACT_BOW_OF_THE_SHARPSHOOTER)))\n        return 0;\n    if (attacker->m_creatureType == CREATURE_ARROW_TOWER\n            || attacker->m_creatureType == CREATURE_SHARPSHOOTER)\n        return 0;\n\n    int source = attacker->m_gridIndex;\n    int dest = defender->m_gridIndex;\n    if (attacker->is(creatureDoubleWide))\n        source = attacker->getSecondGridIndex();\n    if (getDistance(source, dest) <= 10)\n        return 0;\n    if (!defender->is(creatureDoubleWide))\n        return 1;\n    dest = defender->getSecondGridIndex();\n    return getDistance(source, dest) > 10;\n}\n",
+  "gridExcerpt": "enum ECombatGrid {\n    COMBAT_GRID_CELLS = 0xbb,\n    COMBAT_GRID_ROW_STRIDE = 0x11,\n    COMBAT_GRID_LAST_COLUMN = COMBAT_GRID_ROW_STRIDE - 1,\n    // The two hero-portrait pseudo-hexes GetGridIndex answers with when",
+  "coordinateExcerpt": "    static int gridY(int index) { return index / COMBAT_GRID_ROW_STRIDE; }\n\n    DC_ADDRESS(0x027f4c, 0x18)\n    static int gridX(int index)\n    {\n        return index % COMBAT_GRID_ROW_STRIDE;\n    }",
+  "sha256": {
+    "distanceBody": "0ef58c829e652c1b0640fa5ab002fbb3c35dce8cbacd5f9137c9715bf8e83ac8",
+    "shotBody": "20b9a324e129d76ca490ab11a07042e1a6efd3b910c104a5919b3c96df19f5c9",
+    "gridExcerpt": "86d4edbfbc41eb7eea5711a99531445c61ac174e4fcec6cf33f8fabc6c82dd3a",
+    "coordinateExcerpt": "b52e3bc932943440a04f4bc2dc05f5c236afcca20a86bd6b4ed6fe09842a9568"
+  }
+}

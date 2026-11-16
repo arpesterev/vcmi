@@ -14,6 +14,7 @@
 #include <vstd/RNG.h>
 
 #include "../../../lib/battle/CUnitState.h"
+#include "../../../lib/CCreatureHandler.h"
 #include "../../../lib/json/JsonNode.h"
 
 namespace test
@@ -117,6 +118,7 @@ TEST_F(CloneTest, RejectsTierExceedingMaxTier)
 	EXPECT_CALL(unit, isValidTarget(Eq(false))).WillRepeatedly(Return(true));
 	// CreatureID(6) = Swordsman, level 4 — exceeds maxTier=3
 	EXPECT_CALL(unit, creatureId()).WillRepeatedly(Return(CreatureID(6)));
+	EXPECT_CALL(unit, unitType()).WillRepeatedly(Return(CreatureID(6).toCreature()));
 
 	EXPECT_CALL(mechanicsMock, adaptProblem(Eq(ESpellCastProblem::NO_APPROPRIATE_TARGET), Ref(problemMock))).WillOnce(Return(false));
 
@@ -138,6 +140,7 @@ TEST_F(CloneTest, AcceptsTierAtMaxTier)
 	EXPECT_CALL(unit, isValidTarget(Eq(false))).WillRepeatedly(Return(true));
 	// CreatureID(4) = Griffin, level 3 — equals maxTier=3, should pass
 	EXPECT_CALL(unit, creatureId()).WillRepeatedly(Return(CreatureID(4)));
+	EXPECT_CALL(unit, unitType()).WillRepeatedly(Return(CreatureID(4).toCreature()));
 	EXPECT_CALL(unit, isInvincible()).WillRepeatedly(Return(false));
 
 	EXPECT_CALL(mechanicsMock, isReceptive(Eq(&unit))).WillRepeatedly(Return(true));
@@ -223,6 +226,7 @@ public:
 		EXPECT_CALL(original, getCount()).WillRepeatedly(Return(expectedAmount));
 		EXPECT_CALL(original, unitId()).WillRepeatedly(Return(originalId));
 		EXPECT_CALL(original, creatureId()).WillRepeatedly(Return(CreatureID(0)));
+		EXPECT_CALL(original, unitType()).WillRepeatedly(Return(CreatureID(0).toCreature()));
 		EXPECT_CALL(original, creatureIndex()).WillRepeatedly(Return(0));
 		EXPECT_CALL(original, doubleWide()).WillRepeatedly(Return(false));
 		EXPECT_CALL(original, getPosition()).WillRepeatedly(Return(originalPosition));

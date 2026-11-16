@@ -426,6 +426,7 @@ TEST_F(SacrificeGetHealthChangeTest, DeadTargetReturnsMaxResurrectionValue)
 	auto & unit = unitsFake.add(BattleSide::ATTACKER);
 	EXPECT_CALL(unit, unitBaseAmount()).WillRepeatedly(Return(baseAmount));
 	EXPECT_CALL(unit, creatureId()).WillRepeatedly(Return(CreatureID(unitId)));
+	EXPECT_CALL(unit, unitType()).WillRepeatedly(Return(static_cast<const Creature *>(CreatureID(unitId).toCreature())));
 	unit.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, unitHP, BonusSourceID()));
 	unitsFake.setDefaultBonusExpectations();
 
@@ -452,6 +453,7 @@ TEST_F(SacrificeGetHealthChangeTest, VictimSetsHealOfTarget)
 	auto & unit = unitsFake.add(BattleSide::ATTACKER);
 	EXPECT_CALL(unit, unitBaseAmount()).WillRepeatedly(Return(10));
 	EXPECT_CALL(unit, creatureId()).WillRepeatedly(Return(CreatureID(unitId)));
+	EXPECT_CALL(unit, unitType()).WillRepeatedly(Return(static_cast<const Creature *>(CreatureID(unitId).toCreature())));
 	unit.addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT, BonusType::STACK_HEALTH, BonusSource::CREATURE_ABILITY, 100, BonusSourceID()));
 
 	auto & victim = unitsFake.add(BattleSide::ATTACKER);
