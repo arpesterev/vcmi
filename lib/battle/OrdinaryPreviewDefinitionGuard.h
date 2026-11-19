@@ -140,7 +140,8 @@ private:
 			for(auto bonus : node.exported)
 				if(definitionExports.contains(bonus))
 					throw std::invalid_argument("Ordinary mutable export aliases a Creature export");
-			pending.insert(pending.end(), node.children.begin(), node.children.end());
+			for(auto child : node.children)
+				pending.push_back(child);
 		}
 		mutationClosure.assign(visited.begin(), visited.end());
 	}
