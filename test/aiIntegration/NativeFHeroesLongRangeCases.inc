@@ -48,7 +48,9 @@ protected:
   if(level)attackerSideHero->setSecSkillLevel(SecondarySkill::ARCHERY,level,ChangeValueMode::ABSOLUTE);
   map()->getTile(defenderSideHero->visitablePos()).terrainType=ETerrainId::SAND;
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);ASSERT_EQ(gameState()->currentBattles.size(),1u);
-  for(const auto & u:battle()->stacks)(u->unitSide()==BattleSide::ATTACKER?actor:enemy)=u.get();ASSERT_NE(actor,nullptr);ASSERT_NE(enemy,nullptr);
+  for(const auto & u:battle()->stacks)
+   (u->unitSide()==BattleSide::ATTACKER?actor:enemy)=u.get();
+  ASSERT_NE(actor,nullptr);ASSERT_NE(enemy,nullptr);
   auto callback=std::make_shared<DecisionCallback>(actor->unitOwner());callback->onBattleStarted(battle());const auto v=callback->getBattle(battle()->getBattleID());
   ASSERT_TRUE(v->battleHasDistancePenalty(actor,actor->getPosition(),enemy->getPosition()));ASSERT_TRUE(AIIntegration::Ports::FHeroes2::ordinaryPursuitThreats(*v,*enemy,{actor}));
   runToCompletion(std::nullopt,false,"FHeroes2Tactics","FHeroes2Tactics",true);ASSERT_FALSE(HasFatalFailure());EXPECT_GT(recorder.shots,0);EXPECT_TRUE(gameState()->currentBattles.empty());

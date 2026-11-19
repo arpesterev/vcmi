@@ -45,7 +45,7 @@ protected:
   }
   std::vector<const CStack *> targets{enemy,distant};if(ignored)targets.push_back(ignored);
   const auto source=AIIntegration::Ports::FHeroes2::ordinaryRangedTargetThreats(*view,*actor,targets);
-  ASSERT_EQ(bool(source),!fallback);if(source)EXPECT_EQ(source->size(),2u);
+  ASSERT_EQ(bool(source),!fallback);if(source){EXPECT_EQ(source->size(),2u);}
   const auto * selected=fallback?enemy:distant;const auto id=selected->unitId();
   const auto expected=view->battleEstimateDamage(BattleAttackInfo(actor,selected,0,true));int hits=0;
   recorder.onAttackBeforeApply=[&](const BattleAttack & packet){if(packet.stackAttacking==actor->unitId())for(const auto & hit:packet.bsa)if(hit.stackAttacked==id){++hits;EXPECT_TRUE(packet.shot());EXPECT_GE(hit.damageAmount,expected.damage.min);EXPECT_LE(hit.damageAmount,expected.damage.max);}};

@@ -42,7 +42,7 @@ protected:
   if(!recorder.battleResults.empty())
   {
    const auto question=recorder.battleResults.back().questionID;
-   if(question!=QuestionID::NONE)ASSERT_TRUE(gameHandler->answerQuestion(question,0,player));
+   if(question!=QuestionID::NONE){ASSERT_TRUE(gameHandler->answerQuestion(question,0,player));}
    EXPECT_EQ(recorder.acceptedResults,1);EXPECT_TRUE(gameState()->currentBattles.empty());
   }
  }

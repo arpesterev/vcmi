@@ -23,7 +23,7 @@ protected:
   startRecordedGame();ASSERT_FALSE(HasFatalFailure());const bool mass=mastery==MasteryLevel::EXPERT;
   setArmy(attackerSideHero,CreatureID(2),scenario==Case::Underdog||scenario==Case::Overkill?1:400);
   setArmy(defenderSideHero,CreatureID(2),200);
-  if(mass)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id,SlotID(1)),CreatureID(2).toCreature(),200));
+  if(mass){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id,SlotID(1)),CreatureID(2).toCreature(),200));}
   teachBattleSpell(attackerSideHero,SpellID::WEAKNESS);attackerSideHero->setSecSkillLevel(SecondarySkill::WATER_MAGIC,mastery,ChangeValueMode::ABSOLUTE);
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);ASSERT_EQ(gameState()->currentBattles.size(),1u);battle()->obstacles.clear();
   CStack *active=nullptr;std::vector<CStack *> enemies;
@@ -58,7 +58,7 @@ protected:
    const int base=static_cast<int>(enemy->getCount()*(enemy->getMinDamage(true)+enemy->getMaxDamage(true))/2.0);
    EXPECT_EQ(*actualAverage,original(base,enemy->getAttack(true),active->getAvailableHealth()));
   }
-  if(scenario==Case::Existing||scenario==Case::Resistant)ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*active));
+  if(scenario==Case::Existing||scenario==Case::Resistant){ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*active));}
   for(auto *enemy:enemies)
   {
    ASSERT_TRUE(view->battleCanShoot(enemy,active->getPosition()));
@@ -109,7 +109,7 @@ protected:
  {
   startRecordedGame();ASSERT_FALSE(HasFatalFailure());
   setArmy(attackerSideHero,CreatureID(0),400);setArmy(defenderSideHero,CreatureID(0),200);
-  if(exposedShooter)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),50));
+  if(exposedShooter){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),50));}
   teachBattleSpell(attackerSideHero,SpellID::WEAKNESS);attackerSideHero->setSecSkillLevel(SecondarySkill::WATER_MAGIC,MasteryLevel::ADVANCED,ChangeValueMode::ABSOLUTE);
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);ASSERT_EQ(gameState()->currentBattles.size(),1u);
   battle()->obstacles.clear();CStack *ally=nullptr,*enemy=nullptr,*shooter=nullptr;

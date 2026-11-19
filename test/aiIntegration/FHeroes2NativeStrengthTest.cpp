@@ -149,7 +149,10 @@ TEST_F(FHeroes2NativeStrengthBattle,ordinaryDeathKeepsSourceScaleAndZeroTroopStr
 	const AIIntegration::Ports::FHeroes2::NativeStrengthModel model(*view);
 	ASSERT_TRUE(model.usesSourceScale()); EXPECT_DOUBLE_EQ(model.value(*unit),0);
 	for(const auto & survivor : battle()->stacks)
-		if(survivor->alive()) EXPECT_GT(model.value(*survivor),0);
+		if(survivor->alive())
+		{
+			EXPECT_GT(model.value(*survivor),0);
+		}
 }
 TEST_F(FHeroes2NativeStrengthBattle,unsupportedPreviewRestartsWholeChooserInNativeScale)
 {

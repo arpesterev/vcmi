@@ -9,7 +9,7 @@ protected:
 		setArmy(attackerSideHero, CreatureID(2), scenario == 6 ? 1 : 80);
 		setArmy(defenderSideHero, CreatureID(6), 15);
 		if(scenario == 5)
-			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 10));
+			{ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 10));}
 		ASSERT_FALSE(HasFatalFailure());
 		gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);

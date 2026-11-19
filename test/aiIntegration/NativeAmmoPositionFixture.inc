@@ -190,7 +190,7 @@
 		ASSERT_NE(a.enemy, nullptr);
 		ASSERT_NE(b.enemy, nullptr);
 		const auto m = melee ? at(initial, melee, cluster) : AmmoAttackOption{};
-		if(mixed) ASSERT_NE(m.enemy, nullptr);
+		if(mixed) {ASSERT_NE(m.enemy, nullptr);}
 		const double lower = mixed ? a.hitValue + std::max(b.hitValue, m.hitValue) : std::max(a.hitValue, b.hitValue);
 		const double upper = a.hitValue + b.hitValue + (mixed ? m.hitValue : 0.0);
 		ASSERT_GT(upper, lower + 0.002);

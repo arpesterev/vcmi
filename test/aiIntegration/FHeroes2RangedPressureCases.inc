@@ -14,7 +14,9 @@ protected:
 		setArmy(attackerSideHero, CreatureID(0), 100);
 		setArmy(defenderSideHero, CreatureID(0), 100);
 		if(ownArchers)
+		{
 			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 10));
+		}
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(2).toCreature(), 20));
 		gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
@@ -71,7 +73,7 @@ TEST_F(FHeroes2RangedPressureBattle, ownNonDamageAndAdventureSpellsDoNotCreatePr
 	preparePressure();
 	ASSERT_FALSE(HasFatalFailure());
 	teachBattleSpell(attackerSideHero, SpellID::HASTE, 99);
-	teachSpell(attackerSideHero, SpellID::TOWN_PORTAL);
+	teachSpell(attackerSideHero, spellByName("core:townPortal"));
 	EXPECT_FALSE(stance().defensive);
 }
 
@@ -125,7 +127,7 @@ TEST_F(FHeroes2RangedPressureBattle, enemyObservedMaximumDoesNotMultiplyAreaDama
 	EXPECT_EQ(Magic::maximumObservedDamage(*pressureView, one), raw);
 	EXPECT_EQ(Magic::maximumObservedDamage(*pressureView, many), raw);
 	const AIIntegration::FHeroes2ObservedSpells both{{area, true}, {SpellID(SpellID::IMPLOSION), false},
-		{SpellID(SpellID::HASTE), true}, {SpellID(SpellID::TOWN_PORTAL), false}};
+		{SpellID(SpellID::HASTE), true}, {spellByName("core:townPortal"), false}};
 	EXPECT_EQ(Magic::maximumObservedDamage(*pressureView, both), std::max(raw,
 		static_cast<double>(SpellID(SpellID::IMPLOSION).toSpell()->calculateRawEffectValue(MasteryLevel::NONE, 99, 1))));
 }

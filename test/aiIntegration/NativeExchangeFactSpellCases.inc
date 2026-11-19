@@ -78,8 +78,8 @@ protected:
   }
   EXPECT_EQ(own->blessed,spellID==SpellID::BLESS);
   EXPECT_EQ(enemy->cursed,spellID==SpellID::CURSE);
-  if(spellID==SpellID::BLESS) EXPECT_EQ(own->blessAmount,expert ? 1 : 0);
-  if(spellID==SpellID::CURSE) EXPECT_EQ(enemy->curseAmount,expert ? 1 : 0);
+  if(spellID==SpellID::BLESS) {EXPECT_EQ(own->blessAmount,expert ? 1 : 0);}
+  if(spellID==SpellID::CURSE) {EXPECT_EQ(enemy->curseAmount,expert ? 1 : 0);}
   const auto attack=NativeExchangeFacts::rangedAttack(*censusView,*shooters[0],*targets[0]);
   ASSERT_TRUE(attack);
   EXPECT_EQ(attack->attack,actor.getAdjustedAttack(&target,true));

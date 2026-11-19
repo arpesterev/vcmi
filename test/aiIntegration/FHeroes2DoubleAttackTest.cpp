@@ -199,7 +199,9 @@ TEST_F(FHeroes2DoubleAttackBattle,sourceSecondStrikeChangesPursuitTarget)
  startGame();ASSERT_FALSE(HasFatalFailure());attackerSideHero->setStackCount(SlotID(0),20);defenderSideHero->setStackCount(SlotID(0),4);
  ASSERT_TRUE(gameHandler->changeStackType(StackLocation(defenderSideHero->id,SlotID(0)),CreatureID(7).toCreature()));
  startBattle();ASSERT_FALSE(HasFatalFailure());CStack * active=nullptr;CStack * enemy=nullptr;
- for(const auto & unit:battle()->stacks)(unit->unitSide()==BattleSide::ATTACKER?active:enemy)=unit.get();ASSERT_NE(active,nullptr);ASSERT_NE(enemy,nullptr);
+ for(const auto & unit:battle()->stacks)
+  (unit->unitSide()==BattleSide::ATTACKER?active:enemy)=unit.get();
+ ASSERT_NE(active,nullptr);ASSERT_NE(enemy,nullptr);
  for(auto * u:{active,enemy}){BattleStackMoved move;move.battleID=battle()->getBattleID();move.stack=u->unitId();move.teleporting=true;move.tilesToMove.insert(BattleHex(u==active?87:48));server.applyPack(move);}
  auto * alternative=addStack(BattleSide::DEFENDER,CreatureID(0),BattleHex(150),70);ASSERT_NE(alternative,nullptr);
  ASSERT_NE(addStack(BattleSide::ATTACKER,CreatureID(0),BattleHex(19),10000),nullptr);

@@ -78,7 +78,10 @@ protected:
    if(unit->isCatapult()){++catapults;if(!retainCatapult)injure(unit.get(),unit->getAvailableHealth());}
    else if(unit->creatureId()==CreatureID(0))active=unit.get();
   }
-  if(retainCatapult)ASSERT_GT(catapults,0);
+  if(retainCatapult)
+  {
+   ASSERT_GT(catapults,0);
+  }
   ASSERT_NE(active,nullptr);
   for(const auto & unit:battle()->stacks)
    if(unit->unitSide()==BattleSide::DEFENDER && unit->creatureId()==CreatureID(0))defender=unit.get();
@@ -90,7 +93,10 @@ protected:
   ASSERT_TRUE(view->battleCanFlee());
   ASSERT_FALSE(view->battleIsInsideWalls(active->getPosition()));
   ASSERT_TRUE(view->battleIsInsideWalls(defender->getPosition()));
-  if(!retainCatapult && !humanControlled)ASSERT_TRUE(choose());
+  if(!retainCatapult && !humanControlled)
+  {
+   ASSERT_TRUE(choose());
+  }
 
  }
  std::optional<BattleAction> choose(bool human=false,bool autocombat=false)

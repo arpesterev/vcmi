@@ -17,7 +17,9 @@ protected:
 		ASSERT_NE(town, nullptr);
 		for(const auto building : {BuildingID::FORT, BuildingID::CITADEL, BuildingID::CASTLE})
 			if(!town->hasBuilt(building))
+			{
 				ASSERT_TRUE(gameHandler->buildStructure(town->id, building, true));
+			}
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), CreatureID(0).toCreature(), 100));
 		const auto layout = BattleLayout::createDefaultLayout(*gameState(), attackerSideHero, town);
 		gameHandler->battles->startBattle(attackerSideHero, town, town->visitablePos(), attackerSideHero, nullptr, layout, town);

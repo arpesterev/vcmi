@@ -21,7 +21,7 @@ protected:
 			hero->setPrimarySkill(PrimarySkill::DEFENSE, 0, ChangeValueMode::ABSOLUTE);
 		}
 		if(groundPeer)
-			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 10));
+			{ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), 10));}
 		for(int slot = 1; slot <= 2; ++slot)
 			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id, SlotID(slot)), CreatureID(6).toCreature(), 15));
 		map()->getTile(defenderSideHero->visitablePos()).terrainType = terrain;

@@ -43,8 +43,12 @@ protected:
   beginCombat();ASSERT_FALSE(HasFatalFailure());
  }
  double sourceValue(const CStack * unit,int resist){
-  if(resist>=100)return 0;const uint32_t damage=static_cast<uint32_t>(raw)*(100-resist)/100;
-  if(!damage)return 0;const double strength=unit->estimateCombatValue();
+  if(resist>=100)
+   return 0;
+  const uint32_t damage=static_cast<uint32_t>(raw)*(100-resist)/100;
+  if(!damage)
+   return 0;
+  const double strength=unit->estimateCombatValue();
   if(damage>=unit->getAvailableHealth()){double army=0;for(const auto & u:battle()->stacks)if(u->alive()&&u->unitSide()==BattleSide::DEFENDER)army+=u->estimateCombatValue();return strength+army*.035;}
   double fraction=static_cast<double>(damage)/unit->getAvailableHealth();if(unit->hasBonusOfType(BonusType::NOT_ACTIVE))fraction+=fraction-1;return fraction*strength;
  }

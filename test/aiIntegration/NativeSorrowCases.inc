@@ -23,7 +23,7 @@ protected:
   setArmy(attackerSideHero,CreatureID(2),scenario==Case::Underdog?1:400);
   setArmy(defenderSideHero,CreatureID(2),200);
   for(auto *hero:{attackerSideHero,defenderSideHero})hero->setSecSkillLevel(SecondarySkill::LEADERSHIP,0,ChangeValueMode::ABSOLUTE);
-  if(mass)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id,SlotID(1)),CreatureID(2).toCreature(),200));
+  if(mass){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id,SlotID(1)),CreatureID(2).toCreature(),200));}
   teachBattleSpell(attackerSideHero,SpellID::SORROW);
   attackerSideHero->setSecSkillLevel(SecondarySkill::EARTH_MAGIC,mastery,ChangeValueMode::ABSOLUTE);
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);
@@ -44,7 +44,7 @@ protected:
   auto environment=std::make_shared<NativePortEnvironment>(makeCallback(player),callback);
   for(auto *enemy:enemies)ASSERT_TRUE(view->battleCanShoot(enemy,ally->getPosition()));
   if(scenario==Case::Immune || scenario==Case::Mirth || scenario==Case::Sorrow || scenario==Case::Resistant)
-   ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*ally))<<"negative fixture requires positive baseline";
+   {ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*ally))<<"negative fixture requires positive baseline";}
   for(auto *enemy:enemies)
   {
    if(scenario==Case::Immune)enemy->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,BonusType::NO_MORALE,BonusSource::OTHER,1,BonusSourceID()));
@@ -103,7 +103,7 @@ protected:
  {
   startRecordedGame();ASSERT_FALSE(HasFatalFailure());
   setArmy(attackerSideHero,CreatureID(0),400);setArmy(defenderSideHero,CreatureID(0),200);
-  if(exposedShooter)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),50));
+  if(exposedShooter){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),50));}
   teachBattleSpell(attackerSideHero,SpellID::SORROW);attackerSideHero->setSecSkillLevel(SecondarySkill::EARTH_MAGIC,MasteryLevel::ADVANCED,ChangeValueMode::ABSOLUTE);
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);ASSERT_EQ(gameState()->currentBattles.size(),1u);
   battle()->obstacles.clear();CStack *ally=nullptr,*enemy=nullptr,*shooter=nullptr;

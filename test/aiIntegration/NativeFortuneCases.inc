@@ -20,7 +20,7 @@ protected:
  {
   startRecordedGame();ASSERT_FALSE(HasFatalFailure());const bool mass=mastery==MasteryLevel::EXPERT;
   setArmy(attackerSideHero,CreatureID(2),200);setArmy(defenderSideHero,CreatureID(2),scenario==Case::Overkill?1:1000);
-  if(mass || scenario==Case::TwoFriend)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),100));
+  if(mass || scenario==Case::TwoFriend){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),100));}
   teachBattleSpell(attackerSideHero,SpellID::FORTUNE);attackerSideHero->setSecSkillLevel(SecondarySkill::AIR_MAGIC,mastery,ChangeValueMode::ABSOLUTE);
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);ASSERT_EQ(gameState()->currentBattles.size(),1u);battle()->obstacles.clear();
   std::vector<CStack *> allies;CStack *enemy=nullptr;
@@ -33,7 +33,7 @@ protected:
   auto environment=std::make_shared<NativePortEnvironment>(makeCallback(player),callback);
   for(auto *u:allies)ASSERT_TRUE(view->battleCanShoot(u,enemy->getPosition()));
   if(scenario==Case::Nonzero||scenario==Case::ExistingFortune||scenario==Case::ExistingMisfortune||scenario==Case::Immune)
-   ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*active));
+   {ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*active));}
   for(auto *u:allies)
   {
    if(scenario==Case::Nonzero)u->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,BonusType::LUCK,BonusSource::OTHER,1,BonusSourceID()));
@@ -87,7 +87,7 @@ protected:
   auto environment=std::make_shared<NativePortEnvironment>(makeCallback(player),callback);
   const auto census=AIIntegration::Ports::HoMM3::captureNativeOrdinaryCensus(*view,BattleSide::ATTACKER,environment.get(),true);ASSERT_TRUE(census);ASSERT_TRUE(census->rows.at(0));
   if(!distant){ASSERT_TRUE(census->rows.at(0)->target);ASSERT_LE(census->rows.at(0)->target->attackTime,1);}
-  else if(census->rows.at(0)->target)ASSERT_GT(census->rows.at(0)->target->attackTime,1);
+  else if(census->rows.at(0)->target){ASSERT_GT(census->rows.at(0)->target->attackTime,1);}
   const auto selected=AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*active,{},certified);
   if(distant||!certified){EXPECT_FALSE(selected);return;}
   ASSERT_TRUE(selected);EXPECT_EQ(selected->spell,SpellID::FORTUNE);

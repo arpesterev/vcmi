@@ -22,9 +22,9 @@ protected:
   const bool mass=mastery==MasteryLevel::EXPERT;
   setArmy(attackerSideHero,CreatureID(2),scenario==Case::Underdog?1:400);
   setArmy(defenderSideHero,scenario==Case::TwoFriend?creatureByName("core:woodElf"):(scenario==Case::Melee?CreatureID(0):CreatureID(2)),200);
-  if(scenario==Case::TwoFriend)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),50));
+  if(scenario==Case::TwoFriend){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(2).toCreature(),50));}
   for(auto *hero:{attackerSideHero,defenderSideHero})hero->setSecSkillLevel(SecondarySkill::LEADERSHIP,0,ChangeValueMode::ABSOLUTE);
-  if(mass)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id,SlotID(1)),CreatureID(2).toCreature(),200));
+  if(mass){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id,SlotID(1)),CreatureID(2).toCreature(),200));}
   teachBattleSpell(attackerSideHero,SpellID::MISFORTUNE);
   attackerSideHero->setSecSkillLevel(SecondarySkill::FIRE_MAGIC,mastery,ChangeValueMode::ABSOLUTE);
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);
@@ -50,7 +50,7 @@ protected:
    ASSERT_EQ(friendCount,2);
   }
   if(scenario==Case::Immune || scenario==Case::Fortune || scenario==Case::Misfortune || scenario==Case::Resistant)
-   ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*ally))<<"negative fixture requires positive baseline";
+   {ASSERT_TRUE(AIIntegration::HoMM3SpellPolicy::choose(view,environment.get(),*ally))<<"negative fixture requires positive baseline";}
   for(auto *enemy:enemies)
   {
    if(scenario==Case::Immune)enemy->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,BonusType::NO_LUCK,BonusSource::OTHER,1,BonusSourceID()));

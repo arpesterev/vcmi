@@ -64,7 +64,10 @@ protected:
   gameHandler->setOwner(town,PlayerColor(0));town->addBuilding(BuildingID::TAVERN);
   ASSERT_TRUE(gameHandler->changeStackType(StackLocation(attackerSideHero->id,SlotID(0)),creatureByName("core:archer").toCreature()));
   ASSERT_TRUE(gameHandler->changeStackCount(StackLocation(attackerSideHero->id,SlotID(0)),winning?200:1,ChangeValueMode::ABSOLUTE));
-  if(secondOwn)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),creatureByName("core:masterGremlin").toCreature(),1));
+  if(secondOwn)
+  {
+   ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),creatureByName("core:masterGremlin").toCreature(),1));
+  }
   gameHandler->createWanderingMonster({9,9,0},creatureByName("core:woodElf"),winning?1:40);
   auto *neutral=const_cast<CGCreature *>(findFirst<CGCreature>());ASSERT_NE(neutral,nullptr);
   gameState()->getMap().getTile(neutral->visitablePos()).terrainType=ETerrainId::SAND;
@@ -188,7 +191,10 @@ protected:
   gameHandler->createWanderingMonster({9,9,0},creatureByName("core:halberdier"),winning?1:enemyCount);
   auto *neutral=const_cast<CGCreature *>(findFirst<CGCreature>());ASSERT_NE(neutral,nullptr);
   gameState()->getMap().getTile(neutral->visitablePos()).terrainType=ETerrainId::SAND;
-  if(mixedEnemy)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(neutral->id,SlotID(1)),creatureByName("core:woodElf").toCreature(),40));
+  if(mixedEnemy)
+  {
+   ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(neutral->id,SlotID(1)),creatureByName("core:woodElf").toCreature(),40));
+  }
   events.gameState=gameState();gameHandler=std::make_shared<CGameHandler>(events,gameState());
   events.after=[this](CPackForClient &p)
   {
@@ -238,7 +244,10 @@ protected:
    a.m_gridIndex=u->getPosition().toInt();R::manager.m_cells[a.m_gridIndex].value=&a;
    a.retaliates=u->counterAttacks.available()>0;a.m_retaliationCount=u->counterAttacks.available();
    a.m_facing=*history->source().find(u->unitId())->facing;
-   if(u->moved()||u->defended())a.flags|=R::creatureDone;if(u->waited())a.flags|=R::creatureWaiting;
+   if(u->moved()||u->defended())
+    a.flags|=R::creatureDone;
+   if(u->waited())
+    a.flags|=R::creatureWaiting;
   }
   R::draws=factors;R::drawCursor=0;R::manager.simulateCombat(0,true);
   EXPECT_EQ(projected->order,R::manager.fixedOrder);EXPECT_EQ(projected->drawsConsumed,R::drawCursor);
@@ -292,7 +301,10 @@ protected:
   prepareGround(winning,false,true,enemyCount);ASSERT_FALSE(HasFatalFailure());
   ASSERT_TRUE(attackerSideHero->artifactsInBackpack.empty());
   ASSERT_LE(attackerSideHero->artifactsWorn.size(),1u);
-  if(!attackerSideHero->artifactsWorn.empty())ASSERT_TRUE(attackerSideHero->hasArt(ArtifactID(ArtifactID::CATAPULT),true));
+  if(!attackerSideHero->artifactsWorn.empty())
+  {
+   ASSERT_TRUE(attackerSideHero->hasArt(ArtifactID(ArtifactID::CATAPULT),true));
+  }
   reserve=active->getCount()*active->creatureCost()/2+2500;
   gameState()->players.at(PlayerColor(0)).resources[GameResID::GOLD]=reserve;
   const auto policy=F::captureNativeShooterPolicy(*view,environment.get());ASSERT_TRUE(policy);

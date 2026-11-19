@@ -16,7 +16,8 @@ protected:
   if(fallback)guard->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,BonusType::MAGIC_MIRROR,BonusSource::OTHER,1,BonusSourceID()));
   ASSERT_EQ(bool(AIIntegration::Ports::FHeroes2::ordinaryPursuitThreats(*view,*actor,{enemy,guard})),!fallback);
   const auto blocked=view->getReachability(guard);
-  for(const auto & hex:guard->getPosition().getNeighbouringTiles())ASSERT_FALSE(blocked.isReachable(hex));
+  const auto guardNeighbours=guard->getPosition().getNeighbouringTiles();
+  for(const auto & hex:guardNeighbours)ASSERT_FALSE(blocked.isReachable(hex));
   const auto origin=actor->getPosition();const auto hp=actor->getAvailableHealth();const auto guardHp=guard->getAvailableHealth();
   const int speed=actor->getMovementRange();BattleHex chosen;
   chooseAndApply([&](const BattleAction & action){

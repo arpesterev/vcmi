@@ -65,8 +65,14 @@ protected:
  void prepare(bool ranged=false,bool activeRanged=false)
  {
   startGame(); ASSERT_FALSE(HasFatalFailure());
-  if(activeRanged) ASSERT_TRUE(gameHandler->changeStackType(StackLocation(attackerSideHero->id,SlotID(0)),CreatureID(2).toCreature()));
-  if(ranged) ASSERT_TRUE(gameHandler->changeStackType(StackLocation(defenderSideHero->id,SlotID(0)),CreatureID(2).toCreature()));
+  if(activeRanged)
+  {
+   ASSERT_TRUE(gameHandler->changeStackType(StackLocation(attackerSideHero->id,SlotID(0)),CreatureID(2).toCreature()));
+  }
+  if(ranged)
+  {
+   ASSERT_TRUE(gameHandler->changeStackType(StackLocation(defenderSideHero->id,SlotID(0)),CreatureID(2).toCreature()));
+  }
   attackerSideHero->setStackCount(SlotID(0),1000);defenderSideHero->setStackCount(SlotID(0),10);
   startBattle(); ASSERT_FALSE(HasFatalFailure());
   for(const auto & unit:battle()->stacks)

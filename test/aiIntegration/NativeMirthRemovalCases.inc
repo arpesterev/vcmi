@@ -316,7 +316,7 @@ protected:
    hero->setSecSkillLevel(SecondarySkill::LEADERSHIP,MasteryLevel::NONE,ChangeValueMode::ABSOLUTE);
   }
   const bool mass=mastery==MasteryLevel::EXPERT;
-  if(mass)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(0).toCreature(),100));
+  if(mass){ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id,SlotID(1)),CreatureID(0).toCreature(),100));}
   teachBattleSpell(attackerSideHero,SpellID::MIRTH);
   attackerSideHero->setSecSkillLevel(SecondarySkill::WATER_MAGIC,mastery,ChangeValueMode::ABSOLUTE);
   gameHandler->battles->startBattle(attackerSideHero,defenderSideHero);

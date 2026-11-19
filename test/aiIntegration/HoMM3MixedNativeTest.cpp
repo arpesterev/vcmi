@@ -97,7 +97,10 @@ protected:
   }
   ASSERT_TRUE(gameHandler->changeStackType(StackLocation(armies[0]->id,SlotID(0)),creatureByName("core:halberdier").toCreature()));
   ASSERT_TRUE(gameHandler->changeStackType(StackLocation(armies[0]->id,SlotID(1)),creatureByName("core:archer").toCreature()));
-  if(lethal) ASSERT_TRUE(gameHandler->changeStackCount(StackLocation(armies[0]->id,SlotID(1)),1000,ChangeValueMode::ABSOLUTE));
+  if(lethal)
+  {
+   ASSERT_TRUE(gameHandler->changeStackCount(StackLocation(armies[0]->id,SlotID(1)),1000,ChangeValueMode::ABSOLUTE));
+  }
   const auto layout=BattleLayout::createDefaultLayout(*gameState(),armies[0],armies[1]);
   const std::string fieldName="core:sand_shore";
   BattleField field(*LIBRARY->identifiers()->getIdentifier(ModScope::scopeGame(),"battlefield",fieldName));
@@ -157,7 +160,14 @@ protected:
   const auto result=F::chooseOrdinaryLiveMixed(input);ASSERT_TRUE(result);R::manager.doCompAI(1-R::manager.m_currentSide);ASSERT_FALSE(R::manager.trace.empty());const auto & expected=R::manager.trace.back();const auto & actual=result->choice;
   EXPECT_EQ(actual.actor,expected.actor);EXPECT_EQ(static_cast<int>(actual.order),expected.order);EXPECT_EQ(actual.target,expected.target);EXPECT_EQ(result->drawsConsumed,R::drawCursor);
   if(!active->shooting){EXPECT_EQ(actual.value,expected.value);EXPECT_EQ(actual.danger,expected.danger);EXPECT_EQ(actual.dangerousEnemies,expected.marked);}
-  if(expected.order==2||expected.order==6||expected.order==7)EXPECT_EQ(actual.destination,expected.destination);if(expected.order==6)EXPECT_EQ(actual.attackHex,expected.hex);
+  if(expected.order==2||expected.order==6||expected.order==7)
+  {
+   EXPECT_EQ(actual.destination,expected.destination);
+  }
+  if(expected.order==6)
+  {
+   EXPECT_EQ(actual.attackHex,expected.hex);
+  }
  }
  std::optional<F::OrdinaryLiveMeleeInput> capture(bool known=true)
  {
@@ -212,7 +222,7 @@ TEST_F(HoMM3MixedNative, OwnMeleeWriterThenOwnShotKillRetainsCorpseRankForNextRo
  prepare(2,false,false,true);ASSERT_FALSE(HasFatalFailure());const auto id=battle()->getBattleID();
  const auto activate=[&](const CStack * u){BattleSetActiveStack p;p.battleID=id;p.stack=u->unitId();p.reason=BattleUnitTurnReason::TURN_QUEUE;gameHandler->sendAndApply(p);};
  const auto own=[&](int slot){return *std::find_if(units.begin(),units.end(),[&](const auto * u){return u->unitSide()==BattleSide::ATTACKER&&u->unitSlot()==SlotID(slot);});};
- const auto choose=[&](){const auto * u=views[0]->battleActiveUnit();histories[0]->beforeOwnChoice();auto result=F::chooseNativeOrdinaryLiveMixed(*views[0],*lifecycle[0],{2,{true,true}},*u,true,*histories[0],expectedRandom[0]);if(result){controllers[0][0]->activeStack(id,dynamic_cast<const CStack *>(u));EXPECT_TRUE(callbacks[0][0]->action);if(callbacks[0][0]->action)EXPECT_EQ(callbacks[0][0]->action->toString(),result->action.toString());}return result;};
+ const auto choose=[&](){const auto * u=views[0]->battleActiveUnit();histories[0]->beforeOwnChoice();auto result=F::chooseNativeOrdinaryLiveMixed(*views[0],*lifecycle[0],{2,{true,true}},*u,true,*histories[0],expectedRandom[0]);if(result){controllers[0][0]->activeStack(id,dynamic_cast<const CStack *>(u));EXPECT_TRUE(callbacks[0][0]->action);if(callbacks[0][0]->action){EXPECT_EQ(callbacks[0][0]->action->toString(),result->action.toString());}}return result;};
  activate(own(0));auto melee=choose();ASSERT_TRUE(melee);ASSERT_TRUE(act(melee->action));ASSERT_TRUE(histories[0]->ready());
  std::map<F::UnitId,int> ranks;for(const auto * u:units){const auto * h=histories[0]->source().find(u->unitId());ASSERT_NE(h,nullptr);ASSERT_TRUE(h->rank);ranks[u->unitId()]=*h->rank;}
  activate(own(1));auto shot=choose();ASSERT_TRUE(shot);ASSERT_EQ(shot->action.actionType,EActionType::SHOOT);ASSERT_TRUE(act(shot->action));ASSERT_TRUE(histories[0]->ready());

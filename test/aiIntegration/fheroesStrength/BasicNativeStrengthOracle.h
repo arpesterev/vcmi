@@ -10,9 +10,9 @@
 
 namespace FHeroes2StrengthFixture
 {
+#include "pinned-speed.h"
 namespace
 {
-#include "pinned-speed.h"
 namespace Spell { enum {BLIND,PARALYZE,PETRIFY,DISPEL,CURSE}; }
 namespace fheroes2 {
 enum class MonsterAbilityType { NO_ENEMY_RETALIATION, DOUBLE_SHOOTING, DOUBLE_MELEE_ATTACK, DOUBLE_DAMAGE_TO_UNDEAD, TWO_CELL_MELEE_ATTACK, UNLIMITED_RETALIATION, ALL_ADJACENT_CELL_MELEE_ATTACK, AREA_SHOT, NO_MELEE_PENALTY, FLYING, ENEMY_HALVING, SOUL_EATER, HP_DRAIN, SPELL_CASTER };

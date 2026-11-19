@@ -49,7 +49,7 @@
 #include "../../server/CGameHandler.h"
 #include "../../server/battles/BattleProcessor.h"
 
-namespace
+namespace NativePortBattleTestSupport
 {
 class DecisionCallback final : public CBattleCallback
 {
@@ -243,6 +243,8 @@ public:
 	}
 };
 }
+
+using namespace NativePortBattleTestSupport;
 
 
 #include "NativeAmmoPositionOracle.inc"
@@ -646,9 +648,9 @@ protected:
 		}
 		if(fortification == BuildingID::CASTLE || fortification == BuildingID::CITADEL)
 			if(!town->hasBuilt(BuildingID::CITADEL))
-				ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CITADEL, true));
+				{ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CITADEL, true));}
 		if(fortification == BuildingID::CASTLE && !town->hasBuilt(BuildingID::CASTLE))
-			ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CASTLE, true));
+			{ASSERT_TRUE(gameHandler->buildStructure(town->id, BuildingID::CASTLE, true));}
 		ASSERT_GT(town->fortificationsLevel().wallsHealth, 0);
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id, SlotID(0)), defenderType.toCreature(), defenderCount));
 		if(includeDefenderShooter)
@@ -771,7 +773,7 @@ protected:
 		policy->activeStack(id, actor);
 		ASSERT_TRUE(callback->action.has_value());
 		ASSERT_EQ(callback->action->actionType, damageSpell ? EActionType::HERO_SPELL : EActionType::WALK_AND_ATTACK);
-		if(damageSpell) ASSERT_EQ(callback->action->spell, SpellID::MAGIC_ARROW);
+		if(damageSpell) {ASSERT_EQ(callback->action->spell, SpellID::MAGIC_ARROW);}
 		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(id, player, *callback->action));
 		if(damageSpell)
 		{
@@ -899,7 +901,7 @@ protected:
 		const auto * speedTarget = speedSpell == SpellID::HASTE ? late : target;
 		ASSERT_NE(projected->battleGetUnitByID(speedTarget->unitId())->getMovementRange(), speedTarget->getMovementRange());
 		if(speedSpell == SpellID::HASTE)
-			ASSERT_EQ(projected->battleGetUnitByID(late->unitId())->getMovementRange(), 7u);
+			{ASSERT_EQ(projected->battleGetUnitByID(late->unitId())->getMovementRange(), 7u);}
 		for(int repeat = 0; repeat < 2; ++repeat)
 			EXPECT_FALSE(AIIntegration::HoMM3SpellPolicy::choose(view, environment.get(), *actor, forecast))
 				<< "A supported win with casualties must suppress direct Haste/Slow without suppressing all spells";
@@ -925,7 +927,7 @@ protected:
 		policy->activeStack(id, actor);
 		ASSERT_TRUE(callback->action.has_value());
 		ASSERT_EQ(callback->action->actionType, damageSpell ? EActionType::HERO_SPELL : EActionType::WALK_AND_ATTACK);
-		if(damageSpell) ASSERT_EQ(callback->action->spell, SpellID::MAGIC_ARROW);
+		if(damageSpell) {ASSERT_EQ(callback->action->spell, SpellID::MAGIC_ARROW);}
 		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(id, player, *callback->action));
 		if(damageSpell)
 		{
@@ -1074,7 +1076,7 @@ protected:
 		policy->activeStack(id, actor);
 		ASSERT_TRUE(callback->action.has_value());
 		ASSERT_EQ(callback->action->actionType, alternativeSpell ? EActionType::HERO_SPELL : EActionType::WALK_AND_ATTACK);
-		if(alternativeSpell) ASSERT_EQ(callback->action->spell, alternative);
+		if(alternativeSpell) {ASSERT_EQ(callback->action->spell, alternative);}
 		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(id, player, *callback->action));
 		if(alternativeSpell)
 		{
@@ -1086,7 +1088,7 @@ protected:
 			EXPECT_EQ(attackerSideHero->mana, mana);
 			EXPECT_EQ(recorder.spellPackets, packets);
 		}
-		if(!alternativeSpell || alternative == SpellID::MAGIC_ARROW) EXPECT_GT(recorder.damage, 0);
+		if(!alternativeSpell || alternative == SpellID::MAGIC_ARROW) {EXPECT_GT(recorder.damage, 0);}
 		policy.reset();
 		runToCompletion(BattleSide::ATTACKER, true, "HoMM3OriginalTactics");
 	}
@@ -1370,7 +1372,7 @@ protected:
 		policy->activeStack(id, actor);
 		ASSERT_TRUE(callback->action.has_value());
 		ASSERT_EQ(callback->action->actionType, alternativeSpell ? EActionType::HERO_SPELL : EActionType::WALK_AND_ATTACK);
-		if(alternativeSpell) ASSERT_EQ(callback->action->spell, alternative);
+		if(alternativeSpell) {ASSERT_EQ(callback->action->spell, alternative);}
 		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(id, player, *callback->action));
 		if(alternativeSpell)
 		{
@@ -1382,7 +1384,7 @@ protected:
 			EXPECT_EQ(attackerSideHero->mana, mana);
 			EXPECT_EQ(recorder.spellPackets, packets);
 		}
-		if(!alternativeSpell || alternative == SpellID::MAGIC_ARROW) EXPECT_GT(recorder.damage, 0);
+		if(!alternativeSpell || alternative == SpellID::MAGIC_ARROW) {EXPECT_GT(recorder.damage, 0);}
 		policy.reset();
 		runToCompletion(BattleSide::ATTACKER, true, "HoMM3OriginalTactics");
 	}
@@ -1396,9 +1398,9 @@ protected:
 		setArmy(attackerSideHero, CreatureID(0), sleeping ? 10 : 100);
 		setArmy(defenderSideHero, CreatureID(exhausted ? 2 : 0), mass ? 60 : 100);
 		if(mass || sleeping)
-			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), sleeping ? 100 : 20));
+			{ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(0).toCreature(), sleeping ? 100 : 20));}
 		if(mass || controlled)
-			ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), mass ? 60 : 2));
+			{ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(defenderSideHero->id, SlotID(1)), CreatureID(0).toCreature(), mass ? 60 : 2));}
 		gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
 		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
 		battle()->obstacles.clear();
@@ -1563,13 +1565,13 @@ protected:
 			EXPECT_FALSE(target->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
 		}
 		EXPECT_FALSE(fork->battleGetUnitByID(actor->unitId())->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
-		if(ally) EXPECT_FALSE(fork->battleGetUnitByID(ally->unitId())->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
+		if(ally) {EXPECT_FALSE(fork->battleGetUnitByID(ally->unitId())->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));}
 		EXPECT_EQ(attackerSideHero->mana, mana);
 		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(id, player, *selected));
 		EXPECT_TRUE(enemy->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
-		if(mass) EXPECT_TRUE(second->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
+		if(mass) {EXPECT_TRUE(second->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));}
 		EXPECT_FALSE(actor->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
-		if(ally) EXPECT_FALSE(ally->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));
+		if(ally) {EXPECT_FALSE(ally->hasBonusOfType(BonusType::ALWAYS_MINIMUM_DAMAGE));}
 		if(sleep) ally->removeBonus(sleep);
 		runToCompletion(std::nullopt, false, "HoMM3OriginalTactics");
 	}
@@ -2816,7 +2818,7 @@ protected:
 			ASSERT_NE(moving, nullptr);
 			EXPECT_EQ(moving->unitSide(), side);
 			if(moved.size() == 1)
-				EXPECT_EQ(moving->unitId(), archer->unitId());
+				{EXPECT_EQ(moving->unitId(), archer->unitId());}
 			const auto before = moving->getPosition();
 			ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action));
 			EXPECT_NE(moving->getPosition(), before);
@@ -23797,7 +23799,7 @@ protected:
 			const auto reach = view->getReachability(actor);
 			ASSERT_EQ(reach.distToNearestNeighbour(actor, target, &landing), 2u);
 			for(const auto hex : targetPosition.getNeighbouringTiles())
-				if(hex.isAvailable() && hex != landing) EXPECT_GT(reach.distances[hex.toInt()], 2u);
+				if(hex.isAvailable() && hex != landing) {EXPECT_GT(reach.distances[hex.toInt()], 2u);}
 		}
 		// Independent native midpoint oracle: retaliation uses the post-hit count.
 		auto oracleActor = actor->acquireState();
@@ -23856,7 +23858,7 @@ protected:
 			const auto reach = view->getReachability(actor);
 			ASSERT_EQ(reach.distances[landing.toInt()], 2u);
 			for(const auto hex : finish.getNeighbouringTiles())
-				if(hex != landing) EXPECT_GT(reach.distances[hex.toInt()], 2u);
+				if(hex != landing) {EXPECT_GT(reach.distances[hex.toInt()], 2u);}
 			const auto actorHealth = actor->getAvailableHealth();
 			const auto targetHealth = target->getAvailableHealth();
 			const auto forecast = HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, true);
@@ -24310,7 +24312,7 @@ protected:
 		ASSERT_NE(actor, nullptr);
 		ASSERT_EQ(targets.size(), 2u);
 		std::sort(targets.begin(), targets.end(), [](const auto * a, const auto * b) { return a->unitSlot() < b->unitSlot(); });
-		if(nativeDefense) ASSERT_TRUE(castOn(defenderSideHero, SpellID::AIR_SHIELD, targets[0]));
+		if(nativeDefense) {ASSERT_TRUE(castOn(defenderSideHero, SpellID::AIR_SHIELD, targets[0]));}
 		ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, targets[0]));
 		battle()->nextRound();
 		battle()->activeStack = actor->unitId();
