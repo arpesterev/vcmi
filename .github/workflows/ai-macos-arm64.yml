@@ -44,6 +44,7 @@ jobs:
           python3 -m unittest discover -s CI -p 'test_macos_native_ai.py' -v
           python3 -m unittest discover -s CI -p 'test_native_ai_inventory.py' -v
           python3 -m unittest discover -s CI -p 'test_macos_a53_inventory.py' -v
+          python3 -m unittest discover -s CI -p 'test_macos_candidate_inventory.py' -v
           python3 -m unittest discover -s CI -p 'test_verify_mmai_1_8.py' -v
           python3 CI/test_launcher_ai_selection.py
 
@@ -156,7 +157,7 @@ jobs:
             --test-binary "$GITHUB_WORKSPACE/out/build/macos-arm-conan-ninja-release/bin/vcmitest" \
             --fixture-archive "$RUNNER_TEMP/vcmi-test-data-v2.0.7z" \
             --source-sha "$GITHUB_SHA" --expected-native-count 479 --expected-forecast-count 18 --expected-lifecycle-count 10 \
-            --reviewed-inventory "$GITHUB_WORKSPACE/CI/macos_ai_a53_inventory.json" \
+            --reviewed-inventory "$GITHUB_WORKSPACE/CI/macos_ai_f398624_inventory.json" \
             --suite-group "$1" --output-dir "$GITHUB_WORKSPACE/out/mac-ai-$1"
           SH
 

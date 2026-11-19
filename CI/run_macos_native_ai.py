@@ -108,6 +108,9 @@ TIED_LANDING_NATIVE = {
 }
 FULL_NATIVE_FILTER = "AIIntegrationNativeBattle.*:AIIntegrationNativeSpeed.*:AIIntegrationNativeForecastApproach.*:AIIntegrationNativePeerDefense.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*:FHeroes2WideCautious.*:HoMM3TiedLanding.*"
 NATIVE_FILTER = FULL_NATIVE_FILTER + "-" + ":".join(sorted(GATED_NATIVE))
+REVIEWED_FILTER = ("AIIntegration*.*:" + FULL_NATIVE_FILTER
+                   + ":MMAINNOutputValidation.*:Nullkiller2_*:ResourceTradingTurnTest.*-"
+                   + ":".join(sorted(GATED_NATIVE)))
 
 
 def selected_suites(native_count, forecast_count, group="all", additional_count=0):
@@ -490,10 +493,7 @@ def main(argv=None):
             additional_count = 0
             if args.reviewed_inventory:
                 manifest = json.loads(args.reviewed_inventory.read_text(encoding="utf-8"))
-                reviewed_filter = ("AIIntegration*.*:HoMM3ForecastQueueNative.*:"
-                                   "HoMM3ForecastLifecycleNative.*:MMAINNOutputValidation.*:"
-                                   "Nullkiller2_*:ResourceTradingTurnTest.*-" + ":".join(sorted(GATED_NATIVE)))
-                reviewed = read_inventory(binary, output, env, "reviewed", reviewed_filter)
+                reviewed = read_inventory(binary, output, env, "reviewed", REVIEWED_FILTER)
                 verify_reviewed_inventory(reviewed, manifest)
                 additional_count = sum(identity.startswith("AIIntegration")
                                        and not matches_filter(identity, FULL_NATIVE_FILTER)
