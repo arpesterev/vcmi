@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from run_macos_native_ai import parse_test_inventory, verify_native_inventory
+from run_macos_native_ai import parse_test_inventory, verify_native_inventory, validate_report, NATIVE_FILTER
 
 
 def workflow_counts(text):
@@ -22,22 +22,27 @@ def workflow_counts(text):
     return counts
 
 
-def check_inventory(listing, workflow):
+def check_inventory(listing, workflow, xml=None):
     counts = workflow_counts(workflow)
     identities = parse_test_inventory(listing)
     selected = verify_native_inventory(identities, counts["native"], counts["forecast"], counts["lifecycle"])
-    return {"status": "passed", "evidence": "compiled-inventory-only", "expected_counts": counts,
-            "compiled_cases": len(identities), "selected_non_neural_cases": len(selected)}
+    report = {"status": "passed", "evidence": "compiled-inventory-only", "expected_counts": counts,
+              "compiled_cases": len(identities), "selected_non_neural_cases": len(selected)}
+    if xml is not None:
+        report["executed_cases"] = validate_report(xml, selected, NATIVE_FILTER)
+        report["evidence"] = "compiled-inventory-and-native-xml"
+    return report
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", required=True, type=Path)
     parser.add_argument("--mac-workflow", required=True, type=Path)
+    parser.add_argument("--xml", type=Path, help="Require exact completed non-neural XML identities")
     args = parser.parse_args()
     try:
         report = check_inventory(args.inventory.read_text(encoding="utf-8"),
-                                 args.mac_workflow.read_text(encoding="utf-8"))
+                                 args.mac_workflow.read_text(encoding="utf-8"), args.xml)
     except (OSError, ValueError) as error:
         parser.exit(1, "Native candidate inventory check failed: " + str(error) + "\n")
     print(json.dumps(report, sort_keys=True))

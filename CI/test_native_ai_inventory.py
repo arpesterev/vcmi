@@ -2,6 +2,8 @@
 """Portable inventory contracts; synthetic inputs are not native execution evidence."""
 
 import unittest
+import tempfile
+from test_macos_native_ai import write_xml
 import re
 from pathlib import Path
 
@@ -88,6 +90,21 @@ class CandidateInventoryContracts(unittest.TestCase):
             checker.check_inventory(listing(stale), self.workflow)
         self.assertTrue(all(runner.matches_filter(name, runner.NATIVE_FILTER)
                             for name in runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE))
+
+    def test_native_xml_must_match_non_neural_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            xml = Path(directory) / "native.xml"
+            selected = self.identities - runner.GATED_NATIVE
+            write_xml(xml, selected)
+            result = checker.check_inventory(listing(self.identities), self.workflow, xml)
+            self.assertEqual(result["executed_cases"], len(selected))
+            self.assertEqual(result["evidence"], "compiled-inventory-and-native-xml")
+            for changed in (selected - {next(iter(runner.WIDE_CAUTIOUS_NATIVE))},
+                            selected | {next(iter(runner.GATED_NATIVE))},
+                            (selected - {next(iter(runner.TIED_LANDING_NATIVE))}) | {"HoMM3TiedLanding.unreviewed"}):
+                write_xml(xml, changed)
+                with self.subTest(changed=changed), self.assertRaises(ValueError):
+                    checker.check_inventory(listing(self.identities), self.workflow, xml)
 
     def test_stale_native_or_forecast_count_fails(self):
         for flag, old, new in (("native", "370", "312"), ("forecast", "18", "8"), ("lifecycle", "10", "9")):

@@ -192,6 +192,10 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('diagnostics=' + json.dumps(report, separators=(',', ':')) + '\n')
           PY
+          python3 "$GITHUB_WORKSPACE/CI/check_native_ai_inventory.py" \
+            --inventory native-port-names.txt \
+            --mac-workflow "$GITHUB_WORKSPACE/.github/workflows/ai-macos-arm64.yml" \
+            --xml native-port-battles.xml || status=1
           exit "$status"
 
       - name: Run four native FHeroes2 reference properties
