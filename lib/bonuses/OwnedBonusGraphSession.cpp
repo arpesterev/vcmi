@@ -51,7 +51,7 @@ struct OwnedBonusGraphSession::State
  Cache & cacheForUpdate(BonusGraphSnapshot::NodeId node)
  {
   auto & entry = caches.at(node);
-  if(!entry.unique()) entry = std::make_shared<Cache>(*entry);
+  if(entry.use_count() != 1) entry = std::make_shared<Cache>(*entry);
   return *entry;
  }
  void invalidate(const std::vector<BonusGraphSnapshot::NodeId> & nodes)

@@ -259,7 +259,7 @@ OwnedBonusValueId OwnedBonusLogicalDomain::internOwned(const std::shared_ptr<con
  if(auto found = state->data->currentBonusIds.find(value); found != state->data->currentBonusIds.end())
   return OwnedBonusValueId(std::make_shared<const OwnedBonusValueId::Identity>(OwnedBonusValueId::Identity{state->data->family, found->second}));
  // Query transactions share the indexes until an updater creates a new value.
- if(!state->data.unique())
+ if(state->data.use_count() != 1)
  {
   auto trial = std::make_unique<State>(*state);
   auto key = trial->data->index(value);
