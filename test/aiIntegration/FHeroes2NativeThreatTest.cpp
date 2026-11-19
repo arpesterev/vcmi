@@ -17,11 +17,7 @@
 #include "AI/Integration/Ports/FHeroes2NativeStrength.h"
 #include "AI/Integration/Ports/FHeroes2SpellPolicy.h"
 #include <vcmi/Environment.h>
-#ifdef FHER_THREAT_BASELINE
-#include "../../../evidence/BaselineFHeroes2BattleAI.h"
-#else
 #include "AI/Integration/Ports/FHeroes2BattleAI.h"
-#endif
 #include "AI/Integration/Ports/FHeroes2NativeThreat.h"
 #include "fheroesThreat/PinnedThreatFixtureOracle.h"
 
