@@ -88,3 +88,13 @@ before the irrelevant category is skipped. Pinned army.cpp:2687-2703 and native
 damageCalculator.lua select only the matching attack category. Duplicate,
 expired, action-expiring, malformed and specialty-style records remain refused.
 Stone Gaze and existing geometry/ownership/offense restrictions remain unchanged.
+
+## Equal-cost ordinary melee landings
+
+The moving clear 1v1 prefix now admits tied cheapest attack cells. It follows
+the pinned `checkAdjacentHexes` direction order and retains the first cost tie,
+superseding the unique-landing restriction above. No additional targets,
+obstacles, siege, special attacks or unknown threat states are admitted.
+Native midpoint damage remains a projection. See
+[TIED-LANDING-SCOPE.md](TIED-LANDING-SCOPE.md) for the source argument,
+controller/server regressions and their explicit evidence boundaries.

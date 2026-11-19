@@ -244,6 +244,7 @@ if(ENABLE_BATTLE_AI)
 	aiIntegration/HoMM3OrdinaryTwoPassNativeTest.cpp
 	aiIntegration/HoMM3LiveShooterNativeTest.cpp
 	aiIntegration/HoMM3GroundNativeTest.cpp
+	aiIntegration/HoMM3TiedLandingTest.cpp
 	aiIntegration/HoMM3GroundControllerTest.cpp
 	aiIntegration/HoMM3OwnHeroGroundTest.cpp
 	aiIntegration/HoMM3FailedSiegeTest.cpp

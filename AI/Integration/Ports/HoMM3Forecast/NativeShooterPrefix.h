@@ -3,6 +3,7 @@
 #include "NativeLifecycle.h"
 #include "ShooterPrefix.h"
 #include "../HoMM3CombatValue.h"
+#include "../HoMM3GroundPath.h"
 #include "../HoMM3CurrentDefendWitness.h"
 #include "../../../../lib/CCreatureHandler.h"
 #include "../../../../lib/battle/BattleAttackInfo.h"
@@ -245,21 +246,20 @@ public:
 			if(separation > second->getMovementRange() || separation - 1 > first->getMovementRange()) return std::nullopt;
 			const auto reach = callback.getReachability(first);
 			std::uint32_t cheapest = ReachabilityInfo::INFINITE_DIST;
-			std::size_t cheapestCount = 0;
-			for(const auto hex : second->getPosition().getNeighbouringTiles())
+			// checkAdjacentHexes visits source directions 0..5 and retains the first cost tie.
+			for(const int index : AIIntegration::Ports::HoMM3::GroundPathDetail::adjacent(second->getPosition().toInt()))
 			{
-				if(!hex.isAvailable()) continue;
+				if(index < 0) continue;
+				const BattleHex hex(index);
 				const auto distance = reach.distances[hex.toInt()];
 				if(distance < cheapest)
 				{
 					cheapest = distance;
-					cheapestCount = 1;
 					attackPosition = hex;
 				}
-				else if(distance == cheapest) ++cheapestCount;
 			}
-			// Equal-time/value ordinary source attacks prefer cost; direction ties remain unsupported.
-			if(cheapestCount != 1 || cheapest != separation - 1) return std::nullopt;
+			// The clear 1v1 domain has zero landing threat and no blocking-shooter value.
+			if(cheapest != separation - 1) return std::nullopt;
 		}
 		if(callback.meleeAttackHexes(first, second, attackPosition).empty()) return std::nullopt;
 		auto attacker = first->acquireState();

@@ -23921,7 +23921,7 @@ TEST_F(AIIntegrationNativeForecastApproach, movingMeleeRefusesUnprovedGeometryDi
 	ASSERT_TRUE(HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, true).outcome);
 	EXPECT_FALSE(HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, false).outcome);
 	target->setPosition(BattleHex(112));
-	EXPECT_FALSE(HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, true).outcome);
+	EXPECT_TRUE(HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, true).outcome);
 	target->setPosition(BattleHex(98));
 	EXPECT_FALSE(HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, true).outcome);
 	target->setPosition(BattleHex(95));
@@ -24006,7 +24006,7 @@ TEST_F(AIIntegrationNativeForecastApproach, uniqueSouthWestLethalWinner)
 	verifyOffRowApproach(BattleHex::BOTTOM_LEFT, 1);
 }
 
-TEST_F(AIIntegrationNativeForecastApproach, tiedOffRowLandingRemainsUnavailable)
+TEST_F(AIIntegrationNativeForecastApproach, tiedOffRowLandingPreservesBoundedForecast)
 {
 	prepareApproach();
 	ASSERT_FALSE(HasFatalFailure());
@@ -24024,7 +24024,7 @@ TEST_F(AIIntegrationNativeForecastApproach, tiedOffRowLandingRemainsUnavailable)
 			if(reach.distances[hex.toInt()] == distance - 1) ++count;
 		if(count < 2) continue;
 		SCOPED_TRACE(destination);
-		EXPECT_FALSE(HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, true).outcome);
+		EXPECT_TRUE(HoMM3Forecast::nativeShooterPrefix(*view, *lifecycle, true).outcome);
 		++ties;
 	}
 	EXPECT_GT(ties, 10u);
