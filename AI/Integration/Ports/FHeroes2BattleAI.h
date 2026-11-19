@@ -803,7 +803,7 @@ private:
 		// Predecessors arrive from far to near; source visits near to far.
 		std::reverse(pathSteps.begin(), pathSteps.end());
 		const auto friends = battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE);
-		const bool sourceRisk = sourceThreats && !battle.battleGetDefendedTown() && !stack.doubleWide()
+		const bool sourceRisk = sourceThreats && !battle.battleGetDefendedTown()
 			&& std::none_of(enemies.begin(), enemies.end(), [](const CStack * enemy) { return enemy->doubleWide(); });
 		std::map<uint32_t, ReachabilityInfo::TDistances> riskPaths;
 		if(sourceRisk)
@@ -855,10 +855,12 @@ private:
 				if(sourceRisk)
 				{
 					// Source keeps the current actor on the board while testing
-					// future contact. Do not reuse the archer UnitRemover graph.
+					// future contact. Native surrounding hexes exclude both cells
+					// of a wide footprint; H2 reversal/path rules are not imported.
+					// Do not reuse the archer UnitRemover graph.
 					const auto & paths = riskPaths.at(enemy->unitId());
 					bool contact = false;
-					for(const auto & adjacent : step.getNeighbouringTiles())
+					for(const auto & adjacent : stack.getSurroundingHexes(step))
 						if(paths[adjacent.toInt()] < ReachabilityInfo::INFINITE_DIST
 							&& paths[adjacent.toInt()] <= speed)
 							contact = true;

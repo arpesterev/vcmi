@@ -240,6 +240,7 @@ if(ENABLE_BATTLE_AI)
 		battleAI/BattleEvaluatorTest.cpp
 		battleAI/SpellTargetsEvaluatorTest.cpp
 		aiIntegration/NativePortBattleTest.cpp
+		aiIntegration/FHeroes2WideCautiousTest.cpp
 	aiIntegration/HoMM3OrdinaryTwoPassNativeTest.cpp
 	aiIntegration/HoMM3LiveShooterNativeTest.cpp
 	aiIntegration/HoMM3GroundNativeTest.cpp
