@@ -40,7 +40,7 @@ calling original code on malformed engine states.
 
 Commands from repository root:
 
-```
+```sh
 g++ -std=c++20 -O2 -Wall -Wextra -Werror CI/homm3_ground_path_test.cpp -o /tmp/homm3_ground_path
 /tmp/homm3_ground_path
 g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=undefined,float-cast-overflow -fno-sanitize-recover=all CI/homm3_ground_path_test.cpp -o /tmp/homm3_ground_path_ubsan

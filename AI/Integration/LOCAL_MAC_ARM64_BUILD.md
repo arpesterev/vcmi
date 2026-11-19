@@ -25,7 +25,7 @@ These exact gitlinks were independently read from base commit
 `aafa3de7cd5d93dbec49dda1702ebc5c699e0827` in `arpesterev/vcmi`; they are not floating
 branches. None of the three contains nested submodules.
 
-```bash
+```sh
 set -eu
 test "$(uname -s)" = Darwin
 test "$(uname -m)" = arm64
@@ -63,7 +63,7 @@ Continue in the same shell and source directory. Cache and downloaded archive
 live beside the source, not in `~/.conan2`. The commands mirror the checked-in
 `.github/workflows/ai-macos-arm64.yml`; `--build=never` is intentional.
 
-```bash
+```sh
 WORK="$(pwd)/../local-mac-work"
 mkdir -p "$WORK"
 export CONAN_HOME="$WORK/conan-home"
@@ -100,7 +100,7 @@ remove quarantine, disable Gatekeeper/XProtect, or ignore a failed signature.
 
 ## 3. Verify the actual package before using it
 
-```bash
+```sh
 BUILD="$(pwd)/out/build/macos-arm-conan-ninja-release"
 MOUNT="$WORK/mounted-dmg"
 mkdir -p "$MOUNT"

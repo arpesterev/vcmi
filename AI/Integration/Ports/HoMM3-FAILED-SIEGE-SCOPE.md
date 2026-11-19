@@ -9,6 +9,7 @@ doCompAI and sets retreat action 4 for a nonhuman side. This is not just the
 separate retreating hint supplied to the source spellcaster.
 
 Admission is deliberately narrower than the source:
+
 - computer-controlled attacker only; human and three-argument preference/autocombat
   initialization cannot withdraw automatically; authoritative player ownership
   also must identify a computer player;

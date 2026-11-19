@@ -12,7 +12,7 @@ and damage, restores survivor facing. Death retains source roster identity/rank
 and clears dead facing. Corpse rows are not compacted. Unknown unit/spell/effect,
 replacement, control, resurrection, unpaired damage, interrupted action, siege
 or map events invalidate the corresponding bridge. An ordinary WALK is also
-_tactics-capable_ in VCMI: actual tactic distance, not `isTacticsAction()`, selects
+*tactics-capable* in VCMI: actual tactic distance, not `isTacticsAction()`, selects
 the tactics boundary.
 
 Ranks begin unknown. A certified live melee chooser executes original order

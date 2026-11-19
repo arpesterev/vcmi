@@ -103,6 +103,7 @@ Still outstanding: general blocked/depleted/ranged-defender/special-ability sour
 Linux native3077/3077, all3058 a35 test IDs accounted for with19 additions and one explicitly documented Crusader fallback-to-admission rename. Directed60/60, standalone31/31, Lua55 exports unchanged. Earlier a33 source-strength migrations retain their separate evidence. This is a verified bounded checkpoint, not complete original-AI parity or Mac/game-readiness acceptance.
 
 New since the historical a28 record:
+
 - a29: FHeroes2 farewell resistance scoring for four canonical area spells; HoMM3 Prayer live composition/casting.
 - a30: actual-active ordinary all-shooter source choice after spells and before existing fallback.
 - a31: actual ordinary all-melee source move/attack/wait/defend choice, native legality and consumed-prefix private RNG commit.
@@ -119,7 +120,6 @@ Important current limits: fresh supported map/history and effective ordinary fac
 The dated material below is preserved historical evidence. Older “latest” or absent-consumer statements describe that cutoff; the summary above takes precedence.
 
 ## Historical record through a28
-
 
 Latest accepted checkpoint a28: 2,928/2,928 Linux native tests passed with the same original exclusions, one reviewed Stone Skin test rename and no unaccounted a27 test IDs removed; 55 Lua API export files are byte-identical. Standalone CTest passes 20/20. This is a tested checkpoint, not full behavioral parity or readiness for play. Fifteen bonus-list loops now retain their owning shared pointers, correcting a lifetime defect also present in older checkpoints. A focused native adapter ASan diagnostic reproduces the prior use-after-free and passes with ownership-only correction; the full engine/suite was not ASan-instrumented. Earlier evidence is preserved, but older green checkpoints must not be treated as free of this defect.
 
@@ -185,6 +185,7 @@ Retreat/surrender, valuable-artifact and economic-context checks, farewell damag
 Closed in a15: standard-native live tower/cover pressure now precedes hero pressure; stance and defended geometry share the any-live-tower gate. Native destruction, intact-gate/no-tower and CASTLE cover fixtures pass. Tower strength remains a native projection, not H2 virtual-archer identity.
 
 Concrete remaining blocks:
+
 1. **Exact upstream strength/threat and geometry equivalence.** Certified ordinary domains now use source-backed strength/threat arithmetic, including a49–a51 blocked-melee/ranged/melee priority; unsupported contexts retain native projections. `FHeroes2ThreatProjection` preserves selected source modifiers but treats native strikes beyond two as a projection. Native H3 geometry/pathfinding and creature abilities are not Heroes II rules. Exact kiting/cover behavior needs broader decision-by-decision source comparisons, not just presence of those functions.
 2. **Effect/removal/turn-state fidelity across native combinations.** The spell implementation is broad, but native ownership, duration, immunity, target count and simultaneous removal differ from original H2. Existing cases close specific mappings, not arbitrary combinations/modded effects. A full source branch inventory plus differential decisions is still needed before calling this complete.
 3. **Random/reflection outcomes.** The FHeroes2 chooser calls `castEval`, which skips native `beforeCast` reflection/resistance rolls. Like HoMM3, a16 now excludes reflectable direct negative candidates, matching native reflection eligibility. Seven native regressions include a real guaranteed reflected cast proving the changed damage recipient; area/mass/positive exceptions remain selectable. This is conservative exclusion, not simulation of reflection outcomes. a17 discounts uncapped raw damage before kills/lethal/wake valuation for four standard direct spell IDs with partial resistance, using native damage/strength facts. a18 passes 36 native chooser/isolation cases across all four IDs, including 20 real server casts with mana/packet acceptance checks. Unknown combat-event/clone/modded partial outcomes are conservatively unavailable; zero resistance keeps the old preview. Joint outcome models remain separate.

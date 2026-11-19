@@ -6,7 +6,7 @@ Pinned ihhub/fheroes2 commit `0dbfe9f386f33c2500842f4a59cd284d7f03d541`.
 
 Build independently, without game assets:
 
-```
+```sh
 cmake -S test/aiIntegration/fheroesStrength -B build-fheroes-strength
 cmake --build build-fheroes-strength
 ctest --test-dir build-fheroes-strength --output-on-failure

@@ -26,6 +26,7 @@ are inert stubs or fail if randomness is reached. Those excluded branches are
 not qualified by the test results.
 
 Important source facts:
+
 - `getArcheryFactor` tables are float `{0,.1,.25,.5}`; Offense
   `{0,.1,.2,.3}`; Defense reductions `{0,.05,.1,.15}`.
 - Defense returns `1.0f-factor`, not double subtraction. The later damage
@@ -41,7 +42,7 @@ Important source facts:
   the victim is a shooter.
 
 Hero source URL:
-https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/hero.cpp
+<https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/hero.cpp>
 
 `census-bodies.pinned.inc` additionally retains the complete `findAITargets`,
 `considerAttack` and `getAITargetTime(long)` bodies. The test passes real scalar
@@ -52,7 +53,7 @@ is presented to both implementations.
 
 Qualification commands from repository root:
 
-```
+```sh
 g++ -std=c++20 -O2 -Wall -Wextra -Werror CI/homm3_exchange_test.cpp -o exchange
 ./exchange
 g++ -std=c++20 -O2 -Wall -Wextra -Werror CI/homm3_ranged_census_test.cpp -o census

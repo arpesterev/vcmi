@@ -5,10 +5,12 @@ This increment implements direct hero Curse in HoMM3SpellPolicy. It does not cla
 ## Pinned source
 
 sushi-shi/homm3-decomp e12906accf96c2662b1abadbc49ddc111991bf21:
+
 - src/ai_tactical.cpp: type_AI_combat_parameters constructor (line 285), getDuration (1755), considerSingleEnchantment (2017), considerEnchantment (2065), getCurseValue (2347), getEnchantmentFunction (2410), findEnemyAttacks (2716).
 - src/army.cpp: getAverageDamage (2188), getUnitCombatValue (2285), getTotalCombatValue (2345).
 
 getEnchantmentFunction dispatches Curse to getCurseValue. Single/mass enchantment selection excludes cannotAttack, invalid targets, and existing same-spell duration. Single hostile casting uses shouldAttackNow; mass casts are immediate. getCurseValue requires enemyCanAttack, !killsOnly, and !winLikely. It takes source integer total combat value, computes old per-creature average (Bless high+bonus, Curse max(low-bonus,1), otherwise (low+high)/2), and new max(low-Curse mastery bonus,1). Its three separate truncations are:
+
 1. long(total - sqrt(new/old) * total)
 2. long(value * getDuration(duration, completed))
 3. long(workChance * value), when resistance is checked.
@@ -45,7 +47,7 @@ Remaining gaps include full source census, underdog easy-AI context, special-uni
 
 The first candidate missed the constructor's signed-long awake-low * 5 intermediate. a02 rejects awake totals outside [0, INT32_MAX], and rejects min(awake totals) above INT32_MAX/5 before entering the horizon formula. The concrete 500,000,000 versus 500,000,000 state is unsupported, not assigned seven rounds. Boundary tests compare the exact pinned constructor tail only where its arithmetic is defined.
 
-Additional explicit guards preserve the source arithmetic domain: low+high must fit signed32 (also proving high+Bless<=INT32_MAX for admitted bonus0/1); projected raw attack/defense modifiers and differences from their minima fit signed32; raw maxHealth*count fits signed32 before wound subtraction; available health is positive and no greater than that raw product. Native getFightValue returns int32_t, and negative values are rejected. The source operation order remains availableHealth * double unitValue / maxHealth, then truncation. Side totals are checked before addition; awake totals are nonnegative subsets of those bounded totals. No source overflow is silently replaced with wider-host arithmetic.
+Additional explicit guards preserve the source arithmetic domain: low+high must fit signed32 (also proving high+Bless<=INT32_MAX for admitted bonus0/1); projected raw attack/defense modifiers and differences from their minima fit signed32; raw maxHealth*count fits signed32 before wound subtraction; available health is positive and no greater than that raw product. Native getFightValue returns int32_t, and negative values are rejected. The source operation order remains `availableHealth * double unitValue / maxHealth`, then truncation. Side totals are checked before addition; awake totals are nonnegative subsets of those bounded totals. No source overflow is silently replaced with wider-host arithmetic.
 
 Seven additional native cases distinguish two-enemy aggregation from a one-enemy price by placing actual native Magic Arrow between those scores, verify friendly exclusion, exercise sleeping-unit inclusion, asymmetric source modifier admission/rejection, changed ownership rejection, and exhausted-shooter unreachable versus legal-melee behavior. They supplement, rather than replace, every original v20 test. Native compilation/execution remains pending.
 

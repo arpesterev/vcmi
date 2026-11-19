@@ -4,11 +4,12 @@ Reconstructed source, not retail executable equivalence. Pin:
 `sushi-shi/homm3-decomp@e12906accf96c2662b1abadbc49ddc111991bf21`, CC0-1.0.
 
 Original sources:
-- https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai.cpp
-- https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp
-- https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/army.cpp
-- https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/army.h
-- https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/ai_tactical.h
+
+- <https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai.cpp>
+- <https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai_tactical.cpp>
+- <https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/army.cpp>
+- <https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/army.h>
+- <https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/ai_tactical.h>
 
 `two-pass-bodies.pinned.inc` holds exact extracted original function bodies.
 `ai_tactical.h.snapshot` preserves signed-long constructor fields. The harness
@@ -68,6 +69,6 @@ final ledger and restored four scratch fields are compared. Invalid vectors are
 production-only refusal checks, never calls into source undefined arithmetic.
 
 Original capacity declaration is preserved in cmbtmgr.h.snapshot (line765):
-army m_armies[2][21]. Harness matches21;22-peer malformed input is tested only
+`army m_armies[2][21]`. Harness matches21;22-peer malformed input is tested only
 as unavailable, never executed in the fixed-array source oracle. Header URL:
-https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/cmbtmgr.h
+<https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/include/cmbtmgr.h>

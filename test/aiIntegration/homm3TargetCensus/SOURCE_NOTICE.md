@@ -3,8 +3,8 @@
 Source: `sushi-shi/homm3-decomp`, commit
 `e12906accf96c2662b1abadbc49ddc111991bf21`, CC0-1.0.
 
-- https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/army.cpp
-- https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai.cpp
+- <https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/army.cpp>
+- <https://github.com/sushi-shi/homm3-decomp/blob/e12906accf96c2662b1abadbc49ddc111991bf21/src/ai.cpp>
 
 Full fetched file bytes are retained as `*.snapshot`; SHA-256 values are in
 `provenance.json`. `PinnedTargetCensus.h` preserves the exact `considerAttack`
@@ -32,7 +32,7 @@ also exercises the reducer's more general source-field input combinations.
 
 Standalone checks:
 
-```
+```sh
 g++ -std=c++20 -O2 -Wall -Wextra -Werror CI/homm3_target_census_test.cpp -o target-census
 ./target-census
 g++ -std=c++20 -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -Wall -Wextra -Werror CI/homm3_target_census_test.cpp -o target-census-ubsan

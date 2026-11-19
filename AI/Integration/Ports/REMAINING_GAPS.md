@@ -1,6 +1,6 @@
-> Historical inventory: this document predates the a10–a14 native validation and contains superseded build/coverage statements. See [STATUS.md](STATUS.md) for the current verified boundary and remaining work. The old text is retained for history, not current readiness.
-
 # Remaining FHeroes2 and HoMM3 gaps
+
+> Historical inventory: this document predates the a10–a14 native validation and contains superseded build/coverage statements. See [STATUS.md](STATUS.md) for the current verified boundary and remaining work. The old text is retained for history, not current readiness.
 
 Review baseline: VCMI aafa3de7cd5d93dbec49dda1702ebc5c699e0827 plus the
 unpublished source candidates prepared on 2026-11-08 (candidate revision 13).
@@ -186,7 +186,6 @@ Source references: pinned FHeroes2 0dbfe9f386f33c2500842f4a59cd284d7f03d541,
 src/fheroes2/ai/ai_battle.cpp, ai_battle_spell.cpp and battle/battle_troop.cpp;
 pinned reconstructed HoMM3 e12906accf96c2662b1abadbc49ddc111991bf21,
 src/ai_tactical.cpp. Historical README results do not qualify new candidates.
-
 
 ## Hypothetical ammunition supply, open
 
