@@ -46,7 +46,8 @@ public:
  {
   if(!source)return nullptr;
   if(auto found=values.find(source.get());found!=values.end())return found->second;
-  if(typeid(*source)!=typeid(Bonus))throw std::invalid_argument("Unsupported owned Bonus subtype");
+  const auto * sourcePtr = source.get();
+  if(typeid(*sourcePtr)!=typeid(Bonus))throw std::invalid_argument("Unsupported owned Bonus subtype");
   auto result=std::make_shared<Bonus>(*source);values.emplace(source.get(),result);sources.push_back(source);
   if(source->parameters)
   {

@@ -46,6 +46,7 @@ class BonusGraphSnapshotCapture
 	{
 		if(!source)
 			return nullptr;
+		const auto * sourcePtr = source.get();
 		CopyGuard guard(inProgress, source.get());
 		if(auto found = updaterCopies.find(source.get()); found != updaterCopies.end())
 			return found->second;
@@ -60,7 +61,7 @@ class BonusGraphSnapshotCapture
 			|| copyExactType<TimesHeroLevelDivideStackLevelUpdater>(source, result)
 			|| copyExactType<OwnerUpdater>(source, result)
 			|| copyExactType<CompositeUpdater>(source, result)))
-			throw std::runtime_error("Unsupported bonus updater in snapshot: " + std::string(typeid(*source).name()));
+			throw std::runtime_error("Unsupported bonus updater in snapshot: " + std::string(typeid(*sourcePtr).name()));
 		updaterCopies.emplace(source.get(), result);
 		if(auto * aggregate = dynamic_cast<CompositeUpdater *>(result.get()))
 			for(auto & child : aggregate->updaters)
@@ -74,6 +75,7 @@ class BonusGraphSnapshotCapture
 	{
 		if(!source)
 			return nullptr;
+		const auto * sourcePtr = source.get();
 		CopyGuard guard(inProgress, source.get());
 		if(auto found = limiterCopies.find(source.get()); found != limiterCopies.end())
 			return found->second;
@@ -93,7 +95,7 @@ class BonusGraphSnapshotCapture
 			|| copyExactType<UnitOnHexLimiter>(source, result)
 			|| copyExactType<UnitAdjacentLimiter>(source, result)
 			|| copyExactType<HasChargesLimiter>(source, result)))
-			throw std::runtime_error("Unsupported bonus limiter in snapshot: " + std::string(typeid(*source).name()));
+			throw std::runtime_error("Unsupported bonus limiter in snapshot: " + std::string(typeid(*sourcePtr).name()));
 		limiterCopies.emplace(source.get(), result);
 		if(auto * aggregate = dynamic_cast<AggregateLimiter *>(result.get()))
 			for(auto & child : aggregate->limiters)
@@ -105,11 +107,12 @@ class BonusGraphSnapshotCapture
 	{
 		if(!source)
 			return nullptr;
+		const auto * sourcePtr = source.get();
 		if(auto found = propagatorCopies.find(source.get()); found != propagatorCopies.end())
 			return found->second;
 		std::shared_ptr<IPropagator> result;
 		if(!(copyExactType<IPropagator>(source, result) || copyExactType<CPropagatorNodeType>(source, result)))
-			throw std::runtime_error("Unsupported bonus propagator in snapshot: " + std::string(typeid(*source).name()));
+			throw std::runtime_error("Unsupported bonus propagator in snapshot: " + std::string(typeid(*sourcePtr).name()));
 		propagatorCopies.emplace(source.get(), result);
 		return result;
 	}
@@ -135,11 +138,12 @@ public:
 	{
 		if(!source)
 			return nullptr;
+		const auto * sourcePtr = source.get();
 		CopyGuard guard(inProgress, source.get());
 		if(auto found = bonusCopies.find(source.get()); found != bonusCopies.end())
 			return found->second;
-		if(typeid(*source) != typeid(Bonus))
-			throw std::runtime_error("Unsupported bonus subtype in snapshot: " + std::string(typeid(*source).name()));
+		if(typeid(*sourcePtr) != typeid(Bonus))
+			throw std::runtime_error("Unsupported bonus subtype in snapshot: " + std::string(typeid(*sourcePtr).name()));
 		auto result = std::make_shared<Bonus>(*source);
 		bonusCopies.emplace(source.get(), result);
 		result->updater = updater(source->updater);

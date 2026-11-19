@@ -135,7 +135,8 @@ JsonNode Bonus::toJsonNode() const
 	if(propagator)
 	{
 		std::string name = vstd::findKey(bonusPropagatorMap, propagator);
-		if(typeid(*propagator) == typeid(CPropagatorNodeType))
+		const auto * propagatorPtr = propagator.get();
+		if(typeid(*propagatorPtr) == typeid(CPropagatorNodeType))
 		{
 			// Independently owned propagators serialize by value, not registry address.
 			for(const auto & [key, registered] : bonusPropagatorMap)

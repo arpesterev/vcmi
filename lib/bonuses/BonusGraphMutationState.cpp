@@ -61,9 +61,10 @@ public:
 	bool shouldAttach(Bonus bonus, Node node) const
 	{
 		const auto & propagator = state.ownedBonuses.at(bonus)->propagator;
-		if(typeid(*propagator) == typeid(IPropagator))
+		const auto * propagatorPtr = propagator.get();
+		if(typeid(*propagatorPtr) == typeid(IPropagator))
 			return false;
-		if(typeid(*propagator) != typeid(CPropagatorNodeType))
+		if(typeid(*propagatorPtr) != typeid(CPropagatorNodeType))
 			throw std::logic_error("Unsupported owned bonus propagator");
 		return matchesBonusPropagationType(state.ownedNodes.at(node).type, propagator->getPropagatorType());
 	}

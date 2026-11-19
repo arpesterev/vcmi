@@ -3,6 +3,7 @@
 #include "server/CGameHandler.h"
 #include "lib/networkPacks/SetStackEffect.h"
 #include "lib/bonuses/OwnedBonusGraphSession.h"
+#include "lib/bonuses/OwnedBonusValueCopier.h"
 #include "lib/bonuses/BonusParameters.h"
 #include "lib/bonuses/Propagators.h"
 #include "lib/bonuses/Updaters.h"
@@ -95,4 +96,30 @@ TEST_F(OwnedBonusGraphSessionTest, ColdUpdaterQueryKeepsRetainedMembershipAfterF
   EXPECT_EQ(recomputed->front()->val, 10);
  }
  EXPECT_EQ(source->getAllBonuses(selected)->front()->val, 10);
+}
+
+TEST(OwnedBonusValueCopierTest, NullAndExactBasePreserveCopyIdentity)
+{
+ OwnedBonusValueCopier copier;
+ EXPECT_EQ(copier.copy(nullptr), nullptr);
+ auto source = std::make_shared<Bonus>(effect());
+ auto copy = copier.copy(source);
+ ASSERT_NE(copy, nullptr);
+ EXPECT_NE(copy.get(), source.get());
+ EXPECT_EQ(copy->val, source->val);
+ EXPECT_EQ(copy->turnsRemain, source->turnsRemain);
+ EXPECT_EQ(copier.copy(source), copy);
+ copy->val = 99;
+ EXPECT_EQ(source->val, 7);
+ EXPECT_EQ(copier.ownedSources().size(), 1);
+}
+
+TEST(OwnedBonusValueCopierTest, UnsupportedDynamicSubtypeIsNotSlicedOrRetained)
+{
+ class DerivedBonus final : public Bonus {};
+ OwnedBonusValueCopier copier;
+ std::shared_ptr<const Bonus> source = std::make_shared<DerivedBonus>();
+ EXPECT_THROW(copier.copy(source), std::invalid_argument);
+ EXPECT_EQ(copier.copiedBonus(source.get()), nullptr);
+ EXPECT_TRUE(copier.ownedSources().empty());
 }
