@@ -665,7 +665,9 @@ class HoMM3SpellPolicy
    const auto pair=unit->canShoot?NativeExchangeFacts::rangedAttack(battle,*actor,*target,witness)
     :NativeExchangeFacts::meleeAttack(battle,*actor,*target,witness);if(!pair)continue;
    auto increased=*pair;const int capped=std::min(amount,pair->attack);
-   if(increased.attack>INT32_MAX-capped)continue;increased.attack+=capped;
+   if(increased.attack>INT32_MAX-capped)
+    continue;
+   increased.attack+=capped;
    // getEstimatedDamage(100) is a fixed base, not a 100-creature strike and
    // not a double shot. The certified ordinary pair excludes residual effects.
    SourceOrdinaryUnit fixed;fixed.minimumDamage=fixed.maximumDamage=100;
@@ -696,7 +698,9 @@ class HoMM3SpellPolicy
    || bonus->limiter || bonus->propagator || bonus->updater || bonus->propagationUpdater || bonus->parameters || !bonus->stacking.empty())return std::nullopt;
   for(bool ranged:{false,true})if(after.getAttack(ranged)!=std::max(0,old.unit->getAttack(ranged)-amount))return std::nullopt;
   const auto value=Ports::HoMM3::weaknessSpellValue(facts[0],facts[1],facts[2],facts[3],facts[4],duration);
-  if(!value)return std::nullopt;return *value;
+  if(!value)
+   return std::nullopt;
+  return *value;
  }
 
  static std::map<uint32_t,std::array<int32_t,3>> fortuneTargetFacts(const CPlayerBattleCallback & battle,
