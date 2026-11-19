@@ -263,7 +263,7 @@ TEST_F(OwnedStatePacketTest, CandidateCountDependentMaximumHealthMatchesNative)
 {
  auto * unit = add(); auto scaled = effect(BonusDuration::PERMANENT, 1); scaled->type = BonusType::STACK_HEALTH; scaled->updater = std::make_shared<TimesStackSizeUpdater>(); unit->addNewBonus(scaled); unit->nodeHasChanged();
  int64_t healing = INT32_MAX; unit->health.heal(healing, EHealLevel::HEAL, EHealPower::PERMANENT);
- auto frame = HypotheticBattle::captureOwnedFixture(*battle()); const auto revision = frame->getTreeVersion(); const auto before = unit->save();
+ auto frame = HypotheticBattle::captureOwnedFixture(*battle()); frame->getTreeVersion(); const auto before = unit->save();
  auto damaged = unit->acquireState(); int64_t loss = unit->getMaxHealth(); damaged->damage(loss);
  UnitChanges change(unit->unitId(), BattleChanges::EOperation::UPDATE); change.healthDelta = -loss; change.data = damaged->save();
  BattleUnitsChanged packet; packet.battleID = battle()->getBattleID(); packet.changedStacks.push_back(change);
@@ -278,7 +278,7 @@ TEST_F(OwnedStatePacketTest, CandidateExpiryMaximumChangesMatchOtherRecipients)
  recipient->attachTo(*source);
  struct Detach { CStack * child; CStack * parent; ~Detach() { child->detachFrom(*parent); } } detach{recipient, source};
  auto bonus = effect(BonusDuration::UNTIL_ATTACK, 2); bonus->type = BonusType::STACK_HEALTH; recipient->addNewBonus(bonus);
- auto frame = HypotheticBattle::captureOwnedFixture(*battle()); const auto revision = frame->getTreeVersion();
+ auto frame = HypotheticBattle::captureOwnedFixture(*battle()); frame->getTreeVersion();
  BattleAttack packet; packet.battleID = battle()->getBattleID(); packet.attackerChanges.battleID = packet.battleID; packet.stackAttacking = source->unitId();
  frame->applyOwnedStatePacket(packet); applyNative(packet); same(*frame, source); same(*frame, recipient);
 }
@@ -384,7 +384,7 @@ TEST_F(OwnedStatePacketTest, IndirectPreExpiryMaximumChangesMatchAcrossGraphReci
  auto * source = add(); auto * recipient = add(7); recipient->attachTo(*source);
  struct Detach { CStack * child; CStack * parent; ~Detach() { child->detachFrom(*parent); } } detach{recipient, source};
  auto health = effect(BonusDuration::UNTIL_TAKING_INDIRECT_DAMAGE, 2); health->type = BonusType::STACK_HEALTH; recipient->addNewBonus(health);
- auto frame = HypotheticBattle::captureOwnedFixture(*battle()); const auto revision = frame->getTreeVersion();
+ auto frame = HypotheticBattle::captureOwnedFixture(*battle()); frame->getTreeVersion();
  StacksInjured packet; packet.battleID = battle()->getBattleID(); BattleStackAttacked entry;
  entry.stackAttacked = source->unitId(); entry.newState.id = source->unitId(); entry.newState.data = source->save(); packet.stacks.push_back(entry);
  frame->applyOwnedStatePacket(packet); applyNative(packet); same(*frame, source); same(*frame, recipient);
@@ -766,8 +766,14 @@ TEST_F(OwnedRoundPacketTest, OpeningEffectsAndSideMetadataFollowRepeatedNativeRo
   auto packet = next(); frame->applyOwnedStatePacket(packet); applyNative(packet); sameBattle(*frame);
   EXPECT_EQ(frame->getForUpdate(a->unitId()).get(), retained.get());
   EXPECT_EQ(frame->getRound(), round);
-  if(round == 1) EXPECT_TRUE(retained->hasBonus(Bonus::NTurns));
-  if(round == 2) EXPECT_FALSE(retained->hasBonus(Bonus::NTurns));
+  if(round == 1)
+  {
+   EXPECT_TRUE(retained->hasBonus(Bonus::NTurns));
+  }
+  if(round == 2)
+  {
+   EXPECT_FALSE(retained->hasBonus(Bonus::NTurns));
+  }
  }
  for(auto * untouched : {parent.get(), sibling.get()})
  {

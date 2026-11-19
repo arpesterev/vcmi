@@ -7,6 +7,7 @@
 class OrdinaryUnitStoreLifecycleTest : public BattleTestFixture
 {
 public:
+ using BattleTestFixture::apply;
  void SetUp() override { BattleTestFixture::SetUp(); startGame(); startBattle(); }
  CStack * add(int x = 5)
  { return addStack(BattleSide::ATTACKER, creatureByName("core:woodElf"), BattleHex(x, 5), 10); }

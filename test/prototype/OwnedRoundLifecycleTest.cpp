@@ -16,6 +16,7 @@
 class OwnedRoundLifecycleTest : public BattleTestFixture
 {
 public:
+ using BattleTestFixture::apply;
  void SetUp() override
  {
   BattleTestFixture::SetUp(); startGame(); startBattle();

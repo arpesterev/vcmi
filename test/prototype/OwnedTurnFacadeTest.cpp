@@ -48,7 +48,10 @@ TEST_F(OwnedTurnFacadeTest, AllReasonsMatchNativeDirectAndPacketWithRetainedRefe
   EXPECT_EQ(retained->getTurnStatus(), reason == BattleUnitTurnReason::MORALE ? battle::UnitTurnStatus::READY : battle::UnitTurnStatus::ACTED);
   EXPECT_EQ(retained->hasBonus(selected()), reason == BattleUnitTurnReason::UNIT_SPELLCAST);
   EXPECT_EQ(retained->getTreeVersion() == epoch, unit->getTreeVersion() == nativeEpoch);
-  if(reason == BattleUnitTurnReason::UNIT_SPELLCAST) EXPECT_EQ(retained->getTreeVersion(), epoch);
+  if(reason == BattleUnitTurnReason::UNIT_SPELLCAST)
+  {
+   EXPECT_EQ(retained->getTreeVersion(), epoch);
+  }
   EXPECT_EQ(historical->size(), 1); EXPECT_EQ(historical->front()->duration, BonusDuration::STACK_GETS_TURN | BonusDuration::UNTIL_ATTACK);
   EXPECT_EQ(detached->save(), detachedBefore); EXPECT_EQ(parent->getForUpdate(unit->unitId())->save(), before);
   EXPECT_TRUE(parent->getForUpdate(unit->unitId())->hasBonus(selected())); EXPECT_EQ(parent->getActiveStackID(), parentActive);

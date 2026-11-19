@@ -46,7 +46,10 @@ TEST_F(OwnedBattleBearerTest, ColdAndWarmRootQueriesPreserveNativeRequestKeysAnd
   battle()->addNewBonus(bonus);
   const auto selector = selected(warm ? 792 : 791);
   const auto * native = battle()->getBonusBearer();
-  if(warm) ASSERT_EQ(native->getAllBonuses(selector, "battle-root")->size(), 1);
+  if(warm)
+  {
+   ASSERT_EQ(native->getAllBonuses(selector, "battle-root")->size(), 1);
+  }
   auto frame = HypotheticBattle::captureOwnedFixture(*battle());
   const auto * owned = frame->getBonusBearer();
   ASSERT_NE(owned, nullptr); EXPECT_NE(owned, native);

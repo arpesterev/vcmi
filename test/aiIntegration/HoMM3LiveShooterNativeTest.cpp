@@ -41,7 +41,10 @@ protected:
    const auto type=creatureByName(side?(mixed?"core:pikeman":"core:woodElf"):"core:archer");
    ASSERT_TRUE(gameHandler->changeStackType(StackLocation(h->id,SlotID(0)),type.toCreature()));
    ASSERT_TRUE(gameHandler->changeStackCount(StackLocation(h->id,SlotID(0)),side?40:1,ChangeValueMode::ABSOLUTE));
-   if(side)ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(h->id,SlotID(1)),type.toCreature(),40));
+   if(side)
+   {
+    ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(h->id,SlotID(1)),type.toCreature(),40));
+   }
   }
   startBattle();ASSERT_FALSE(HasFatalFailure());battle()->obstacles.clear();
   for(const auto &u:battle()->stacks){if(u->unitSide()==BattleSide::ATTACKER){actor=u.get();u->setPosition(BattleHex(87));}
