@@ -85,7 +85,7 @@ CURSE_NATIVE = {
     "AIIntegrationNativeBattle.fheroes2CureRequiresNativeCurseRollRemoval",
     "AIIntegrationNativeBattle.fheroes2DispelRequiresNativeCurseRollRemoval",
 }
-APPROACH_NATIVE = {"AIIntegrationNativeForecastApproach.nativeBothShieldsPreserveMelee", "AIIntegrationNativeForecastApproach.offChannelAirShieldBoundsAndRefusals", 'AIIntegrationNativeForecastApproach.uniqueSouthEastLethalWinner', 'AIIntegrationNativeForecastApproach.uniqueSouthWestSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.movingMeleeRefusesActorRangeAndAdditionalStacks', 'AIIntegrationNativeForecastApproach.uniqueSouthWestLethalWinner', 'AIIntegrationNativeForecastApproach.uniqueNorthEastLethalWinner', 'AIIntegrationNativeForecastApproach.movingMeleePreservesAdjacentDomainAndUnknownBonusRefusal', 'AIIntegrationNativeForecastApproach.uniqueNorthEastSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.tiedOffRowLandingRemainsUnavailable', 'AIIntegrationNativeForecastApproach.uniqueSouthEastSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.movingMeleeReverseDirectionProjectsLethalStrike', 'AIIntegrationNativeForecastApproach.uniqueNorthWestSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.uniqueNorthWestLethalWinner', 'AIIntegrationNativeForecastApproach.movingMeleeRefusesUnprovedGeometryDifficultyAndThreat', 'AIIntegrationNativeForecastApproach.movingMeleeProjectsSurvivorRetaliationWithoutMutatingBattle', 'AIIntegrationNativeForecastApproach.defenseAdjacentActorArmorer', 'AIIntegrationNativeForecastApproach.defenseAdjacentTargetShield', 'AIIntegrationNativeForecastApproach.defenseAdjacentBothReductions', 'AIIntegrationNativeForecastApproach.defenseAdjacentLethalShield', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingActorArmorer', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingTargetShield', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingBothReductions', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingLethalShield', 'AIIntegrationNativeForecastApproach.defenseRejectsUnsupportedBonuses'}
+APPROACH_NATIVE = {"AIIntegrationNativeForecastApproach.nativeBothShieldsPreserveMelee", "AIIntegrationNativeForecastApproach.offChannelAirShieldBoundsAndRefusals", 'AIIntegrationNativeForecastApproach.uniqueSouthEastLethalWinner', 'AIIntegrationNativeForecastApproach.uniqueSouthWestSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.movingMeleeRefusesActorRangeAndAdditionalStacks', 'AIIntegrationNativeForecastApproach.uniqueSouthWestLethalWinner', 'AIIntegrationNativeForecastApproach.uniqueNorthEastLethalWinner', 'AIIntegrationNativeForecastApproach.movingMeleePreservesAdjacentDomainAndUnknownBonusRefusal', 'AIIntegrationNativeForecastApproach.uniqueNorthEastSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.tiedOffRowLandingPreservesBoundedForecast', 'AIIntegrationNativeForecastApproach.uniqueSouthEastSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.movingMeleeReverseDirectionProjectsLethalStrike', 'AIIntegrationNativeForecastApproach.uniqueNorthWestSurvivorRetaliation', 'AIIntegrationNativeForecastApproach.uniqueNorthWestLethalWinner', 'AIIntegrationNativeForecastApproach.movingMeleeRefusesUnprovedGeometryDifficultyAndThreat', 'AIIntegrationNativeForecastApproach.movingMeleeProjectsSurvivorRetaliationWithoutMutatingBattle', 'AIIntegrationNativeForecastApproach.defenseAdjacentActorArmorer', 'AIIntegrationNativeForecastApproach.defenseAdjacentTargetShield', 'AIIntegrationNativeForecastApproach.defenseAdjacentBothReductions', 'AIIntegrationNativeForecastApproach.defenseAdjacentLethalShield', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingActorArmorer', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingTargetShield', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingBothReductions', 'AIIntegrationNativeForecastApproach.defenseUniqueLandingLethalShield', 'AIIntegrationNativeForecastApproach.defenseRejectsUnsupportedBonuses'}
 PEER_DEFENSE_NATIVE = {
     "AIIntegrationNativePeerDefense.nativeBothShieldsPreserveShot",
     "AIIntegrationNativePeerDefense.offChannelShieldBoundsAndRefusals",
@@ -94,7 +94,19 @@ PEER_DEFENSE_NATIVE = {
     "AIIntegrationNativePeerDefense.defenseChangesPeerRanking",
     "AIIntegrationNativePeerDefense.rejectsUnsupportedReductionRecords",
 }
-FULL_NATIVE_FILTER = "AIIntegrationNativeBattle.*:AIIntegrationNativeSpeed.*:AIIntegrationNativeForecastApproach.*:AIIntegrationNativePeerDefense.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*"
+WIDE_CAUTIOUS_NATIVE = {
+    "FHeroes2WideCautious.blockedEnemyAllowsFullWideAdvanceAcceptedByServer",
+    "FHeroes2WideCautious.unsupportedThreatRetainsShorterNativeAdvanceAcceptedByServer",
+    "FHeroes2WideCautious.blockedTailPreventsPassageDespiteClearHead",
+}
+TIED_LANDING_NATIVE = {
+    "HoMM3TiedLanding.SourceOrderedTiesProjectLethalAndSuppressControllerSpell",
+    "HoMM3TiedLanding.SurvivingTargetKeepsSpellAndServerCast",
+    "HoMM3TiedLanding.SourceGeometryAcrossParitiesAndDirections",
+    "HoMM3TiedLanding.ThreatRangeAndSpecialAttackRemainUnavailable",
+    "HoMM3TiedLanding.DefenderSideMirroredSourceLandingAndServerExchange",
+}
+FULL_NATIVE_FILTER = "AIIntegrationNativeBattle.*:AIIntegrationNativeSpeed.*:AIIntegrationNativeForecastApproach.*:AIIntegrationNativePeerDefense.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*:FHeroes2WideCautious.*:HoMM3TiedLanding.*"
 NATIVE_FILTER = FULL_NATIVE_FILTER + "-" + ":".join(sorted(GATED_NATIVE))
 
 
@@ -329,6 +341,12 @@ def verify_native_inventory(identities, native_count, forecast_count, lifecycle_
         raise ValueError("Native disable removal inventory lacks reviewed six identities")
     if not CURSE_NATIVE <= native:
         raise ValueError("Native Curse removal inventory lacks reviewed two identities")
+    wide_cautious = {identity for identity in identities if identity.startswith("FHeroes2WideCautious.")}
+    if wide_cautious != WIDE_CAUTIOUS_NATIVE:
+        raise ValueError("Native wide cautious inventory differs from the reviewed three identities")
+    tied_landing = {identity for identity in identities if identity.startswith("HoMM3TiedLanding.")}
+    if tied_landing != TIED_LANDING_NATIVE:
+        raise ValueError("Native tied landing inventory differs from the reviewed five identities")
     forecast = queue | lifecycle
     possible_gates = {identity for identity in native
                       if any(fnmatch.fnmatchcase(identity, pattern) for pattern in (
@@ -337,8 +355,8 @@ def verify_native_inventory(identities, native_count, forecast_count, lifecycle_
                           "AIIntegrationNativeBattle.mmaiOppositeSideMetadataIsRejected"))}
     if possible_gates != GATED_NATIVE:
         raise ValueError("Native inventory does not contain exactly the reviewed 20 gated names")
-    if (len(native | speed | approach | peer_defense) != native_count + len(GATED_NATIVE) or len(forecast) != forecast_count
-            or len(lifecycle) != lifecycle_count or native | speed | approach | peer_defense | forecast != identities):
+    if (len(native | speed | approach | peer_defense | wide_cautious | tied_landing) != native_count + len(GATED_NATIVE) or len(forecast) != forecast_count
+            or len(lifecycle) != lifecycle_count or native | speed | approach | peer_defense | wide_cautious | tied_landing | forecast != identities):
         raise ValueError("Native/forecast inventory differs from the caller's expected candidate counts")
     return identities - GATED_NATIVE
 

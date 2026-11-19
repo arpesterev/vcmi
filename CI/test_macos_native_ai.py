@@ -131,11 +131,11 @@ class InventoryAndXMLContracts(unittest.TestCase):
                 runner.parse_test_inventory(listing)
 
     def test_next_candidate_inventory_requires_exact_gates_and_forecasts(self):
-        selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE
+        selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE | runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE
         selected |= {f"HoMM3ForecastQueueNative.case{x}" for x in range(8)}
         full = selected | runner.GATED_NATIVE
         self.assertEqual(len(runner.GATED_NATIVE), 20)
-        self.assertEqual(runner.verify_native_inventory(full, 362, 8), selected)
+        self.assertEqual(runner.verify_native_inventory(full, 370, 8), selected)
         self.assertTrue(all(runner.matches_filter(x, runner.NATIVE_FILTER) for x in selected))
         self.assertFalse(any(runner.matches_filter(x, runner.NATIVE_FILTER) for x in runner.GATED_NATIVE))
         with self.assertRaisesRegex(ValueError, "candidate counts"):
@@ -146,47 +146,47 @@ class InventoryAndXMLContracts(unittest.TestCase):
             runner.verify_native_inventory(full | {"AIIntegrationNativeBattle.mmaiUnreviewedRealBattle"}, 350, 8)
 
     def test_lifecycle_namespace_is_selected_and_counted_exactly(self):
-        selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE
+        selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE | runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE
         selected |= {f"HoMM3ForecastQueueNative.case{x}" for x in range(8)}
         selected |= {f"HoMM3ForecastLifecycleNative.case{x}" for x in range(10)}
         full = selected | runner.GATED_NATIVE
-        self.assertEqual(runner.verify_native_inventory(full, 362, 18, 10), selected)
+        self.assertEqual(runner.verify_native_inventory(full, 370, 18, 10), selected)
         self.assertTrue(all(runner.matches_filter(x, runner.NATIVE_FILTER) for x in selected))
-        self.assertEqual(runner.selected_suites(362, 18)[0][2], 380)
+        self.assertEqual(runner.selected_suites(370, 18)[0][2], 388)
         with self.assertRaisesRegex(ValueError, "candidate counts"):
-            runner.verify_native_inventory(full, 362, 18, 9)
+            runner.verify_native_inventory(full, 370, 18, 9)
         with self.assertRaisesRegex(ValueError, "candidate counts"):
-            runner.verify_native_inventory(full, 362, 8, 0)
+            runner.verify_native_inventory(full, 370, 8, 0)
         with self.assertRaisesRegex(ValueError, "candidate counts"):
-            runner.verify_native_inventory(full | {"HoMM3ForecastLifecycleNativeExtra.case0"}, 362, 19, 10)
+            runner.verify_native_inventory(full | {"HoMM3ForecastLifecycleNativeExtra.case0"}, 370, 19, 10)
 
     def test_base_inventory_is_an_explicit_separate_mode(self):
-        selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(296)} | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE
-        self.assertEqual(runner.verify_native_inventory(selected | runner.GATED_NATIVE, 360, 0), selected)
-        suites = runner.selected_suites(362, 8)
-        self.assertEqual([s[2] for s in suites], [370, 48, 145])
+        selected = {f"AIIntegrationNativeBattle.case{x}" for x in range(296)} | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE | runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE
+        self.assertEqual(runner.verify_native_inventory(selected | runner.GATED_NATIVE, 368, 0), selected)
+        suites = runner.selected_suites(370, 8)
+        self.assertEqual([s[2] for s in suites], [378, 48, 145])
         self.assertEqual([s[3] for s in suites], [300, 90, 900])
 
     def test_speed_inventory_requires_exact_reviewed_names(self):
         native = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.GATED_NATIVE
-        full = native | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE
+        full = native | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE | runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE
         self.assertEqual(len(runner.SPEED_NATIVE), 7)
-        self.assertEqual(runner.verify_native_inventory(full, 362, 0), full - runner.GATED_NATIVE)
+        self.assertEqual(runner.verify_native_inventory(full, 370, 0), full - runner.GATED_NATIVE)
         for changed in (native, full - {next(iter(runner.SPEED_NATIVE))},
                         (full - {next(iter(runner.SPEED_NATIVE))}) | {"AIIntegrationNativeSpeed.unreviewed"},
                         full | {"AIIntegrationNativeSpeed.unreviewed"}):
             with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "seven identities"):
-                runner.verify_native_inventory(changed, 362, 0)
+                runner.verify_native_inventory(changed, 370, 0)
 
     def test_approach_inventory_requires_exact_reviewed_names(self):
-        full = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.GATED_NATIVE | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE
+        full = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.GATED_NATIVE | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE | runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE
         self.assertEqual(len(runner.APPROACH_NATIVE), 25)
         self.assertEqual(len(runner.PURSUIT_NATIVE), 4)
         self.assertEqual(len(runner.SHIELD_NATIVE), 5)
         self.assertEqual(len(runner.PEER_DEFENSE_NATIVE), 6)
         for changed in (full - {next(iter(runner.APPROACH_NATIVE))}, full | {"AIIntegrationNativeForecastApproach.unreviewed"}, full - {next(iter(runner.PURSUIT_NATIVE))}, full - {next(iter(runner.SHIELD_NATIVE))}, full - {next(iter(runner.CURSE_NATIVE))}, full - {next(iter(runner.DISABLE_REMOVAL_NATIVE))}, full - {next(iter(runner.BLIND_WINNER_NATIVE))}, full - {next(iter(runner.SPEED_WINNER_NATIVE))}, full - {next(iter(runner.PEER_DEFENSE_NATIVE))}, full | {"AIIntegrationNativePeerDefense.unreviewed"}):
             with self.subTest(changed=changed), self.assertRaises(ValueError):
-                runner.verify_native_inventory(changed, 362, 0)
+                runner.verify_native_inventory(changed, 370, 0)
 
     def test_xml_matches_actual_selected_inventory(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -63,20 +63,34 @@ def listing(identities):
 
 class CandidateInventoryContracts(unittest.TestCase):
     def setUp(self):
-        self.identities = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.GATED_NATIVE | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE
+        self.identities = {f"AIIntegrationNativeBattle.case{x}" for x in range(298)} | runner.GATED_NATIVE | runner.SPEED_NATIVE | runner.PURSUIT_NATIVE | runner.APPROACH_NATIVE | runner.SHIELD_NATIVE | runner.PEER_DEFENSE_NATIVE | runner.CURSE_NATIVE | runner.DISABLE_REMOVAL_NATIVE | runner.BLIND_WINNER_NATIVE | runner.SPEED_WINNER_NATIVE | runner.ATTACK_SKILL_WINNER_NATIVE | runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE
         self.identities |= {f"HoMM3ForecastQueueNative.case{x}" for x in range(8)}
         self.identities |= {f"HoMM3ForecastLifecycleNative.case{x}" for x in range(10)}
-        self.workflow = "run: runner --expected-native-count 362 --expected-forecast-count 18 --expected-lifecycle-count 10"
+        self.workflow = "run: runner --expected-native-count 370 --expected-forecast-count 18 --expected-lifecycle-count 10"
 
     def test_compiled_counts_match_reviewed_workflow_arguments(self):
         report = checker.check_inventory(listing(self.identities), self.workflow)
-        self.assertEqual(report["compiled_cases"], 400)
-        self.assertEqual(report["selected_non_neural_cases"], 380)
-        self.assertEqual(report["expected_counts"], {"native": 362, "forecast": 18, "lifecycle": 10})
+        self.assertEqual(report["compiled_cases"], 408)
+        self.assertEqual(report["selected_non_neural_cases"], 388)
+        self.assertEqual(report["expected_counts"], {"native": 370, "forecast": 18, "lifecycle": 10})
         self.assertEqual(report["evidence"], "compiled-inventory-only")
 
+    def test_new_suites_and_renamed_landing_are_required(self):
+        for name in runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                checker.check_inventory(listing(self.identities - {name}), self.workflow)
+        for suite in ("FHeroes2WideCautious", "HoMM3TiedLanding"):
+            with self.subTest(suite=suite), self.assertRaises(ValueError):
+                checker.check_inventory(listing(self.identities | {suite + ".unreviewed"}), self.workflow)
+        renamed = "AIIntegrationNativeForecastApproach.tiedOffRowLandingPreservesBoundedForecast"
+        stale = (self.identities - {renamed}) | {"AIIntegrationNativeForecastApproach.tiedOffRowLandingRemainsUnavailable"}
+        with self.assertRaisesRegex(ValueError, "approach inventory"):
+            checker.check_inventory(listing(stale), self.workflow)
+        self.assertTrue(all(runner.matches_filter(name, runner.NATIVE_FILTER)
+                            for name in runner.WIDE_CAUTIOUS_NATIVE | runner.TIED_LANDING_NATIVE))
+
     def test_stale_native_or_forecast_count_fails(self):
-        for flag, old, new in (("native", "362", "312"), ("forecast", "18", "8"), ("lifecycle", "10", "9")):
+        for flag, old, new in (("native", "370", "312"), ("forecast", "18", "8"), ("lifecycle", "10", "9")):
             with self.subTest(flag=flag), self.assertRaises(ValueError):
                 checker.check_inventory(listing(self.identities), self.workflow.replace(f"--expected-{flag}-count {old}", f"--expected-{flag}-count {new}"))
 
@@ -87,8 +101,8 @@ class CandidateInventoryContracts(unittest.TestCase):
             checker.check_inventory(listing(changed), self.workflow)
 
     def test_missing_unknown_or_duplicate_workflow_values_fail(self):
-        for workflow in ("", self.workflow + " --expected-native-count 362",
-                         self.workflow.replace("362", "$EXPECTED_NATIVE"),
+        for workflow in ("", self.workflow + " --expected-native-count 370",
+                         self.workflow.replace("370", "$EXPECTED_NATIVE"),
                          self.workflow.replace("--expected-lifecycle-count 10", "--expected-lifecycle-count 19")):
             with self.subTest(workflow=workflow), self.assertRaises(ValueError):
                 checker.workflow_counts(workflow)

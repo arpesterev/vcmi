@@ -157,7 +157,9 @@ jobs:
         id: native_battles
         run: |
           cd out/build/linux-gcc-test/bin
-          ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*' --gtest_list_tests > native-port-names.txt
+          native_filter=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from run_macos_native_ai import FULL_NATIVE_FILTER; print(FULL_NATIVE_FILTER)' "$GITHUB_WORKSPACE/CI")
+          non_neural_filter=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from run_macos_native_ai import NATIVE_FILTER; print(NATIVE_FILTER)' "$GITHUB_WORKSPACE/CI")
+          ./vcmitest --gtest_filter="$native_filter" --gtest_list_tests > native-port-names.txt
           grep -q '^AIIntegrationNativeBattle\.' native-port-names.txt
           grep -q '^HoMM3ForecastQueueNative\.' native-port-names.txt
           grep -q '^HoMM3ForecastLifecycleNative\.' native-port-names.txt
@@ -165,7 +167,7 @@ jobs:
             --inventory native-port-names.txt \
             --mac-workflow "$GITHUB_WORKSPACE/.github/workflows/ai-macos-arm64.yml"
           status=0
-          timeout 180 ./vcmitest --gtest_filter='AIIntegrationNativeBattle.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*' \
+          timeout 300 ./vcmitest --gtest_filter="$non_neural_filter" \
             --gtest_output=xml:native-port-battles.xml > "$RUNNER_TEMP/native-battles.log" 2>&1 || status=$?
           tail -n 120 "$RUNNER_TEMP/native-battles.log"
           python3 - <<'PY'
