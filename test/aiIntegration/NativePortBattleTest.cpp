@@ -6943,6 +6943,21 @@ TEST_F(AIIntegrationNativeBattle, fheroes2BlindedAreaShooterNoLongerSpreadsFrien
 	EXPECT_EQ(BattleHex::getDistance(activeSplash->target.front().hexValue, archerHex), 2)
 		<< "Active native area shot should keep the melee guard away from its shooter";
 
+	// Immobilizing movement alone must not turn off a loaded area shooter.
+	// Check the real native action before applying Blind to the same stack.
+	splash->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+		BonusType::BIND_EFFECT, BonusSource::OTHER, 0, BonusSourceID()));
+	ASSERT_EQ(splash->getMovementRange(), 0u);
+	ASSERT_FALSE(splash->hasBonusOfType(BonusType::NOT_ACTIVE));
+	ASSERT_TRUE(splash->shots.canUse(1));
+	ASSERT_TRUE(battle()->battleCanShoot(splash));
+	const auto boundSplash = decide();
+	ASSERT_TRUE(boundSplash.has_value());
+	ASSERT_EQ(boundSplash->actionType, EActionType::WALK);
+	ASSERT_FALSE(boundSplash->target.empty());
+	EXPECT_EQ(BattleHex::getDistance(boundSplash->target.front().hexValue, archerHex), 2)
+		<< "Bind prevents movement, not native area shooting";
+
 	teachBattleSpell(attackerSideHero, SpellID::BLIND, 6);
 	ASSERT_TRUE(castOn(attackerSideHero, SpellID::BLIND, splash))
 		<< "The actual engine must apply Blind to the enemy area shooter";

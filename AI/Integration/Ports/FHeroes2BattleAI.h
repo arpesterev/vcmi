@@ -896,8 +896,7 @@ private:
 			[](const CStack * left, const CStack * right) { return left->unitId() < right->unitId(); });
 		double rangedStrength = 0;
 		for(const auto * friendly : friends)
-			if(friendly != &guard && friendly->alive() && fheroes2IsArcher(*friendly)
-				&& friendly->getMovementRange() > 0 && !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
+			if(friendly != &guard && fheroes2ContributesRangedPressure(*friendly))
 				rangedStrength += strength(battle, *friendly);
 
 		double enemyStrength = 0;
@@ -905,8 +904,7 @@ private:
 		for(const auto * enemy : enemies)
 		{
 			enemyStrength += strength(battle, *enemy);
-			if(fheroes2IsArcher(*enemy) && enemy->getMovementRange() > 0
-				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+			if(fheroes2ContributesRangedPressure(*enemy)
 				&& enemy->hasBonusOfType(BonusType::SHOOTS_ALL_ADJACENT)
 				&& !battle.battleIsUnitBlocked(enemy))
 				areaShotStrength += strength(battle, *enemy);

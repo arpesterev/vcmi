@@ -59,8 +59,23 @@ protected:
 TEST_P(FHeroes2ShieldAmmoBattle,directProtectionPremiumUsesRemainingShots){
  initialize();ASSERT_FALSE(HasFatalFailure());pair(BattleSide::ATTACKER);ASSERT_FALSE(HasFatalFailure());
  threat=addStack(BattleSide::DEFENDER,CreatureID(2),BattleHex(5*17+13),100);ASSERT_NE(threat,nullptr);beginCombat();candidateSpell(SpellID::AIR_SHIELD);
- const auto action=choose();ASSERT_TRUE(action);const auto * expected=GetParam()?alternative:subject;EXPECT_EQ(view->battleGetUnitByPos(action->target.front().hexValue),expected);
- const auto * actual=execute(*action,SpellID::AIR_SHIELD);ASSERT_NE(actual,nullptr);EXPECT_TRUE(actual->hasBonus(shieldEffect()));
+ const auto * expected=GetParam()?alternative:subject;
+ const auto units=view->battleGetAllStacks();
+ ASSERT_EQ(std::count_if(units.begin(),units.end(),[&](const CStack * unit){
+  return unit->alive()&&unit->unitSide()==BattleSide::DEFENDER&&AIIntegration::fheroes2IsArcher(*unit);
+ }),1);
+ const auto unbound=choose();ASSERT_TRUE(unbound);ASSERT_FALSE(unbound->target.empty());
+ EXPECT_EQ(view->battleGetUnitByPos(unbound->target.front().hexValue),expected);
+
+ threat->addNewBonus(std::make_shared<Bonus>(BonusDuration::PERMANENT,
+  BonusType::BIND_EFFECT,BonusSource::OTHER,0,BonusSourceID()));
+ ASSERT_EQ(threat->getMovementRange(),0u);
+ ASSERT_FALSE(threat->hasBonusOfType(BonusType::NOT_ACTIVE));
+ ASSERT_TRUE(threat->shots.canUse(1));ASSERT_TRUE(battle()->battleCanShoot(threat));
+ const auto bound=choose();ASSERT_TRUE(bound)<<"An armed, bound archer can still make Air Shield useful";
+ ASSERT_FALSE(bound->target.empty());
+ EXPECT_EQ(view->battleGetUnitByPos(bound->target.front().hexValue),expected);
+ const auto * actual=execute(*bound,SpellID::AIR_SHIELD);ASSERT_EQ(actual,expected);EXPECT_TRUE(actual->hasBonus(shieldEffect()));
 }
 TEST_P(FHeroes2ShieldAmmoBattle,enemyDispelPremiumUsesRemainingShots){
  initialize();ASSERT_FALSE(HasFatalFailure());pair(BattleSide::DEFENDER);ASSERT_FALSE(HasFatalFailure());

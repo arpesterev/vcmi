@@ -137,8 +137,8 @@ class FHeroes2SpellPolicy
 		for(const auto * unit : real.battleGetAllStacks())
 		{
 			// Preserve the source's future-volley classification, not current shot legality.
-			if(!unit->alive() || real.battleGetOwner(unit) == real.battleGetOwner(&protectedUnit)
-				|| !fheroes2IsArcher(*unit) || actingSpeed(*unit) <= 0)
+			if(!fheroes2ContributesRangedPressure(*unit)
+				|| real.battleGetOwner(unit) == real.battleGetOwner(&protectedUnit))
 				continue;
 			StackWithBonuses shooter(&projected, static_cast<const battle::Unit *>(unit));
 			const auto withShield = real.calculateDmgRange(BattleAttackInfo(&shooter, &shielded, 0, true)).damage;
@@ -161,12 +161,12 @@ class FHeroes2SpellPolicy
 			result.strength += strength;
 			// Source ai_battle.cpp::analyzeBattleState uses GetSpeed(false, true)
 			// for projected army speed and isImmovable() for archer strength.
-			// Blind/Paralyze stop both, although VCMI may retain raw speed;
+			// Blind/Paralyze stop both; Bind stops movement but not shooting.
 			// Forgetfulness and contact only suppress the current shot.
 			const int nextTurnSpeed = unit->hasBonusOfType(BonusType::NOT_ACTIVE)
 				? 0 : static_cast<int>(unit->getMovementRange());
 			result.weightedSpeed += strength * nextTurnSpeed;
-			if(fheroes2IsArcher(*unit) && nextTurnSpeed > 0)
+			if(fheroes2ContributesRangedPressure(*unit))
 				result.shooters += strength;
 		}
 		return result;

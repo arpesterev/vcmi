@@ -24,4 +24,12 @@ inline bool fheroes2IsArcher(const battle::Unit & unit)
 	const auto state = unit.acquireState();
 	return state->shots.canUse(1);
 }
+
+// Source isImmovable() means disabled by Blind or paralysis, not unable
+// to change hexes. Native Bind stops movement but does not stop shooting.
+inline bool fheroes2ContributesRangedPressure(const battle::CUnitState & unit)
+{
+	return unit.alive() && !unit.isCatapult() && fheroes2IsArcher(unit)
+		&& !unit.hasBonusOfType(BonusType::NOT_ACTIVE);
+}
 }

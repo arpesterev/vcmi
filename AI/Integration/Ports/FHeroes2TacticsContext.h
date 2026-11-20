@@ -5,6 +5,7 @@
 #pragma once
 
 #include "SourceTactics.h"
+#include "FHeroes2ArcherClassification.h"
 #include "FHeroes2NativeStrength.h"
 #include "FHeroes2SiegePressure.h"
 #include "FHeroes2ObservedMagic.h"
@@ -134,22 +135,15 @@ public:
 		for(const auto * friendly : battle.battleGetStacks(CBattleInfoEssentials::ONLY_MINE))
 		{
 			input.armyStrength += strengthModel.value(*friendly);
-			// fheroes2 analyzeBattleState counts capable ranged units even
-			// when adjacent enemies block shots, but isImmovable() excludes
-			// Blind/Paralyze. Native NOT_ACTIVE projects incapacity, including
-			// native-only effects. Zero movement does not prevent ranged fire.
-			// Source isArchers() requires remaining ammunition. Native ammo
-			// carts supply shots without making adjacency a classification gate.
-			// Native catapults carry SHOOTER but can only attack walls.
-			if(!friendly->isCatapult() && friendly->isShooter() && friendly->shots.canUse(1)
-				&& !friendly->hasBonusOfType(BonusType::NOT_ACTIVE))
+			// Like the source, this census does not exclude archers because
+			// an adjacent enemy blocks a shot at the current moment.
+			if(fheroes2ContributesRangedPressure(*friendly))
 				input.shootersStrength += strengthModel.value(*friendly);
 		}
 		for(const auto * enemy : enemies)
 		{
 			input.enemyArmyStrength += strengthModel.value(*enemy);
-			if(!enemy->isCatapult() && enemy->isShooter() && enemy->shots.canUse(1)
-				&& !enemy->hasBonusOfType(BonusType::NOT_ACTIVE))
+			if(fheroes2ContributesRangedPressure(*enemy))
 				input.enemyShootersStrength += strengthModel.value(*enemy);
 		}
 		if(input.armyStrength <= 0 || input.enemyArmyStrength <= 0)
