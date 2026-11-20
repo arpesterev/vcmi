@@ -6,8 +6,8 @@ ports or playing-strength equivalence.
 
 ## Scope and source
 
-The reviewed integration base is
-`830fdfeb844e30494fab613a370073c3cdff470c`. Its engine version is **1.8.0** in
+The current recovery base is public `develop` commit
+`ef7883ae5bc4c45e409fa74c14b3560c7d38d56e`. Its engine version is **1.8.0** in
 `cmake_modules/VersionDefinition.cmake`. Record the final build commit after
 applying any changes; a result from the base commit does not validate later edits.
 
@@ -122,20 +122,28 @@ intentionally different from a portable app: do not apply the bundle rpath
 normalizer to this executable or change the dependency cache. A loader or
 signature failure is a test blocker, not a reason to bypass macOS protection.
 
-The reviewed next-candidate inventory contains 358 `AIIntegrationNativeBattle`
-cases, 8 `HoMM3ForecastQueueNative` cases and 10
-`HoMM3ForecastLifecycleNative` cases. The runner enumerates the compiled
-binary, requires exactly the 20 named model-gated cases, excludes only those
-cases, then verifies that the selected inventory and XML identities agree.
-Linux CI validates the compiled inventory against the Mac workflow counts
-before executing its suites. Require that check before scheduling a new Mac
-build to catch stale counts without repeating the longer compilation.
-Expected genuine passes are 338 native battle cases, 18 forecast/lifecycle cases,
-48 `MMAINNOutputValidation` cases and 145 Nullkiller/resource-trading cases:
-**549 executed cases with zero skipped, disabled, failed or errored cases**.
-These are required results, not a claim that this Mac run has already passed.
-A source change that alters the inventory requires an explicit reviewed update
-to the expected counts. XML counts alone cannot substitute for matching names.
+The workflow uses `CI/macos_ai_f398624_inventory.json` as its exact reviewed
+inventory: **899 identities**, partitioned into **754 core** and **145 slow**
+cases. The core group requires 479 non-neural native cases, 18
+forecast/lifecycle cases (including 10 lifecycle cases), 48
+`MMAINNOutputValidation` cases and 209 additional integration cases. The slow
+group contains the 145 Nullkiller/resource-trading cases. Each group must
+produce matching XML identities with zero skipped, disabled, failed or errored
+cases; counts alone cannot substitute for matching names.
+
+The runner enumerates the compiled native selection, requires all 20 explicitly
+named model-gated cases, and excludes exactly those cases from execution. These
+20 exclusions are separate from the 899 reviewed identities. Linux CI checks
+the compiled inventory and executed native XML against the Mac workflow's
+`--expected-native-count 479`, `--expected-forecast-count 18` and
+`--expected-lifecycle-count 10`. Require this check before scheduling a new Mac
+build. Any inventory change needs a separately reviewed update; keep the
+historical `CI/macos_ai_a53_inventory.json` unchanged.
+
+These are required acceptance results, not evidence that this candidate has
+passed on macOS. Record the exact final source SHA for both the mounted DMG
+and the native core/slow XML. Historical packages or Linux runs cannot qualify
+a later candidate.
 
 The fixture is the existing Linux CI archive from
 [vcmi-test-data v2.0](https://github.com/vcmi-mods/vcmi-test-data/releases/tag/v2.0),
@@ -153,9 +161,10 @@ for `vcmi` and `vcmi-test`, leaving ordinary user presets untouched.
 Only explicit JSON/XML/log reports are uploaded as a separate native-test
 artifact. A verified application artifact can therefore exist even if this
 later gate fails; inspect both results before describing runtime readiness.
-The compile estimate is 15–30 additional minutes for roughly 172 translation
-units, plus 2–5 minutes of execution, unmeasured on macOS. Test timeouts are
-300 seconds for native/forecast, 90 for output contracts and 900 for Nullkiller.
+Compilation and execution times for the current candidate remain unmeasured
+on macOS. Per-suite timeouts are 300 seconds for native/forecast and additional
+integration cases, 90 for output contracts and 900 for Nullkiller. The workflow
+has a 90-minute job limit.
 Real neural-model inference is excluded from this gate and remains a separate
 acceptance requirement. Neither build-tree passes nor server CLI startup prove
 launcher selection persistence or packaged gameplay.
@@ -281,8 +290,8 @@ hashes and result of each check. Do not mark checks passed before execution.
   with SHA-256 `11e561522b8cb8e76867f7c2b76762c24e680d0c8f0f6d681f22f2f27e57e5b3`.
   Native test compilation then failed a Clang warning in a test-only lifecycle
   receiver. Its 522 runtime cases did not run. The receiver is now final,
-  without warning suppression; the current expanded 549-case gate still needs
-  a new exact-commit Mac run.
+  without warning suppression; that historical result does not qualify the
+  current 899-case gate, which still needs a new exact-commit Mac run.
 - No installed launcher, Apple Silicon inference or gameplay test has been
   executed by this delivery preparation.
 - Portable cleanup/audit tests use synthetic Mach-O tool responses. The CMake
