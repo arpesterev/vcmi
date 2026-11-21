@@ -78,6 +78,32 @@ working wall/gate cases are positive and negative branch evidence. Initial
 fixture probes, not claimed tactical defects. The final tests follow actual
 native paths and queue transitions.
 
+## Cure with a live Berserk window
+
+The historical single-friendly-stack native fixture did not establish a
+hero-magic opportunity while Berserk was live. Pinned `planUnitTurn` bypasses
+spell selection for the compelled stack; the port retains that rule. A later
+Cure after native expiry can heal damage without proving control removal.
+The Mac failure on `7d3a0f7` alone therefore does not establish a platform bug.
+
+`fheroes2CuresNativeBerserkAndCompletesBattle` now uses two friendly stacks.
+A real enemy hero casts Berserk and its active unit defends. The actual next
+unit is an unenchanted ally, while the full-health recipient remains under
+Berserk. Check cast legality and a real hypothetical preview before requesting
+the AI action; require server-accepted Cure, exact mana expenditure, removal
+of the native effect, unchanged recipient health and an accepted unit action.
+A zero-mana control rejects spell selection. `FHeroes2CureWindow` separately
+checks the compelled-active branch and preserves the original free-running
+setup as diagnostic evidence, counting Cure while control is live rather than
+mistaking later healing for control removal.
+
+Pinned `spellDispelValue` values removal of negative friendly effects. VCMI
+owns actual Berserk duration, Cure mechanics and mana cost. No spell-policy or
+native effect changes are part of this fixture correction. The existing exact
+native identity remains in the Linux/Mac gate; the two extra diagnostic cases
+run in focused and full local regression outside that unchanged selection.
+Mac execution of the corrected fixture remains separate acceptance work.
+
 ## Reviewable work queue
 
 Existing scenario names below identify bounded coverage, not exhaustive

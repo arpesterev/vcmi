@@ -1648,6 +1648,134 @@ protected:
 		EXPECT_GT(recorder.spellPackets, 0);
 	}
 
+	void checkControlledCureBerserk(bool compelled)
+	{
+		startRecordedGame(); ASSERT_FALSE(HasFatalFailure());
+		setArmy(attackerSideHero, CreatureID(0), 80);
+		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(attackerSideHero->id, SlotID(1)), CreatureID(6).toCreature(), 10));
+		setArmy(defenderSideHero, CreatureID(4), 40);
+		gameHandler->battles->startBattle(attackerSideHero, defenderSideHero);
+		ASSERT_EQ(gameState()->currentBattles.size(), 1u);
+		CStack * victim = nullptr;
+		CStack * ally = nullptr;
+		CStack * enemy = nullptr;
+		for(const auto & unit : battle()->stacks)
+		{
+			if(unit->unitSide() == BattleSide::DEFENDER) enemy = unit.get();
+			else if(unit->creatureId() == CreatureID(0)) victim = unit.get();
+			else if(unit->creatureId() == CreatureID(6)) ally = unit.get();
+		}
+		ASSERT_NE(victim, nullptr); ASSERT_NE(ally, nullptr); ASSERT_NE(enemy, nullptr);
+		ASSERT_EQ(battle()->stacks.size(), 3u);
+		battle()->obstacles.clear();
+		victim->setPosition(BattleHex(9, 5)); ally->setPosition(BattleHex(7, 3)); enemy->setPosition(BattleHex(13, 5));
+		ASSERT_GT(enemy->getMovementRange(), ally->getMovementRange());
+		ASSERT_GT(ally->getMovementRange(), victim->getMovementRange());
+		ASSERT_EQ(battle()->battleActiveUnit(), enemy);
+		for(const auto & spell : LIBRARY->spellh->objects)
+		{
+			attackerSideHero->removeSpellFromSpellbook(spell->id);
+			defenderSideHero->removeSpellFromSpellbook(spell->id);
+		}
+		teachBattleSpell(defenderSideHero, SpellID::BERSERK, 6);
+		teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
+		setMagicMastery(defenderSideHero, MasteryLevel::BASIC);
+		setMagicMastery(attackerSideHero, MasteryLevel::BASIC);
+		auto * affected = compelled ? ally : victim;
+		const auto health = affected->getAvailableHealth();
+		ASSERT_EQ(health, affected->getCount() * affected->getMaxHealth());
+		const auto battleID = battle()->getBattleID();
+		const auto player = attackerSideHero->getOwner();
+		const auto berserk = Selector::source(BonusSource::SPELL_EFFECT, BonusSourceID(SpellID(SpellID::BERSERK)));
+		const auto setup = BattleAction::makeHeroSpellcast(BattleSide::DEFENDER,
+			battle::Target{battle::Destination(affected)}, SpellID::BERSERK);
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, defenderSideHero->getOwner(), setup));
+		ASSERT_TRUE(affected->hasBonus(berserk));
+		ASSERT_TRUE(affected->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+		ASSERT_EQ(affected->getAvailableHealth(), health);
+		const auto manaBeforeAdvance = attackerSideHero->mana;
+		const auto movementsBeforeAdvance = recorder.movementPackets;
+		const auto attacksBeforeAdvance = recorder.meleeAttacks + recorder.shots;
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, defenderSideHero->getOwner(), BattleAction::makeDefend(enemy)));
+		if(compelled)
+		{
+			// Native activation executes Berserk automatically before offering
+			// the next player turn. There is no hero-magic window on this unit.
+			ASSERT_NE(battle()->battleActiveUnit(), ally);
+			EXPECT_TRUE(ally->moved());
+			EXPECT_TRUE(recorder.movementPackets > movementsBeforeAdvance
+				|| recorder.meleeAttacks + recorder.shots > attacksBeforeAdvance);
+			EXPECT_EQ(attackerSideHero->mana, manaBeforeAdvance);
+			EXPECT_TRUE(recorder.castsOf(SpellID::CURE).empty());
+			RecordProperty("native_compelled_activation", 1);
+			RecordProperty("mana_spent_in_window", static_cast<int>(manaBeforeAdvance - attackerSideHero->mana));
+			runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+			EXPECT_GT(recorder.damage, 0);
+			return;
+		}
+		ASSERT_EQ(battle()->battleActiveUnit(), ally);
+		ASSERT_EQ(ally->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE), compelled);
+		ASSERT_TRUE(affected->hasBonus(berserk));
+		ASSERT_EQ(affected->getAvailableHealth(), health);
+		auto callback = std::make_shared<DecisionCallback>(player); callback->onBattleStarted(battle());
+		auto view = callback->getBattle(battleID);
+		auto environment = std::make_shared<NativePortEnvironment>(makeCallback(player), callback);
+		const auto mana = attackerSideHero->mana;
+		const auto * cure = SpellID(SpellID::CURE).toSpell();
+		const auto cost = view->battleGetSpellCost(cure, attackerSideHero);
+		ASSERT_GT(cost, 0); ASSERT_GE(mana, cost);
+		RecordProperty("cure_mana_cost", cost);
+		RecordProperty("target_full_health", std::to_string(health));
+		RecordProperty("compelled_active", compelled ? 1 : 0);
+		const spells::Target target{battle::Destination(affected)};
+		spells::BattleCast legality(view.get(), attackerSideHero, spells::Mode::HERO, cure);
+		ASSERT_EQ(view->battleCanCastSpell(attackerSideHero, spells::Mode::HERO), ESpellCastProblem::OK);
+		ASSERT_TRUE(cure->battleMechanics(&legality)->canBeCastAt(target));
+		auto projected = std::make_shared<HypotheticBattle>(environment.get(), view);
+		spells::BattleCast preview(projected.get(), attackerSideHero, spells::Mode::HERO, cure);
+		const auto packets = recorder.spellPackets;
+		preview.castEval(projected->getServerCallback(), target);
+		const auto * after = projected->battleGetUnitByID(affected->unitId()); ASSERT_NE(after, nullptr);
+		ASSERT_FALSE(after->hasBonus(berserk));
+		ASSERT_FALSE(after->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+		ASSERT_EQ(after->getAvailableHealth(), health);
+		ASSERT_TRUE(affected->hasBonus(berserk)); ASSERT_EQ(affected->getAvailableHealth(), health);
+		ASSERT_EQ(attackerSideHero->mana, mana); ASSERT_EQ(recorder.spellPackets, packets);
+		attackerSideHero->mana = 0;
+		EXPECT_FALSE(AIIntegration::FHeroes2SpellPolicy::choose(view, environment.get(), ally));
+		EXPECT_TRUE(affected->hasBonus(berserk)); EXPECT_EQ(recorder.spellPackets, packets);
+		attackerSideHero->mana = mana;
+		auto policy = AIFactory::createBattleAI("FHeroes2Tactics"); ASSERT_NE(policy, nullptr);
+		AutocombatPreferences prefs; prefs.enableSpellsUsage = true;
+		policy->playerID = player; policy->initBattleInterface(environment, callback, prefs);
+		policy->battleStart(battleID, battle()->getSideArmy(BattleSide::ATTACKER), battle()->getSideArmy(BattleSide::DEFENDER),
+			battle()->getLocation(), attackerSideHero, defenderSideHero, BattleSide::ATTACKER, false);
+		policy->activeStack(battleID, ally); ASSERT_TRUE(callback->action);
+		ASSERT_TRUE(callback->spellAction); ASSERT_EQ(callback->action->actionType, EActionType::HERO_SPELL);
+		ASSERT_EQ(callback->action->spell, SpellID::CURE); ASSERT_FALSE(callback->action->target.empty());
+		ASSERT_EQ(view->battleGetUnitByPos(callback->action->target.front().hexValue), affected);
+		ASSERT_TRUE(affected->hasBonus(berserk)); ASSERT_EQ(affected->getAvailableHealth(), health);
+		const auto action = *callback->action;
+		policy->actionStarted(battleID, action);
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, action));
+		ASSERT_EQ(recorder.castsOf(SpellID::CURE).size(), 1u);
+		EXPECT_EQ(attackerSideHero->mana, mana - cost);
+		EXPECT_FALSE(affected->hasBonus(berserk)); EXPECT_FALSE(affected->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE));
+		EXPECT_EQ(affected->getAvailableHealth(), health);
+		ASSERT_EQ(battle()->battleActiveUnit(), ally);
+		policy->battleSpellCast(battleID, &recorder.casts.back().announcement); policy->actionFinished(battleID, action);
+		callback->action.reset(); callback->spellAction = false;
+		const auto movements = recorder.movementPackets; const auto damage = recorder.damage;
+		policy->activeStack(battleID, ally); ASSERT_TRUE(callback->action);
+		ASSERT_FALSE(callback->spellAction); ASSERT_NE(callback->action->actionType, EActionType::HERO_SPELL);
+		ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battleID, player, *callback->action));
+		EXPECT_TRUE(recorder.movementPackets > movements || recorder.damage > damage);
+		EXPECT_EQ(attackerSideHero->mana, mana - cost);
+		RecordProperty("mana_spent_in_window", static_cast<int>(mana - attackerSideHero->mana));
+		runToCompletion(std::nullopt, false, "FHeroes2Tactics");
+		EXPECT_GT(recorder.damage, 0);
+	}
+
 	void runToCompletion(std::optional<BattleSide> expectedWinner = std::nullopt, bool spellsEnabled = true,
 		const std::string & backendName = "FHeroes2Tactics", const std::string & defenderBackend = "",
 		bool requireBothSidesAct = false,
@@ -4469,6 +4597,17 @@ TEST_F(AIIntegrationNativeBattle, fheroes2EngagedArcherPrefersMeleeDespiteNative
 
 TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
 {
+	checkControlledCureBerserk(false);
+}
+
+class FHeroes2CureWindow : public AIIntegrationNativeBattle {};
+TEST_F(FHeroes2CureWindow, nativeCompelledActivationDoesNotOpenHeroMagicWindow)
+{
+	checkControlledCureBerserk(true);
+}
+
+TEST_F(FHeroes2CureWindow, singleCompelledStackHasNoLiveCureWindow)
+{
 	prepareBattle(CreatureID(0), 80, CreatureID(0), 80);
 	ASSERT_FALSE(HasFatalFailure());
 	const CStack * friendly = nullptr;
@@ -4487,21 +4626,32 @@ TEST_F(AIIntegrationNativeBattle, fheroes2CuresNativeBerserkAndCompletesBattle)
 	ASSERT_EQ(friendly->getAvailableHealth(), healthBefore)
 		<< "There must be no missing health to explain Cure's selection";
 	teachBattleSpell(attackerSideHero, SpellID::CURE, 6);
-	bool sawNativeControlRestoration = false;
-	// Like the existing Cure/Blind/Slow regressions, inspect after the
-	// injury/effect packet has applied. BattleSpellCast arrives earlier
-	// than the status-removal packet on the authoritative server.
-	recorder.onInjuriesAfterApply = [&](const StacksInjured &)
+	bool priorBerserk = friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+	auto priorHealth = friendly->getAvailableHealth();
+	auto priorMana = attackerSideHero->mana;
+	int liveCures = 0;
+	int observedCures = 0;
+	const auto trace = [&](const BattleAction & action, BattleSide side, BattleHex)
 	{
-		if(!recorder.castsOf(SpellID::CURE).empty())
-			sawNativeControlRestoration |= !friendly->hasBonus(berserk)
-				&& !friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+		if(!recorder.battleResults.empty())
+			return;
+		const bool nowBerserk = friendly->hasBonusOfType(BonusType::ATTACKS_NEAREST_CREATURE);
+		if(side == BattleSide::ATTACKER && action.actionType == EActionType::HERO_SPELL && action.spell == SpellID::CURE)
+		{
+			++observedCures;
+			liveCures += priorBerserk ? 1 : 0;
+		}
+		std::cout << "CURE_WINDOW_ORIGINAL side=" << static_cast<int>(side)
+			<< " action=" << action.toString() << " berserk_before=" << priorBerserk
+			<< " berserk_after=" << nowBerserk << " hp_before=" << priorHealth
+			<< " hp_after=" << friendly->getAvailableHealth() << " mana_before=" << priorMana
+			<< " mana_after=" << attackerSideHero->mana << '\n';
+		priorBerserk = nowBerserk; priorHealth = friendly->getAvailableHealth(); priorMana = attackerSideHero->mana;
 	};
-	runToCompletion(std::nullopt, true, "FHeroes2Tactics");
-	EXPECT_FALSE(recorder.castsOf(SpellID::CURE).empty())
-		<< "Source-derived FHeroes2 must independently select Cure for Berserk";
-	EXPECT_TRUE(sawNativeControlRestoration)
-		<< "The real engine must remove Berserk control, not merely accept Cure";
+	runToCompletion(std::nullopt, true, "FHeroes2Tactics", "", false, trace);
+	EXPECT_EQ(liveCures, 0) << "One compelled friendly stack provides no source hero-magic window";
+	RecordProperty("cures_while_berserk_live", liveCures);
+	RecordProperty("total_attacker_cures", observedCures);
 	EXPECT_GT(recorder.damage, 0);
 }
 
