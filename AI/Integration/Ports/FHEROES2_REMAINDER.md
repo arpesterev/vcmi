@@ -304,7 +304,7 @@ matrix. Native estimates remain an intentional approximation to H2 threat.
 | Group | Missing implementation or bounded fallback | Still unverified | Intentional native boundary |
 | --- | --- | --- | --- |
 | Cover and retreat | No new algorithmic defect established by this slice; unsupported threat contexts retain native fallback. | Equal-ranked cover placements, wide retreat orientations, both occupied cells and inability to escape across the full context matrix. | VCMI board, occupancy, activation and speed vetoes. |
-| Siege and towers | Moat pursuit is bounded to a reachable attack after one stopping turn; longer chains of stops retain the old fallback. | Full defender-driven gate opening/holding lifecycle, longer routes, and broader combinations of tower/wall state and target priority. | H3 walls, drawbridge, two-cell stopping and tower execution; towerless FORT approach is a native extension. |
+| Siege and towers | Moat pursuit looks ahead one new stopping turn, including when already standing in the moat; general longer chains still retain the old fallback. | Other gate blockers/corpses and town-specific bridge variants, routes beyond the verified two-stop corridor, and broader combinations of tower/wall state and target priority. | H3 walls, drawbridge, two-cell stopping and tower execution; towerless FORT approach is a native extension. |
 | Special attacks | Uncertified ability combinations retain native estimates rather than certified H2 threat arithmetic. | Wounded and retaliation-spent exchanges, wide secondary targets, combined extra strikes and native reaction effects; the paired friendly-breath weight is now covered. | Native damage and recipient geometry, FIRST_STRIKE/ranged counters and modded abilities do not imply H2 mechanic identity. |
 | Magic | Exact joint reflection/resistance valuation is absent and direct-negative Mirror refusal remains conservative. Other spell contexts have bounded supported subsets. | Simultaneous effects, expiry/cancellation, disabled/waiting/completed recipients, preview failure and all relevant spell combinations; multi-recipient reflection chains remain open. | Native H3 duration, immunity/resistance rolls, Clone ammunition, mana and cast legality; Mirror reflection has no H2 Mirror Image equivalence. |
 | Acceptance | New standalone cases have not been admitted to the exact CI/reviewed inventories; this patch does not alter those contracts. | Same-SHA native Apple Silicon XML, per-decision latency, GUI/save-load and campaign acceptance. | Linux compiler/syntax and local server tests are not Mac execution or historical A53 qualification. |
@@ -325,3 +325,45 @@ must account for all probability mass; sampled RNG traces cannot silently stand
 in for expected utility. The AI would apply its policy to those outcomes and
 retain refusal when the result is unsupported. No such API, server mechanic or
 reflection-policy change is implemented by this patch.
+
+## Continuing from a native moat stop
+
+Pinned `battle_pathfinding.cpp` (commit `0dbfe9f386f33c2500842f4a59cd284d7f03d541`)
+tracks the starting moat cell separately and charges a new moat penalty later
+in the path. The native adapter previously rejected every already-in-moat
+position before evaluating another entry. It now considers entries whose
+footprint contains a moat cell outside the current footprint. Native movement,
+wall accessibility and server damage remain authoritative.
+
+`FHeroes2MoatContinuation.twoStopsReachTheBreach` uses a real Castle CITADEL,
+a destroyed Upper Wall and a server-installed permanent blocking obstacle.
+The obstacle isolates a corridor, rather than claiming that an unobstructed
+standard castle requires this route. A wide attacker starts at head 43/tail 42;
+the defender is at 46. The server accepts 43 to 44/43, then 28/27 on the next
+actual activation, then an attack from 30/29. Each entry inflicts native moat
+damage. Before the fix, the same scenario reaches 44/43 and then skips instead
+of choosing the legal next entry at 28/27. The paired shorter passage leaves
+26 open and goes directly to 28/27; the intact-wall control cannot attack
+through 29. Neither control requires a production change.
+
+This is receding one-stop lookahead, not a general multi-turn route planner.
+The first step in this corridor is supplied by the existing geometric fallback;
+the fix permits continuation from that stop. The helper evaluates at most one
+native BFS per available new-moat head (bounded by the fixed battlefield size),
+with unchanged target/adjacent-goal ranking and no recursion or persistent
+cache. Starting outside the moat retains the same candidate entries. Other
+long chains, route costs across H2/H3 geometry, and future blocker changes are
+not certified. The four standalone cases belong to the broad local regression;
+the exact current CI and reviewed Mac manifests are unchanged.
+
+`FHeroes2MoatContinuation.defenderHoldsAndReleasesGate` separately exercises
+server-driven gate state without injected gate-state packets. The attacker at
+93 defends; the real defender walks from 97 to 95 and holds the gate open. The
+AI attacks from 94/93 and the server deals damage. After the defender returns
+to 97, the gate closes in `BLOCKED` state because the attacker occupies bridge
+94. Its next AI move vacates the bridge, returning the gate to `CLOSED`; the
+intact gate excludes attack and access through 95/96 while closed/blocked.
+This is existing VCMI behavior, verified without a gate-policy change. The
+initial expectation of immediate `CLOSED` was corrected to the native contract;
+that fixture correction is not a red/green AI regression. Corpses, Fortress's
+long bridge, force fields on the bridge and other tower states remain open.

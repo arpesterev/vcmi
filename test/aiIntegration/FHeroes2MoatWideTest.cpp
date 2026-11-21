@@ -292,3 +292,110 @@ protected:
 TEST_F(FHeroes2MoatMultiTarget,strongerBottomTargetChoosesItsBreach){routes(3000,true);}
 TEST_F(FHeroes2MoatMultiTarget,weakerBottomTargetRetainsUpperBreach){routes(10,true);}
 TEST_F(FHeroes2MoatMultiTarget,closedBottomWallExcludesStrongerTarget){routes(3000,false);}
+
+class FHeroes2MoatContinuation : public FHeroes2MoatWide
+{
+protected:
+	void corridor(bool shorter, bool broken)
+	{
+		prepare(43,46,true,100); ASSERT_FALSE(HasFatalFailure());
+		if(broken) breakUpperWall();
+		SpellCreatedObstacle obstacle;
+		obstacle.uniqueID=battle()->nextObstacleId(); obstacle.ID=SpellID::FORCE_FIELD;
+		obstacle.casterSide=BattleSide::DEFENDER; obstacle.turnsRemaining=-1;
+		const std::set<int> open{42,43,44,27,28,29,30,46};
+		for(int i=0;i<GameConstants::BFIELD_SIZE;++i)
+			if(BattleHex(i).isAvailable() && !open.count(i) && !(shorter && i==26)) obstacle.customSize.insert(BattleHex(i));
+		BattleObstaclesChanged pack; pack.battleID=battle()->getBattleID(); obstacle.toInfo(pack.change); gameHandler->sendAndApply(pack);
+		activate(); ASSERT_FALSE(HasFatalFailure());
+	}
+};
+TEST_F(FHeroes2MoatContinuation,twoStopsReachTheBreach)
+{
+	corridor(false,true); ASSERT_FALSE(HasFatalFailure());
+	const auto health=enemy->getAvailableHealth();
+	for(const auto head : {44,28})
+	{
+		SCOPED_TRACE(head);
+		activate();
+		const auto before=actor->getAvailableHealth();
+		ASSERT_TRUE(view->getReachability(actor).isReachable(BattleHex(head)));
+		choose(); ASSERT_FALSE(HasFatalFailure());
+		ASSERT_EQ(callback->action->actionType,EActionType::WALK);
+		ASSERT_EQ(callback->action->target.front().hexValue,BattleHex(head));
+		submit(); ASSERT_FALSE(HasFatalFailure());
+		EXPECT_EQ(actor->getPosition(),BattleHex(head)); EXPECT_EQ(actor->occupiedHex(),BattleHex(head-1));
+		EXPECT_EQ(actor->getAvailableHealth(),before-70);
+		RecordProperty("stop_"+std::to_string(head),actor->getPosition().toInt());
+		EXPECT_EQ(enemy->getAvailableHealth(),health);
+		nextActorTurn(); ASSERT_FALSE(HasFatalFailure());
+	}
+	choose(); ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(callback->action->actionType,EActionType::WALK_AND_ATTACK);
+	ASSERT_EQ(callback->action->target.front().hexValue,BattleHex(30));
+	submit(); ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(actor->getPosition(),BattleHex(30)); EXPECT_EQ(actor->occupiedHex(),BattleHex(29));
+	EXPECT_LT(enemy->getAvailableHealth(),health);
+}
+
+TEST_F(FHeroes2MoatContinuation,shorterPassageAvoidsFirstStop)
+{
+	corridor(true,true); ASSERT_FALSE(HasFatalFailure());
+	choose(); ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(callback->action->actionType,EActionType::WALK);
+	ASSERT_EQ(callback->action->target.front().hexValue,BattleHex(28));
+	submit(); ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(actor->getPosition(),BattleHex(28)); EXPECT_EQ(actor->occupiedHex(),BattleHex(27));
+	nextActorTurn(); choose(); ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(callback->action->actionType,EActionType::WALK_AND_ATTACK);
+	const auto health=enemy->getAvailableHealth();
+	submit(); ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(actor->getPosition(),BattleHex(30)); EXPECT_EQ(actor->occupiedHex(),BattleHex(29));
+	EXPECT_LT(enemy->getAvailableHealth(),health);
+}
+TEST_F(FHeroes2MoatContinuation,intactWallDoesNotInventContinuation)
+{
+	corridor(false,false); ASSERT_FALSE(HasFatalFailure());
+	const auto health=enemy->getAvailableHealth();
+	for(int turn=0;turn<3;++turn)
+	{
+		activate(); choose(); ASSERT_FALSE(HasFatalFailure());
+		ASSERT_NE(callback->action->actionType,EActionType::WALK_AND_ATTACK);
+		submit(); ASSERT_FALSE(HasFatalFailure());
+		EXPECT_FALSE(view->getReachability(actor).isReachable(BattleHex(30)));
+		EXPECT_EQ(enemy->getAvailableHealth(),health);
+		nextActorTurn(); ASSERT_FALSE(HasFatalFailure());
+	}
+}
+
+TEST_F(FHeroes2MoatContinuation,defenderHoldsAndReleasesGate)
+{
+	prepare(93,97,true,10); activate(); ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(view->battleGetGateState(),EGateState::CLOSED);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battle()->getBattleID(),actor->unitOwner(),BattleAction::makeDefend(actor)));
+	ASSERT_EQ(battle()->battleActiveUnit(),enemy);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battle()->getBattleID(),enemy->unitOwner(),BattleAction::makeMove(enemy,BattleHex(95))));
+	ASSERT_EQ(enemy->getPosition(),BattleHex(95));
+	ASSERT_EQ(view->battleGetGateState(),EGateState::OPENED);
+	nextActorTurn(); activate(); choose(); ASSERT_FALSE(HasFatalFailure());
+	ASSERT_EQ(callback->action->actionType,EActionType::WALK_AND_ATTACK);
+	const auto health=enemy->getAvailableHealth();
+	submit(); ASSERT_FALSE(HasFatalFailure());
+	EXPECT_LT(enemy->getAvailableHealth(),health);
+	ASSERT_EQ(view->battleGetGateState(),EGateState::OPENED);
+	ASSERT_EQ(battle()->battleActiveUnit(),enemy);
+	ASSERT_TRUE(gameHandler->battles->makePlayerBattleAction(battle()->getBattleID(),enemy->unitOwner(),BattleAction::makeMove(enemy,BattleHex(97))));
+	ASSERT_EQ(enemy->getPosition(),BattleHex(97));
+	ASSERT_EQ(actor->getPosition(),BattleHex(BattleHex::GATE_BRIDGE));
+	ASSERT_EQ(view->battleGetGateState(),EGateState::BLOCKED);
+	nextActorTurn(); activate(); ASSERT_FALSE(HasFatalFailure());
+	EXPECT_FALSE(view->getReachability(actor).isReachable(BattleHex(95)));
+	EXPECT_FALSE(view->getReachability(actor).isReachable(BattleHex(96)));
+	choose(); ASSERT_FALSE(HasFatalFailure());
+	ASSERT_NE(callback->action->actionType,EActionType::WALK_AND_ATTACK);
+	const auto remaining=enemy->getAvailableHealth();
+	submit(); ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(enemy->getAvailableHealth(),remaining);
+	EXPECT_EQ(view->battleGetWallState(EWallPart::GATE),EWallState::INTACT);
+	EXPECT_EQ(view->battleGetGateState(),EGateState::CLOSED);
+}

@@ -718,14 +718,15 @@ private:
 				moat.insert(obstacle->getStoppingTile());
 		if(battle.battleGetGateState() == EGateState::OPENED || battle.battleGetGateState() == EGateState::DESTROYED)
 			moat.erase(BattleHex(BattleHex::GATE_BRIDGE));
-		const auto touchesMoat = [&](BattleHex head)
+		const auto startingHexes = stack.getHexes();
+		const auto entersNewMoat = [&](BattleHex head)
 		{
 			for(const auto & hex : stack.getHexes(head))
-				if(moat.contains(hex))
+				if(moat.contains(hex) && !startingHexes.contains(hex))
 					return true;
 			return false;
 		};
-		if(moat.empty() || touchesMoat(stack.getPosition()))
+		if(moat.empty())
 			return std::nullopt;
 
 		struct Route
@@ -736,7 +737,7 @@ private:
 		std::vector<Route> routes(enemies.size());
 		for(const auto & entry : available)
 		{
-			if(!entry.isAvailable() || !touchesMoat(entry))
+			if(!entry.isAvailable() || !entersNewMoat(entry))
 				continue;
 			auto accessible = stack.getHexes();
 			accessible.insert(stack.getHexes(entry));
