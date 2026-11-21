@@ -11,7 +11,9 @@ namespace AIIntegration::Ports::HoMM3
 inline bool sameMirthLimiter(const TLimiterPtr & a,const TLimiterPtr & b)
 {
  if(!a || !b)return !a && !b;
- if(typeid(*a)!=typeid(*b))return false;
+ const auto * aPtr=a.get();
+ const auto * bPtr=b.get();
+ if(typeid(*aPtr)!=typeid(*bPtr))return false;
  if(const auto * terrain=dynamic_cast<const TerrainLimiter *>(a.get()))
   return terrain->terrainType==static_cast<const TerrainLimiter &>(*b).terrainType;
  if(const auto * aggregate=dynamic_cast<const AggregateLimiter *>(a.get()))
@@ -36,7 +38,9 @@ inline bool sameMirthBaselineBonus(const Bonus & a,const Bonus & b)
  const auto component=[](const auto & x,const auto & y)
  {
   if(!x || !y)return !x && !y;
-  return typeid(*x)==typeid(*y) && x->toJsonNode()==y->toJsonNode();
+  const auto * xPtr=x.get();
+  const auto * yPtr=y.get();
+  return typeid(*xPtr)==typeid(*yPtr) && x->toJsonNode()==y->toJsonNode();
  };
  try
  {
@@ -44,7 +48,9 @@ inline bool sameMirthBaselineBonus(const Bonus & a,const Bonus & b)
    || !component(a.updater,b.updater) || !component(a.propagationUpdater,b.propagationUpdater)
    || !component(a.parameters,b.parameters))return false;
   if(!a.propagator || !b.propagator)return !a.propagator && !b.propagator;
-  return typeid(*a.propagator)==typeid(*b.propagator)
+  const auto * aPropagator=a.propagator.get();
+  const auto * bPropagator=b.propagator.get();
+  return typeid(*aPropagator)==typeid(*bPropagator)
    && a.propagator->getPropagatorType()==b.propagator->getPropagatorType();
  }
  catch(const std::exception &)

@@ -36,7 +36,8 @@ class BonusGraphSnapshotCapture
 	template<typename T, typename Base>
 	static bool copyExactType(const std::shared_ptr<const Base> & source, std::shared_ptr<Base> & result)
 	{
-		if(typeid(*source) != typeid(T))
+		const auto * sourcePtr = source.get();
+		if(typeid(*sourcePtr) != typeid(T))
 			return false;
 		result = std::make_shared<T>(*static_cast<const T *>(source.get()));
 		return true;
