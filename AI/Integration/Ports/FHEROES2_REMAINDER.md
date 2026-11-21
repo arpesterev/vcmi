@@ -78,6 +78,45 @@ working wall/gate cases are positive and negative branch evidence. Initial
 fixture probes, not claimed tactical defects. The final tests follow actual
 native paths and queue transitions.
 
+## Moat entry and the following wide move
+
+Pinned `meleeUnitOffense` enters a moat-ending path to gain movement freedom
+on the following turn. VCMI stops native BFS when either occupied cell first
+enters a stopping obstacle and ignores the starting footprint on the next
+move. Its wall, drawbridge and two-cell rules remain authoritative; this is
+not an identity between the H2 and H3 grids.
+
+`FHeroes2MoatWide` starts a real server battle with `BattleLayout`, a built
+Citadel and the native Castle moat spell. The keep is destroyed by a native
+packet to isolate movement. No manual obstacle replaces the real moat.
+At origin 26 against defender 46 with Upper Wall 29 destroyed, the old fallback
+chose 11 solely by geometric tie order. A wide stack then stopped again at
+head 29 / tail 28 instead of attacking on the next turn. Entry 28 / tail 27
+allows the following attack from 30 / tail 29. A single-cell stack instead
+attacks from 29. Entering the moat costs the native 70 HP; the server accepts
+both turns and applies real attack damage.
+
+The bounded correction applies when the current graph supplies no attack
+route, the attacker is not already in the moat, and there is one target.
+Compare legal moat entries using a second native BFS from each complete
+footprint, including the vacated original footprint. Require a native attack
+landing within the following movement range; entering another stopping tile
+cannot be treated as an attack. Only the first legal WALK is submitted.
+Future actions, damage and movement range are recalculated on the real turn.
+Multiple targets and routes needing further moat stops retain the old fallback.
+
+The farther defender at 63 already used entry 28 and remains unchanged.
+Intact Upper Wall blocks the passage, including a wide tail in wall 29.
+Closed-gate cases retain entry 44; an authoritative opened-gate packet permits
+single-cell attack from 79 or wide attack from 96 / tail 95 without a moat
+trigger. These are gate-state consumers, not a complete drawbridge-opening
+lifecycle. All cases assert actual server movement and occupancy.
+
+The standalone suite is exercised by focused and broad local regression.
+It is outside the unchanged exact CI/reviewed filters and is not qualified
+by the historical A53 evidence. Live-tower pressure and multiple movable
+targets require separate source-priority checks before extending this slice.
+
 ## Cure with a live Berserk window
 
 The historical single-friendly-stack native fixture did not establish a
@@ -113,18 +152,15 @@ control and a real accepted action or state packet.
 | Area | Existing bounded evidence | Next discriminating check |
 | --- | --- | --- |
 | Cover and retreat | Native cover family, blocked-route escape, vacated-footprint and stopping-obstacle checks; wide-tail escape; `FHeroes2WideCautious` covers obstacle passage and unsupported-threat fallback; center/ring pair above. | Pair equal-ranked cover positions and wide retreat orientations with real turn order; independently verify both cells and inability to escape. Keep flying-enemy and insufficient-speed vetoes. |
-| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | The isolated FORT wall/gate/controller pairs above now cover this fallback. Next pair moat stopping and subsequent movement with standing/destroyed walls, then wide footprints; keep full drawbridge-opening lifecycle separate. |
+| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | The isolated FORT wall/gate/controller pairs above now cover this fallback. The native moat/next-turn/footprint pairs above now cover a single target. Next distinguish live-tower pressure and multiple target priorities; keep full drawbridge-opening lifecycle separate. |
 | Special attacks | Native breath and friendly collateral, fatal/preemptive strikes, ranged retaliation; bounded DoubleAttack/DoubleShot/Wolf strength and unsupported-record refusal; native Berserk action/path cases. | Cross wound state, spent retaliation and wide secondary targets at a decision boundary. Require the server's executed strikes to match the valuation assumptions; retain whole-context fallback for uncertified records. |
 | Magic | Current-ammunition Shield/Dispel and Clone; observed-spell Anti-Magic; duration/cancellation controls; area/farewell resistance and conservative Mirror handling. | Enumerate simultaneous-effect and expiry combinations per spell. Pair disabled/waiting/completed-turn recipients, removal that genuinely changes native damage, and preview success/failure. Partial reflection and joint stochastic outcomes remain unsupported rather than silently treated as deterministic. |
 
-Take moat stopping and subsequent movement next, then wide cover/escape and
-special-attack boundary matrices, then spell combinations individually. The
-pinned source explicitly rushes a pursuit path ending in the moat, but native
-VCMI BFS stops expansion there; a missing textual branch alone is not proof
-of a wrong native decision. Establish a distinguishing real scenario before
-changing that policy. Separately diagnose the Cure/Berserk cast window using
-a live, unenchanted ally's actual turn; a free-running battle can consume the
-control effect before a useful Cure opportunity.
+Take live-tower pressure at the moat boundary next, then multiple-target
+pursuit and wide cover/escape. For special attacks, compare wounded and
+retaliation-spent recipients with secondary wide targets. Magic combinations
+still need individual controlled cast windows; the Cure/Berserk window above
+is bounded evidence, not a certificate for all cancellation choices.
 
 ## Intentional native boundaries and acceptance
 

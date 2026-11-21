@@ -33,6 +33,7 @@
 #include "../../../lib/CStack.h"
 #include "../../../lib/bonuses/BonusSelector.h"
 #include "../../../lib/battle/BattleAction.h"
+#include "../../../lib/battle/CObstacleInstance.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
 #include "../../../lib/callback/CBattleCallback.h"
 #include "../../../lib/callback/CBattleGameInterface.h"
@@ -697,6 +698,66 @@ private:
 		return std::nullopt;
 	}
 
+	// Native BFS stops at a new moat footprint. For a lone siege target,
+	// compare legal entries by the attack route available after that stop.
+	// Only the first WALK is issued; the next turn is evaluated afresh.
+	static std::optional<BattleAction> approachAcrossMoat(CPlayerBattleCallback & battle,
+		const CStack & stack, const ReachabilityInfo & current, const BattleHexArray & available,
+		const std::vector<const CStack *> & enemies)
+	{
+		if(stack.controllingSide() != BattleSide::ATTACKER || !battle.battleGetDefendedTown()
+			|| stack.hasBonusOfType(BonusType::FLYING) || enemies.size() != 1)
+			return std::nullopt;
+
+		BattleHexArray moat;
+		for(const auto & obstacle : battle.battleGetAllObstacles(battle.battleGetMySide()))
+			if(obstacle->obstacleType == CObstacleInstance::MOAT
+				&& battle.battleIsObstacleVisibleForSide(*obstacle, battle.battleGetMySide()))
+				moat.insert(obstacle->getStoppingTile());
+		if(battle.battleGetGateState() == EGateState::OPENED || battle.battleGetGateState() == EGateState::DESTROYED)
+			moat.erase(BattleHex(BattleHex::GATE_BRIDGE));
+		const auto touchesMoat = [&](BattleHex head)
+		{
+			for(const auto & hex : stack.getHexes(head))
+				if(moat.contains(hex))
+					return true;
+			return false;
+		};
+		if(moat.empty() || touchesMoat(stack.getPosition()))
+			return std::nullopt;
+
+		BattleHex best;
+		uint32_t bestDistance = ReachabilityInfo::INFINITE_DIST;
+		const auto * enemy = enemies.front();
+		for(const auto & entry : available)
+		{
+			if(!entry.isAvailable() || !touchesMoat(entry))
+				continue;
+			auto accessible = stack.getHexes();
+			accessible.insert(stack.getHexes(entry));
+			ReachabilityInfo::Parameters params(battle.battleGetMySide(), &stack, entry, accessible);
+			const auto following = battle.getReachability(params);
+			const auto followingSteps = battle.battleGetAvailableHexes(following, &stack, false);
+			for(const auto & goal : enemy->getAttackableHexes(&stack))
+			{
+				if(!goal.isAvailable() || !followingSteps.contains(goal)
+					|| !battle.isMeleeAttackPossible(&stack, enemy, goal))
+					continue;
+				// Entering another stopper cannot become an attack. Standing
+				// on the entry on the following turn does permit an attack.
+				if(goal != entry && !battle.battleCanAttackFromHex(followingSteps, &stack, enemy->getPosition(), goal))
+					continue;
+				const auto distance = current.distances[entry.toInt()] + following.distances[goal.toInt()];
+				if(distance < bestDistance || (distance == bestDistance && (!best.isValid() || entry.toInt() < best.toInt())))
+				{
+					best = entry;
+					bestDistance = distance;
+				}
+			}
+		}
+		return best.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&stack, best)) : std::nullopt;
+	}
+
 	// fheroes2 meleeUnitOffense first pursues targets that cannot evade,
 	// then maximizes threat divided by the path distance. Unlike the former
 	// nearest-stack policy, this can pursue a remote archer over nearby bait.
@@ -749,6 +810,8 @@ private:
 		}
 		if(!destination.isValid())
 		{
+			if(const auto moat = approachAcrossMoat(battle, stack, reachability, available, enemies))
+				return *moat;
 			if(const auto wall = approachSiegeWall(battle, stack, available, enemies))
 				return *wall;
 			// Pinned planUnitTurn issues SKIP if meleeUnitOffense cannot find
