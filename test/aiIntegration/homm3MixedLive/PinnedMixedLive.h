@@ -264,7 +264,9 @@ inline bool validHex(int32_t value){return value>=0 && value<187;}
 #define random PinnedMixedLive::drawRandom
 #include "../homm3GroundTwoPass/ground-bodies.instrumented.inc"
 #pragma GCC diagnostic push
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 #define attemptShooterDefense sourceAttemptShooterDefense
 #include "mixed-bodies.pinned.inc"
 #undef attemptShooterDefense

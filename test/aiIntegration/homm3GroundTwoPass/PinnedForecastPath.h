@@ -91,7 +91,9 @@ struct searchArray
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 // Original six-way switch covers the bounded direction loop.
+#if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 #endif
 #include "../homm3Ground/bodies.pinned.inc"
 inline int oppositeDirection(int direction){return (direction+3)%6;}
