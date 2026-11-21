@@ -268,3 +268,60 @@ entry, explicit acceptance or supported implementation of each native boundary,
 exact CI inventory admission of new scenarios, native Mac execution on the same
 candidate SHA, and recorded performance and gameplay acceptance. None of these
 broader criteria is satisfied merely by passing the local suites in this slice.
+
+## Friendly secondary melee priority
+
+Pinned `battle_troop.cpp::evaluateThreatForUnit` applies a `-2` multiplier to
+friendly victims. `ai_battle.cpp::doubleCellAttackValue` feeds the secondary
+victim into that function, and `optimalAttackValue` includes it in the melee
+comparison. The existing port already collects native breath/sweep victims,
+handles native first strike, and evaluates multiple legal aims. Its remaining
+error in this slice was charging friendly secondary loss only once.
+
+The correction applies the source multiplier to the existing native loss
+estimate. It does not replace VCMI damage, attack geometry, retaliation or
+ownership with H2 rules, and does not change the separate blocked-archer raw-HP
+policy. Basic breath and Hydra collection were already implemented; an audit
+of wide hypothetical footprints did not establish an additional bug here.
+
+`Secondary/FHeroes2BreathPriority.secondaryOwnershipChangesActualPrimaryChoice`
+uses a real server battle and its actual first activation. The actor at 90
+receives native breath and zero movement range to isolate two legal adjacent
+primary choices: archers at 91 and pikemen at 73. The secondary pikemen at 92
+are hostile or friendly in the paired cases. The chooser is invoked through
+AIFactory, and its selected command is submitted to the server. Before this
+correction, Friendly chooses 91 and kills all 500 allied HP at 92. Hostile is
+an unchanged positive control: the same secondary damage is desirable.
+After correction, Friendly selects 73, deals 901 native HP to that enemy and
+spares all 500 allied HP. Hostile still selects 91 and deals 973 primary plus
+500 secondary HP. Identical test bytes give one failing case before and two
+passing cases after; the server accepts every selected command.
+These two cases close this ranking-weight boundary, not the full special-attack
+matrix. Native estimates remain an intentional approximation to H2 threat.
+
+## Remaining groups: implementation, native rules, verification
+
+| Group | Missing implementation or bounded fallback | Still unverified | Intentional native boundary |
+| --- | --- | --- | --- |
+| Cover and retreat | No new algorithmic defect established by this slice; unsupported threat contexts retain native fallback. | Equal-ranked cover placements, wide retreat orientations, both occupied cells and inability to escape across the full context matrix. | VCMI board, occupancy, activation and speed vetoes. |
+| Siege and towers | Moat pursuit is bounded to a reachable attack after one stopping turn; longer chains of stops retain the old fallback. | Full defender-driven gate opening/holding lifecycle, longer routes, and broader combinations of tower/wall state and target priority. | H3 walls, drawbridge, two-cell stopping and tower execution; towerless FORT approach is a native extension. |
+| Special attacks | Uncertified ability combinations retain native estimates rather than certified H2 threat arithmetic. | Wounded and retaliation-spent exchanges, wide secondary targets, combined extra strikes and native reaction effects; the paired friendly-breath weight is now covered. | Native damage and recipient geometry, FIRST_STRIKE/ranged counters and modded abilities do not imply H2 mechanic identity. |
+| Magic | Exact joint reflection/resistance valuation is absent and direct-negative Mirror refusal remains conservative. Other spell contexts have bounded supported subsets. | Simultaneous effects, expiry/cancellation, disabled/waiting/completed recipients, preview failure and all relevant spell combinations; multi-recipient reflection chains remain open. | Native H3 duration, immunity/resistance rolls, Clone ammunition, mana and cast legality; Mirror reflection has no H2 Mirror Image equivalence. |
+| Acceptance | New standalone cases have not been admitted to the exact CI/reviewed inventories; this patch does not alter those contracts. | Same-SHA native Apple Silicon XML, per-decision latency, GUI/save-load and campaign acceptance. | Linux compiler/syntax and local server tests are not Mac execution or historical A53 qualification. |
+
+An unverified group above is not automatically a proven missing algorithm.
+Completion requires resolving every bounded fallback or explicitly accepting
+its supported-domain boundary, plus the scenario and platform criteria above.
+
+## Possible reflection evaluator interface (design only)
+
+A future read-only native evaluator would accept an immutable battle snapshot,
+public caster/target facts and a legal spell action. Its result must distinguish
+`Unsupported(reason)` from certified outcomes with probability mass, recipient
+order and state deltas (health/count/effects/owner), plus mana and action cost.
+It must preserve native reflection recipient selection, fresh resistance rolls,
+chain reflection and immunity semantics. Exact enumeration or certified bounds
+must account for all probability mass; sampled RNG traces cannot silently stand
+in for expected utility. The AI would apply its policy to those outcomes and
+retain refusal when the result is unsupported. No such API, server mechanic or
+reflection-policy change is implemented by this patch.

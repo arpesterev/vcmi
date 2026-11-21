@@ -434,8 +434,10 @@ private:
 				BattleAttackInfo extra(&outgoing, victim, distance, false);
 				extra.attackerPos = from;
 				const double effect = lossValue(battle, *victim, battle.battleEstimateDamage(extra));
+				// Pinned evaluateThreatForUnit doubles the friendly-hit penalty.
+				// Keep native damage/footprints, but preserve that ranking weight.
 				extraValue += battle.battleGetOwner(victim) == battle.battleGetOwner(&attacker)
-					? -effect : effect;
+					? -2.0 * effect : effect;
 			}
 			return extraValue;
 		};
