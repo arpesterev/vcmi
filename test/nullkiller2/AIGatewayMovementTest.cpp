@@ -13,6 +13,8 @@
 #include "nullkiller2/ScriptedMovementClient.h"
 
 #include "lib/callback/CCallback.h"
+#include "lib/gameState/CGameState.h"
+#include <shared_mutex>
 
 namespace
 {
@@ -45,6 +47,8 @@ protected:
 
 	NK2AI::HeroMovementResult moveHeroTo(const int3 & destination)
 	{
+		// Match makeTurn: waitTillFree temporarily releases this shared lock.
+		std::shared_lock gsLock(CGameState::mutex);
 		return gateway->moveHeroToTile(destination, NK2AI::HeroPtr(hero, callback.get()));
 	}
 
