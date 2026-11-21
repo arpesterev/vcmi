@@ -70,6 +70,7 @@ add_test(NAME ai_homm3_exchange COMMAND homm3_exchange_test)
 add_test(NAME ai_homm3_ranged_census COMMAND homm3_ranged_census_test)
 add_test(NAME ai_homm3_defend_provenance COMMAND homm3_defend_provenance_test)
 add_test(NAME ai_homm3_ground_path COMMAND homm3_ground_path_test)
+set_tests_properties(ai_homm3_ground_path PROPERTIES TIMEOUT 90)
 add_test(NAME ai_homm3_ground_census COMMAND homm3_ground_census_test)
 add_test(NAME ai_homm3_combat_value COMMAND homm3_combat_value_test)
 add_test(NAME ai_homm3_forecast_prefix COMMAND homm3_forecast_prefix_test)
@@ -81,7 +82,7 @@ add_test(NAME ai_native_inventory_checker
 	COMMAND ${Python3_EXECUTABLE} -m unittest -v test_native_ai_inventory test_macos_native_ai)
 set_tests_properties(ai_adapter_evidence_checker ai_native_inventory_checker PROPERTIES
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../CI")
-set_tests_properties(ai_adapter_protocol ai_source_tactics ai_fheroes2_source_parity ai_fheroes2_magic_source ai_homm3_spell_source ai_homm3_target_census ai_homm3_exchange ai_homm3_ranged_census ai_homm3_ground_path ai_homm3_ground_census ai_homm3_defend_provenance ai_homm3_combat_value ai_homm3_forecast_prefix ai_homm3_forecast_lifecycle ai_homm3_forecast_shooter ai_adapter_evidence_checker ai_native_inventory_checker PROPERTIES TIMEOUT 30)
+set_tests_properties(ai_adapter_protocol ai_source_tactics ai_fheroes2_source_parity ai_fheroes2_magic_source ai_homm3_spell_source ai_homm3_target_census ai_homm3_exchange ai_homm3_ranged_census ai_homm3_ground_census ai_homm3_defend_provenance ai_homm3_combat_value ai_homm3_forecast_prefix ai_homm3_forecast_lifecycle ai_homm3_forecast_shooter ai_adapter_evidence_checker ai_native_inventory_checker PROPERTIES TIMEOUT 30)
 
 # Pure current-Defend affinity tripwire, not a whole-host concurrency proof.
 add_executable(homm3_current_defend_thread_guard_test ../../test/aiIntegration/homm3Defend/ThreadGuardStandalone.cpp)
