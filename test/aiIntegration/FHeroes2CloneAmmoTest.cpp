@@ -18,7 +18,7 @@ public:
 };
 }
 class FHeroes2CloneAmmoBattle : public BattleTestFixture,public ::testing::WithParamInterface<bool> {};
-TEST_P(FHeroes2CloneAmmoBattle,valuesFreshNativeCloneRatherThanCopyingOwnerAmmunition){
+TEST_P(FHeroes2CloneAmmoBattle,valuesOriginalAmmunitionWithoutChangingNativeCloneStock){
  startGame();ASSERT_FALSE(HasFatalFailure());startBattle();ASSERT_FALSE(HasFatalFailure());
  auto * owner=addStack(BattleSide::ATTACKER,CreatureID(2),BattleHex(4*17+5),22);
  auto * alternative=addStack(BattleSide::ATTACKER,CreatureID(2),BattleHex(7*17+5),20);
@@ -30,7 +30,7 @@ TEST_P(FHeroes2CloneAmmoBattle,valuesFreshNativeCloneRatherThanCopyingOwnerAmmun
  const auto remaining=owner->shots.available();ASSERT_LT(remaining,totalShots);
  ASSERT_EQ(AIIntegration::fheroes2IsArcher(*owner),!GetParam());
  // Pinned H2 would copy remaining shots and classify an exhausted original as ground.
- // Native H3 Clone instead creates an armed unit. Preserve that real combat benefit.
+ // Native H3 Clone still creates an armed unit; valuation uses the pre-cast target.
  const double large=owner->estimateCombatValue(),small=alternative->estimateCombatValue();
  ASSERT_GT(large,small);ASSERT_LT(large*0.33,small);
  for(const auto & spell:LIBRARY->spellh->objects)attackerSideHero->removeSpellFromSpellbook(spell->id);
@@ -49,12 +49,13 @@ TEST_P(FHeroes2CloneAmmoBattle,valuesFreshNativeCloneRatherThanCopyingOwnerAmmun
  EXPECT_TRUE(AIIntegration::fheroes2IsArcher(*projectedClone));EXPECT_TRUE(projectedClone->isShooter());EXPECT_EQ(projectedClone->getCount(),owner->getCount());
  const auto * projectedOwner=dynamic_cast<const battle::CUnitState *>(preview->battleGetUnitByID(owner->unitId()));ASSERT_NE(projectedOwner,nullptr);EXPECT_EQ(projectedOwner->shots.available(),remaining);
  const auto action=AIIntegration::FHeroes2SpellPolicy::choose(view,environment.get());ASSERT_TRUE(action);EXPECT_EQ(action->spell,SpellID::CLONE);
- EXPECT_EQ(view->battleGetUnitByPos(action->target.front().hexValue),owner)<<"Native armed clone must not inherit the source exhausted-owner discount";
+ const auto * expected=GetParam()?alternative:owner;
+ ASSERT_EQ(view->battleGetUnitByPos(action->target.front().hexValue),expected)<<"Pinned Mirror Image values the original remaining ammunition";
  EXPECT_EQ(owner->shots.available(),remaining);EXPECT_EQ(owner->getAvailableHealth(),health);EXPECT_LT(owner->cloneID,0);EXPECT_EQ(attackerSideHero->mana,mana);EXPECT_EQ(server.casts.size(),packets);EXPECT_EQ(battle()->stacks.size(),count);
  const auto * selected=dynamic_cast<const CStack *>(view->battleGetUnitByPos(action->target.front().hexValue));ASSERT_NE(selected,nullptr);ASSERT_TRUE(castOn(attackerSideHero,SpellID::CLONE,selected));
- EXPECT_EQ(server.casts.size(),packets+1);EXPECT_LT(attackerSideHero->mana,mana);ASSERT_GE(owner->cloneID,0);
- const auto * realClone=dynamic_cast<const CStack *>(battle()->battleGetUnitByID(owner->cloneID));ASSERT_NE(realClone,nullptr);EXPECT_TRUE(realClone->alive());EXPECT_TRUE(realClone->isClone());
- EXPECT_EQ(realClone->shots.available(),totalShots);EXPECT_EQ(realClone->shots.total(),totalShots);EXPECT_TRUE(AIIntegration::fheroes2IsArcher(*realClone));EXPECT_EQ(realClone->getCount(),owner->getCount());
+ EXPECT_EQ(server.casts.size(),packets+1);EXPECT_LT(attackerSideHero->mana,mana);ASSERT_GE(selected->cloneID,0);
+ const auto * realClone=dynamic_cast<const CStack *>(battle()->battleGetUnitByID(selected->cloneID));ASSERT_NE(realClone,nullptr);EXPECT_TRUE(realClone->alive());EXPECT_TRUE(realClone->isClone());
+ EXPECT_EQ(realClone->shots.available(),totalShots);EXPECT_EQ(realClone->shots.total(),totalShots);EXPECT_TRUE(AIIntegration::fheroes2IsArcher(*realClone));EXPECT_EQ(realClone->getCount(),selected->getCount());
  EXPECT_EQ(owner->shots.available(),remaining);EXPECT_EQ(owner->getAvailableHealth(),health);
 }
 INSTANTIATE_TEST_SUITE_P(OriginalAmmo,FHeroes2CloneAmmoBattle,::testing::Bool(),[](const auto & info){return info.param?"Exhausted":"PartiallySpent";});

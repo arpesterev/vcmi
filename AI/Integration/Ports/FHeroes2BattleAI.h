@@ -1228,7 +1228,8 @@ private:
 			}
 			if(!safe)
 				continue;
-			const int centerDistance = BattleHex::getDistance(hex, center);
+			// Pinned 1 / distance assigns both the center and its first ring 1.0.
+			const int centerDistance = std::max(1, static_cast<int>(BattleHex::getDistance(hex, center)));
 			if(nearest > safestDistance || (nearest == safestDistance
 				&& (centerDistance < smallestCenterDistance || (centerDistance == smallestCenterDistance
 					&& (!safest.isValid() || hex.toInt() < safest.toInt())))))

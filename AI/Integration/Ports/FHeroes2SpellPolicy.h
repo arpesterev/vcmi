@@ -1292,8 +1292,9 @@ public:
 				// only when the *projected* battle really creates a new
 				// friendly clone. Never infer success from cast legality,
 				// an existing clone, or a spell effect on the original.
-				if(mirrorImageSpell)
+				if(mirrorImageSpell && aimed)
 				{
+					const auto * projectedOriginal = dynamic_cast<const battle::CUnitState *>(projected->battleGetUnitByID(aimed->unitId()));
 					// HypotheticBattle creates StackWithBonuses units, not CStack objects.
 					// The legacy CStack-only view is delegated to the live battle and
 					// silently omits newly summoned clones. Query simulated Units.
@@ -1304,12 +1305,15 @@ public:
 							continue;
 						const bool newlyCreated = std::none_of(before.begin(), before.end(),
 							[&](const UnitSnapshot & old) { return old.unit->unitId() == clone->unitId(); });
-						if(!newlyCreated)
+						if(!newlyCreated || !projectedOriginal
+							|| projectedOriginal->cloneID != static_cast<int32_t>(clone->unitId()))
 							continue;
-						value += strengthModel.value(*clone)
+						// Source Mirror Image values the pre-cast target, including remaining shots.
+						// Native Clone still receives the engine-defined ammunition stock.
+						value += strengthModel.value(*aimed)
 							* Ports::FHeroes2::mirrorImageCloneRatio(
-								clone->isShooter(), clone->hasBonusOfType(BonusType::FLYING),
-								static_cast<int>(clone->getMovementRange()), theirs.averageSpeed(), true);
+								fheroes2IsArcher(*aimed), aimed->hasBonusOfType(BonusType::FLYING),
+								static_cast<int>(aimed->getMovementRange()), theirs.averageSpeed(), true);
 					}
 				}
 				// Pinned fheroes2 spellSummonValue counts the combat strength of
