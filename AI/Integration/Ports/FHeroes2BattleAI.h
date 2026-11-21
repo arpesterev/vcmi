@@ -698,7 +698,7 @@ private:
 		return std::nullopt;
 	}
 
-	// Native BFS stops at a new moat footprint. For a lone siege target,
+	// Native BFS stops at a new moat footprint. For each siege target,
 	// compare legal entries by the attack route available after that stop.
 	// Only the first WALK is issued; the next turn is evaluated afresh.
 	static std::optional<BattleAction> approachAcrossMoat(CPlayerBattleCallback & battle,
@@ -706,7 +706,7 @@ private:
 		const std::vector<const CStack *> & enemies)
 	{
 		if(stack.controllingSide() != BattleSide::ATTACKER || !battle.battleGetDefendedTown()
-			|| stack.hasBonusOfType(BonusType::FLYING) || enemies.size() != 1)
+			|| stack.hasBonusOfType(BonusType::FLYING) || enemies.empty())
 			return std::nullopt;
 
 		BattleHexArray moat;
@@ -726,9 +726,12 @@ private:
 		if(moat.empty() || touchesMoat(stack.getPosition()))
 			return std::nullopt;
 
-		BattleHex best;
-		uint32_t bestDistance = ReachabilityInfo::INFINITE_DIST;
-		const auto * enemy = enemies.front();
+		struct Route
+		{
+			BattleHex entry;
+			uint32_t distance = ReachabilityInfo::INFINITE_DIST;
+		};
+		std::vector<Route> routes(enemies.size());
 		for(const auto & entry : available)
 		{
 			if(!entry.isAvailable() || !touchesMoat(entry))
@@ -738,21 +741,47 @@ private:
 			ReachabilityInfo::Parameters params(battle.battleGetMySide(), &stack, entry, accessible);
 			const auto following = battle.getReachability(params);
 			const auto followingSteps = battle.battleGetAvailableHexes(following, &stack, false);
-			for(const auto & goal : enemy->getAttackableHexes(&stack))
+			for(size_t i = 0; i < enemies.size(); ++i)
 			{
-				if(!goal.isAvailable() || !followingSteps.contains(goal)
-					|| !battle.isMeleeAttackPossible(&stack, enemy, goal))
-					continue;
-				// Entering another stopper cannot become an attack. Standing
-				// on the entry on the following turn does permit an attack.
-				if(goal != entry && !battle.battleCanAttackFromHex(followingSteps, &stack, enemy->getPosition(), goal))
-					continue;
-				const auto distance = current.distances[entry.toInt()] + following.distances[goal.toInt()];
-				if(distance < bestDistance || (distance == bestDistance && (!best.isValid() || entry.toInt() < best.toInt())))
+				const auto * enemy = enemies[i];
+				auto & route = routes[i];
+				for(const auto & goal : enemy->getAttackableHexes(&stack))
 				{
-					best = entry;
-					bestDistance = distance;
+					if(!goal.isAvailable() || !followingSteps.contains(goal)
+						|| !battle.isMeleeAttackPossible(&stack, enemy, goal))
+						continue;
+					// Entering another stopper cannot become an attack. Standing
+					// on the entry on the following turn does permit an attack.
+					if(goal != entry && !battle.battleCanAttackFromHex(followingSteps, &stack, enemy->getPosition(), goal))
+						continue;
+					const auto distance = current.distances[entry.toInt()] + following.distances[goal.toInt()];
+					if(distance < route.distance || (distance == route.distance && (!route.entry.isValid() || entry.toInt() < route.entry.toInt())))
+					{
+						route.entry = entry;
+						route.distance = distance;
+					}
 				}
+			}
+		}
+		BattleHex best;
+		std::optional<Ports::FHeroes2::DistantTarget> bestTarget;
+		const auto sourceThreats = Ports::FHeroes2::ordinaryPursuitThreats(battle, stack, enemies);
+		for(size_t i = 0; i < enemies.size(); ++i)
+		{
+			if(!routes[i].entry.isValid())
+				continue;
+			const auto * enemy = enemies[i];
+			const int enemySpeed = enemy->hasBonusOfType(BonusType::NOT_ACTIVE)
+				? 0 : static_cast<int>(enemy->getMovementRange());
+			const bool cannotEvade = fheroes2IsArcher(*enemy) || enemySpeed <= 0
+				|| (!enemy->hasBonusOfType(BonusType::FLYING) && enemySpeed < static_cast<int>(stack.getMovementRange()));
+			const Ports::FHeroes2::DistantTarget candidate{
+				threatAgainst(battle, *enemy, stack, sourceThreats ? &sourceThreats->at(enemy->unitId()) : nullptr),
+				std::max(1, static_cast<int>(routes[i].distance)), cannotEvade, static_cast<int>(enemy->unitId())};
+			if(!bestTarget || Ports::FHeroes2::preferDistantTarget(candidate, *bestTarget))
+			{
+				bestTarget = candidate;
+				best = routes[i].entry;
 			}
 		}
 		return best.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&stack, best)) : std::nullopt;

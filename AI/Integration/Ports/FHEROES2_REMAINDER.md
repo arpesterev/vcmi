@@ -97,13 +97,13 @@ attacks from 29. Entering the moat costs the native 70 HP; the server accepts
 both turns and applies real attack damage.
 
 The bounded correction applies when the current graph supplies no attack
-route, the attacker is not already in the moat, and there is one target.
+route and the attacker is not already in the moat.
 Compare legal moat entries using a second native BFS from each complete
 footprint, including the vacated original footprint. Require a native attack
 landing within the following movement range; entering another stopping tile
 cannot be treated as an attack. Only the first legal WALK is submitted.
 Future actions, damage and movement range are recalculated on the real turn.
-Multiple targets and routes needing further moat stops retain the old fallback.
+Routes needing further moat stops retain the old fallback.
 
 The farther defender at 63 already used entry 28 and remains unchanged.
 Intact Upper Wall blocks the passage, including a wide tail in wall 29.
@@ -118,7 +118,7 @@ by the historical A53 evidence. The paired live-keep cases use the same breach w
 `isValidTarget` already excludes turrets from the movement-target census; no
 separate tower-target fix is needed. Removing the keep must include its shooter
 ID in the CatapultAttack packet, not only change the wall state. Multiple
-movable targets still require source-priority checks before extending this slice.
+movable targets are covered by the bounded extension below.
 
 ## Cure with a live Berserk window
 
@@ -155,7 +155,7 @@ control and a real accepted action or state packet.
 | Area | Existing bounded evidence | Next discriminating check |
 | --- | --- | --- |
 | Cover and retreat | Native cover family, blocked-route escape, vacated-footprint and stopping-obstacle checks; wide-tail escape; `FHeroes2WideCautious` covers obstacle passage and unsupported-threat fallback; center/ring pair above. | Pair equal-ranked cover positions and wide retreat orientations with real turn order; independently verify both cells and inability to escape. Keep flying-enemy and insufficient-speed vetoes. |
-| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | The isolated FORT wall/gate/controller pairs above now cover this fallback. The native moat/next-turn/footprint pairs above now cover a single target. Live/destroyed keep pairs also cover this route; next distinguish multiple target priorities and the full drawbridge-opening lifecycle. |
+| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | The isolated FORT wall/gate/controller pairs above now cover this fallback. The native moat/next-turn/footprint pairs cover single and multiple targets. Live/destroyed keep pairs also cover this route; next distinguish the full drawbridge-opening lifecycle and routes needing more than one additional stop. |
 | Special attacks | Native breath and friendly collateral, fatal/preemptive strikes, ranged retaliation; bounded DoubleAttack/DoubleShot/Wolf strength and unsupported-record refusal; native Berserk action/path cases. | Cross wound state, spent retaliation and wide secondary targets at a decision boundary. Require the server's executed strikes to match the valuation assumptions; retain whole-context fallback for uncertified records. |
 | Magic | Current-ammunition Shield/Dispel and Clone; observed-spell Anti-Magic; duration/cancellation controls; area/farewell resistance and conservative Mirror handling. | Enumerate simultaneous-effect and expiry combinations per spell. Pair disabled/waiting/completed-turn recipients, removal that genuinely changes native damage, and preview success/failure. Partial reflection and joint stochastic outcomes remain unsupported rather than silently treated as deterministic. |
 
@@ -164,12 +164,12 @@ native `MAGIC_MIRROR`, combined with resistance. `FHeroes2SpellPolicy::choose`
 explicitly rejects every positive reflection value because `castEval` does not
 execute the native before-cast/reflection path. This is an unsupported joint
 outcome distribution, not evidence of an incorrect deterministic preview or
-an absent H2 Magic Mirror spell. Keep the refusal while establishing controlled
-zero/partial/full reflection cases with real mana expenditure and reflected
-recipient effects. Native H3 reflection must not be confused with the pinned
+an absent H2 Magic Mirror spell. The controlled zero/partial/full reflection and partial-resistance cases
+below establish the refusal boundary, real mana expenditure and reflected
+recipient effects without evaluating the joint distribution. Native H3 reflection must not be confused with the pinned
 H2 Mirror Image / VCMI Clone mapping.
 
-Multiple-target moat pursuit, wide cover/escape and wounded or
+Longer-horizon moat pursuit, wide cover/escape and wounded or
 retaliation-spent recipients of special attacks remain separate work.
 The Cure/Berserk window above is bounded cancellation evidence, not a
 certificate for all simultaneous-effect choices.
@@ -190,3 +190,81 @@ CI gates nor qualifies these decisions under the historical A53 manifest.
 Native Apple Silicon execution of the new revision, per-decision latency,
 GUI/save-load and campaign play remain separate acceptance work. A Linux
 Clang/libc++ syntax check is not an Apple Clang build or Mac native XML.
+
+## Multiple-target moat entry
+
+The extension from `3ab09bc6b7fafcd14ba8130cb1609a4033a62e40` retains the
+same bounded second-turn native search, but collects the shortest legal entry
+for each target. It then uses the existing distant-target comparator: targets
+that cannot evade first, then threat divided by path distance, with the existing
+stable visitation tie behavior. This follows pinned `meleeUnitOffense`; the
+native path and ordinary/unsupported threat boundary remain VCMI contracts.
+No future attack is cached or submitted speculatively.
+
+`FHeroes2MoatMultiTarget` places 100 Cavaliers at 94, 300 Pikemen at 46 and
+a second Pikeman stack at 184 in a native Citadel battle. With both wall
+breaches open and 3000 lower defenders, the accepted entry is head 181 / tail
+180, followed by an accepted attack from 167 / 166. Reducing only the lower
+stack to ten selects entry 28 / 27 and attacks the upper target from 30 / 29.
+Keeping 3000 lower defenders but leaving Bottom Wall intact also selects the
+upper route. Both candidate moat entries are reachable; the following path
+must cross the selected destroyed wall and the server must damage that target.
+The shared-upper-breach pair separately covers single and wide attackers.
+The Cavalier charge context keeps the existing native threat fallback; these
+cases certify target/route selection, not identical H2 damage arithmetic.
+All five cases fail against the previous production header, which chooses 11.
+The other twelve prior moat cases remain positive/negative regression controls.
+
+The first oversized-defender probe used only ten Cavaliers and ended the battle
+on retaliation, invalidating its fixture pointers. The final two-breach fixture
+keeps the battle alive and verifies actual post-command head/tail positions;
+that preliminary runner failure is not a tactical result.
+
+## Reflection and resistance boundary
+
+Pinned `spellDamageValue` scales damage by `(100 - GetMagicResist()) / 100`.
+Its Mirror Image is a copy spell, not native H3 Magic Mirror. Importing that
+scalar as the joint reflection/resistance distribution would be incorrect.
+Native `BattleSpellMechanics::beforeCast` rolls resistance over living units,
+then tests reflection. Reflection selects an opposite-side recipient and calls
+`beforeCast` again, including new resistance rolls and possible further
+reflection. `castEval` bypasses that entire path. It therefore cannot certify
+expected joint outcomes, even when a deterministic preview succeeds.
+
+The conservative direct-negative-spell refusal for every positive Mirror
+value remains unchanged. The new reflection suite distinguishes the public
+AIFactory action from forced, legal diagnostic casts: only the latter exercise
+reflected outcomes. This is a documented unsupported valuation group, not a
+claim that reflection is absent from the engine or that H2 supplies its rules.
+
+`Mirror/FHeroes2ReflectionResistance` invokes `AIFactory::activeStack` on the
+real first unenchanted allied activation with only Arrow available. With 50%
+resistance on each stack, no Mirror selects Arrow; 50% and 100% Mirror select
+an accepted ordinary WALK with unchanged mana and no spell packet. Each choice
+is submitted to the server; selection itself cannot emit server casts or spend mana.
+`Seed/FHeroes2ReflectionOutcomes` forces a separate legal Arrow for diagnosis.
+The same preview always removes 310 enemy HP and no allied HP. Native seeds
+0, 2 and 4 respectively produce target resistance, reflection plus allied
+resistance, and reflection causing 310 allied HP damage. All consume exactly
+the native Arrow mana cost once. These three controlled outcomes are not a
+statistical probability estimate or an exhaustive reflection-chain matrix.
+The production Mirror guard is unchanged.
+
+## Completion criteria for this port
+
+A group is closed only when its supported contexts have a pinned rule, a public
+AI decision in a real native battle, accepted server effects, and discriminating
+negative controls. Pure helper arithmetic and successful preview alone are
+insufficient. Record intentional native differences explicitly, and preserve
+unsupported-context refusal until its replacement has the same evidence.
+
+Remaining groups are cover/retreat orientations and occupancy, complete gate
+lifecycle and longer siege routes, wounded/retaliation-spent special attacks,
+and interacting magic duration/cancellation/stochastic outcomes. Each needs
+its own finite scenario matrix with boundaries and reproducible XML identities.
+The joint reflection distribution remains open; bounded moat entry does not
+close all siege tactics. Completion also requires review of every open catalog
+entry, explicit acceptance or supported implementation of each native boundary,
+exact CI inventory admission of new scenarios, native Mac execution on the same
+candidate SHA, and recorded performance and gameplay acceptance. None of these
+broader criteria is satisfied merely by passing the local suites in this slice.

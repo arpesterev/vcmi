@@ -57,14 +57,14 @@ protected:
 	CStack * enemy = nullptr;
 	std::shared_ptr<MoatDecisionCallback> callback;
 	std::shared_ptr<CPlayerBattleCallback> view;
-	void prepare(int origin, int target, bool wide)
+	void prepare(int origin, int target, bool wide, int wideCount = 10)
 	{
 		startGame(); ASSERT_FALSE(HasFatalFailure());
 		const auto * town = findFirst<CGTownInstance>(); ASSERT_NE(town,nullptr);
 		if(!town->hasBuilt(BuildingID::FORT)) { ASSERT_TRUE(gameHandler->buildStructure(town->id,BuildingID::FORT,true)); }
 		ASSERT_TRUE(gameHandler->buildStructure(town->id,BuildingID::CITADEL,true));
 		ASSERT_TRUE(gameHandler->changeStackType(StackLocation(attackerSideHero->id,SlotID(0)),CreatureID(wide?10:6).toCreature()));
-		attackerSideHero->setStackCount(SlotID(0),wide?10:40);
+		attackerSideHero->setStackCount(SlotID(0),wide?wideCount:40);
 		ASSERT_TRUE(gameHandler->insertNewStack(StackLocation(town->id,SlotID(0)),CreatureID(0).toCreature(),300));
 		BattleLayout layout;
 		layout.units[BattleSide::ATTACKER][0]=BattleHex(origin);
@@ -230,16 +230,19 @@ TEST_P(FHeroes2MoatWide,openedGatePassesBothCellsWithoutMoatTrigger)
 	EXPECT_LT(enemy->getAvailableHealth(),enemyHealth);EXPECT_TRUE(server.castsOf(moatSpell).empty());
 	EXPECT_EQ(view->battleGetWallState(EWallPart::GATE),EWallState::INTACT);
 }
-TEST_P(FHeroes2MoatWide,multipleTargetsRetainConservativeFallback)
+TEST_P(FHeroes2MoatWide,multipleTargetsShareTheBreach)
 {
 	prepare(26,46,GetParam());ASSERT_FALSE(HasFatalFailure());
 	ASSERT_NE(addStack(BattleSide::DEFENDER,CreatureID(0),BattleHex(63),300),nullptr);
-	breakUpperWall();ASSERT_FALSE(HasFatalFailure());
-	ASSERT_EQ(battle()->battleActiveUnit(),actor);
+	breakUpperWall();activate();ASSERT_FALSE(HasFatalFailure());
 	choose();ASSERT_FALSE(HasFatalFailure());ASSERT_EQ(callback->action->actionType,EActionType::WALK);
-	ASSERT_EQ(callback->action->target.front().hexValue,BattleHex(11));submit();ASSERT_FALSE(HasFatalFailure());
-	EXPECT_EQ(actor->getPosition(),BattleHex(11));
-	if(GetParam()) {EXPECT_EQ(actor->occupiedHex(),BattleHex(10));}
+	EXPECT_EQ(callback->action->target.front().hexValue,BattleHex(28));submit();ASSERT_FALSE(HasFatalFailure());
+	EXPECT_EQ(actor->getPosition(),BattleHex(28));
+	if(GetParam()) {EXPECT_EQ(actor->occupiedHex(),BattleHex(27));}
+	nextActorTurn();ASSERT_FALSE(HasFatalFailure());
+	const auto health=enemy->getAvailableHealth();
+	choose();ASSERT_FALSE(HasFatalFailure());ASSERT_EQ(callback->action->actionType,EActionType::WALK_AND_ATTACK);
+	submit();ASSERT_FALSE(HasFatalFailure());EXPECT_LT(enemy->getAvailableHealth(),health);
 }
 TEST_P(FHeroes2MoatWide,liveTowerDoesNotHideTheOnlyGroundBreachTarget)
 {
@@ -247,3 +250,45 @@ TEST_P(FHeroes2MoatWide,liveTowerDoesNotHideTheOnlyGroundBreachTarget)
 	breach(46);
 }
 INSTANTIATE_TEST_SUITE_P(Footprint,FHeroes2MoatWide,::testing::Bool(),[](const auto & info){return info.param?"Wide":"Single";});
+
+class FHeroes2MoatMultiTarget : public FHeroes2MoatWide
+{
+protected:
+	void routes(int bottomCount, bool bottomOpen)
+	{
+		prepare(94,46,true,100);ASSERT_FALSE(HasFatalFailure());
+		auto * bottom=addStack(BattleSide::DEFENDER,CreatureID(0),BattleHex(184),bottomCount);ASSERT_NE(bottom,nullptr);
+		breakUpperWall();
+		if(bottomOpen)
+		{
+			CatapultAttack wall;wall.battleID=battle()->getBattleID();wall.attackedPart=EWallPart::BOTTOM_WALL;wall.damageDealt=100;
+			wall.destinationTile=view->wallPartToBattleHex(EWallPart::BOTTOM_WALL).toInt();gameHandler->sendAndApply(wall);
+		}
+		activate();ASSERT_FALSE(HasFatalFailure());
+		const auto available=view->battleGetAvailableHexes(actor,false);
+		ASSERT_TRUE(available.contains(BattleHex(28)));ASSERT_TRUE(available.contains(BattleHex(181)));
+		choose();ASSERT_FALSE(HasFatalFailure());ASSERT_EQ(callback->action->actionType,EActionType::WALK);
+		const BattleHex entry(bottomOpen && bottomCount>300?181:28);
+		EXPECT_EQ(callback->action->target.front().hexValue,entry);
+		submit();ASSERT_FALSE(HasFatalFailure());
+		RecordProperty("entry_head",actor->getPosition().toInt());RecordProperty("entry_tail",actor->occupiedHex().toInt());
+		EXPECT_EQ(actor->getPosition(),entry);EXPECT_EQ(actor->occupiedHex(),BattleHex(entry.toInt()-1));
+		nextActorTurn();ASSERT_FALSE(HasFatalFailure());
+		auto * target=bottomOpen && bottomCount>300?bottom:enemy;
+		const auto health=target->getAvailableHealth();
+		choose();ASSERT_FALSE(HasFatalFailure());ASSERT_EQ(callback->action->actionType,EActionType::WALK_AND_ATTACK);
+		const auto landing=callback->action->target.front().hexValue;
+		const auto reach=view->getReachability(actor);
+		ASSERT_TRUE(reach.isReachable(landing));
+		BattleHexArray path;auto step=landing;
+		for(int i=0;i<GameConstants::BFIELD_SIZE && step.isValid() && step!=actor->getPosition();++i)
+		{path.insert(step);step=reach.predecessors[step.toInt()];}
+		EXPECT_TRUE(path.contains(view->wallPartToBattleHex(bottomOpen && bottomCount>300?EWallPart::BOTTOM_WALL:EWallPart::UPPER_WALL)));
+		submit();ASSERT_FALSE(HasFatalFailure());EXPECT_LT(target->getAvailableHealth(),health);
+		EXPECT_EQ(actor->getPosition(),landing);EXPECT_EQ(actor->occupiedHex(),BattleHex(landing.toInt()-1));
+		RecordProperty("attack_head",actor->getPosition().toInt());RecordProperty("attack_tail",actor->occupiedHex().toInt());
+	}
+};
+TEST_F(FHeroes2MoatMultiTarget,strongerBottomTargetChoosesItsBreach){routes(3000,true);}
+TEST_F(FHeroes2MoatMultiTarget,weakerBottomTargetRetainsUpperBreach){routes(10,true);}
+TEST_F(FHeroes2MoatMultiTarget,closedBottomWallExcludesStrongerTarget){routes(3000,false);}
