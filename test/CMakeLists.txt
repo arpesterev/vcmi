@@ -242,6 +242,7 @@ if(ENABLE_BATTLE_AI)
 		aiIntegration/NativePortBattleTest.cpp
 		aiIntegration/FHeroes2WideCautiousTest.cpp
 		aiIntegration/FHeroes2RetreatCenterRingTest.cpp
+		aiIntegration/FHeroes2SiegeFallbackTest.cpp
 	aiIntegration/HoMM3OrdinaryTwoPassNativeTest.cpp
 	aiIntegration/HoMM3LiveShooterNativeTest.cpp
 	aiIntegration/HoMM3GroundNativeTest.cpp

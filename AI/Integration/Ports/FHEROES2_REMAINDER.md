@@ -39,6 +39,45 @@ created native clone retains full ammunition in both cases. Before the
 correction, only Exhausted failed. These are native VCMI decisions informed
 by H2 ranking, not identical H2 spell execution or geometry.
 
+## Siege fallback and current controller
+
+The follow-up to the retreat/Clone candidate `e6a97b6dacc0684e3f9465b0f775dd065cb2de94`
+is tested in `FHeroes2SiegeFallbackTest.cpp`, using a real FORT BattleLayout
+without machines, towers or moat. Native activation is never overwritten.
+
+- Standing Upper Wall: attacker 44, defender 46, permanent barrier 45.
+  No available step decreases defender distance and no attack position is
+  reachable. The existing fallback already chooses 28 toward wall 29, and
+  the server accepts the WALK without damage.
+- Destroyed Upper Wall: an authoritative wall-damage packet opens 29. The
+  existing chooser selects WALK_AND_ATTACK through 29 and the server deals
+  damage. Both wall cases passed before the new controller correction.
+- Closed/open gate packets with unchanged intact gate wall: attacker 93,
+  defender 97. Closed chooses 44 without damage; open selects an attack
+  from 79 whose native predecessor path crosses 95 and 96. Both actions
+  are accepted. This isolates gate-state consumers, not the full lifecycle
+  by which a defender opens and holds the drawbridge.
+- Current controller: real Hypnotize transfers a defender at 44 to the
+  attacker while another defender remains at 46. Valid native turns advance
+  until the controlled stack actually becomes active. Its closed-gate access
+  follows the attacker, but the old fallback incorrectly tested its original
+  defender side and returned SKIP. Use `controllingSide()` in that guard.
+  The paired unenchanted defender still approaches its actual enemy instead
+  of taking the wall-fallback move.
+
+Pinned `analyzeBattleState` sets `_myColor` from `GetCurrentColor()` before
+assigning castle attack/defense. This supports controller-based policy, not
+identity between H2 and H3 siege layouts. H2 enables castle stance only while
+a tower remains. VCMI has a towerless FORT with blocking walls: preserving
+its existing legal wall approach is an intentional native extension. No
+wall ranking, native gate rule, Hypnotize effect or other AI is changed.
+
+The controlled-attacker case is the production red control; the already
+working wall/gate cases are positive and negative branch evidence. Initial
+94/96 gate-destination guesses and a single-step turn-order assumption were
+fixture probes, not claimed tactical defects. The final tests follow actual
+native paths and queue transitions.
+
 ## Reviewable work queue
 
 Existing scenario names below identify bounded coverage, not exhaustive
@@ -48,16 +87,18 @@ control and a real accepted action or state packet.
 | Area | Existing bounded evidence | Next discriminating check |
 | --- | --- | --- |
 | Cover and retreat | Native cover family, blocked-route escape, vacated-footprint and stopping-obstacle checks; wide-tail escape; `FHeroes2WideCautious` covers obstacle passage and unsupported-threat fallback; center/ring pair above. | Pair equal-ranked cover positions and wide retreat orientations with real turn order; independently verify both cells and inability to escape. Keep flying-enemy and insufficient-speed vetoes. |
-| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | Isolate `approachSiegeWall` fallback where no legal step approaches a living defender. Pair standing versus destroyed blocking wall and sealed versus open gate; assert wall state, legal head/tail path, actual activation and accepted action. Existing closed-wall advance alone does not prove this fallback. |
+| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | The isolated FORT wall/gate/controller pairs above now cover this fallback. Next pair moat stopping and subsequent movement with standing/destroyed walls, then wide footprints; keep full drawbridge-opening lifecycle separate. |
 | Special attacks | Native breath and friendly collateral, fatal/preemptive strikes, ranged retaliation; bounded DoubleAttack/DoubleShot/Wolf strength and unsupported-record refusal; native Berserk action/path cases. | Cross wound state, spent retaliation and wide secondary targets at a decision boundary. Require the server's executed strikes to match the valuation assumptions; retain whole-context fallback for uncertified records. |
 | Magic | Current-ammunition Shield/Dispel and Clone; observed-spell Anti-Magic; duration/cancellation controls; area/farewell resistance and conservative Mirror handling. | Enumerate simultaneous-effect and expiry combinations per spell. Pair disabled/waiting/completed-turn recipients, removal that genuinely changes native damage, and preview success/failure. Partial reflection and joint stochastic outcomes remain unsupported rather than silently treated as deterministic. |
 
-Take the isolated siege-wall fallback pair next. First demonstrate which
-production branch is reached: nearby living defenders can satisfy the
-ordinary approach before wall fallback is considered. A wall-state assertion
-alone cannot distinguish the two branches. Do not manufacture activation
-while a catapult owns the turn. After this pair, extend wide cover/escape
-and special-attack boundary matrices, then spell combinations individually.
+Take moat stopping and subsequent movement next, then wide cover/escape and
+special-attack boundary matrices, then spell combinations individually. The
+pinned source explicitly rushes a pursuit path ending in the moat, but native
+VCMI BFS stops expansion there; a missing textual branch alone is not proof
+of a wrong native decision. Establish a distinguishing real scenario before
+changing that policy. Separately diagnose the Cure/Berserk cast window using
+a live, unenchanted ally's actual turn; a free-running battle can consume the
+control effect before a useful Cure opportunity.
 
 ## Intentional native boundaries and acceptance
 
@@ -68,7 +109,7 @@ facts. Existing unsupported-case fallbacks and conservative refusal remain
 part of the contract. Native estimates are not certified H2 arithmetic.
 Enemy spell intelligence uses public observations, not hidden spellbooks.
 
-The new retreat suite and the existing Clone suite run explicitly in the
+The retreat, Clone and new siege suites run explicitly in the
 focused and full local regressions. They are outside the unchanged exact
 Linux native/macOS reviewed selection. This change neither expands those
 CI gates nor qualifies these decisions under the historical A53 manifest.

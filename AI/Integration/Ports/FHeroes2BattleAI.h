@@ -619,7 +619,7 @@ private:
 		const CStack & stack, const BattleHexArray & available,
 		const std::vector<const CStack *> & enemies)
 	{
-		if(stack.unitSide() != BattleSide::ATTACKER || battle.battleGetDefendedTown() == nullptr
+		if(stack.controllingSide() != BattleSide::ATTACKER || battle.battleGetDefendedTown() == nullptr
 			|| stack.getMovementRange() == 0 || stack.isTurret()
 			|| enemies.empty() || !stack.getPosition().isValid())
 			return std::nullopt;
