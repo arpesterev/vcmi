@@ -52,6 +52,7 @@ public:
 class FHeroes2MoatWide : public BattleTestFixture, public ::testing::WithParamInterface<bool>
 {
 protected:
+	bool keepAlive = false;
 	CStack * actor = nullptr;
 	CStack * enemy = nullptr;
 	std::shared_ptr<MoatDecisionCallback> callback;
@@ -69,7 +70,20 @@ protected:
 		layout.units[BattleSide::ATTACKER][0]=BattleHex(origin);
 		layout.units[BattleSide::DEFENDER][0]=BattleHex(target);
 		gameHandler->battles->startBattle(attackerSideHero,town,town->visitablePos(),attackerSideHero,nullptr,layout,town);
-		CatapultAttack tower; tower.battleID=battle()->getBattleID(); tower.attackedPart=EWallPart::KEEP; tower.damageDealt=100; gameHandler->sendAndApply(tower);
+		if(!keepAlive)
+		{
+			CatapultAttack tower; tower.battleID=battle()->getBattleID(); tower.attackedPart=EWallPart::KEEP; tower.damageDealt=100;
+			tower.destinationTile=battle()->wallPartToBattleHex(EWallPart::KEEP).toInt();
+			for(const auto & unit:battle()->stacks)
+				if(unit->isTurret() && unit->getPosition()==BattleHex(BattleHex::CASTLE_CENTRAL_TOWER))
+					tower.killedTowerShooter=unit->unitId();
+			ASSERT_NE(tower.killedTowerShooter,-1);
+			gameHandler->sendAndApply(tower);
+			ASSERT_EQ(battle()->battleGetWallState(EWallPart::KEEP),EWallState::DESTROYED);
+		}
+		const auto liveTowers=std::count_if(battle()->stacks.begin(),battle()->stacks.end(),[](const auto & unit){return unit->isTurret() && unit->alive() && !unit->isGhost();});
+		ASSERT_EQ(liveTowers,keepAlive?1:0);
+		RecordProperty("live_towers",static_cast<int>(liveTowers));
 		ASSERT_FALSE(battle()->obstacles.empty());
 		for(const auto & unit:battle()->stacks) if(unit->getPosition().isValid() && unit->alive()) (unit->unitSide()==BattleSide::ATTACKER?actor:enemy)=unit.get();
 		ASSERT_NE(actor,nullptr); ASSERT_NE(enemy,nullptr);
@@ -83,6 +97,7 @@ protected:
 	}
 	void activate()
 	{
+		ASSERT_FALSE(HasFatalFailure()); ASSERT_NE(actor,nullptr);
 
 		ASSERT_EQ(battle()->activeStack,actor->unitId());
 		std::vector<battle::Units> order; view->battleGetTurnOrder(order,2,1);
@@ -109,7 +124,7 @@ protected:
 	}
 	void breakUpperWall()
 	{
-		CatapultAttack wall; wall.battleID=battle()->getBattleID();wall.attackedPart=EWallPart::UPPER_WALL;wall.damageDealt=100;gameHandler->sendAndApply(wall);
+		CatapultAttack wall; wall.battleID=battle()->getBattleID();wall.attackedPart=EWallPart::UPPER_WALL;wall.damageDealt=100;wall.destinationTile=view->wallPartToBattleHex(EWallPart::UPPER_WALL).toInt();gameHandler->sendAndApply(wall);
 		ASSERT_EQ(view->battleGetWallState(EWallPart::UPPER_WALL),EWallState::DESTROYED);
 	}
 	void submit()
@@ -135,9 +150,11 @@ protected:
 		submit(); ASSERT_FALSE(HasFatalFailure());
 		EXPECT_EQ(actor->getPosition(),selected);
 		if(GetParam()) { EXPECT_EQ(actor->occupiedHex(),BattleHex(selected.toInt()-1)); }
-		EXPECT_EQ(actor->getAvailableHealth(),health-70);
+		if(keepAlive) {EXPECT_LE(actor->getAvailableHealth(),health-70);}
+		else {EXPECT_EQ(actor->getAvailableHealth(),health-70);}
 		EXPECT_EQ(enemy->getAvailableHealth(),enemyHealth);
 		ASSERT_EQ(server.castsOf(spellByName("core:castleMoatTrigger")).size(),1u);
+		EXPECT_EQ(server.castsOf(spellByName("core:castleMoatTrigger")).front().damage,70);
 		RecordProperty("first_head",actor->getPosition().toInt());RecordProperty("first_tail",actor->occupiedHex().toInt());
 		nextActorTurn(); ASSERT_FALSE(HasFatalFailure());
 		const auto reach=view->getReachability(actor);
@@ -223,5 +240,10 @@ TEST_P(FHeroes2MoatWide,multipleTargetsRetainConservativeFallback)
 	ASSERT_EQ(callback->action->target.front().hexValue,BattleHex(11));submit();ASSERT_FALSE(HasFatalFailure());
 	EXPECT_EQ(actor->getPosition(),BattleHex(11));
 	if(GetParam()) {EXPECT_EQ(actor->occupiedHex(),BattleHex(10));}
+}
+TEST_P(FHeroes2MoatWide,liveTowerDoesNotHideTheOnlyGroundBreachTarget)
+{
+	keepAlive=true;
+	breach(46);
 }
 INSTANTIATE_TEST_SUITE_P(Footprint,FHeroes2MoatWide,::testing::Bool(),[](const auto & info){return info.param?"Wide":"Single";});

@@ -114,8 +114,11 @@ lifecycle. All cases assert actual server movement and occupancy.
 
 The standalone suite is exercised by focused and broad local regression.
 It is outside the unchanged exact CI/reviewed filters and is not qualified
-by the historical A53 evidence. Live-tower pressure and multiple movable
-targets require separate source-priority checks before extending this slice.
+by the historical A53 evidence. The paired live-keep cases use the same breach with native tower activation enabled. Native
+`isValidTarget` already excludes turrets from the movement-target census; no
+separate tower-target fix is needed. Removing the keep must include its shooter
+ID in the CatapultAttack packet, not only change the wall state. Multiple
+movable targets still require source-priority checks before extending this slice.
 
 ## Cure with a live Berserk window
 
@@ -152,15 +155,24 @@ control and a real accepted action or state packet.
 | Area | Existing bounded evidence | Next discriminating check |
 | --- | --- | --- |
 | Cover and retreat | Native cover family, blocked-route escape, vacated-footprint and stopping-obstacle checks; wide-tail escape; `FHeroes2WideCautious` covers obstacle passage and unsupported-threat fallback; center/ring pair above. | Pair equal-ranked cover positions and wide retreat orientations with real turn order; independently verify both cells and inability to escape. Keep flying-enemy and insufficient-speed vetoes. |
-| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | The isolated FORT wall/gate/controller pairs above now cover this fallback. The native moat/next-turn/footprint pairs above now cover a single target. Next distinguish live-tower pressure and multiple target priorities; keep full drawbridge-opening lifecycle separate. |
+| Siege and towers | `fheroes2SiegeAttackerApproachesClosedWallUsingNativeWalk`, wide castle defender, Earthquake; `FHeroes2SiegePressureBattle` checks live/last tower, broken gate and native cover metadata. | The isolated FORT wall/gate/controller pairs above now cover this fallback. The native moat/next-turn/footprint pairs above now cover a single target. Live/destroyed keep pairs also cover this route; next distinguish multiple target priorities and the full drawbridge-opening lifecycle. |
 | Special attacks | Native breath and friendly collateral, fatal/preemptive strikes, ranged retaliation; bounded DoubleAttack/DoubleShot/Wolf strength and unsupported-record refusal; native Berserk action/path cases. | Cross wound state, spent retaliation and wide secondary targets at a decision boundary. Require the server's executed strikes to match the valuation assumptions; retain whole-context fallback for uncertified records. |
 | Magic | Current-ammunition Shield/Dispel and Clone; observed-spell Anti-Magic; duration/cancellation controls; area/farewell resistance and conservative Mirror handling. | Enumerate simultaneous-effect and expiry combinations per spell. Pair disabled/waiting/completed-turn recipients, removal that genuinely changes native damage, and preview success/failure. Partial reflection and joint stochastic outcomes remain unsupported rather than silently treated as deterministic. |
 
-Take live-tower pressure at the moat boundary next, then multiple-target
-pursuit and wide cover/escape. For special attacks, compare wounded and
-retaliation-spent recipients with secondary wide targets. Magic combinations
-still need individual controlled cast windows; the Cure/Berserk window above
-is bounded evidence, not a certificate for all cancellation choices.
+The next confirmed magic boundary is direct negative magic against partial
+native `MAGIC_MIRROR`, combined with resistance. `FHeroes2SpellPolicy::choose`
+explicitly rejects every positive reflection value because `castEval` does not
+execute the native before-cast/reflection path. This is an unsupported joint
+outcome distribution, not evidence of an incorrect deterministic preview or
+an absent H2 Magic Mirror spell. Keep the refusal while establishing controlled
+zero/partial/full reflection cases with real mana expenditure and reflected
+recipient effects. Native H3 reflection must not be confused with the pinned
+H2 Mirror Image / VCMI Clone mapping.
+
+Multiple-target moat pursuit, wide cover/escape and wounded or
+retaliation-spent recipients of special attacks remain separate work.
+The Cure/Berserk window above is bounded cancellation evidence, not a
+certificate for all simultaneous-effect choices.
 
 ## Intentional native boundaries and acceptance
 
