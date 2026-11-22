@@ -26,6 +26,8 @@
 #include "lib/networkPacks/PacksForClient.h"
 #include "lib/networkPacks/PacksForServer.h"
 
+#include <shared_mutex>
+
 namespace
 {
 const PlayerColor PLAYER = PlayerColor(0);
@@ -165,7 +167,10 @@ TEST_F(ResourceTradingTurnTest, tradesForArmyOnlyOncePerTurn)
 	TradingPhaseClient client(gameState(), PLAYER);
 	auto gateway = makeGateway(PLAYER, &client);
 
-	gateway->nullkiller->makeTurn();
+	{
+		std::shared_lock gsLock(CGameState::mutex);
+		gateway->nullkiller->makeTurn();
+	}
 
 	EXPECT_GT(client.recruitmentRequests, 0)
 		<< "the fixture must consume traded gold by buying army";
@@ -182,7 +187,10 @@ TEST_F(ResourceTradingTurnTest, stopsTradingWhenServerRejectsTrade)
 	TradeRejectingClient client(gameState(), PLAYER);
 	auto gateway = makeGateway(PLAYER, &client);
 
-	gateway->nullkiller->makeTurn();
+	{
+		std::shared_lock gsLock(CGameState::mutex);
+		gateway->nullkiller->makeTurn();
+	}
 
 	EXPECT_EQ(client.rejectedTrades, 1)
 		<< "a rejected trade must not be retried in the same trading step";

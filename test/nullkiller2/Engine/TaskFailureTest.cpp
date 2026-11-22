@@ -18,8 +18,10 @@
 #include "nullkiller2/NullkillerTest.h"
 
 #include "lib/callback/CCallback.h"
+#include "lib/gameState/CGameState.h"
 #include "lib/mapObjects/CGHeroInstance.h"
 
+#include <shared_mutex>
 #include <tbb/global_control.h>
 
 namespace
@@ -165,7 +167,10 @@ TEST_F(FailedEscapeRouteTest, replanningAvoidsFailedMultiNodeEscapeRoute)
 		*escapingHero,
 		failedDestination,
 		escapingHero->visitablePos()));
-	ASSERT_FALSE(NK2AI::NullkillerTestAccess::executeTask(ai, failedTask));
+	{
+		std::shared_lock gsLock(CGameState::mutex);
+		ASSERT_FALSE(NK2AI::NullkillerTestAccess::executeTask(ai, failedTask));
+	}
 
 	const auto replannedGoals = escape.decompose(&ai);
 	const auto * replannedChain = findHeroChain(replannedGoals, escapingHero);
