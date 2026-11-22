@@ -22,6 +22,8 @@
 #include "lib/mapObjects/CGTownInstance.h"
 #include "lib/networkPacks/PacksForClient.h"
 
+#include <shared_mutex>
+
 namespace
 {
 const PlayerColor PLAYER(0);
@@ -99,7 +101,10 @@ TEST_F(Nullkiller2_Behaviors_GatherArmyBehavior, upgradesPikemenCarriedByGarriso
 
 	GameHandlerTestClient client(gameState(), PLAYER);
 	const auto gateway = makeGateway(PLAYER, &client);
-	gateway->nullkiller->makeTurn();
+	{
+		std::shared_lock gsLock(CGameState::mutex);
+		gateway->nullkiller->makeTurn();
+	}
 
 	ASSERT_NE(hero->getStackPtr(SlotID(0)), nullptr);
 	EXPECT_EQ(hero->getStackPtr(SlotID(0))->getCreatureID(), halberdier);
