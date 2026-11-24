@@ -27,6 +27,7 @@
 #include "../../../lib/callback/IGameInfoCallback.h"
 #include "../../../lib/mapObjects/CGHeroInstance.h"
 #include "../../../lib/battle/BattleAction.h"
+#include "../../../lib/battle/CObstacleInstance.h"
 #include "../../../lib/battle/CPlayerBattleCallback.h"
 #include "../../../lib/callback/CBattleCallback.h"
 #include "../../../lib/callback/CBattleGameInterface.h"
@@ -1360,9 +1361,68 @@ private:
 			{effect, isIncapacitated(target, includeNativeInactive), !canAttack, canAttack, time}, false);
 	}
 
+	// Pinned moveToward stops at a moat while keeping a route beyond it.
+	// Native BFS stops expanding there, so certify a following-turn attack
+	// with one extra search per legal entry. This is a bounded native route,
+	// not the source siege danger field or an instruction for a future turn.
+	static std::optional<BattleAction> approachMoat(CPlayerBattleCallback & battle,
+		const CStack & stack, const ReachabilityInfo & current, const BattleHexArray & available,
+		const std::vector<const CStack *> & enemies)
+	{
+		if(stack.controllingSide() != BattleSide::ATTACKER || !battle.battleGetDefendedTown()
+			|| stack.hasBonusOfType(BonusType::FLYING))
+			return std::nullopt;
+		BattleHexArray moat;
+		for(const auto & obstacle : battle.battleGetAllObstacles(battle.battleGetMySide()))
+			if(obstacle->obstacleType == CObstacleInstance::MOAT
+				&& battle.battleIsObstacleVisibleForSide(*obstacle, battle.battleGetMySide()))
+				moat.insert(obstacle->getStoppingTile());
+		if(battle.battleGetGateState() == EGateState::OPENED || battle.battleGetGateState() == EGateState::DESTROYED)
+			moat.erase(BattleHex(BattleHex::GATE_BRIDGE));
+		const auto touchesMoat = [&](BattleHex head)
+		{
+			for(const auto & hex : stack.getHexes(head))
+				if(moat.contains(hex))
+					return true;
+			return false;
+		};
+		if(moat.empty() || touchesMoat(stack.getPosition()))
+			return std::nullopt;
+
+		BattleHex bestEntry;
+		uint32_t bestDistance = ReachabilityInfo::INFINITE_DIST;
+		for(const auto entry : available)
+		{
+			if(!entry.isAvailable() || !touchesMoat(entry))
+				continue;
+			auto accessible = stack.getHexes();
+			accessible.insert(stack.getHexes(entry));
+			ReachabilityInfo::Parameters parameters(battle.battleGetMySide(), &stack, entry, accessible);
+			const auto following = battle.getReachability(parameters);
+			const auto nextSteps = battle.battleGetAvailableHexes(following, &stack, false);
+			for(const auto * enemy : enemies)
+				for(const auto goal : enemy->getAttackableHexes(&stack))
+				{
+					if(!goal.isAvailable() || !nextSteps.contains(goal)
+						|| !battle.isMeleeAttackPossible(&stack, enemy, goal))
+						continue;
+					if(goal != entry && !battle.battleCanAttackFromHex(nextSteps, &stack, enemy->getPosition(), goal))
+						continue;
+					const auto distance = current.distances[entry.toInt()] + following.distances[goal.toInt()];
+					if(distance < bestDistance || (distance == bestDistance
+						&& (!bestEntry.isValid() || entry.toInt() < bestEntry.toInt())))
+					{
+						bestEntry = entry;
+						bestDistance = distance;
+					}
+				}
+		}
+		return bestEntry.isValid() ? std::optional<BattleAction>(BattleAction::makeMove(&stack, bestEntry)) : std::nullopt;
+	}
+
 	static BattleAction moveTowardEnemy(CPlayerBattleCallback & battle, const CStack & stack,
 		const ReachabilityInfo & reach, const BattleHexArray & available,
-		const std::vector<const CStack *> & enemies)
+		const std::vector<const CStack *> & enemies, bool allowMoat = false)
 	{
 		BattleHex goal;
 		int shortest = GameConstants::BFIELD_SIZE;
@@ -1381,7 +1441,12 @@ private:
 			}
 		}
 		if(!goal.isValid() || shortest >= GameConstants::BFIELD_SIZE)
+		{
+			if(allowMoat)
+				if(const auto entry = approachMoat(battle, stack, reach, available, enemies))
+					return *entry;
 			return BattleAction::makeDefend(&stack);
+		}
 		if(stack.hasBonusOfType(BonusType::FLYING))
 		{
 			BattleHex nearest;
@@ -1623,7 +1688,7 @@ public:
 					return alternate;
 			}
 		}
-		return moveTowardEnemy(battle, stack, reach, available, enemies);
+		return moveTowardEnemy(battle, stack, reach, available, enemies, !avoidFastDecoys);
 	}
 };
 }
