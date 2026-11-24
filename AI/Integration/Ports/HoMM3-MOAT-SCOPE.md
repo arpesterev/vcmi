@@ -50,3 +50,10 @@ selection. Record their actual before/after XML separately. No historical A53
 qualification or native Apple Silicon result follows from local Linux tests.
 The source siege danger map, moat-damage economics, general multi-stop pursuit,
 and complete siege parity remain open.
+
+The wide actor is a Cavalier. On the second activation it chooses native
+landing 64/63 with a longer charge path through breach 29, rather than the
+FHeroes2 landing 30/29. The fixture checks that path and the server result;
+it does not change HoMM3's existing charge or equal-value landing rule.
+The initial wide green failure at the inherited landing assertion was a
+fixture mismatch, separate from the baseline refusal to enter the moat.

@@ -161,13 +161,24 @@ protected:
 		ASSERT_TRUE(reach.isReachable(BattleHex(29)));
 		choose(); ASSERT_FALSE(HasFatalFailure());
 		ASSERT_EQ(callback->action->actionType,EActionType::WALK_AND_ATTACK);
-		const BattleHex landing(target==46?(GetParam()?30:29):(GetParam()?47:46));
+		// Native Cavalier charge and source tie order prefer the longer landing.
+		const BattleHex landing(target==46?(GetParam()?64:29):(GetParam()?47:46));
 		ASSERT_EQ(callback->action->target.front().hexValue,landing);
 		if(GetParam() && target==46)
 		{
-			EXPECT_EQ(reach.predecessors[30],BattleHex(29));
+			EXPECT_GT(reach.distances[landing.toInt()],reach.distances[30]);
+			bool crossesBreach=false;
+			auto cursor=landing;
+			for(int step=0;cursor!=actor->getPosition() && step<GameConstants::BFIELD_SIZE;++step)
+			{
+				ASSERT_TRUE(cursor.isAvailable());
+				crossesBreach |= actor->getHexes(cursor).contains(BattleHex(29));
+				cursor=reach.predecessors[cursor.toInt()];
+			}
+			EXPECT_EQ(cursor,actor->getPosition());
+			EXPECT_TRUE(crossesBreach);
 			EXPECT_EQ(actor->occupiedHex(BattleHex(29)),BattleHex(28));
-			EXPECT_EQ(actor->occupiedHex(landing),BattleHex(29));
+			EXPECT_EQ(actor->occupiedHex(landing),BattleHex(63));
 		}
 		submit(); ASSERT_FALSE(HasFatalFailure());
 		EXPECT_EQ(actor->getPosition(),landing);
