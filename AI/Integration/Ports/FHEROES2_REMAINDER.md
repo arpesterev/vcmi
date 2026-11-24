@@ -368,7 +368,6 @@ initial expectation of immediate `CLOSED` was corrected to the native contract;
 that fixture correction is not a red/green AI regression. Corpses, Fortress's
 long bridge, force fields on the bridge and other tower states remain open.
 
-
 ## Native projection boundary checked on 2026-11-24
 
 The pinned H2 pathfinder exempts its starting moat cell; it does not forbid
