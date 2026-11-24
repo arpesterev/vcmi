@@ -22,7 +22,9 @@ search fails, for a ground attacker outside a visible native moat in a siege.
 For each reachable moat entry, one second native reachability search checks
 whether a legal attack landing is available on the following turn. Both
 occupied cells, walls, gate state and stopping tiles remain native. The
-original footprint is vacated for that hypothetical search. The shortest
+original footprint is vacated for that hypothetical search. A bounded predecessor
+walk rejects any route touching a moat cell outside the entry footprint;
+accessibility overrides cannot silently turn another moat stop into transit. The shortest
 combined route wins, then the smaller entry index, matching the existing
 fallback's distance preference rather than claiming the source target score.
 Only the first WALK is submitted. The next actual activation recalculates

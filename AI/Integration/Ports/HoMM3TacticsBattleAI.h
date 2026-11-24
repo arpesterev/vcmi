@@ -1400,10 +1400,29 @@ private:
 			ReachabilityInfo::Parameters parameters(battle.battleGetMySide(), &stack, entry, accessible);
 			const auto following = battle.getReachability(parameters);
 			const auto nextSteps = battle.battleGetAvailableHexes(following, &stack, false);
+			const auto entryFootprint = stack.getHexes(entry);
+			const auto singleStopRoute = [&](BattleHex goal)
+			{
+				for(int steps = 0; steps < GameConstants::BFIELD_SIZE; ++steps)
+				{
+					if(goal == entry)
+						return true;
+					if(!goal.isAvailable())
+						return false;
+					for(const auto hex : stack.getHexes(goal))
+						if(moat.contains(hex) && !entryFootprint.contains(hex))
+							return false;
+					const auto previous = following.predecessors[goal.toInt()];
+					if(previous == goal)
+						return false;
+					goal = previous;
+				}
+				return false;
+			};
 			for(const auto * enemy : enemies)
 				for(const auto goal : enemy->getAttackableHexes(&stack))
 				{
-					if(!goal.isAvailable() || !nextSteps.contains(goal)
+					if(!goal.isAvailable() || !nextSteps.contains(goal) || !singleStopRoute(goal)
 						|| !battle.isMeleeAttackPossible(&stack, enemy, goal))
 						continue;
 					if(goal != entry && !battle.battleCanAttackFromHex(nextSteps, &stack, enemy->getPosition(), goal))
