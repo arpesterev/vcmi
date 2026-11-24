@@ -1,6 +1,11 @@
 /*
  * FHeroes2BattleAI.h, part of VCMI engine
  *
+ * Moat-start policy adapted on 2026-11-24 from fheroes2
+ * src/fheroes2/battle/battle_pathfinding.cpp at
+ * 0dbfe9f386f33c2500842f4a59cd284d7f03d541.
+ * Copyright (C) 2020 - 2026 fheroes2 contributors.
+ * Native footprint reachability and actions remain VCMI rules.
  * License: GNU General Public License v2.0 or later.
  * Full text of license available in license.txt file, in main folder.
  */
