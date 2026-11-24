@@ -762,6 +762,22 @@ private:
 					// on the entry on the following turn does permit an attack.
 					if(goal != entry && !battle.battleCanAttackFromHex(followingSteps, &stack, enemy->getPosition(), goal))
 						continue;
+					// knownAccessible also clears the vacated original footprint.
+					// It must not waive a new stop there on the following turn.
+					const auto entryHexes = stack.getHexes(entry);
+					auto cursor = goal;
+					bool crossesNewMoat = false;
+					for(int step = 0; cursor != entry && step < GameConstants::BFIELD_SIZE; ++step)
+					{
+						if(!cursor.isAvailable())
+							break;
+						for(const auto & hex : stack.getHexes(cursor))
+							if(moat.contains(hex) && !entryHexes.contains(hex))
+								crossesNewMoat = true;
+						cursor = following.predecessors[cursor.toInt()];
+					}
+					if(crossesNewMoat || cursor != entry)
+						continue;
 					const auto distance = current.distances[entry.toInt()] + following.distances[goal.toInt()];
 					if(distance < route.distance || (distance == route.distance && (!route.entry.isValid() || entry.toInt() < route.entry.toInt())))
 					{

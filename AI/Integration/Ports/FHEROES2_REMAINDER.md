@@ -367,3 +367,23 @@ This is existing VCMI behavior, verified without a gate-policy change. The
 initial expectation of immediate `CLOSED` was corrected to the native contract;
 that fixture correction is not a red/green AI regression. Corpses, Fortress's
 long bridge, force fields on the bridge and other tower states remain open.
+
+
+## Native projection boundary checked on 2026-11-24
+
+The pinned H2 pathfinder exempts its starting moat cell; it does not forbid
+all planning from an existing moat stop. The VCMI adapter keeps native
+per-cell stopping and orientation, rather than importing H2 path costs or
+zero-cost reversals. Its virtual BFS clears the old footprint for occupancy,
+but that also exempts those cells from native stopper checks. The adapter
+therefore inspects the chosen predecessor chain and refuses any further moat
+cell outside the projected entry footprint, including a vacated original
+moat cell. This guard is bounded by the battlefield size and is conservative;
+no separate native red case is claimed for the guard itself.
+
+The baseline Apple Silicon run 45047489791 at `30375e683411c20fb053e614fbe1323074a2047b`
+completed packaging, mounted-image verification and both existing native
+partitions. This is a usable baseline, not qualification of the new continuation
+cases or full tactical parity. The current continuation candidate still needs
+explicit inventory admission and same-SHA native Mac execution before its new
+scenarios can be called Mac-tested.
