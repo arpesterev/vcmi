@@ -386,3 +386,15 @@ partitions. This is a usable baseline, not qualification of the new continuation
 cases or full tactical parity. The current continuation candidate still needs
 explicit inventory admission and same-SHA native Mac execution before its new
 scenarios can be called Mac-tested.
+
+## Current Mac inventory admission
+
+The four `FHeroes2MoatContinuation` cases are now explicitly listed with the
+six HoMM3 moat cases in `CI/macos_ai_a102f718_inventory.json` and run in the
+mandatory core `moat-route-regressions` suite. The new reviewed total is 909:
+764 core and the unchanged 145 slow cases, with 20 separate model exclusions.
+Earlier statements about these four cases being outside the gate describe the
+preceding implementation stage; other standalone suites are not silently
+admitted by this change. A53 and the previous 899-case list remain unchanged.
+Local Linux selection/XML validation does not qualify this revision on ARM64;
+a same-SHA Mac run and mounted DMG checks remain required.

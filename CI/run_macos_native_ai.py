@@ -106,20 +106,43 @@ TIED_LANDING_NATIVE = {
     "HoMM3TiedLanding.ThreatRangeAndSpecialAttackRemainUnavailable",
     "HoMM3TiedLanding.DefenderSideMirroredSourceLandingAndServerExchange",
 }
+MOAT_NATIVE = {
+    'FHeroes2MoatContinuation.defenderHoldsAndReleasesGate',
+    'FHeroes2MoatContinuation.intactWallDoesNotInventContinuation',
+    'FHeroes2MoatContinuation.shorterPassageAvoidsFirstStop',
+    'FHeroes2MoatContinuation.twoStopsReachTheBreach',
+    'Footprint/HoMM3MoatApproach.breachedWallEnablesEntryAndFollowingAttack/Single',
+    'Footprint/HoMM3MoatApproach.breachedWallEnablesEntryAndFollowingAttack/Wide',
+    'Footprint/HoMM3MoatApproach.intactWallDoesNotInventCrossing/Single',
+    'Footprint/HoMM3MoatApproach.intactWallDoesNotInventCrossing/Wide',
+    'Footprint/HoMM3MoatApproach.openGateKeepsExistingDirectAttack/Single',
+    'Footprint/HoMM3MoatApproach.openGateKeepsExistingDirectAttack/Wide',
+}
+MOAT_FILTER = "FHeroes2MoatContinuation.*:Footprint/HoMM3MoatApproach.*"
+
+
+def verify_moat_inventory(identities):
+    if identities != MOAT_NATIVE:
+        raise ValueError("Moat inventory differs from the exact reviewed ten identities")
+    return identities
+
+
 FULL_NATIVE_FILTER = "AIIntegrationNativeBattle.*:AIIntegrationNativeSpeed.*:AIIntegrationNativeForecastApproach.*:AIIntegrationNativePeerDefense.*:HoMM3ForecastQueueNative.*:HoMM3ForecastLifecycleNative.*:FHeroes2WideCautious.*:HoMM3TiedLanding.*"
 NATIVE_FILTER = FULL_NATIVE_FILTER + "-" + ":".join(sorted(GATED_NATIVE))
-REVIEWED_FILTER = ("AIIntegration*.*:" + FULL_NATIVE_FILTER
+REVIEWED_FILTER = ("AIIntegration*.*:" + FULL_NATIVE_FILTER + ":" + MOAT_FILTER
                    + ":MMAINNOutputValidation.*:Nullkiller2_*:ResourceTradingTurnTest.*-"
                    + ":".join(sorted(GATED_NATIVE)))
 
 
-def selected_suites(native_count, forecast_count, group="all", additional_count=0):
+def selected_suites(native_count, forecast_count, group="all", additional_count=0, include_moat=False):
     suites = (
         ("native-port-battles", NATIVE_FILTER, native_count + forecast_count, 300),
         ("mmai-onnx-output-contracts", "MMAINNOutputValidation.*", 48, 90),
         ("nullkiller-regressions", "Nullkiller2_*:ResourceTradingTurnTest.*", 145, 900),
     )
 
+    if include_moat:
+        suites += (("moat-route-regressions", MOAT_FILTER, len(MOAT_NATIVE), 300),)
     if additional_count:
         extra = "AIIntegration*.*-" + FULL_NATIVE_FILTER
         suites += (("additional-integration", extra, additional_count, 300),)
@@ -490,6 +513,8 @@ def main(argv=None):
             full_inventory = read_inventory(binary, output, env, "full-native", FULL_NATIVE_FILTER)
             native_inventory = verify_native_inventory(
                 full_inventory, args.expected_native_count, args.expected_forecast_count, args.expected_lifecycle_count)
+            moat_inventory = verify_moat_inventory(
+                read_inventory(binary, output, env, "moat", MOAT_FILTER))
             additional_count = 0
             if args.reviewed_inventory:
                 manifest = json.loads(args.reviewed_inventory.read_text(encoding="utf-8"))
@@ -500,7 +525,7 @@ def main(argv=None):
                                        for identity in reviewed)
                 report["reviewed_inventory_sha256"] = sha256_file(args.reviewed_inventory)
             suites = selected_suites(args.expected_native_count, args.expected_forecast_count,
-                                     args.suite_group, additional_count)
+                                     args.suite_group, additional_count, include_moat=True)
             inventories = {}
             for suite in suites:
                 name, selected, expected, _ = suite
@@ -509,6 +534,8 @@ def main(argv=None):
                     raise ValueError(f"{name}: selected inventory count differs from expected {expected}")
                 if name == "native-port-battles" and inventories[name] != native_inventory:
                     raise ValueError("Selected native inventory differs from full inventory minus exact gates")
+                if name == "moat-route-regressions" and inventories[name] != moat_inventory:
+                    raise ValueError("Selected moat inventory differs from exact reviewed identities")
             prepare_fixture(fixture, temporary, env, sevenzip)
             for suite in suites:
                 report["suites"].append(run_suite(binary, output, env, suite, inventories[suite[0]]))

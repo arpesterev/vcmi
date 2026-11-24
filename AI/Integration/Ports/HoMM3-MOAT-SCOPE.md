@@ -45,9 +45,11 @@ server-accepted WALK, native moat damage, next activation and accepted attack.
 The wide case checks both cells through the broken wall. No manual obstacle or
 manual activation substitutes for native BattleLayout and Castle moat rules.
 
-These standalone identities are outside the unchanged exact CI/reviewed
-selection. Record their actual before/after XML separately. No historical A53
-qualification or native Apple Silicon result follows from local Linux tests.
+These six identities are admitted by `CI/macos_ai_a102f718_inventory.json`
+as part of the separate mandatory Mac core `moat-route-regressions` suite.
+Record their actual before/after XML separately. Admission is not execution:
+no historical A53 qualification or native Apple Silicon result follows from
+local Linux tests.
 The source siege danger map, moat-damage economics, general multi-stop pursuit,
 and complete siege parity remain open.
 

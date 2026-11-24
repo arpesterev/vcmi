@@ -122,23 +122,27 @@ intentionally different from a portable app: do not apply the bundle rpath
 normalizer to this executable or change the dependency cache. A loader or
 signature failure is a test blocker, not a reason to bypass macOS protection.
 
-The workflow uses `CI/macos_ai_f398624_inventory.json` as its exact reviewed
-inventory: **899 identities**, partitioned into **754 core** and **145 slow**
+The workflow uses `CI/macos_ai_a102f718_inventory.json` as its exact reviewed
+inventory: **909 identities**, partitioned into **764 core** and **145 slow**
 cases. The core group requires 479 non-neural native cases, 18
 forecast/lifecycle cases (including 10 lifecycle cases), 48
-`MMAINNOutputValidation` cases and 209 additional integration cases. The slow
+`MMAINNOutputValidation` cases, 209 additional integration cases and a separate
+mandatory ten-case `moat-route-regressions` suite. That suite checks exact
+FHeroes2 continuation and HoMM3 single/wide moat identities before executing
+them and validates the same XML identities afterward. The slow
 group contains the 145 Nullkiller/resource-trading cases. Each group must
 produce matching XML identities with zero skipped, disabled, failed or errored
 cases; counts alone cannot substitute for matching names.
 
 The runner enumerates the compiled native selection, requires all 20 explicitly
 named model-gated cases, and excludes exactly those cases from execution. These
-20 exclusions are separate from the 899 reviewed identities. Linux CI checks
+20 exclusions are separate from the 909 reviewed identities. Linux CI checks
 the compiled inventory and executed native XML against the Mac workflow's
 `--expected-native-count 479`, `--expected-forecast-count 18` and
 `--expected-lifecycle-count 10`. Require this check before scheduling a new Mac
 build. Any inventory change needs a separately reviewed update; keep the
-historical `CI/macos_ai_a53_inventory.json` unchanged.
+historical `CI/macos_ai_a53_inventory.json` and the previous
+`CI/macos_ai_f398624_inventory.json` unchanged.
 
 These are required acceptance results, not evidence that this candidate has
 passed on macOS. Record the exact final source SHA for both the mounted DMG
@@ -291,7 +295,7 @@ hashes and result of each check. Do not mark checks passed before execution.
   Native test compilation then failed a Clang warning in a test-only lifecycle
   receiver. Its 522 runtime cases did not run. The receiver is now final,
   without warning suppression; that historical result does not qualify the
-  current 899-case gate, which still needs a new exact-commit Mac run.
+  current 909-case gate, which still needs a new exact-commit Mac run.
 - No installed launcher, Apple Silicon inference or gameplay test has been
   executed by this delivery preparation.
 - Portable cleanup/audit tests use synthetic Mach-O tool responses. The CMake
